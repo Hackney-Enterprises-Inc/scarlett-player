@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --vp-home-hero-name-color: white;
+  --vp-home-hero-name-background: transparent;
+}
+
+.VPHome {
+  background: linear-gradient(180deg, #B22222 0%, #660000 100%) !important;
+  min-height: 100vh;
+}
+
+/* Hide mobile menu and hamburger */
+.VPNavBarHamburger,
+.VPNavScreen {
+  display: none !important;
+}
+
+/* 3D Text Effect */
+.text-3d {
+  text-shadow:
+    0 1px 0 #991111,
+    0 2px 0 #881010,
+    0 3px 0 #770f0f,
+    0 4px 0 #660e0e,
+    0 5px 0 #550d0d,
+    0 6px 0 #440c0c,
+    0 7px 0 #330b0b,
+    0 8px 0 #220a0a,
+    0 9px 0 #110909,
+    0 10px 10px rgba(0,0,0,.4),
+    0 15px 20px rgba(0,0,0,.3),
+    0 20px 30px rgba(0,0,0,.2);
+}
+
+/* Hide the navigation bar on home page */
+.VPNav {
+  display: none !important;
+}
+
+/* Override VitePress default colors */
+.VPHero .name {
+  font-weight: 900 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.VPHero .name .clip,
+.VPHero .name span {
+  color: white !important;
+  background: transparent !important;
+  background-image: none !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: white !important;
+  background-clip: text !important;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+.VPHero .text {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.VPHero .tagline {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.VPFeature {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.VPFeature .title {
+  color: white !important;
+}
+
+.VPFeature .details {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
