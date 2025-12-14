@@ -34697,6 +34697,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.eventBus.emit("playback:ratechange", { rate });
     }
     /**
+     * Set autoplay state.
+     *
+     * When enabled, videos will automatically play after loading.
+     *
+     * @param autoplay - Autoplay flag
+     *
+     * @example
+     * ```ts
+     * player.setAutoplay(true);
+     * await player.load('video.mp4'); // Will auto-play
+     * ```
+     */
+    setAutoplay(autoplay) {
+      this.checkDestroyed();
+      this.stateManager.set("autoplay", autoplay);
+      this.logger.debug("Autoplay set", { autoplay });
+    }
+    /**
      * Subscribe to an event.
      *
      * @param event - Event name
@@ -35024,6 +35042,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     get live() {
       return this.stateManager.getValue("live");
+    }
+    /**
+     * Get autoplay state.
+     */
+    get autoplay() {
+      return this.stateManager.getValue("autoplay");
     }
     /**
      * Check if player is destroyed.

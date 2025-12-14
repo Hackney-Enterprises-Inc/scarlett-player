@@ -454,6 +454,26 @@ export class ScarlettPlayer {
   }
 
   /**
+   * Set autoplay state.
+   *
+   * When enabled, videos will automatically play after loading.
+   *
+   * @param autoplay - Autoplay flag
+   *
+   * @example
+   * ```ts
+   * player.setAutoplay(true);
+   * await player.load('video.mp4'); // Will auto-play
+   * ```
+   */
+  setAutoplay(autoplay: boolean): void {
+    this.checkDestroyed();
+
+    this.stateManager.set('autoplay', autoplay);
+    this.logger.debug('Autoplay set', { autoplay });
+  }
+
+  /**
    * Subscribe to an event.
    *
    * @param event - Event name
@@ -835,6 +855,13 @@ export class ScarlettPlayer {
    */
   get live(): boolean {
     return this.stateManager.getValue('live');
+  }
+
+  /**
+   * Get autoplay state.
+   */
+  get autoplay(): boolean {
+    return this.stateManager.getValue('autoplay');
   }
 
   /**
