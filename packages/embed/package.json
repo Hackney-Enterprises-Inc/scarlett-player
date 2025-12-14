@@ -1,64 +1,65 @@
 {
-  "name": "@scarlett-player/core",
+  "name": "@scarlett-player/embed",
   "version": "0.1.0",
-  "description": "Core player with plugin system for Scarlett Player",
+  "description": "Standalone CDN-ready embed package for Scarlett Player",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
+  "main": "./dist/embed.umd.cjs",
+  "module": "./dist/embed.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
+      "import": "./dist/embed.js",
+      "require": "./dist/embed.umd.cjs",
       "types": "./dist/index.d.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "iframe.html"
   ],
   "scripts": {
     "dev": "vite",
-    "demo": "vite",
     "build": "tsc && vite build",
-    "test": "vitest --run",
+    "preview": "vite preview",
+    "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest --coverage",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist"
   },
   "keywords": [
     "video",
     "player",
-    "plugin",
+    "embed",
+    "cdn",
     "hls",
-    "dash",
     "streaming",
-    "live",
-    "dvr",
-    "chapters"
+    "scarlett"
   ],
   "author": "The Stream Platform",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
-    "directory": "packages/core"
+    "directory": "packages/embed"
   },
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
   },
   "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme",
+  "dependencies": {
+    "@scarlett-player/core": "file:../core",
+    "@scarlett-player/hls": "file:../plugins/hls",
+    "@scarlett-player/ui": "file:../plugins/ui",
+    "hls.js": "^1.5.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@vitest/coverage-v8": "^1.1.0",
+    "@vitest/ui": "^1.1.0",
     "jsdom": "^23.0.0",
     "rimraf": "^5.0.5",
-    "terser": "^5.44.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
     "vitest": "^1.1.0"
-  },
-  "dependencies": {
-    "hls.js": "^1.6.13"
   }
 }

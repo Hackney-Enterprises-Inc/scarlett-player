@@ -312,6 +312,65 @@
     <div class="console-line">Console output will appear here...</div>
   </div>
 
+  <div class="divider" style="margin-top: 48px;"></div>
+
+  <div class="info" style="margin-top: 32px;">
+    <h2>Embed Integration</h2>
+    <p style="color: #888; margin-bottom: 16px;">Drop the player into any site with a single script tag:</p>
+
+    <div class="embed-examples">
+      <div class="embed-example">
+        <div class="embed-label">Simplest Drop-in</div>
+        <pre class="code-block">&lt;script src="https://cdn.../embed.umd.cjs"&gt;&lt;/script&gt;
+&lt;div data-sp src="video.m3u8"&gt;&lt;/div&gt;</pre>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">With Branding</div>
+        <pre class="code-block">&lt;div data-sp src="video.m3u8" color="#e50914"&gt;&lt;/div&gt;</pre>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">iframe Embed</div>
+        <pre class="code-block">&lt;iframe src="https://embed.../v/abc123"&gt;&lt;/iframe&gt;</pre>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <a href="../../../packages/embed/demo.html" class="demo-link" style="color: #e50914; text-decoration: none;">
+        View Full Embed Demo &rarr;
+      </a>
+    </div>
+  </div>
+
+  <style>
+    .embed-examples {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .embed-example {
+      background: #0d0d0d;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .embed-label {
+      font-size: 0.75rem;
+      color: #e50914;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .code-block {
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.8rem;
+      color: #4fc3f7;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+
   <script src="demo.bundle.js"></script>
   <script>
     // Update stats display

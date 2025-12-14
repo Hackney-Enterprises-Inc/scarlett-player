@@ -6,8 +6,12 @@
   "description": "Scarlett Player - Modular, plugin-based video player",
   "repository": {
     "type": "git",
-    "url": "TBD"
+    "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git"
   },
+  "bugs": {
+    "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
+  },
+  "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme",
   "author": "The Stream Platform",
   "license": "MIT",
   "workspaces": [
@@ -43,5 +47,5 @@
     "node": ">=18",
     "pnpm": ">=8"
   },
-  "packageManager": "pnpm@8.15.0"
+  "packageManager": "pnpm@10.25.0"
 }

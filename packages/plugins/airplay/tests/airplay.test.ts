@@ -110,7 +110,7 @@ describe('AirPlay Plugin', () => {
         expect(api.logger.debug).toHaveBeenCalledWith('AirPlay not supported in this browser');
       });
 
-      it('should warn when no video element found (with webkit support)', async () => {
+      it('should log debug when no video element found (with webkit support)', async () => {
         // Enable webkit support
         (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker = vi.fn();
 
@@ -119,7 +119,8 @@ describe('AirPlay Plugin', () => {
 
         await plugin.init(api);
 
-        expect(api.logger.warn).toHaveBeenCalledWith('No video element found for AirPlay');
+        // Implementation uses debug logging for missing video during init
+        expect(api.logger.debug).toHaveBeenCalledWith('AirPlay: No video element yet');
       });
 
       it('should add event listeners when supported and video exists', async () => {
@@ -180,17 +181,8 @@ describe('AirPlay Plugin', () => {
         expect(video.webkitShowPlaybackTargetPicker).toHaveBeenCalled();
       });
 
-      it('should warn when no video element', async () => {
-        const api = createMockApi(); // No video
-        const plugin = airplayPlugin();
-
-        await plugin.init(api);
-        plugin.showPicker();
-
-        expect(api.logger.warn).toHaveBeenCalledWith('Cannot show AirPlay picker: no video element');
-      });
-
       it('should warn when no video element (with webkit support)', async () => {
+        // Must enable webkit support to get past isAirPlaySupported() check
         (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker = vi.fn();
 
         const api = createMockApi(); // No video

@@ -5,11 +5,15 @@
     "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
     "composite": true,
-    "jsx": "preserve",
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

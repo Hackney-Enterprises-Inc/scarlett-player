@@ -239,7 +239,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           const delay = getRetryDelay(networkRetryCount - 1);
 
           api?.logger.info(`Attempting network error recovery (attempt ${networkRetryCount}/${maxRetries}) in ${delay}ms`);
-          api?.emit('error:network', { error: new Error(error.details), retry: networkRetryCount, maxRetries });
+          api?.emit('error:network', { error: new Error(error.details) });
 
           // Clear any existing retry timeout
           if (retryTimeout) {
@@ -268,7 +268,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           const delay = getRetryDelay(mediaRetryCount - 1);
 
           api?.logger.info(`Attempting media error recovery (attempt ${mediaRetryCount}/${maxRetries}) in ${delay}ms`);
-          api?.emit('error:media', { error: new Error(error.details), retry: mediaRetryCount, maxRetries });
+          api?.emit('error:media', { error: new Error(error.details) });
 
           // Clear any existing retry timeout
           if (retryTimeout) {
@@ -392,9 +392,10 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     canPlay(src: string): boolean {
       if (!isHLSSupported()) return false;
 
-      // Check file extension
+      // Check file extension (strip query strings and fragments first)
       const url = src.toLowerCase();
-      if (url.endsWith('.m3u8')) return true;
+      const urlWithoutQuery = url.split('?')[0].split('#')[0];
+      if (urlWithoutQuery.endsWith('.m3u8')) return true;
 
       // Check MIME type hint in URL
       if (url.includes('application/x-mpegurl')) return true;

@@ -18,8 +18,8 @@
   ],
   "scripts": {
     "build": "tsc && vite build",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist"
   },
@@ -35,6 +35,15 @@
   ],
   "author": "The Stream Platform",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
+    "directory": "packages/vue"
+  },
+  "bugs": {
+    "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
+  },
+  "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme",
   "peerDependencies": {
     "@scarlett-player/core": "^0.1.0",
     "vue": "^3.3.0"

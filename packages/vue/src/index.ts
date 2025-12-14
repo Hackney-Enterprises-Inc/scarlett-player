@@ -8,7 +8,7 @@
  */
 
 import ScarlettPlayerComponent from './ScarlettPlayer.vue';
-import type { Plugin } from '@vue/runtime-core';
+import type { App, Plugin } from 'vue';
 
 // Export the component
 export { ScarlettPlayerComponent };
@@ -33,7 +33,7 @@ export type {
 
 // Vue plugin installation (optional)
 export const ScarlettPlayerPlugin: Plugin = {
-  install(app) {
+  install(app: App) {
     app.component('ScarlettPlayer', ScarlettPlayerComponent);
   },
 };

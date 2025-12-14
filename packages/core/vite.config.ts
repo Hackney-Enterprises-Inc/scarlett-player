@@ -22,7 +22,8 @@ export default defineConfig({
     },
     minify: 'terser',
     sourcemap: true,
-    target: 'es2020'
+    target: 'es2020',
+    outDir: '../dist',  // Output to package root dist/, not demo/dist/
   },
   test: {
     globals: true,

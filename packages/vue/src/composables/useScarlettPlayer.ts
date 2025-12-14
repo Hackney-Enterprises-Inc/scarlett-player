@@ -33,7 +33,6 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
   const muted = ref(options.muted ?? false);
   const bufferedAmount = ref(0);
   const fullscreen = ref(false);
-  const live = ref(false);
 
   // Initialize player
   async function init() {
@@ -57,11 +56,12 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
         plugins: options.plugins,
       };
 
-      player.value = new PlayerClass(playerOptions);
-      await player.value.init();
+      const instance = new PlayerClass(playerOptions);
+      await instance.init();
+      player.value = instance;
 
       // Setup state sync
-      setupStateSync(player.value);
+      setupStateSync(instance);
 
       isReady.value = true;
     } catch (err) {
@@ -85,7 +85,6 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
 
     playerInstance.on('playback:timeupdate', (payload) => {
       currentTime.value = payload.currentTime;
-      duration.value = payload.duration;
     });
 
     // Sync volume state
@@ -96,9 +95,7 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
 
     // Sync buffering state
     playerInstance.on('media:progress', (payload) => {
-      if (payload.bufferedAmount !== undefined) {
-        bufferedAmount.value = payload.bufferedAmount;
-      }
+      bufferedAmount.value = payload.buffered;
     });
 
     // Sync fullscreen state
@@ -109,12 +106,11 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     // Sync media metadata
     playerInstance.on('media:loadedmetadata', (payload) => {
       duration.value = payload.duration ?? 0;
-      live.value = payload.live ?? false;
     });
 
     // Handle errors
     playerInstance.on('error', (err) => {
-      error.value = err;
+      error.value = err as unknown as Error;
     });
   }
 
@@ -231,7 +227,6 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     muted,
     bufferedAmount,
     fullscreen,
-    live,
     progress,
     isBuffering,
 

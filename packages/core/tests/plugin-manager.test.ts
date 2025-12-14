@@ -571,14 +571,15 @@ describe('PluginManager', () => {
       await expect(pluginManager.destroyPlugin('test-plugin')).resolves.not.toThrow();
     });
 
-    it('should update state to destroyed', async () => {
+    it('should reset state to registered (for re-initialization)', async () => {
       const plugin = createMockPlugin();
       pluginManager.register(plugin);
       await pluginManager.initPlugin('test-plugin');
 
       await pluginManager.destroyPlugin('test-plugin');
 
-      expect(pluginManager.getPluginState('test-plugin')).toBe('destroyed');
+      // State is reset to 'registered' so plugin can be re-initialized
+      expect(pluginManager.getPluginState('test-plugin')).toBe('registered');
     });
   });
 

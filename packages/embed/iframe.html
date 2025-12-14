@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scarlett Player - iframe Embed</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #player {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="player"></div>
+
+  <script type="module">
+    // Parse URL parameters
+    const params = new URLSearchParams(window.location.search);
+
+    // Build configuration from URL params
+    const config = {
+      container: '#player',
+      src: params.get('src') || '',
+      autoplay: params.get('autoplay') === 'true' || params.get('autoplay') === '1',
+      muted: params.get('muted') === 'true' || params.get('muted') === '1',
+      poster: params.get('poster') || undefined,
+      controls: params.get('controls') !== 'false' && params.get('controls') !== '0',
+      brandColor: params.get('brandColor') || params.get('brand-color') || undefined,
+      primaryColor: params.get('primaryColor') || params.get('primary-color') || undefined,
+      backgroundColor: params.get('backgroundColor') || params.get('background-color') || undefined,
+      loop: params.get('loop') === 'true' || params.get('loop') === '1',
+    };
+
+    // Parse numeric params
+    const hideDelay = params.get('hideDelay') || params.get('hide-delay');
+    if (hideDelay) {
+      config.hideDelay = parseInt(hideDelay, 10);
+    }
+
+    const playbackRate = params.get('playbackRate') || params.get('playback-rate');
+    if (playbackRate) {
+      config.playbackRate = parseFloat(playbackRate);
+    }
+
+    const startTime = params.get('startTime') || params.get('start-time');
+    if (startTime) {
+      config.startTime = parseFloat(startTime);
+    }
+
+    // Validate src
+    if (!config.src) {
+      document.body.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: white; font-family: sans-serif; text-align: center; padding: 20px;">
+          <div>
+            <h1 style="margin-bottom: 10px;">Missing Source</h1>
+            <p>Please provide a 'src' URL parameter.</p>
+            <p style="margin-top: 10px; font-size: 14px; opacity: 0.7;">
+              Example: iframe.html?src=https://example.com/video.m3u8
+            </p>
+          </div>
+        </div>
+      `;
+    } else {
+      // Import and initialize player
+      import('./dist/embed.js')
+        .then((module) => {
+          const player = module.create(config);
+
+          if (!player) {
+            console.error('Failed to create player');
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to load Scarlett Player:', error);
+          document.body.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: white; font-family: sans-serif; text-align: center; padding: 20px;">
+              <div>
+                <h1 style="margin-bottom: 10px;">Error Loading Player</h1>
+                <p>${error.message}</p>
+              </div>
+            </div>
+          `;
+        });
+    }
+  </script>
+</body>
+</html>

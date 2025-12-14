@@ -72,11 +72,11 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     try {
       const url = new URL(src, window.location.href);
       const pathname = url.pathname;
-      const ext = pathname.split('.').pop()?.toLowerCase() || '';
+      const ext = pathname.split('.').pop()?.toLowerCase() ?? '';
       return ext;
     } catch {
-      const ext = src.split('.').pop()?.toLowerCase() || '';
-      return ext.split('?')[0]; // Remove query string
+      const rawExt = src.split('.').pop()?.toLowerCase() ?? '';
+      return rawExt.split('?')[0] ?? ''; // Remove query string
     }
   };
 
@@ -127,13 +127,13 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     on('playing', () => {
       api?.setState('playing', true);
       api?.setState('paused', false);
-      api?.emit('playback:playing', undefined);
+      api?.emit('playback:play', undefined);
     });
 
     on('pause', () => {
       api?.setState('playing', false);
       api?.setState('paused', true);
-      api?.emit('playback:paused', undefined);
+      api?.emit('playback:pause', undefined);
     });
 
     on('ended', () => {
@@ -150,17 +150,12 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
     on('durationchange', () => {
       api?.setState('duration', videoEl.duration || 0);
-      api?.emit('media:durationchange', { duration: videoEl.duration || 0 });
     });
 
     // Loading events
     on('loadedmetadata', () => {
       api?.setState('duration', videoEl.duration || 0);
       api?.emit('media:loadedmetadata', { duration: videoEl.duration || 0 });
-    });
-
-    on('loadeddata', () => {
-      api?.emit('media:loadeddata', undefined);
     });
 
     on('canplay', () => {
@@ -202,7 +197,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     on('volumechange', () => {
       api?.setState('volume', videoEl.volume);
       api?.setState('muted', videoEl.muted);
-      api?.emit('volume:change', { volume: videoEl.volume });
+      api?.emit('volume:change', { volume: videoEl.volume, muted: videoEl.muted });
     });
 
     // Playback rate
@@ -307,8 +302,11 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         video.currentTime = clampedTime;
       });
 
-      const unsubVolume = api.on('volume:change', ({ volume }: { volume: number }) => {
-        if (video) video.volume = volume;
+      const unsubVolume = api.on('volume:change', ({ volume, muted }: { volume: number; muted: boolean }) => {
+        if (video) {
+          video.volume = volume;
+          video.muted = muted;
+        }
       });
 
       const unsubMute = api.on('volume:mute', ({ muted }: { muted: boolean }) => {

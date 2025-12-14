@@ -45,6 +45,15 @@
     "controls",
     "scarlett"
   ],
-  "author": "TSP",
-  "license": "MIT"
+  "author": "The Stream Platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
+    "directory": "packages/plugins/ui"
+  },
+  "bugs": {
+    "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
+  },
+  "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme"
 }
