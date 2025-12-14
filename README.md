@@ -2,12 +2,13 @@
 
 **A modular, plugin-based video player for the modern web**
 
-**[Live Demo](https://thestreamplatform.github.io/scarlett-player/demo/)**
+**[Live Demo](https://scarlettplayer.com/demo/)**
 
 ## Features
 
 - **Plugin Architecture** - Modular design with core + plugins
 - **HLS Playback** - Native Safari HLS + hls.js fallback
+- **Native Video** - MP4, WebM, MOV, MKV support
 - **Quality Selection** - Adaptive bitrate with manual override
 - **AirPlay & Chromecast** - Built-in casting support
 - **Modern UI** - Sleek controls inspired by Mux Player & Vidstack
@@ -17,18 +18,20 @@
 ## Quick Start
 
 ```bash
-npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
+npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/native @scarlett-player/ui
 ```
 
 ```typescript
 import { ScarlettPlayer } from '@scarlett-player/core';
 import { createHLSPlugin } from '@scarlett-player/hls';
+import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
 
 const player = new ScarlettPlayer({
   container: document.getElementById('player'),
   plugins: [
-    createHLSPlugin(),
+    createHLSPlugin(),       // HLS streams (.m3u8)
+    createNativePlugin(),    // Native formats (MP4, WebM, MOV, MKV)
     uiPlugin({
       hideDelay: 3000,
       theme: { accentColor: '#e50914' },
@@ -36,7 +39,11 @@ const player = new ScarlettPlayer({
   ],
 });
 
+// Load HLS stream
 await player.load('https://example.com/video.m3u8');
+
+// Or load MP4
+await player.load('https://example.com/video.mp4');
 ```
 
 ## Packages
@@ -45,8 +52,9 @@ await player.load('https://example.com/video.m3u8');
 |---------|-------------|------|
 | `@scarlett-player/core` | Core player engine | ~15KB |
 | `@scarlett-player/hls` | HLS playback provider | ~8KB |
+| `@scarlett-player/native` | Native video provider (MP4/WebM/MOV/MKV) | ~3KB |
 | `@scarlett-player/ui` | UI controls plugin | ~20KB |
-| `@scarlett-player/preset-web` | All-in-one bundle | ~40KB |
+| `@scarlett-player/preset-web` | All-in-one bundle | ~45KB |
 
 ## UI Controls
 
@@ -103,6 +111,23 @@ createHLSPlugin({
 });
 ```
 
+## Native Plugin
+
+Provides native HTML5 video playback for progressive download formats:
+
+- **MP4** - H.264/AAC (universal support)
+- **WebM** - VP8/VP9/Opus
+- **MOV** - H.264/AAC (Safari, Chrome)
+- **MKV** - Varies by browser
+
+```typescript
+createNativePlugin({
+  preload: 'metadata', // 'none' | 'metadata' | 'auto'
+});
+```
+
+The player automatically selects the correct provider based on file extension.
+
 ## Development
 
 ```bash
@@ -129,11 +154,14 @@ packages/
   core/           # Core player engine
   plugins/
     hls/          # HLS provider plugin
+    native/       # Native video provider (MP4/WebM/MOV/MKV)
     ui/           # UI controls plugin
+    airplay/      # AirPlay casting plugin
+    chromecast/   # Chromecast casting plugin
   presets/
     web/          # All-in-one preset
 demo/             # Interactive demo
-docs/             # GitHub Pages demo
+docs/             # VitePress documentation site
 ```
 
 ## Browser Support
@@ -147,6 +175,7 @@ docs/             # GitHub Pages demo
 
 - [x] Core player engine
 - [x] HLS playback (hls.js + native)
+- [x] Native video (MP4, WebM, MOV, MKV)
 - [x] UI controls plugin
 - [x] Quality selection
 - [x] AirPlay & Chromecast casting

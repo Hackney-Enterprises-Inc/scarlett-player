@@ -1,0 +1,43 @@
+{
+  "name": "@scarlett-player/native",
+  "version": "0.1.0",
+  "description": "Native Video Provider Plugin for Scarlett Player (MP4, WebM, MOV, MKV)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@scarlett-player/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@scarlett-player/core": "file:../../core",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.6.0"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "mp4",
+    "webm",
+    "native",
+    "scarlett"
+  ],
+  "license": "MIT"
+}

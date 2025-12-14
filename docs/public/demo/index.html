@@ -172,14 +172,103 @@
       background: #666;
       cursor: not-allowed;
     }
+
+    .demo-selector {
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 16px;
+    }
+
+    .demo-selector-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .demo-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
+
+    .demo-btn:hover {
+      background: #3a3a3a;
+      border-color: #e50914;
+    }
+
+    .demo-btn.active {
+      background: #e50914;
+      border-color: #e50914;
+    }
+
+    .demo-btn .demo-title {
+      font-weight: 600;
+    }
+
+    .demo-btn .demo-format {
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+
+    .divider {
+      width: 100%;
+      max-width: 960px;
+      height: 1px;
+      background: #333;
+      margin: 8px 0 16px 0;
+    }
+
+    .custom-url-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      max-width: 960px;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
   <h1>Scarlett Player</h1>
   <p class="subtitle">Lightweight, plugin-based video player</p>
 
+  <div class="demo-selector">
+    <div class="demo-selector-label">Demo Videos</div>
+    <div class="demo-buttons">
+      <button class="demo-btn active" data-url="https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8">
+        <span class="demo-title">Big Buck Bunny 4K</span>
+        <span class="demo-format">HLS Adaptive Streaming</span>
+      </button>
+      <button class="demo-btn" data-url="https://vod.thestreamplatform.com/demo/bbb-2160p.mp4">
+        <span class="demo-title">Big Buck Bunny 4K</span>
+        <span class="demo-format">MP4 Progressive</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <div class="custom-url-label">Or enter a custom URL</div>
+
   <div class="url-bar">
-    <input type="text" id="url-input" placeholder="Enter HLS URL (.m3u8)" value="https://vod.thestreamplatform.com/tsp/demo/bbb_sunflower_1080p_60fps_normal/playlist.m3u8">
+    <input type="text" id="url-input" placeholder="Enter video URL (.m3u8, .mp4, .webm, .mov)" value="https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8">
     <button id="load-btn">Load</button>
   </div>
 
@@ -190,6 +279,7 @@
     <div class="features">
       <span class="feature active">Core</span>
       <span class="feature active">HLS</span>
+      <span class="feature active">Native (MP4/WebM)</span>
       <span class="feature active">UI Controls</span>
       <span class="feature active">AirPlay</span>
       <span class="feature active">Chromecast</span>
@@ -309,6 +399,37 @@
     loadBtn.addEventListener('click', loadUrl);
     urlInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') loadUrl();
+    });
+
+    // Demo selector functionality
+    const demoButtons = document.querySelectorAll('.demo-btn');
+
+    demoButtons.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const url = btn.dataset.url;
+        if (!url) return;
+
+        // Update active state
+        demoButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Update URL input
+        urlInput.value = url;
+
+        // Load the video
+        loadBtn.disabled = true;
+        loadBtn.textContent = 'Loading...';
+
+        try {
+          await window.player.load(url);
+          console.log('Loaded:', url);
+        } catch (e) {
+          console.error('Failed to load:', e.message);
+        } finally {
+          loadBtn.disabled = false;
+          loadBtn.textContent = 'Load';
+        }
+      });
     });
   </script>
 </body>

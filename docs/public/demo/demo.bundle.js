@@ -35721,6 +35721,267 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/plugins/native/src/index.ts
+  var SUPPORTED_EXTENSIONS = ["mp4", "webm", "mov", "mkv", "ogv", "ogg", "m4v"];
+  var MIME_TYPES = {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    mkv: "video/x-matroska",
+    ogv: "video/ogg",
+    ogg: "video/ogg"
+  };
+  function createNativePlugin(config) {
+    const preload = config?.preload ?? "metadata";
+    let api = null;
+    let video = null;
+    let cleanupEvents = null;
+    const getExtension = (src) => {
+      try {
+        const url = new URL(src, window.location.href);
+        const pathname = url.pathname;
+        const ext = pathname.split(".").pop()?.toLowerCase() || "";
+        return ext;
+      } catch {
+        const ext = src.split(".").pop()?.toLowerCase() || "";
+        return ext.split("?")[0];
+      }
+    };
+    const getMimeType = (ext) => {
+      return MIME_TYPES[ext] || "video/mp4";
+    };
+    const canBrowserPlay = (mimeType) => {
+      const testVideo = document.createElement("video");
+      const canPlay = testVideo.canPlayType(mimeType);
+      return canPlay === "probably" || canPlay === "maybe";
+    };
+    const getOrCreateVideo = () => {
+      if (video) return video;
+      const existing = api?.container.querySelector("video");
+      if (existing) {
+        video = existing;
+        return video;
+      }
+      video = document.createElement("video");
+      video.style.cssText = "width:100%;height:100%;display:block;object-fit:contain;background:#000";
+      video.preload = preload;
+      video.controls = false;
+      video.playsInline = true;
+      api?.container.appendChild(video);
+      return video;
+    };
+    const setupEventListeners = (videoEl) => {
+      const handlers = [];
+      const on = (event, handler) => {
+        videoEl.addEventListener(event, handler);
+        handlers.push([event, handler]);
+      };
+      on("playing", () => {
+        api?.setState("playing", true);
+        api?.setState("paused", false);
+        api?.emit("playback:playing", void 0);
+      });
+      on("pause", () => {
+        api?.setState("playing", false);
+        api?.setState("paused", true);
+        api?.emit("playback:paused", void 0);
+      });
+      on("ended", () => {
+        api?.setState("playing", false);
+        api?.setState("ended", true);
+        api?.emit("playback:ended", void 0);
+      });
+      on("timeupdate", () => {
+        api?.setState("currentTime", videoEl.currentTime);
+        api?.emit("playback:timeupdate", { currentTime: videoEl.currentTime });
+      });
+      on("durationchange", () => {
+        api?.setState("duration", videoEl.duration || 0);
+        api?.emit("media:durationchange", { duration: videoEl.duration || 0 });
+      });
+      on("loadedmetadata", () => {
+        api?.setState("duration", videoEl.duration || 0);
+        api?.emit("media:loadedmetadata", { duration: videoEl.duration || 0 });
+      });
+      on("loadeddata", () => {
+        api?.emit("media:loadeddata", void 0);
+      });
+      on("canplay", () => {
+        api?.setState("buffering", false);
+        api?.emit("media:canplay", void 0);
+      });
+      on("canplaythrough", () => {
+        api?.emit("media:canplaythrough", void 0);
+      });
+      on("waiting", () => {
+        api?.setState("buffering", true);
+        api?.emit("media:waiting", void 0);
+      });
+      on("progress", () => {
+        if (videoEl.buffered.length > 0) {
+          const bufferedEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
+          const duration = videoEl.duration || 0;
+          const buffered = duration > 0 ? bufferedEnd / duration : 0;
+          api?.setState("bufferedAmount", buffered);
+          api?.emit("media:progress", { buffered });
+        }
+      });
+      on("seeking", () => {
+        api?.setState("seeking", true);
+        api?.emit("playback:seeking", { time: videoEl.currentTime });
+      });
+      on("seeked", () => {
+        api?.setState("seeking", false);
+        api?.emit("playback:seeked", { time: videoEl.currentTime });
+      });
+      on("volumechange", () => {
+        api?.setState("volume", videoEl.volume);
+        api?.setState("muted", videoEl.muted);
+        api?.emit("volume:change", { volume: videoEl.volume });
+      });
+      on("ratechange", () => {
+        api?.setState("playbackRate", videoEl.playbackRate);
+        api?.emit("playback:ratechange", { rate: videoEl.playbackRate });
+      });
+      on("error", () => {
+        const error = videoEl.error;
+        let message = "Unknown video error";
+        if (error) {
+          switch (error.code) {
+            case MediaError.MEDIA_ERR_ABORTED:
+              message = "Playback aborted";
+              break;
+            case MediaError.MEDIA_ERR_NETWORK:
+              message = "Network error";
+              break;
+            case MediaError.MEDIA_ERR_DECODE:
+              message = "Decode error - format may not be supported";
+              break;
+            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+              message = "Format not supported";
+              break;
+          }
+        }
+        api?.logger.error("Video error", { code: error?.code, message });
+        api?.emit("error", {
+          code: "MEDIA_ERROR",
+          message,
+          fatal: true,
+          timestamp: Date.now()
+        });
+      });
+      return () => {
+        handlers.forEach(([event, handler]) => {
+          videoEl.removeEventListener(event, handler);
+        });
+      };
+    };
+    const cleanup = () => {
+      cleanupEvents?.();
+      cleanupEvents = null;
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+    };
+    const plugin = {
+      id: "native-provider",
+      name: "Native Video Provider",
+      version: "1.0.0",
+      type: "provider",
+      description: "Native HTML5 video playback for MP4, WebM, MOV, MKV",
+      canPlay(src) {
+        const ext = getExtension(src);
+        if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+          return false;
+        }
+        const mimeType = getMimeType(ext);
+        return canBrowserPlay(mimeType);
+      },
+      async init(pluginApi) {
+        api = pluginApi;
+        api.logger.info("Native video plugin initialized");
+        const unsubPlay = api.on("playback:play", async () => {
+          if (!video) return;
+          try {
+            await video.play();
+          } catch (e) {
+            api?.logger.error("Play failed", e);
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          video?.pause();
+        });
+        const unsubSeek = api.on("playback:seeking", ({ time }) => {
+          if (!video) return;
+          const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
+          video.currentTime = clampedTime;
+        });
+        const unsubVolume = api.on("volume:change", ({ volume }) => {
+          if (video) video.volume = volume;
+        });
+        const unsubMute = api.on("volume:mute", ({ muted }) => {
+          if (video) video.muted = muted;
+        });
+        const unsubRate = api.on("playback:ratechange", ({ rate }) => {
+          if (video) video.playbackRate = rate;
+        });
+        api.onDestroy(() => {
+          unsubPlay();
+          unsubPause();
+          unsubSeek();
+          unsubVolume();
+          unsubMute();
+          unsubRate();
+        });
+      },
+      async destroy() {
+        api?.logger.info("Native video plugin destroying");
+        cleanup();
+        if (video?.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+        video = null;
+        api = null;
+      },
+      async loadSource(src) {
+        if (!api) throw new Error("Plugin not initialized");
+        const ext = getExtension(src);
+        const mimeType = getMimeType(ext);
+        api.logger.info("Loading native video source", { src, mimeType });
+        cleanup();
+        api.setState("playbackState", "loading");
+        api.setState("buffering", true);
+        const videoEl = getOrCreateVideo();
+        cleanupEvents = setupEventListeners(videoEl);
+        return new Promise((resolve, reject) => {
+          const onLoaded = () => {
+            videoEl.removeEventListener("loadedmetadata", onLoaded);
+            videoEl.removeEventListener("error", onError);
+            api?.setState("source", { src, type: mimeType });
+            api?.setState("playbackState", "ready");
+            api?.setState("buffering", false);
+            api?.emit("media:loaded", { src, type: mimeType });
+            resolve();
+          };
+          const onError = () => {
+            videoEl.removeEventListener("loadedmetadata", onLoaded);
+            videoEl.removeEventListener("error", onError);
+            const error = videoEl.error;
+            reject(new Error(error?.message || "Failed to load video source"));
+          };
+          videoEl.addEventListener("loadedmetadata", onLoaded);
+          videoEl.addEventListener("error", onError);
+          videoEl.src = src;
+          videoEl.load();
+        });
+      }
+    };
+    return plugin;
+  }
+
   // packages/plugins/ui/src/styles.ts
   var styles = `
 /* ============================================
@@ -37679,7 +37940,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VIDEO_URL = "https://vod.thestreamplatform.com/tsp/demo/bbb_sunflower_1080p_60fps_normal/playlist.m3u8";
+  var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
     if (!container) {
@@ -37692,6 +37953,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       logLevel: "debug",
       plugins: [
         createHLSPlugin(),
+        // HLS streams (.m3u8)
+        createNativePlugin(),
+        // Native formats (MP4, WebM, MOV, MKV)
         uiPlugin({
           hideDelay: 3e3,
           theme: {

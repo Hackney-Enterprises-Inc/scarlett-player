@@ -4,12 +4,13 @@
 
 import { ScarlettPlayer } from '../packages/core/src/index';
 import { createHLSPlugin } from '../packages/plugins/hls/src/index';
+import { createNativePlugin } from '../packages/plugins/native/src/index';
 import { uiPlugin } from '../packages/plugins/ui/src/index';
 import { airplayPlugin } from '../packages/plugins/airplay/src/index';
 import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
 
-// Demo video URL
-const VIDEO_URL = 'https://vod.thestreamplatform.com/tsp/demo/bbb_sunflower_1080p_60fps_normal/playlist.m3u8';
+// Demo video URL - supports both HLS (.m3u8) and native formats (.mp4, .webm, .mov, .mkv)
+const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8';
 
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
@@ -20,12 +21,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Create player with plugins
+  // Provider plugins (HLS and Native) are tried in order - first one that can play the source wins
   const player = new ScarlettPlayer({
     container,
     src: VIDEO_URL,
     logLevel: 'debug',
     plugins: [
-      createHLSPlugin(),
+      createHLSPlugin(),      // HLS streams (.m3u8)
+      createNativePlugin(),   // Native formats (MP4, WebM, MOV, MKV)
       uiPlugin({
         hideDelay: 3000,
         theme: {
