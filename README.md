@@ -16,6 +16,24 @@
 - **Modern UI** - Sleek controls with keyboard shortcuts and theming
 - **TypeScript** - Fully typed API
 
+## Installation
+
+```bash
+# Core + HLS + UI (most common setup)
+npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
+
+# Optional plugins
+npm install @scarlett-player/native      # MP4, WebM, MOV, MKV support
+npm install @scarlett-player/airplay     # AirPlay casting
+npm install @scarlett-player/chromecast  # Chromecast casting
+
+# Vue 3 wrapper
+npm install @scarlett-player/vue
+
+# CDN embed script (drop-in, no bundler required)
+npm install @scarlett-player/embed
+```
+
 ## Quick Start
 
 ```typescript
