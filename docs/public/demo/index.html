@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scarlett Player Demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 32px;
+    }
+
+    #player {
+      width: 100%;
+      max-width: 960px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    #player video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .info {
+      margin-top: 32px;
+      max-width: 960px;
+      width: 100%;
+    }
+
+    .info h2 {
+      font-size: 1rem;
+      color: #888;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+    }
+
+    .stat {
+      background: #2a2a2a;
+      padding: 16px;
+      border-radius: 8px;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .features {
+      margin-top: 32px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .feature {
+      background: #2a2a2a;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 0.875rem;
+    }
+
+    .feature.active {
+      background: #e50914;
+    }
+
+    .console {
+      margin-top: 32px;
+      max-width: 960px;
+      width: 100%;
+      background: #0d0d0d;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .console-line {
+      color: #888;
+      margin-bottom: 4px;
+    }
+
+    .console-line.info { color: #4fc3f7; }
+    .console-line.warn { color: #ffb74d; }
+    .console-line.error { color: #ef5350; }
+
+    .url-bar {
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 16px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .url-bar input {
+      flex: 1;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 12px 16px;
+      color: #fff;
+      font-size: 0.875rem;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .url-bar input:focus {
+      outline: none;
+      border-color: #e50914;
+    }
+
+    .url-bar button {
+      background: #e50914;
+      border: none;
+      border-radius: 6px;
+      padding: 12px 24px;
+      color: #fff;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .url-bar button:hover {
+      background: #f40d17;
+    }
+
+    .url-bar button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h1>Scarlett Player</h1>
+  <p class="subtitle">Lightweight, plugin-based video player</p>
+
+  <div class="url-bar">
+    <input type="text" id="url-input" placeholder="Enter HLS URL (.m3u8)" value="https://vod.thestreamplatform.com/csn/misc/csn-generic-copyright-16s/playlist.m3u8">
+    <button id="load-btn">Load</button>
+  </div>
+
+  <div id="player"></div>
+
+  <div class="info">
+    <h2>Active Plugins</h2>
+    <div class="features">
+      <span class="feature active">Core</span>
+      <span class="feature active">HLS</span>
+      <span class="feature active">UI Controls</span>
+      <span class="feature active">AirPlay</span>
+      <span class="feature active">Chromecast</span>
+    </div>
+  </div>
+
+  <div class="info">
+    <h2>Player State</h2>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">State</div>
+        <div class="stat-value" id="state">Loading...</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Time</div>
+        <div class="stat-value" id="time">0:00 / 0:00</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Quality</div>
+        <div class="stat-value" id="quality">Auto</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Buffered</div>
+        <div class="stat-value" id="buffered">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="console" id="console">
+    <div class="console-line">Console output will appear here...</div>
+  </div>
+
+  <script src="demo.bundle.js"></script>
+  <script>
+    // Update stats display
+    function formatTime(s) {
+      if (!isFinite(s)) return '0:00';
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return m + ':' + (sec < 10 ? '0' : '') + sec;
+    }
+
+    function updateStats() {
+      if (!window.player) return;
+
+      const state = window.player.getState();
+
+      document.getElementById('state').textContent =
+        state.playing ? '▶️ Playing' :
+        state.paused ? '⏸️ Paused' :
+        state.buffering ? '⏳ Buffering' : '⏹️ Stopped';
+
+      document.getElementById('time').textContent =
+        formatTime(state.currentTime) + ' / ' + formatTime(state.duration);
+
+      const quality = state.currentQuality;
+      document.getElementById('quality').textContent =
+        quality ? quality.label : 'Auto';
+
+      document.getElementById('buffered').textContent =
+        Math.round(state.bufferedAmount * 100) + '%';
+    }
+
+    setInterval(updateStats, 250);
+
+    // Override console.log to show in UI
+    const consoleEl = document.getElementById('console');
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+
+    function addConsoleLine(msg, type = '') {
+      const line = document.createElement('div');
+      line.className = 'console-line ' + type;
+      line.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      consoleEl.appendChild(line);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    console.log = (...args) => {
+      originalLog.apply(console, args);
+      addConsoleLine(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '), 'info');
+    };
+
+    console.warn = (...args) => {
+      originalWarn.apply(console, args);
+      addConsoleLine(args.join(' '), 'warn');
+    };
+
+    console.error = (...args) => {
+      originalError.apply(console, args);
+      addConsoleLine(args.join(' '), 'error');
+    };
+
+    // URL bar functionality
+    const urlInput = document.getElementById('url-input');
+    const loadBtn = document.getElementById('load-btn');
+
+    async function loadUrl() {
+      const url = urlInput.value.trim();
+      if (!url) return;
+
+      loadBtn.disabled = true;
+      loadBtn.textContent = 'Loading...';
+
+      try {
+        await window.player.load(url);
+        console.log('Loaded:', url);
+      } catch (e) {
+        console.error('Failed to load:', e.message);
+      } finally {
+        loadBtn.disabled = false;
+        loadBtn.textContent = 'Load';
+      }
+    }
+
+    loadBtn.addEventListener('click', loadUrl);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadUrl();
+    });
+  </script>
+</body>
+</html>
