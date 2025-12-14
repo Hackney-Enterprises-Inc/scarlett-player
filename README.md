@@ -4,6 +4,8 @@
 
 **[Live Demo](https://scarlettplayer.com/demo/)** | **[Documentation](https://scarlettplayer.com/)**
 
+> **Built for [The Stream Platform](https://thestreamplatform.com)** — the official video player powering live streaming, VOD, and PPV for creators and businesses.
+
 ## Features
 
 - **Plugin Architecture** - Modular design with core + plugins. Only bundle what you need.
