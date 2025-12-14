@@ -1,0 +1,51 @@
+{
+  "name": "@scarlett-player/vue",
+  "version": "0.1.0",
+  "description": "Vue 3 component wrapper for Scarlett Player",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && vite build",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "vue",
+    "vue3",
+    "composition-api",
+    "scarlett",
+    "hls",
+    "streaming"
+  ],
+  "author": "The Stream Platform",
+  "license": "MIT",
+  "peerDependencies": {
+    "@scarlett-player/core": "^0.1.0",
+    "vue": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitejs/plugin-vue": "^4.5.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "vitest": "^1.1.0",
+    "vue": "^3.3.0"
+  }
+}

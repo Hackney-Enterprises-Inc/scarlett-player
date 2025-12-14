@@ -1,25 +1,20 @@
 # Scarlett Player
 
-**A modular, plugin-based video player for the modern web**
+**A lightweight, plugin-based video player for the modern web**
 
-**[Live Demo](https://scarlettplayer.com/demo/)**
+**[Live Demo](https://scarlettplayer.com/demo/)** | **[Documentation](https://scarlettplayer.com/)**
 
 ## Features
 
-- **Plugin Architecture** - Modular design with core + plugins
+- **Plugin Architecture** - Modular design with core + plugins. Only bundle what you need.
 - **HLS Playback** - Native Safari HLS + hls.js fallback
 - **Native Video** - MP4, WebM, MOV, MKV support
 - **Quality Selection** - Adaptive bitrate with manual override
 - **AirPlay & Chromecast** - Built-in casting support
-- **Modern UI** - Sleek controls inspired by Mux Player & Vidstack
+- **Modern UI** - Sleek controls with keyboard shortcuts and theming
 - **TypeScript** - Fully typed API
-- **Lightweight** - ~15KB core, plugins loaded on demand
 
 ## Quick Start
-
-```bash
-npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/native @scarlett-player/ui
-```
 
 ```typescript
 import { ScarlettPlayer } from '@scarlett-player/core';
@@ -33,53 +28,53 @@ const player = new ScarlettPlayer({
     createHLSPlugin(),       // HLS streams (.m3u8)
     createNativePlugin(),    // Native formats (MP4, WebM, MOV, MKV)
     uiPlugin({
-      hideDelay: 3000,
       theme: { accentColor: '#e50914' },
     }),
   ],
 });
 
-// Load HLS stream
+// Load and play
 await player.load('https://example.com/video.m3u8');
-
-// Or load MP4
-await player.load('https://example.com/video.mp4');
 ```
+
+## Vue 3
+
+```vue
+<template>
+  <ScarlettPlayer
+    :src="videoUrl"
+    :plugins="plugins"
+    @ready="onPlayerReady"
+  />
+</template>
+
+<script setup>
+import ScarlettPlayer from '@scarlett-player/vue';
+import { createHLSPlugin } from '@scarlett-player/hls';
+import { uiPlugin } from '@scarlett-player/ui';
+
+const videoUrl = 'https://example.com/video.m3u8';
+const plugins = [createHLSPlugin(), uiPlugin()];
+
+function onPlayerReady(player) {
+  console.log('Player ready!', player);
+}
+</script>
+```
+
+[See full Vue 3 docs →](./packages/vue/README.md)
 
 ## Packages
 
-| Package | Description | Size |
-|---------|-------------|------|
-| `@scarlett-player/core` | Core player engine | ~15KB |
-| `@scarlett-player/hls` | HLS playback provider | ~8KB |
-| `@scarlett-player/native` | Native video provider (MP4/WebM/MOV/MKV) | ~3KB |
-| `@scarlett-player/ui` | UI controls plugin | ~20KB |
-| `@scarlett-player/preset-web` | All-in-one bundle | ~45KB |
-
-## UI Controls
-
-The UI plugin provides a modern video player interface:
-
-- Gradient overlay (no solid background)
-- Thin progress bar (3px default, 5px on hover)
-- Progress bar positioned above controls
-- Smooth 200ms transitions
-- Keyboard shortcuts (Space/K, M, F, arrows)
-- Reduced motion support
-
-### Theming
-
-```typescript
-uiPlugin({
-  theme: {
-    accentColor: '#e50914',    // Progress bar, highlights
-    primaryColor: '#ffffff',    // Text, icons
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    controlBarHeight: 48,
-    iconSize: 24,
-  },
-});
-```
+| Package | Description |
+|---------|-------------|
+| `@scarlett-player/core` | Core player engine with state management and event system |
+| `@scarlett-player/hls` | HLS playback provider (hls.js + native Safari fallback) |
+| `@scarlett-player/native` | Native video provider (MP4, WebM, MOV, MKV) |
+| `@scarlett-player/ui` | UI controls with keyboard shortcuts and theming |
+| `@scarlett-player/airplay` | AirPlay casting support |
+| `@scarlett-player/chromecast` | Chromecast casting support |
+| `@scarlett-player/vue` | Vue 3 component wrapper |
 
 ## Keyboard Shortcuts
 
@@ -93,40 +88,19 @@ uiPlugin({
 | Up Arrow | Volume +10% |
 | Down Arrow | Volume -10% |
 
-## HLS Plugin
-
-Provides HLS playback with automatic fallback:
-
-- Uses hls.js for quality selection and ABR
-- Falls back to native HLS in Safari
-- Seamless switching for AirPlay compatibility
-- Low-latency mode support
-- Error recovery
+## Theming
 
 ```typescript
-createHLSPlugin({
-  debug: false,
-  lowLatencyMode: false,
-  maxBufferLength: 30,
+uiPlugin({
+  theme: {
+    accentColor: '#e50914',    // Progress bar, highlights
+    primaryColor: '#ffffff',    // Text, icons
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    controlBarHeight: 48,
+    iconSize: 24,
+  },
 });
 ```
-
-## Native Plugin
-
-Provides native HTML5 video playback for progressive download formats:
-
-- **MP4** - H.264/AAC (universal support)
-- **WebM** - VP8/VP9/Opus
-- **MOV** - H.264/AAC (Safari, Chrome)
-- **MKV** - Varies by browser
-
-```typescript
-createNativePlugin({
-  preload: 'metadata', // 'none' | 'metadata' | 'auto'
-});
-```
-
-The player automatically selects the correct provider based on file extension.
 
 ## Development
 
@@ -154,14 +128,13 @@ packages/
   core/           # Core player engine
   plugins/
     hls/          # HLS provider plugin
-    native/       # Native video provider (MP4/WebM/MOV/MKV)
+    native/       # Native video provider
     ui/           # UI controls plugin
     airplay/      # AirPlay casting plugin
     chromecast/   # Chromecast casting plugin
-  presets/
-    web/          # All-in-one preset
+  vue/            # Vue 3 component wrapper
 demo/             # Interactive demo
-docs/             # VitePress documentation site
+docs/             # Landing page
 ```
 
 ## Browser Support
@@ -179,10 +152,10 @@ docs/             # VitePress documentation site
 - [x] UI controls plugin
 - [x] Quality selection
 - [x] AirPlay & Chromecast casting
+- [x] Vue 3 component wrapper
 - [ ] Playlists & queue management
 - [ ] Closed captions (WebVTT)
 - [ ] Thumbnail preview on seek
-- [ ] Vue 3 component wrapper
 - [ ] React component wrapper
 
 ## License
@@ -191,14 +164,7 @@ MIT License
 
 ### Attribution
 
-Scarlett Player is inspired by [Vidstack Player](https://github.com/vidstack/player) (Copyright 2023 Rahim Alwer, MIT License). We reference Vidstack's architecture patterns for educational purposes.
-
-## Credits
-
-Built with inspiration from:
-- **Vidstack** - Provider architecture reference
-- **Mux Player** - UI design inspiration
-- **HLS.js** - Battle-tested HLS streaming
+Scarlett Player is inspired by [Vidstack Player](https://github.com/vidstack/player) (Copyright 2023 Rahim Alwer, MIT License).
 
 ---
 

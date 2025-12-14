@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scarlett Player - Modern Video Player</title>
+  <meta name="description" content="A lightweight, plugin-based video player for the modern web. HLS streaming, native video formats, and casting support.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            scarlett: {
+              DEFAULT: '#e50914',
+              dark: '#b20710',
+              light: '#f40d17'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .gradient-bg {
+      background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    }
+    .code-block {
+      background: #0d0d0d;
+      border: 1px solid #333;
+    }
+    .feature-card {
+      background: linear-gradient(180deg, #2a2a2a 0%, #1f1f1f 100%);
+      border: 1px solid #333;
+    }
+    .feature-card:hover {
+      border-color: #e50914;
+    }
+    .animated-gradient {
+      background: linear-gradient(
+        90deg,
+        #e50914,
+        #ff4d4d,
+        #ffffff,
+        #ff9999,
+        #e50914,
+        #b20710,
+        #e50914
+      );
+      background-size: 300% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: gradient-shift 6s ease infinite;
+    }
+    @keyframes gradient-shift {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  </style>
+</head>
+<body class="gradient-bg text-white min-h-screen">
+  <!-- Hero -->
+  <header class="max-w-5xl mx-auto px-6 pt-20 pb-16 text-center">
+    <h1 class="text-6xl md:text-7xl font-black tracking-tight mb-4">
+      <span class="animated-gradient">SCARLETT PLAYER</span>
+    </h1>
+    <p class="text-xl text-gray-400 mb-8 max-w-2xl mx-auto">
+      A lightweight, plugin-based video player for the modern web.
+      Only bundle what you need.
+    </p>
+    <div class="flex flex-wrap justify-center gap-4">
+      <a href="https://scarlettplayer.com/demo/"
+         class="bg-scarlett hover:bg-scarlett-light px-8 py-3 rounded-lg font-semibold transition-colors">
+        Try the Demo
+      </a>
+      <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player"
+         class="bg-white/10 hover:bg-white/20 px-8 py-3 rounded-lg font-semibold transition-colors">
+        View on GitHub
+      </a>
+    </div>
+  </header>
+
+  <!-- Features -->
+  <section class="max-w-5xl mx-auto px-6 py-16">
+    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="feature-card rounded-xl p-6 transition-colors">
+        <div class="text-2xl mb-3">&#x1F9E9;</div>
+        <h3 class="font-semibold mb-2">Plugin Architecture</h3>
+        <p class="text-gray-400 text-sm">Modular design. HLS, UI, casting - all separate plugins. Bundle only what you use.</p>
+      </div>
+      <div class="feature-card rounded-xl p-6 transition-colors">
+        <div class="text-2xl mb-3">&#x1F3AC;</div>
+        <h3 class="font-semibold mb-2">HLS + Native Video</h3>
+        <p class="text-gray-400 text-sm">Adaptive streaming with hls.js. Native support for MP4, WebM, MOV, MKV.</p>
+      </div>
+      <div class="feature-card rounded-xl p-6 transition-colors">
+        <div class="text-2xl mb-3">&#x1F4FA;</div>
+        <h3 class="font-semibold mb-2">Casting Support</h3>
+        <p class="text-gray-400 text-sm">Built-in AirPlay and Chromecast plugins with seamless HLS switching.</p>
+      </div>
+      <div class="feature-card rounded-xl p-6 transition-colors">
+        <div class="text-2xl mb-3">&#x1F4DD;</div>
+        <h3 class="font-semibold mb-2">TypeScript First</h3>
+        <p class="text-gray-400 text-sm">Fully typed API with excellent IDE support and developer experience.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Code Example -->
+  <section class="max-w-5xl mx-auto px-6 py-16">
+    <h2 class="text-2xl font-bold mb-8 text-center">Quick Start</h2>
+    <div class="code-block rounded-xl p-6 overflow-x-auto">
+      <pre class="text-sm font-mono"><code class="text-gray-300"><span class="text-purple-400">import</span> { ScarlettPlayer } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/core'</span>;
+<span class="text-purple-400">import</span> { createHLSPlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/hls'</span>;
+<span class="text-purple-400">import</span> { createNativePlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/native'</span>;
+<span class="text-purple-400">import</span> { uiPlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/ui'</span>;
+
+<span class="text-purple-400">const</span> player = <span class="text-purple-400">new</span> <span class="text-yellow-400">ScarlettPlayer</span>({
+  container: <span class="text-cyan-400">document</span>.<span class="text-yellow-400">getElementById</span>(<span class="text-green-400">'player'</span>),
+  plugins: [
+    <span class="text-yellow-400">createHLSPlugin</span>(),       <span class="text-gray-500">// HLS streams (.m3u8)</span>
+    <span class="text-yellow-400">createNativePlugin</span>(),    <span class="text-gray-500">// Native formats (MP4, WebM)</span>
+    <span class="text-yellow-400">uiPlugin</span>({
+      theme: { accentColor: <span class="text-green-400">'#e50914'</span> },
+    }),
+  ],
+});
+
+<span class="text-purple-400">await</span> player.<span class="text-yellow-400">load</span>(<span class="text-green-400">'https://example.com/video.m3u8'</span>);</code></pre>
+    </div>
+  </section>
+
+  <!-- Packages -->
+  <section class="max-w-5xl mx-auto px-6 py-16">
+    <h2 class="text-2xl font-bold mb-8 text-center">Packages</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left">
+        <thead>
+          <tr class="border-b border-gray-700">
+            <th class="py-3 px-4 text-gray-400 font-medium">Package</th>
+            <th class="py-3 px-4 text-gray-400 font-medium">Description</th>
+          </tr>
+        </thead>
+        <tbody class="text-sm">
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/core</td>
+            <td class="py-3 px-4 text-gray-300">Core player engine with state management and event system</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/hls</td>
+            <td class="py-3 px-4 text-gray-300">HLS playback provider (hls.js + native Safari fallback)</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/native</td>
+            <td class="py-3 px-4 text-gray-300">Native video provider (MP4, WebM, MOV, MKV)</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/ui</td>
+            <td class="py-3 px-4 text-gray-300">UI controls with keyboard shortcuts and theming</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/airplay</td>
+            <td class="py-3 px-4 text-gray-300">AirPlay casting support</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/chromecast</td>
+            <td class="py-3 px-4 text-gray-300">Chromecast casting support</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Keyboard Shortcuts -->
+  <section class="max-w-5xl mx-auto px-6 py-16">
+    <h2 class="text-2xl font-bold mb-8 text-center">Keyboard Shortcuts</h2>
+    <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div class="feature-card rounded-lg p-4">
+        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">Space</kbd>
+        <p class="text-gray-400 text-sm mt-2">Play/Pause</p>
+      </div>
+      <div class="feature-card rounded-lg p-4">
+        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">M</kbd>
+        <p class="text-gray-400 text-sm mt-2">Toggle Mute</p>
+      </div>
+      <div class="feature-card rounded-lg p-4">
+        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">F</kbd>
+        <p class="text-gray-400 text-sm mt-2">Fullscreen</p>
+      </div>
+      <div class="feature-card rounded-lg p-4">
+        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">&larr; &rarr;</kbd>
+        <p class="text-gray-400 text-sm mt-2">Seek &plusmn;5s</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="max-w-5xl mx-auto px-6 py-12 border-t border-gray-800 text-center">
+    <p class="text-gray-500 text-sm">
+      <span class="text-scarlett font-semibold">Scarlett Player</span> &mdash; Modular. Extensible. Yours.
+    </p>
+    <p class="text-gray-600 text-xs mt-2">
+      Built with inspiration from Vidstack and Mux Player.
+    </p>
+  </footer>
+</body>
+</html>
