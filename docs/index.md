@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: Try the Demo
-      link: /demo/
+      link: /demo/index.html
     - theme: alt
       text: View on GitHub
       link: https://github.com/thestreamplatform/scarlett-player
