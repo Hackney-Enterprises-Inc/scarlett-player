@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Core player with plugin system for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -47,7 +47,7 @@
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
   },
-  "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme",
+  "homepage": "https://scarlettplayer.com",
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@vitest/coverage-v8": "^1.1.0",

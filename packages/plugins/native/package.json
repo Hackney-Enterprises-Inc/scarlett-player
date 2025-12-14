@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/native",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native Video Provider Plugin for Scarlett Player (MP4, WebM, MOV, MKV)",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -49,5 +49,5 @@
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
   },
-  "homepage": "https://github.com/Hackney-Enterprises-Inc/scarlett-player#readme"
+  "homepage": "https://scarlettplayer.com"
 }
