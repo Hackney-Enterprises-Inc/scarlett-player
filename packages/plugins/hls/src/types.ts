@@ -22,6 +22,14 @@ export interface HLSPluginConfig {
   backBufferLength?: number;
   /** Enable worker for hls.js (better performance) */
   enableWorker?: boolean;
+  /** Max network error retries before giving up (default: 3) */
+  maxNetworkRetries?: number;
+  /** Max media error retries before giving up (default: 2) */
+  maxMediaRetries?: number;
+  /** Base retry delay in milliseconds (default: 1000) */
+  retryDelayMs?: number;
+  /** Exponential backoff multiplier (default: 2) */
+  retryBackoffFactor?: number;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }

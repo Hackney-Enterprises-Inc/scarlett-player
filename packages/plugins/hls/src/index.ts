@@ -51,6 +51,11 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   maxMaxBufferLength: 600,
   backBufferLength: 30,
   enableWorker: true,
+  // Error recovery settings
+  maxNetworkRetries: 3,
+  maxMediaRetries: 2,
+  retryDelayMs: 1000,
+  retryBackoffFactor: 2,
 };
 
 /**
@@ -84,6 +89,17 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
   let cleanupVideoEvents: (() => void) | null = null;
   let isAutoQuality = true; // Track if user has selected auto quality
 
+  // Retry state
+  let networkRetryCount = 0;
+  let mediaRetryCount = 0;
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // Non-fatal error tracking - give up if too many errors in a short time
+  let errorCount = 0;
+  let errorWindowStart = 0;
+  const MAX_ERRORS_IN_WINDOW = 10;
+  const ERROR_WINDOW_MS = 5000; // 5 seconds
+
   /** Get video element from container */
   const getOrCreateVideo = (): HTMLVideoElement => {
     if (video) return video;
@@ -114,6 +130,11 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     cleanupVideoEvents?.();
     cleanupVideoEvents = null;
 
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+      retryTimeout = null;
+    }
+
     if (hls) {
       hls.destroy();
       hls = null;
@@ -122,6 +143,10 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     currentSrc = null;
     isNative = false;
     isAutoQuality = true; // Reset to auto when loading new source
+    networkRetryCount = 0;
+    mediaRetryCount = 0;
+    errorCount = 0;
+    errorWindowStart = 0;
   };
 
   /** Build hls.js config */
@@ -135,37 +160,133 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
     backBufferLength: mergedConfig.backBufferLength,
     enableWorker: mergedConfig.enableWorker,
+    // Minimize hls.js internal retries - we handle retries ourselves
+    fragLoadingMaxRetry: 1,
+    manifestLoadingMaxRetry: 1,
+    levelLoadingMaxRetry: 1,
+    fragLoadingRetryDelay: 500,
+    manifestLoadingRetryDelay: 500,
+    levelLoadingRetryDelay: 500,
   });
 
-  /** Handle HLS errors with recovery */
+  /** Calculate retry delay with exponential backoff */
+  const getRetryDelay = (retryCount: number): number => {
+    const baseDelay = mergedConfig.retryDelayMs ?? 1000;
+    const backoffFactor = mergedConfig.retryBackoffFactor ?? 2;
+    return baseDelay * Math.pow(backoffFactor, retryCount);
+  };
+
+  /** Emit fatal error and stop playback */
+  const emitFatalError = (error: HLSError, retriesExhausted: boolean) => {
+    const message = retriesExhausted
+      ? `HLS error: ${error.details} (max retries exceeded)`
+      : `HLS error: ${error.details}`;
+
+    api?.logger.error(message, { type: error.type, details: error.details });
+    api?.setState('playbackState', 'error');
+    api?.setState('buffering', false);
+
+    api?.emit('error', {
+      code: 'MEDIA_ERROR' as any,
+      message,
+      fatal: true,
+      timestamp: Date.now(),
+    });
+  };
+
+  /** Handle HLS errors with recovery and retry limits */
   const handleHlsError = (error: HLSError) => {
     const Hls = getHlsConstructor();
     if (!Hls || !hls) return;
+
+    // Track all errors (fatal and non-fatal) to detect error storms
+    const now = Date.now();
+    if (now - errorWindowStart > ERROR_WINDOW_MS) {
+      // Reset window
+      errorCount = 1;
+      errorWindowStart = now;
+    } else {
+      errorCount++;
+    }
+
+    // If too many errors in the time window, treat as fatal
+    if (errorCount >= MAX_ERRORS_IN_WINDOW) {
+      api?.logger.error(`Too many errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
+      emitFatalError(error, true);
+
+      // Completely destroy hls.js to stop all activity
+      cleanupHlsEvents?.();
+      cleanupHlsEvents = null;
+      hls.destroy();
+      hls = null;
+      return;
+    }
 
     if (error.fatal) {
       api?.logger.error('Fatal HLS error', { type: error.type, details: error.details });
 
       switch (error.type) {
-        case 'network':
-          api?.logger.info('Attempting network error recovery');
-          api?.emit('error:network', { error: new Error(error.details) });
-          hls.startLoad();
-          break;
+        case 'network': {
+          const maxRetries = mergedConfig.maxNetworkRetries ?? 3;
 
-        case 'media':
-          api?.logger.info('Attempting media error recovery');
-          api?.emit('error:media', { error: new Error(error.details) });
-          hls.recoverMediaError();
+          if (networkRetryCount >= maxRetries) {
+            api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
+            emitFatalError(error, true);
+            return;
+          }
+
+          networkRetryCount++;
+          const delay = getRetryDelay(networkRetryCount - 1);
+
+          api?.logger.info(`Attempting network error recovery (attempt ${networkRetryCount}/${maxRetries}) in ${delay}ms`);
+          api?.emit('error:network', { error: new Error(error.details), retry: networkRetryCount, maxRetries });
+
+          // Clear any existing retry timeout
+          if (retryTimeout) {
+            clearTimeout(retryTimeout);
+          }
+
+          // Retry with exponential backoff
+          retryTimeout = setTimeout(() => {
+            if (hls) {
+              hls.startLoad();
+            }
+          }, delay);
           break;
+        }
+
+        case 'media': {
+          const maxRetries = mergedConfig.maxMediaRetries ?? 2;
+
+          if (mediaRetryCount >= maxRetries) {
+            api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
+            emitFatalError(error, true);
+            return;
+          }
+
+          mediaRetryCount++;
+          const delay = getRetryDelay(mediaRetryCount - 1);
+
+          api?.logger.info(`Attempting media error recovery (attempt ${mediaRetryCount}/${maxRetries}) in ${delay}ms`);
+          api?.emit('error:media', { error: new Error(error.details), retry: mediaRetryCount, maxRetries });
+
+          // Clear any existing retry timeout
+          if (retryTimeout) {
+            clearTimeout(retryTimeout);
+          }
+
+          // Retry with exponential backoff
+          retryTimeout = setTimeout(() => {
+            if (hls) {
+              hls.recoverMediaError();
+            }
+          }, delay);
+          break;
+        }
 
         default:
-          // Unrecoverable error
-          api?.emit('error', {
-            code: 'MEDIA_ERROR' as any,
-            message: `HLS error: ${error.details}`,
-            fatal: true,
-            timestamp: Date.now(),
-          });
+          // Unrecoverable error - no retry
+          emitFatalError(error, false);
           break;
       }
     }

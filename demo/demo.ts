@@ -10,7 +10,7 @@ import { airplayPlugin } from '../packages/plugins/airplay/src/index';
 import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
 
 // Demo video URL - supports both HLS (.m3u8) and native formats (.mp4, .webm, .mov, .mkv)
-const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8';
+const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8';
 
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {

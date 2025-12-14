@@ -35365,7 +35365,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     maxBufferLength: 30,
     maxMaxBufferLength: 600,
     backBufferLength: 30,
-    enableWorker: true
+    enableWorker: true,
+    // Error recovery settings
+    maxNetworkRetries: 3,
+    maxMediaRetries: 2,
+    retryDelayMs: 1e3,
+    retryBackoffFactor: 2
   };
   function createHLSPlugin(config) {
     const mergedConfig = { ...DEFAULT_CONFIG, ...config };
@@ -35377,6 +35382,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupHlsEvents = null;
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
+    let networkRetryCount = 0;
+    let mediaRetryCount = 0;
+    let retryTimeout = null;
+    let errorCount = 0;
+    let errorWindowStart = 0;
+    const MAX_ERRORS_IN_WINDOW = 10;
+    const ERROR_WINDOW_MS = 5e3;
     const getOrCreateVideo = () => {
       if (video) return video;
       const existing = api?.container.querySelector("video");
@@ -35397,6 +35409,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       cleanupHlsEvents = null;
       cleanupVideoEvents?.();
       cleanupVideoEvents = null;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
       if (hls) {
         hls.destroy();
         hls = null;
@@ -35404,6 +35420,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       currentSrc = null;
       isNative = false;
       isAutoQuality = true;
+      networkRetryCount = 0;
+      mediaRetryCount = 0;
+      errorCount = 0;
+      errorWindowStart = 0;
     };
     const buildHlsConfig = () => ({
       debug: mergedConfig.debug,
@@ -35415,31 +35435,98 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       maxBufferLength: mergedConfig.maxBufferLength,
       maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
       backBufferLength: mergedConfig.backBufferLength,
-      enableWorker: mergedConfig.enableWorker
+      enableWorker: mergedConfig.enableWorker,
+      // Minimize hls.js internal retries - we handle retries ourselves
+      fragLoadingMaxRetry: 1,
+      manifestLoadingMaxRetry: 1,
+      levelLoadingMaxRetry: 1,
+      fragLoadingRetryDelay: 500,
+      manifestLoadingRetryDelay: 500,
+      levelLoadingRetryDelay: 500
     });
+    const getRetryDelay2 = (retryCount) => {
+      const baseDelay = mergedConfig.retryDelayMs ?? 1e3;
+      const backoffFactor = mergedConfig.retryBackoffFactor ?? 2;
+      return baseDelay * Math.pow(backoffFactor, retryCount);
+    };
+    const emitFatalError = (error, retriesExhausted) => {
+      const message = retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`;
+      api?.logger.error(message, { type: error.type, details: error.details });
+      api?.setState("playbackState", "error");
+      api?.setState("buffering", false);
+      api?.emit("error", {
+        code: "MEDIA_ERROR",
+        message,
+        fatal: true,
+        timestamp: Date.now()
+      });
+    };
     const handleHlsError = (error) => {
       const Hls2 = getHlsConstructor();
       if (!Hls2 || !hls) return;
+      const now2 = Date.now();
+      if (now2 - errorWindowStart > ERROR_WINDOW_MS) {
+        errorCount = 1;
+        errorWindowStart = now2;
+      } else {
+        errorCount++;
+      }
+      if (errorCount >= MAX_ERRORS_IN_WINDOW) {
+        api?.logger.error(`Too many errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
+        emitFatalError(error, true);
+        cleanupHlsEvents?.();
+        cleanupHlsEvents = null;
+        hls.destroy();
+        hls = null;
+        return;
+      }
       if (error.fatal) {
         api?.logger.error("Fatal HLS error", { type: error.type, details: error.details });
         switch (error.type) {
-          case "network":
-            api?.logger.info("Attempting network error recovery");
-            api?.emit("error:network", { error: new Error(error.details) });
-            hls.startLoad();
+          case "network": {
+            const maxRetries = mergedConfig.maxNetworkRetries ?? 3;
+            if (networkRetryCount >= maxRetries) {
+              api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
+              emitFatalError(error, true);
+              return;
+            }
+            networkRetryCount++;
+            const delay = getRetryDelay2(networkRetryCount - 1);
+            api?.logger.info(`Attempting network error recovery (attempt ${networkRetryCount}/${maxRetries}) in ${delay}ms`);
+            api?.emit("error:network", { error: new Error(error.details), retry: networkRetryCount, maxRetries });
+            if (retryTimeout) {
+              clearTimeout(retryTimeout);
+            }
+            retryTimeout = setTimeout(() => {
+              if (hls) {
+                hls.startLoad();
+              }
+            }, delay);
             break;
-          case "media":
-            api?.logger.info("Attempting media error recovery");
-            api?.emit("error:media", { error: new Error(error.details) });
-            hls.recoverMediaError();
+          }
+          case "media": {
+            const maxRetries = mergedConfig.maxMediaRetries ?? 2;
+            if (mediaRetryCount >= maxRetries) {
+              api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
+              emitFatalError(error, true);
+              return;
+            }
+            mediaRetryCount++;
+            const delay = getRetryDelay2(mediaRetryCount - 1);
+            api?.logger.info(`Attempting media error recovery (attempt ${mediaRetryCount}/${maxRetries}) in ${delay}ms`);
+            api?.emit("error:media", { error: new Error(error.details), retry: mediaRetryCount, maxRetries });
+            if (retryTimeout) {
+              clearTimeout(retryTimeout);
+            }
+            retryTimeout = setTimeout(() => {
+              if (hls) {
+                hls.recoverMediaError();
+              }
+            }, delay);
             break;
+          }
           default:
-            api?.emit("error", {
-              code: "MEDIA_ERROR",
-              message: `HLS error: ${error.details}`,
-              fatal: true,
-              timestamp: Date.now()
-            });
+            emitFatalError(error, false);
             break;
         }
       }
@@ -35829,7 +35916,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       on("seeking", () => {
         api?.setState("seeking", true);
-        api?.emit("playback:seeking", { time: videoEl.currentTime });
       });
       on("seeked", () => {
         api?.setState("seeking", false);
@@ -37940,7 +38026,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p/playlist.m3u8";
+  var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
     if (!container) {

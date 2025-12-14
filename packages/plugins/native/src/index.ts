@@ -188,10 +188,9 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       }
     });
 
-    // Seeking events
+    // Seeking events - only emit state update, not playback:seeking (which would cause a loop)
     on('seeking', () => {
       api?.setState('seeking', true);
-      api?.emit('playback:seeking', { time: videoEl.currentTime });
     });
 
     on('seeked', () => {
