@@ -1,0 +1,45 @@
+{
+  "name": "@scarlett-player/airplay",
+  "version": "0.1.0",
+  "description": "AirPlay Plugin for Scarlett Player",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --coverage"
+  },
+  "peerDependencies": {
+    "@scarlett-player/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@scarlett-player/core": "file:../../core",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "jsdom": "^24.0.0"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "airplay",
+    "casting",
+    "scarlett"
+  ],
+  "license": "MIT"
+}

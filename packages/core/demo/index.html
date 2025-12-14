@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scarlett Player Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      font-size: 2rem;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 30px;
+    }
+
+    #player-container {
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 20px;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      position: relative;
+      min-height: 400px;
+    }
+
+    .controls {
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .control-group {
+      margin-bottom: 15px;
+    }
+
+    .control-group:last-child {
+      margin-bottom: 0;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.9rem;
+      color: #aaa;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.secondary {
+      background: #6c757d;
+    }
+
+    button.secondary:hover {
+      background: #545b62;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      max-width: 300px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #333;
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    .info {
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+
+    .info-item {
+      padding: 10px;
+      background: #333;
+      border-radius: 4px;
+    }
+
+    .info-label {
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .info-value {
+      font-size: 1.1rem;
+      font-weight: 500;
+    }
+
+    .events {
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+
+    .events h3 {
+      margin-bottom: 10px;
+    }
+
+    .event-log {
+      background: #1a1a1a;
+      border-radius: 4px;
+      padding: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+
+    .event-item {
+      padding: 5px;
+      border-bottom: 1px solid #333;
+      color: #0f0;
+    }
+
+    .event-item:last-child {
+      border-bottom: none;
+    }
+
+    .event-time {
+      color: #666;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎬 Scarlett Player Demo</h1>
+    <p class="subtitle">Lightweight, plugin-based video player</p>
+
+    <!-- Player Container -->
+    <div id="player-container"></div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-group">
+        <label>Video Source</label>
+        <input type="text" id="video-source" value="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" />
+        <button onclick="loadVideo()">Load Video</button>
+        <button class="secondary" onclick="loadHLSDemo()">Load HLS Demo</button>
+      </div>
+
+      <div class="control-group">
+        <label>Playback</label>
+        <button onclick="player.play()">▶ Play</button>
+        <button onclick="player.pause()">⏸ Pause</button>
+        <button onclick="player.seek(0)">⏮ Reset</button>
+        <button onclick="player.seek(player.currentTime + 10)">+10s</button>
+        <button onclick="player.seek(player.currentTime - 10)">-10s</button>
+      </div>
+
+      <div class="control-group">
+        <label>Volume: <span id="volume-display">100%</span></label>
+        <input type="range" id="volume-slider" min="0" max="100" value="100"
+               oninput="player.setVolume(this.value / 100); document.getElementById('volume-display').textContent = this.value + '%'" />
+        <button class="secondary" onclick="player.setMuted(!player.muted)">🔇 Toggle Mute</button>
+      </div>
+
+      <div class="control-group">
+        <label>Playback Speed</label>
+        <button class="secondary" onclick="player.setPlaybackRate(0.5)">0.5x</button>
+        <button class="secondary" onclick="player.setPlaybackRate(1.0)">1.0x</button>
+        <button class="secondary" onclick="player.setPlaybackRate(1.5)">1.5x</button>
+        <button class="secondary" onclick="player.setPlaybackRate(2.0)">2.0x</button>
+      </div>
+    </div>
+
+    <!-- Player Info -->
+    <div class="info">
+      <h3>Player State</h3>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">Playing</div>
+          <div class="info-value" id="info-playing">false</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Current Time</div>
+          <div class="info-value" id="info-time">0:00</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Duration</div>
+          <div class="info-value" id="info-duration">0:00</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Volume</div>
+          <div class="info-value" id="info-volume">100%</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Muted</div>
+          <div class="info-value" id="info-muted">false</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Playback Rate</div>
+          <div class="info-value" id="info-rate">1.0x</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Provider</div>
+          <div class="info-value" id="info-provider">none</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="events">
+      <h3>Event Log</h3>
+      <div class="event-log" id="event-log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { ScarlettPlayer } from '../src/index.ts';
+    import { createNativeProvider } from './native-provider.ts';
+    import { createHLSProvider } from './hls-provider.ts';
+
+    // Create player instance with BOTH providers
+    // The player will automatically select the right one based on the source
+    window.player = new ScarlettPlayer({
+      container: document.getElementById('player-container'),
+      autoplay: false,
+      volume: 1.0,
+      muted: false,
+      logLevel: 'debug',
+      plugins: [
+        createNativeProvider(),  // Handles MP4, WebM, OGG
+        createHLSProvider(),      // Handles HLS (.m3u8)
+      ],
+    });
+
+    // Helper to format time
+    function formatTime(seconds) {
+      if (!isFinite(seconds)) return '0:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Helper to log events
+    const eventLog = document.getElementById('event-log');
+    function logEvent(eventName, data) {
+      const time = new Date().toLocaleTimeString();
+      const item = document.createElement('div');
+      item.className = 'event-item';
+      item.innerHTML = `<span class="event-time">${time}</span> <strong>${eventName}</strong> ${data ? JSON.stringify(data) : ''}`;
+      eventLog.insertBefore(item, eventLog.firstChild);
+
+      // Keep only last 20 events
+      while (eventLog.children.length > 20) {
+        eventLog.removeChild(eventLog.lastChild);
+      }
+    }
+
+    // Subscribe to all events
+    player.on('player:ready', () => logEvent('player:ready'));
+    player.on('media:loaded', (data) => logEvent('media:loaded', data));
+    player.on('media:durationchange', (data) => logEvent('media:durationchange', data));
+    player.on('playback:play', () => logEvent('playback:play'));
+    player.on('playback:playing', () => logEvent('playback:playing'));
+    player.on('playback:pause', () => logEvent('playback:pause'));
+    player.on('playback:paused', () => logEvent('playback:paused'));
+    player.on('playback:seeking', (data) => logEvent('playback:seeking', data));
+    player.on('playback:seeked', (data) => logEvent('playback:seeked', data));
+    player.on('playback:ended', () => logEvent('playback:ended'));
+    player.on('playback:timeupdate', (data) => {
+      // Update UI (don't log every timeupdate, too noisy)
+      document.getElementById('info-time').textContent = formatTime(data.currentTime);
+    });
+    player.on('media:durationchange', (data) => {
+      document.getElementById('info-duration').textContent = formatTime(data.duration);
+    });
+    player.on('volume:change', (data) => logEvent('volume:change', data));
+    player.on('volume:mute', (data) => logEvent('volume:mute', data));
+    player.on('playback:ratechange', (data) => logEvent('playback:ratechange', data));
+    player.on('error', (error) => logEvent('error', { message: error.message }));
+
+    // Update state display
+    setInterval(() => {
+      document.getElementById('info-playing').textContent = player.playing;
+      document.getElementById('info-volume').textContent = Math.round(player.volume * 100) + '%';
+      document.getElementById('info-muted').textContent = player.muted;
+      document.getElementById('info-rate').textContent = player.playbackRate + 'x';
+      document.getElementById('info-provider').textContent = player.currentProvider?.name || 'none';
+    }, 100);
+
+    // Load video function
+    window.loadVideo = async function() {
+      const source = document.getElementById('video-source').value;
+      if (source) {
+        await player.load(source);
+        logEvent('Load requested', { source });
+      }
+    };
+
+    // Load HLS demo
+    window.loadHLSDemo = async function() {
+      // Public HLS test stream
+      const hlsSource = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+      document.getElementById('video-source').value = hlsSource;
+      await player.load(hlsSource);
+      logEvent('HLS demo loaded', { source: hlsSource });
+    };
+
+    // Load initial video
+    window.loadVideo();
+
+    console.log('🎬 Scarlett Player Demo loaded!');
+    console.log('Player instance available as window.player');
+    console.log('Try: player.play(), player.pause(), player.seek(30)');
+  </script>
+</body>
+</html>

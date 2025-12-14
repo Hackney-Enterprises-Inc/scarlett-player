@@ -1,0 +1,52 @@
+{
+  "name": "@scarlett-player/hls",
+  "version": "0.1.0",
+  "description": "HLS Provider Plugin for Scarlett Player",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --coverage"
+  },
+  "peerDependencies": {
+    "@scarlett-player/core": "^0.1.0",
+    "hls.js": "^1.4.0"
+  },
+  "peerDependenciesMeta": {
+    "hls.js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@scarlett-player/core": "file:../../core",
+    "hls.js": "^1.5.0",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "jsdom": "^24.0.0"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "hls",
+    "streaming",
+    "scarlett"
+  ],
+  "license": "MIT"
+}
