@@ -11,7 +11,7 @@ hero:
       link: https://scarlettplayer.com/demo/
     - theme: alt
       text: View on GitHub
-      link: https://github.com/thestreamplatform/scarlett-player
+      link: https://github.com/Hackney-Enterprises-Inc/scarlett-player
 
 features:
   - title: Plugin Architecture

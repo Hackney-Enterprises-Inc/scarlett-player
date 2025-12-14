@@ -219,6 +219,18 @@ export class ScarlettPlayer {
     try {
       this.logger.info('Loading source', { source });
 
+      // Reset playback state when loading new source
+      this.stateManager.update({
+        playing: false,
+        paused: true,
+        ended: false,
+        buffering: true,
+        currentTime: 0,
+        duration: 0,
+        bufferedAmount: 0,
+        playbackState: 'loading',
+      });
+
       // Destroy previous provider if switching
       if (this._currentProvider) {
         const previousProviderId = this._currentProvider.id;

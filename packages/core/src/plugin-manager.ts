@@ -156,11 +156,14 @@ export class PluginManager {
     try {
       await record.plugin.destroy();
       record.api.runCleanups();
-      record.state = 'destroyed';
+      // Reset to 'registered' so it can be re-initialized later
+      record.state = 'registered';
       this.logger.info(`Plugin destroyed: ${id}`);
       this.eventBus.emit('plugin:destroyed', { name: id });
     } catch (error) {
       this.logger.error(`Plugin destroy failed: ${id}`, { error });
+      // Even on error, reset state so plugin can be retried
+      record.state = 'registered';
     }
   }
 

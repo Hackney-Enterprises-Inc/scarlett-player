@@ -34323,11 +34323,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       try {
         await record.plugin.destroy();
         record.api.runCleanups();
-        record.state = "destroyed";
+        record.state = "registered";
         this.logger.info(`Plugin destroyed: ${id}`);
         this.eventBus.emit("plugin:destroyed", { name: id });
       } catch (error) {
         this.logger.error(`Plugin destroy failed: ${id}`, { error });
+        record.state = "registered";
       }
     }
     /** Get a plugin by ID (returns any registered plugin). */
@@ -34512,6 +34513,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.checkDestroyed();
       try {
         this.logger.info("Loading source", { source });
+        this.stateManager.update({
+          playing: false,
+          paused: true,
+          ended: false,
+          buffering: true,
+          currentTime: 0,
+          duration: 0,
+          bufferedAmount: 0,
+          playbackState: "loading"
+        });
         if (this._currentProvider) {
           const previousProviderId = this._currentProvider.id;
           this.logger.info("Destroying previous provider", { provider: previousProviderId });
