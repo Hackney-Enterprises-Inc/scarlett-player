@@ -37679,7 +37679,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VIDEO_URL = "https://vod.thestreamplatform.com/csn/misc/csn-generic-copyright-16s/playlist.m3u8";
+  var VIDEO_URL = "https://vod.thestreamplatform.com/tsp/demo/bbb_sunflower_1080p_60fps_normal/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
     if (!container) {

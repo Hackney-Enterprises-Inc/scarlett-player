@@ -9,7 +9,7 @@ import { airplayPlugin } from '../packages/plugins/airplay/src/index';
 import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
 
 // Demo video URL
-const VIDEO_URL = 'https://vod.thestreamplatform.com/csn/misc/csn-generic-copyright-16s/playlist.m3u8';
+const VIDEO_URL = 'https://vod.thestreamplatform.com/tsp/demo/bbb_sunflower_1080p_60fps_normal/playlist.m3u8';
 
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
