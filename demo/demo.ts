@@ -9,6 +9,13 @@ import { uiPlugin } from '../packages/plugins/ui/src/index';
 import { airplayPlugin } from '../packages/plugins/airplay/src/index';
 import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
 
+// Version injected at build time
+declare const __VERSION__: string;
+const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev';
+
+// Expose version globally
+(window as any).SCARLETT_VERSION = VERSION;
+
 // Demo video URL - supports both HLS (.m3u8) and native formats (.mp4, .webm, .mov, .mkv)
 const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8';
 
@@ -54,6 +61,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Expose player globally for debugging
   (window as any).player = player;
 
-  console.log('🎬 Scarlett Player Demo Ready');
+  console.log(`🎬 Scarlett Player v${VERSION} Demo Ready`);
   console.log('Access player via window.player');
 });

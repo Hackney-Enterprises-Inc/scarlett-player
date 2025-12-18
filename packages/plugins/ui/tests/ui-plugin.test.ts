@@ -56,6 +56,7 @@ function createMockApi(): IPluginAPI {
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
     onDestroy: vi.fn(),
+    subscribeToState: vi.fn(() => vi.fn()),
   };
 }
 
@@ -129,9 +130,10 @@ describe('UI Plugin', () => {
 
       const controlBar = api.container.querySelector('.sp-controls');
       expect(controlBar?.querySelector('.sp-play')).not.toBeNull();
-      expect(controlBar?.querySelector('.sp-progress')).not.toBeNull();
       expect(controlBar?.querySelector('.sp-time')).not.toBeNull();
       expect(controlBar?.querySelector('.sp-fullscreen')).not.toBeNull();
+      // Progress bar is now rendered above the control bar, not inside it
+      expect(api.container.querySelector('.sp-progress-wrapper')).not.toBeNull();
 
       await plugin.destroy();
     });
@@ -267,7 +269,7 @@ describe('UI Plugin', () => {
       const plugin = uiPlugin();
       await plugin.init(api);
 
-      expect(api.on).toHaveBeenCalledWith('state:change', expect.any(Function));
+      expect(api.subscribeToState).toHaveBeenCalledWith(expect.any(Function));
 
       await plugin.destroy();
     });

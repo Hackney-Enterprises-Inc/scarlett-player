@@ -7,7 +7,16 @@
     "declarationMap": true,
     "composite": true,
     "allowImportingTsExtensions": false,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@scarlett-player/core": ["../core/dist/index.d.ts"],
+      "@scarlett-player/core/*": ["../core/dist/*"],
+      "@scarlett-player/hls": ["../plugins/hls/dist/index.d.ts"],
+      "@scarlett-player/hls/*": ["../plugins/hls/dist/*"],
+      "@scarlett-player/ui": ["../plugins/ui/dist/index.d.ts"],
+      "@scarlett-player/ui/*": ["../plugins/ui/dist/*"]
+    }
   },
   "include": [
     "src/**/*"

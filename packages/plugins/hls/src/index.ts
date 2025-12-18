@@ -467,8 +467,8 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           isAutoQuality = false;
           const levelIndex = parseInt(quality.replace('level-', ''), 10);
           if (!isNaN(levelIndex) && levelIndex >= 0 && levelIndex < hls.levels.length) {
-            hls.currentLevel = levelIndex;
-            api?.logger.debug(`Quality: set to level ${levelIndex}`);
+            hls.nextLevel = levelIndex;
+            api?.logger.debug(`Quality: queued switch to level ${levelIndex}`);
           }
         }
       });

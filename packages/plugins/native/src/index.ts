@@ -9,7 +9,7 @@
  * - OGG/OGV (Theora/Vorbis)
  */
 
-import type { IPluginAPI, PluginType } from '@scarlett-player/core';
+import { ErrorCode, type IPluginAPI, type PluginType } from '@scarlett-player/core';
 
 /** Supported MIME types and extensions */
 const SUPPORTED_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv', 'ogv', 'ogg', 'm4v'];
@@ -230,7 +230,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
       api?.logger.error('Video error', { code: error?.code, message });
       api?.emit('error', {
-        code: 'MEDIA_ERROR',
+        code: ErrorCode.PLAYBACK_FAILED,
         message,
         fatal: true,
         timestamp: Date.now(),
@@ -353,6 +353,9 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       // Update state
       api.setState('playbackState', 'loading');
       api.setState('buffering', true);
+      // Clear quality levels - native video has only one quality
+      api.setState('qualities', []);
+      api.setState('currentQuality', null);
 
       const videoEl = getOrCreateVideo();
 

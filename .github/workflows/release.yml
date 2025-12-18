@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # Required for npm trusted publishing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Create Release Pull Request or Publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm run version
+          publish: pnpm run release
+          title: 'chore: release packages'
+          commit: 'chore: release packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true  # Trusted publishing with OIDC
+
+      # Upload to MinIO S3 CDN after successful publish
+      - name: Deploy to MinIO CDN
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+        run: |
+          VERSION="${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}"
+          S3_BUCKET="${{ secrets.MINIO_BUCKET }}"
+          S3_ENDPOINT="${{ secrets.MINIO_ENDPOINT }}"
+
+          echo "Deploying v${VERSION} to MinIO CDN..."
+
+          # Upload to versioned path (immutable, 1 year cache)
+          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.js" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "application/javascript" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.umd.js" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "application/javascript" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # Upload HLS chunk (find the hashed filename)
+          HLS_FILE=$(ls packages/embed/dist/hls-*.js 2>/dev/null | head -1)
+          if [ -n "$HLS_FILE" ]; then
+            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/hls.js" \
+              --endpoint-url "${S3_ENDPOINT}" \
+              --content-type "application/javascript" \
+              --cache-control "public, max-age=31536000, immutable"
+          fi
+
+          # Upload to latest path (shorter cache for updates)
+          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.js" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "application/javascript" \
+            --cache-control "public, max-age=3600"
+
+          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.umd.js" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "application/javascript" \
+            --cache-control "public, max-age=3600"
+
+          if [ -n "$HLS_FILE" ]; then
+            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/latest/hls.js" \
+              --endpoint-url "${S3_ENDPOINT}" \
+              --content-type "application/javascript" \
+              --cache-control "public, max-age=3600"
+          fi
+
+          echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/v${VERSION}/"
+          echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/latest/"
+
+      # Trigger Forge deployment after successful publish
+      - name: Trigger Forge Deployment
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          curl -X POST "${{ secrets.FORGE_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            --fail --silent --show-error
+        continue-on-error: true
+
+      # Create GitHub Release with tag
+      - name: Create GitHub Release
+        if: steps.changesets.outputs.published == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}
+          name: v${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}
+          body: |
+            ## Packages Released
+
+            ${{ join(fromJson(steps.changesets.outputs.publishedPackages).*.name, ', ') }}
+
+            See [CHANGELOG](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/CHANGELOG.md) for details.
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Notify on success
+      - name: Release Summary
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION="${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}"
+          CDN_BASE="${{ vars.CDN_BASE_URL || 'https://cdn.example.com' }}"
+
+          echo "## Release Published! :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published packages:" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "- \(.name)@\(.version)"' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Forge deployment triggered" >> $GITHUB_STEP_SUMMARY
