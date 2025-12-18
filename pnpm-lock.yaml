@@ -79,13 +79,13 @@ importers:
   packages/embed:
     dependencies:
       '@scarlett-player/core':
-        specifier: file:../core
+        specifier: workspace:*
         version: link:../core
       '@scarlett-player/hls':
-        specifier: file:../plugins/hls
+        specifier: workspace:*
         version: link:../plugins/hls
       '@scarlett-player/ui':
-        specifier: file:../plugins/ui
+        specifier: workspace:*
         version: link:../plugins/ui
       hls.js:
         specifier: ^1.5.0
@@ -116,7 +116,7 @@ importers:
   packages/plugins/airplay:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       '@vitest/coverage-v8':
         specifier: ^1.6.0
@@ -137,7 +137,7 @@ importers:
   packages/plugins/chromecast:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       '@vitest/coverage-v8':
         specifier: ^1.6.0
@@ -158,7 +158,7 @@ importers:
   packages/plugins/hls:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       '@vitest/coverage-v8':
         specifier: ^1.6.0
@@ -182,7 +182,7 @@ importers:
   packages/plugins/native:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       tsup:
         specifier: ^8.0.0
@@ -197,7 +197,7 @@ importers:
   packages/plugins/ui:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       jsdom:
         specifier: ^24.0.0

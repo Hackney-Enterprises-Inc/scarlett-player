@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "vite",
     "demo": "vite",
-    "build": "tsc && vite build",
+    "build": "rm -f tsconfig.tsbuildinfo && tsc && vite build",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --coverage",
