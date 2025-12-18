@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
+  "changelog": [
+    "@changesets/changelog-github",
+    { "repo": "Hackney-Enterprises-Inc/scarlett-player" }
+  ],
+  "commit": false,
+  "fixed": [
+    [
+      "@scarlett-player/core",
+      "@scarlett-player/embed",
+      "@scarlett-player/vue",
+      "@scarlett-player/hls",
+      "@scarlett-player/ui",
+      "@scarlett-player/native",
+      "@scarlett-player/airplay",
+      "@scarlett-player/chromecast"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}
