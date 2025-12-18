@@ -1,27 +1,52 @@
 /**
- * Native Video Provider Plugin for Scarlett Player
+ * Native Media Provider Plugin for Scarlett Player
  *
  * Provides playback for native browser-supported formats:
+ *
+ * Video:
  * - MP4 (H.264/AAC)
  * - WebM (VP8/VP9/Opus)
  * - MOV (H.264/AAC)
  * - MKV (varies by browser)
  * - OGG/OGV (Theora/Vorbis)
+ *
+ * Audio:
+ * - MP3 (MPEG Audio Layer 3)
+ * - WAV (Waveform Audio)
+ * - OGG (Vorbis)
+ * - FLAC (Free Lossless Audio Codec)
+ * - AAC (Advanced Audio Coding)
+ * - M4A (MPEG-4 Audio)
  */
 
 import { ErrorCode, type IPluginAPI, type PluginType } from '@scarlett-player/core';
 
-/** Supported MIME types and extensions */
-const SUPPORTED_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv', 'ogv', 'ogg', 'm4v'];
+/** Supported video extensions */
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv', 'ogv', 'm4v'];
+
+/** Supported audio extensions */
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'opus', 'weba'];
+
+/** All supported extensions */
+const SUPPORTED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
 
 const MIME_TYPES: Record<string, string> = {
+  // Video
   mp4: 'video/mp4',
   m4v: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
   mkv: 'video/x-matroska',
   ogv: 'video/ogg',
-  ogg: 'video/ogg',
+  // Audio
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  m4a: 'audio/mp4',
+  opus: 'audio/opus',
+  weba: 'audio/webm',
 };
 
 export interface NativePluginConfig {
@@ -85,10 +110,19 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     return MIME_TYPES[ext] || 'video/mp4';
   };
 
+  /** Check if extension is audio */
+  const isAudioExtension = (ext: string): boolean => {
+    return AUDIO_EXTENSIONS.includes(ext);
+  };
+
   /** Check if browser can play this MIME type */
   const canBrowserPlay = (mimeType: string): boolean => {
-    const testVideo = document.createElement('video');
-    const canPlay = testVideo.canPlayType(mimeType);
+    // Use audio element for audio MIME types, video for video
+    const isAudio = mimeType.startsWith('audio/');
+    const testElement = isAudio
+      ? document.createElement('audio')
+      : document.createElement('video');
+    const canPlay = testElement.canPlayType(mimeType);
     return canPlay === 'probably' || canPlay === 'maybe';
   };
 
@@ -109,6 +143,12 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     video.preload = preload;
     video.controls = false;
     video.playsInline = true;
+
+    // Set poster from state if available
+    const poster = api?.getState('poster');
+    if (poster) {
+      video.poster = poster;
+    }
 
     api?.container.appendChild(video);
     return video;
@@ -260,10 +300,10 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   // Plugin implementation
   const plugin: INativePlugin = {
     id: 'native-provider',
-    name: 'Native Video Provider',
+    name: 'Native Media Provider',
     version: '1.0.0',
     type: 'provider' as PluginType,
-    description: 'Native HTML5 video playback for MP4, WebM, MOV, MKV',
+    description: 'Native HTML5 playback for video (MP4, WebM, MOV) and audio (MP3, WAV, FLAC, AAC)',
 
     canPlay(src: string): boolean {
       const ext = getExtension(src);
@@ -344,8 +384,9 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
       const ext = getExtension(src);
       const mimeType = getMimeType(ext);
+      const isAudio = isAudioExtension(ext);
 
-      api.logger.info('Loading native video source', { src, mimeType });
+      api.logger.info('Loading native media source', { src, mimeType, isAudio });
 
       // Cleanup previous source
       cleanup();
@@ -353,11 +394,37 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       // Update state
       api.setState('playbackState', 'loading');
       api.setState('buffering', true);
-      // Clear quality levels - native video has only one quality
+      api.setState('mediaType', isAudio ? 'audio' : 'video');
+
+      // Set title from filename if audio and no title is already set
+      if (isAudio) {
+        try {
+          const url = new URL(src, window.location.href);
+          const filename = url.pathname.split('/').pop() || 'Audio';
+          const title = decodeURIComponent(filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+          api.setState('title', title);
+        } catch {
+          api.setState('title', 'Audio');
+        }
+      }
+      // Clear quality levels - native media has only one quality
       api.setState('qualities', []);
       api.setState('currentQuality', null);
 
       const videoEl = getOrCreateVideo();
+
+      // Hide video element for audio content
+      if (isAudio) {
+        videoEl.style.display = 'none';
+        videoEl.poster = ''; // Clear poster for audio
+      } else {
+        videoEl.style.display = 'block';
+        // Set poster from state if available
+        const poster = api.getState('poster');
+        if (poster) {
+          videoEl.poster = poster;
+        }
+      }
 
       // Setup event listeners
       cleanupEvents = setupEventListeners(videoEl);
