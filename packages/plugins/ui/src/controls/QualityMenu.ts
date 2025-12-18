@@ -73,7 +73,7 @@ export class QualityMenu implements Control {
     this.btnLabel.textContent = currentQuality?.label || 'Auto';
 
     // Only rebuild menu when qualities actually change
-    const qualitiesJson = JSON.stringify(qualities.map(q => q.id));
+    const qualitiesJson = JSON.stringify(qualities.map((q: QualityLevel) => q.id));
     const currentId = currentQuality?.id || 'auto';
 
     if (qualitiesJson !== this.lastQualitiesJson) {

@@ -8,7 +8,7 @@ import { createEmbedPlayer, initElement, initAll, create } from '../src/embed';
 // Mock the dependencies
 vi.mock('@scarlett-player/core', () => ({
   ScarlettPlayer: vi.fn(),
-  createPlayer: vi.fn((config) => {
+  createPlayer: vi.fn(async (config) => {
     // Return a mock player instance
     return {
       container: config.container,
@@ -19,7 +19,7 @@ vi.mock('@scarlett-player/core', () => ({
 }));
 
 vi.mock('@scarlett-player/hls', () => ({
-  hlsPlugin: vi.fn(() => ({ id: 'hls-provider', name: 'HLS Provider' })),
+  createHLSPlugin: vi.fn(() => ({ id: 'hls-provider', name: 'HLS Provider' })),
 }));
 
 vi.mock('@scarlett-player/ui', () => ({
@@ -44,8 +44,8 @@ describe('createEmbedPlayer', () => {
     vi.restoreAllMocks();
   });
 
-  it('should create a player with minimal config', () => {
-    const player = createEmbedPlayer(container, {
+  it('should create a player with minimal config', async () => {
+    const player = await createEmbedPlayer(container, {
       src: 'https://example.com/video.m3u8',
     });
 
@@ -53,8 +53,8 @@ describe('createEmbedPlayer', () => {
     expect(player?.container).toBe(container);
   });
 
-  it('should return null when src is missing', () => {
-    const player = createEmbedPlayer(container, {});
+  it('should return null when src is missing', async () => {
+    const player = await createEmbedPlayer(container, {});
 
     expect(player).toBeNull();
     expect(console.error).toHaveBeenCalledWith(
@@ -62,8 +62,8 @@ describe('createEmbedPlayer', () => {
     );
   });
 
-  it('should apply container styles', () => {
-    createEmbedPlayer(container, {
+  it('should apply container styles', async () => {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
       width: '640px',
       aspectRatio: '16:9',
@@ -73,8 +73,8 @@ describe('createEmbedPlayer', () => {
     expect(container.style.paddingBottom).toBe('56.25%');
   });
 
-  it('should create player with autoplay and muted', () => {
-    const player = createEmbedPlayer(container, {
+  it('should create player with autoplay and muted', async () => {
+    const player = await createEmbedPlayer(container, {
       src: 'video.m3u8',
       autoplay: true,
       muted: true,
@@ -84,8 +84,8 @@ describe('createEmbedPlayer', () => {
     expect(player?.config.muted).toBe(true);
   });
 
-  it('should create player with poster', () => {
-    const player = createEmbedPlayer(container, {
+  it('should create player with poster', async () => {
+    const player = await createEmbedPlayer(container, {
       src: 'video.m3u8',
       poster: 'poster.jpg',
     });
@@ -93,8 +93,8 @@ describe('createEmbedPlayer', () => {
     expect(player?.config.poster).toBe('poster.jpg');
   });
 
-  it('should create player with loop enabled', () => {
-    const player = createEmbedPlayer(container, {
+  it('should create player with loop enabled', async () => {
+    const player = await createEmbedPlayer(container, {
       src: 'video.m3u8',
       loop: true,
     });
@@ -105,7 +105,7 @@ describe('createEmbedPlayer', () => {
   it('should include UI plugin by default', async () => {
     const { uiPlugin } = await import('@scarlett-player/ui');
 
-    createEmbedPlayer(container, {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
     });
 
@@ -116,7 +116,7 @@ describe('createEmbedPlayer', () => {
     const { uiPlugin } = await import('@scarlett-player/ui');
     vi.clearAllMocks();
 
-    createEmbedPlayer(container, {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
       controls: false,
     });
@@ -125,20 +125,20 @@ describe('createEmbedPlayer', () => {
   });
 
   it('should always include HLS plugin', async () => {
-    const { hlsPlugin } = await import('@scarlett-player/hls');
+    const { createHLSPlugin } = await import('@scarlett-player/hls');
 
-    createEmbedPlayer(container, {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
     });
 
-    expect(hlsPlugin).toHaveBeenCalled();
+    expect(createHLSPlugin).toHaveBeenCalled();
   });
 
   it('should pass theme config to UI plugin', async () => {
     const { uiPlugin } = await import('@scarlett-player/ui');
     vi.clearAllMocks();
 
-    createEmbedPlayer(container, {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
       brandColor: '#ff5733',
       primaryColor: '#ffffff',
@@ -160,7 +160,7 @@ describe('createEmbedPlayer', () => {
     const { uiPlugin } = await import('@scarlett-player/ui');
     vi.clearAllMocks();
 
-    createEmbedPlayer(container, {
+    await createEmbedPlayer(container, {
       src: 'video.m3u8',
       hideDelay: 5000,
     });
@@ -178,7 +178,7 @@ describe('createEmbedPlayer', () => {
       throw new Error('Player creation failed');
     });
 
-    const player = createEmbedPlayer(container, {
+    const player = await createEmbedPlayer(container, {
       src: 'video.m3u8',
     });
 
@@ -206,36 +206,36 @@ describe('initElement', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize player from element', () => {
-    const player = initElement(element);
+  it('should initialize player from element', async () => {
+    const player = await initElement(element);
 
     expect(player).not.toBeNull();
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
 
-  it('should not reinitialize already initialized element', () => {
-    const player1 = initElement(element);
-    const player2 = initElement(element);
+  it('should not reinitialize already initialized element', async () => {
+    const player1 = await initElement(element);
+    const player2 = await initElement(element);
 
     expect(player1).not.toBeNull();
     expect(player2).toBeNull();
   });
 
-  it('should parse data attributes from element', () => {
+  it('should parse data attributes from element', async () => {
     element.setAttribute('data-autoplay', 'true');
     element.setAttribute('data-muted', 'true');
 
-    const player = initElement(element);
+    const player = await initElement(element);
 
     expect(player?.config.autoplay).toBe(true);
     expect(player?.config.muted).toBe(true);
   });
 
-  it('should return null when element has no src', () => {
+  it('should return null when element has no src', async () => {
     const elementNoSrc = document.createElement('div');
     document.body.appendChild(elementNoSrc);
 
-    const player = initElement(elementNoSrc);
+    const player = await initElement(elementNoSrc);
 
     expect(player).toBeNull();
 
@@ -248,7 +248,7 @@ describe('initElement', () => {
       throw new Error('Init failed');
     });
 
-    const player = initElement(element);
+    const player = await initElement(element);
 
     expect(player).toBeNull();
     // Element should not be marked as initialized if creation failed
@@ -270,7 +270,7 @@ describe('initAll', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize all players with data-scarlett-player', () => {
+  it('should initialize all players with data-scarlett-player', async () => {
     const element1 = document.createElement('div');
     element1.setAttribute('data-scarlett-player', '');
     element1.setAttribute('data-src', 'video1.m3u8');
@@ -282,7 +282,7 @@ describe('initAll', () => {
     document.body.appendChild(element1);
     document.body.appendChild(element2);
 
-    initAll();
+    await initAll();
 
     expect(element1.hasAttribute('data-scarlett-initialized')).toBe(true);
     expect(element2.hasAttribute('data-scarlett-initialized')).toBe(true);
@@ -291,37 +291,37 @@ describe('initAll', () => {
     );
   });
 
-  it('should initialize players with data-sp shorthand', () => {
+  it('should initialize players with data-sp shorthand', async () => {
     const element = document.createElement('div');
     element.setAttribute('data-sp', '');
     element.setAttribute('data-src', 'video.m3u8');
     document.body.appendChild(element);
 
-    initAll();
+    await initAll();
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
 
-  it('should initialize players with class selector', () => {
+  it('should initialize players with class selector', async () => {
     const element = document.createElement('div');
     element.classList.add('scarlett-player');
     element.setAttribute('data-src', 'video.m3u8');
     document.body.appendChild(element);
 
-    initAll();
+    await initAll();
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
 
-  it('should not log when no players found', () => {
-    initAll();
+  it('should not log when no players found', async () => {
+    await initAll();
 
     expect(console.log).not.toHaveBeenCalledWith(
       expect.stringContaining('Initialized')
     );
   });
 
-  it('should handle mix of different selectors', () => {
+  it('should handle mix of different selectors', async () => {
     const element1 = document.createElement('div');
     element1.setAttribute('data-scarlett-player', '');
     element1.setAttribute('data-src', 'video1.m3u8');
@@ -338,20 +338,20 @@ describe('initAll', () => {
     document.body.appendChild(element2);
     document.body.appendChild(element3);
 
-    initAll();
+    await initAll();
 
     expect(element1.hasAttribute('data-scarlett-initialized')).toBe(true);
     expect(element2.hasAttribute('data-scarlett-initialized')).toBe(true);
     expect(element3.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
 
-  it('should skip elements without src', () => {
+  it('should skip elements without src', async () => {
     const element = document.createElement('div');
     element.setAttribute('data-scarlett-player', '');
     // No src attribute
     document.body.appendChild(element);
 
-    initAll();
+    await initAll();
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(false);
   });
@@ -373,8 +373,8 @@ describe('create', () => {
     vi.restoreAllMocks();
   });
 
-  it('should create player with HTMLElement container', () => {
-    const player = create({
+  it('should create player with HTMLElement container', async () => {
+    const player = await create({
       container,
       src: 'video.m3u8',
     });
@@ -383,8 +383,8 @@ describe('create', () => {
     expect(player?.container).toBe(container);
   });
 
-  it('should create player with CSS selector', () => {
-    const player = create({
+  it('should create player with CSS selector', async () => {
+    const player = await create({
       container: '#player-container',
       src: 'video.m3u8',
     });
@@ -393,8 +393,8 @@ describe('create', () => {
     expect(player?.container).toBe(container);
   });
 
-  it('should return null for non-existent selector', () => {
-    const player = create({
+  it('should return null for non-existent selector', async () => {
+    const player = await create({
       container: '#non-existent',
       src: 'video.m3u8',
     });
@@ -405,8 +405,8 @@ describe('create', () => {
     );
   });
 
-  it('should pass all options to createEmbedPlayer', () => {
-    const player = create({
+  it('should pass all options to createEmbedPlayer', async () => {
+    const player = await create({
       container,
       src: 'video.m3u8',
       autoplay: true,
@@ -423,8 +423,8 @@ describe('create', () => {
     expect(player?.config.poster).toBe('poster.jpg');
   });
 
-  it('should handle creation errors gracefully', () => {
-    const player = create({
+  it('should handle creation errors gracefully', async () => {
+    const player = await create({
       container,
       // Missing src - should error
     });
