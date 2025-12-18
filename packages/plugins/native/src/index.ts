@@ -353,6 +353,9 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       // Update state
       api.setState('playbackState', 'loading');
       api.setState('buffering', true);
+      // Clear quality levels - native video has only one quality
+      api.setState('qualities', []);
+      api.setState('currentQuality', null);
 
       const videoEl = getOrCreateVideo();
 
