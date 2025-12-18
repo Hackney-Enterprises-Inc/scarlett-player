@@ -20,7 +20,7 @@
     "packages/presets/*"
   ],
   "scripts": {
-    "build": "pnpm --filter './packages/**' run build",
+    "build": "pnpm --filter '@scarlett-player/core' run build && pnpm --filter './packages/**' --filter '!@scarlett-player/core' run build",
     "dev": "pnpm --filter '@scarlett-player/core' run dev",
     "test": "pnpm --filter './packages/**' run test",
     "test:watch": "pnpm --filter './packages/**' run test:watch",

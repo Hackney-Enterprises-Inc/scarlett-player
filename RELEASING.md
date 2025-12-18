@@ -37,6 +37,7 @@ When changes with changesets are merged to `main`:
 
 2. **When you merge the Release PR**:
    - Packages are published to npm
+   - CDN files uploaded to S3
    - Forge webhook triggers website deployment
    - GitHub Release is created with tags
 
@@ -70,13 +71,57 @@ If you need to reconfigure:
 3. Set workflow filename: `release.yml`
 4. Set repository: `Hackney-Enterprises-Inc/scarlett-player`
 
-### GitHub Secret: Forge Webhook
+### GitHub Secrets & Variables
 
-Configure in **GitHub → Settings → Secrets → Actions**:
+Configure in **GitHub → Settings → Secrets and Variables → Actions**:
+
+#### Secrets
 
 | Secret | Description |
 |--------|-------------|
 | `FORGE_WEBHOOK_URL` | Laravel Forge deploy webhook URL |
+| `MINIO_ACCESS_KEY` | MinIO access key |
+| `MINIO_SECRET_KEY` | MinIO secret key |
+| `MINIO_BUCKET` | MinIO bucket name |
+| `MINIO_ENDPOINT` | MinIO endpoint URL (e.g., `https://s3.example.com`) |
+
+#### Variables (Optional)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CDN_BASE_URL` | CDN base URL for summary | `https://cdn.example.com` |
+
+### MinIO S3 CDN Setup
+
+The release workflow uploads the embed bundle to MinIO for CDN distribution:
+
+```
+s3://your-bucket/scarlett-player/
+├── v0.1.1/                    # Versioned (immutable, 1 year cache)
+│   ├── scarlett-player.js     # ES module
+│   ├── scarlett-player.umd.js # UMD for <script> tags
+│   └── hls.js                 # HLS.js chunk
+└── latest/                    # Latest version (1 hour cache)
+    ├── scarlett-player.js
+    ├── scarlett-player.umd.js
+    └── hls.js
+```
+
+**MinIO Policy** (minimum required permissions):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::your-bucket/scarlett-player/*"
+    }
+  ]
+}
+```
+
+### Forge Webhook
 
 **Getting Forge Webhook URL:**
 1. Go to Laravel Forge → Your Site → Deployments
@@ -107,7 +152,7 @@ All packages are versioned together (fixed versioning). When any package changes
 ## Workflow Diagram
 
 ```
-Feature Branch           main Branch              npm + Forge
+Feature Branch           main Branch              Deployments
       │                       │                        │
       │  Create PR            │                        │
       ├──────────────────────►│                        │
@@ -125,6 +170,7 @@ Feature Branch           main Branch              npm + Forge
       │                       ├───────────────────────►│
       │                       │                        │
       │                       │     npm publish        │
+      │                       │     S3 CDN upload      │
       │                       │     Forge deploy       │
       │                       │     GitHub Release     │
 ```
@@ -150,3 +196,26 @@ pnpm changeset
 - Verify `FORGE_WEBHOOK_URL` is correct
 - Check Forge deployment logs
 - The workflow continues even if webhook fails
+
+### MinIO CDN upload fails
+
+- Verify MinIO credentials are correct (`MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`)
+- Check the MinIO user has `s3:PutObject` permission for the bucket
+- Verify `MINIO_BUCKET` and `MINIO_ENDPOINT` secrets are set correctly
+- Check the bucket exists and is accessible from GitHub Actions
+- Ensure the endpoint URL includes the protocol (e.g., `https://s3.example.com`)
+
+## CDN Usage
+
+After release, the player is available via CDN:
+
+```html
+<!-- Use specific version (recommended for production) -->
+<script src="https://your-cdn.com/scarlett-player/v0.1.1/scarlett-player.umd.js"></script>
+
+<!-- Use latest version (always gets newest release) -->
+<script src="https://your-cdn.com/scarlett-player/latest/scarlett-player.umd.js"></script>
+
+<!-- Initialize -->
+<div data-scarlett-player data-src="https://example.com/video.m3u8"></div>
+```

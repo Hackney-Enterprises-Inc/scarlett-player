@@ -82,9 +82,19 @@ jobs:
       - name: Release Summary
         if: steps.changesets.outputs.published == 'true'
         run: |
+          VERSION="${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}"
+          CDN_BASE="${{ vars.CDN_BASE_URL || 'https://cdn.example.com' }}"
+
           echo "## Release Published! :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Published packages:" >> $GITHUB_STEP_SUMMARY
+          echo "### Published packages:" >> $GITHUB_STEP_SUMMARY
           echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "- \(.name)@\(.version)"' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Forge deployment triggered." >> $GITHUB_STEP_SUMMARY
+          echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Forge deployment triggered" >> $GITHUB_STEP_SUMMARY
