@@ -14,7 +14,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      id-token: write  # Required for npm trusted publishing
 
     steps:
       - name: Checkout
@@ -32,7 +31,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install
@@ -40,26 +38,45 @@ jobs:
       - name: Build packages
         run: pnpm run build
 
-      - name: Create Release Pull Request or Publish
+      # Get version from embed package (main distributable)
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./packages/embed/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      # Check if this version tag already exists (to avoid duplicate releases)
+      - name: Check if release exists
+        id: check_release
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.version }} already exists, skipping release"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.version }} does not exist, will create release"
+          fi
+
+      # Create Release Pull Request (versioning only, no npm publish)
+      - name: Create Release Pull Request
         id: changesets
         uses: changesets/action@v1
         with:
           version: pnpm run version
-          publish: pnpm run release
           title: 'chore: release packages'
           commit: 'chore: release packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true  # Trusted publishing with OIDC
 
-      # Upload to MinIO S3 CDN after successful publish
+      # Upload to MinIO S3 CDN (runs when version doesn't have a release yet)
       - name: Deploy to MinIO CDN
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.check_release.outputs.exists == 'false'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
         run: |
-          VERSION="${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}"
+          VERSION="${{ steps.version.outputs.version }}"
           S3_BUCKET="${{ secrets.MINIO_BUCKET }}"
           S3_ENDPOINT="${{ secrets.MINIO_ENDPOINT }}"
 
@@ -106,9 +123,9 @@ jobs:
           echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/v${VERSION}/"
           echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/latest/"
 
-      # Trigger Forge deployment after successful publish
+      # Trigger Forge deployment after successful CDN upload
       - name: Trigger Forge Deployment
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.check_release.outputs.exists == 'false'
         run: |
           curl -X POST "${{ secrets.FORGE_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
@@ -117,15 +134,13 @@ jobs:
 
       # Create GitHub Release with tag
       - name: Create GitHub Release
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.check_release.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}
-          name: v${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
           body: |
-            ## Packages Released
-
-            ${{ join(fromJson(steps.changesets.outputs.publishedPackages).*.name, ', ') }}
+            ## Scarlett Player v${{ steps.version.outputs.version }}
 
             See [CHANGELOG](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/CHANGELOG.md) for details.
           generate_release_notes: true
@@ -134,21 +149,22 @@ jobs:
 
       # Notify on success
       - name: Release Summary
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.check_release.outputs.exists == 'false'
         run: |
-          VERSION="${{ fromJson(steps.changesets.outputs.publishedPackages)[0].version }}"
+          VERSION="${{ steps.version.outputs.version }}"
           CDN_BASE="${{ vars.CDN_BASE_URL || 'https://cdn.example.com' }}"
 
           echo "## Release Published! :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Published packages:" >> $GITHUB_STEP_SUMMARY
-          echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "- \(.name)@\(.version)"' >> $GITHUB_STEP_SUMMARY
+          echo "### Version: v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
           echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Forge deployment triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** npm publishing is handled manually" >> $GITHUB_STEP_SUMMARY
