@@ -35497,7 +35497,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return video;
       }
       video = document.createElement("video");
-      video.style.cssText = "width:100%;height:100%;display:block;object-fit:contain;background:#000";
+      video.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;display:block;object-fit:contain;background:#000";
       video.preload = "metadata";
       video.controls = false;
       video.playsInline = true;
@@ -35803,6 +35803,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         } else {
           throw new Error("HLS playback not supported in this browser");
         }
+        if (video) {
+          const muted = api.getState("muted");
+          const volume = api.getState("volume");
+          if (muted !== void 0) video.muted = muted;
+          if (volume !== void 0) video.volume = volume;
+        }
         api.setState("playbackState", "ready");
         api.setState("buffering", false);
       },
@@ -35986,7 +35992,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return video;
       }
       video = document.createElement("video");
-      video.style.cssText = "width:100%;height:100%;display:block;object-fit:contain;background:#000";
+      video.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;display:block;object-fit:contain;background:#000";
       video.preload = preload;
       video.controls = false;
       video.playsInline = true;
@@ -36208,6 +36214,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const onLoaded = () => {
             videoEl.removeEventListener("loadedmetadata", onLoaded);
             videoEl.removeEventListener("error", onError);
+            const muted = api?.getState("muted");
+            const volume = api?.getState("volume");
+            if (muted !== void 0) videoEl.muted = muted;
+            if (volume !== void 0) videoEl.volume = volume;
             api?.setState("source", { src, type: mimeType });
             api?.setState("playbackState", "ready");
             api?.setState("buffering", false);
@@ -39528,7 +39538,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "0.2.0" : "dev";
+  var VERSION = true ? "0.2.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {

@@ -1,6 +1,6 @@
 ---
-"@scarlett-player/embed": minor
-"@scarlett-player/hls": minor
+"@scarlett-player/embed": patch
+"@scarlett-player/hls": patch
 ---
 
 Add multiple embed bundle variants for optimized CDN distribution
