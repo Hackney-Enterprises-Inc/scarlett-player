@@ -13,7 +13,7 @@
  * - Persistent viewer identification
  */
 
-import type { IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
+import type { IPluginAPI, Plugin, PluginType, QualityLevel } from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
   ViewSession,
@@ -473,7 +473,7 @@ export function createAnalyticsPlugin(
 
     // Try to get bitrate from quality levels
     const qualities = api.getState('qualities');
-    const currentQuality = qualities.find((q) => q.id === payload.quality);
+    const currentQuality = qualities.find((q: QualityLevel) => q.id === payload.quality);
 
     if (currentQuality) {
       const bitrateChange: BitrateChange = {

@@ -1,0 +1,38 @@
+{
+  "name": "@scarlett-player/media-session",
+  "version": "0.1.2",
+  "description": "Media Session Plugin for Scarlett Player - Lock screen and hardware media controls",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "@scarlett-player/core": "^0.1.0"
+  },
+  "keywords": [
+    "video",
+    "audio",
+    "player",
+    "media-session",
+    "lock-screen",
+    "media-keys",
+    "scarlett"
+  ],
+  "author": "The Stream Platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
+    "directory": "packages/plugins/media-session"
+  }
+}

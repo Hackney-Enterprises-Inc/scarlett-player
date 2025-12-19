@@ -78,12 +78,24 @@ importers:
 
   packages/embed:
     dependencies:
+      '@scarlett-player/analytics':
+        specifier: workspace:*
+        version: link:../plugins/analytics
+      '@scarlett-player/audio-ui':
+        specifier: workspace:*
+        version: link:../plugins/audio-ui
       '@scarlett-player/core':
         specifier: workspace:*
         version: link:../core
       '@scarlett-player/hls':
         specifier: workspace:*
         version: link:../plugins/hls
+      '@scarlett-player/media-session':
+        specifier: workspace:*
+        version: link:../plugins/media-session
+      '@scarlett-player/playlist':
+        specifier: workspace:*
+        version: link:../plugins/playlist
       '@scarlett-player/ui':
         specifier: workspace:*
         version: link:../plugins/ui
@@ -137,7 +149,7 @@ importers:
   packages/plugins/analytics:
     devDependencies:
       '@scarlett-player/core':
-        specifier: file:../../core
+        specifier: workspace:*
         version: link:../../core
       '@vitest/coverage-v8':
         specifier: ^1.6.0
@@ -154,6 +166,12 @@ importers:
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
+  packages/plugins/audio-ui:
+    dependencies:
+      '@scarlett-player/core':
+        specifier: ^0.1.0
+        version: 0.1.1
 
   packages/plugins/chromecast:
     devDependencies:
@@ -200,6 +218,12 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
+  packages/plugins/media-session:
+    dependencies:
+      '@scarlett-player/core':
+        specifier: ^0.1.0
+        version: 0.1.1
+
   packages/plugins/native:
     devDependencies:
       '@scarlett-player/core':
@@ -214,6 +238,12 @@ importers:
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
+  packages/plugins/playlist:
+    dependencies:
+      '@scarlett-player/core':
+        specifier: ^0.1.0
+        version: 0.1.1
 
   packages/plugins/ui:
     devDependencies:
@@ -3068,7 +3098,7 @@ snapshots:
       std-env: 3.10.0
       strip-literal: 2.1.1
       test-exclude: 6.0.0
-      vitest: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+      vitest: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@23.2.0)(terser@5.44.1)
     transitivePeerDependencies:
       - supports-color
 
