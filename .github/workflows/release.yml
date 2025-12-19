@@ -79,49 +79,50 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           S3_BUCKET="${{ secrets.MINIO_BUCKET }}"
           S3_ENDPOINT="${{ secrets.MINIO_ENDPOINT }}"
+          BASE_PATH="s3://${S3_BUCKET}/scarlett-player"
+          DIST="packages/embed/dist"
 
           echo "Deploying v${VERSION} to MinIO CDN..."
 
-          # Upload to versioned path (immutable, 1 year cache)
-          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=31536000, immutable"
-
-          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.umd.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=31536000, immutable"
-
-          # Upload HLS chunk (find the hashed filename)
-          HLS_FILE=$(ls packages/embed/dist/hls-*.js 2>/dev/null | head -1)
-          if [ -n "$HLS_FILE" ]; then
-            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/hls.js" \
+          # Upload gzipped file with clean name
+          upload() {
+            local src="$1"
+            local dest="$2"
+            local gzipped="/tmp/${dest}"
+            mkdir -p "$(dirname "$gzipped")"
+            gzip -9 -c "$src" > "$gzipped"
+            echo "  Uploading ${dest}..."
+            # Versioned (immutable, 1 year cache)
+            aws s3 cp "$gzipped" "${BASE_PATH}/v${VERSION}/${dest}" \
               --endpoint-url "${S3_ENDPOINT}" \
               --content-type "application/javascript" \
+              --content-encoding "gzip" \
               --cache-control "public, max-age=31536000, immutable"
-          fi
-
-          # Upload to latest path (shorter cache for updates)
-          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=3600"
-
-          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.umd.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=3600"
-
-          if [ -n "$HLS_FILE" ]; then
-            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/latest/hls.js" \
+            # Latest (1 hour cache)
+            aws s3 cp "$gzipped" "${BASE_PATH}/latest/${dest}" \
               --endpoint-url "${S3_ENDPOINT}" \
               --content-type "application/javascript" \
+              --content-encoding "gzip" \
               --cache-control "public, max-age=3600"
-          fi
+          }
 
-          echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/v${VERSION}/"
-          echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/latest/"
+          # Video players
+          upload "${DIST}/embed.umd.cjs" "embed.js"
+          upload "${DIST}/embed.light.umd.cjs" "embed.light.js"
+          upload "${DIST}/embed.full.umd.cjs" "embed.full.js"
+
+          # Audio players
+          upload "${DIST}/embed.audio.umd.cjs" "embed.audio.js"
+          upload "${DIST}/embed.audio.light.umd.cjs" "embed.audio.light.js"
+
+          # HLS chunks
+          HLS_FILE=$(ls ${DIST}/hls-*.js 2>/dev/null | head -1)
+          [ -n "$HLS_FILE" ] && upload "$HLS_FILE" "hls.js"
+
+          HLS_LIGHT=$(ls ${DIST}/hls.light-*.js 2>/dev/null | head -1)
+          [ -n "$HLS_LIGHT" ] && upload "$HLS_LIGHT" "hls.light.js"
+
+          echo "Done!"
 
       # Trigger Forge deployment after successful CDN upload
       - name: Trigger Forge Deployment
@@ -152,19 +153,22 @@ jobs:
         if: steps.check_release.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          CDN_BASE="${{ vars.CDN_BASE_URL || 'https://cdn.example.com' }}"
+          CDN="https://assets.thestreamplatform.com/scarlett-player"
 
           echo "## Release Published! :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Version: v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Usage:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`html" >> $GITHUB_STEP_SUMMARY
+          echo "<script src=\"${CDN}/latest/embed.js\"></script>" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Forge deployment triggered" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** npm publishing is handled manually" >> $GITHUB_STEP_SUMMARY
+          echo "### Available builds:" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Video | \`embed.js\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Video Light | \`embed.light.js\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Video Full | \`embed.full.js\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Audio | \`embed.audio.js\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Audio Light | \`embed.audio.light.js\` |" >> $GITHUB_STEP_SUMMARY
