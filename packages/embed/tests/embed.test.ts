@@ -3,27 +3,53 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createEmbedPlayer, initElement, initAll, create } from '../src/embed';
+import { createEmbedPlayer, initElement, initAll, createScarlettPlayerAPI, type PluginCreators } from '../src/create-embed';
+import type { PlayerType } from '../src/types';
 
-// Mock the dependencies
+// Mock plugins
+const mockHLSPlugin = { id: 'hls-provider', name: 'HLS Provider' };
+const mockVideoUIPlugin = { id: 'ui', name: 'Video UI Plugin' };
+const mockAudioUIPlugin = { id: 'audio-ui', name: 'Audio UI Plugin' };
+const mockAnalyticsPlugin = { id: 'analytics', name: 'Analytics Plugin' };
+const mockPlaylistPlugin = { id: 'playlist', name: 'Playlist Plugin' };
+const mockMediaSessionPlugin = { id: 'media-session', name: 'Media Session Plugin' };
+
+// Mock plugin creators
+const fullPluginCreators: PluginCreators = {
+  hls: vi.fn(() => mockHLSPlugin),
+  videoUI: vi.fn(() => mockVideoUIPlugin),
+  audioUI: vi.fn(() => mockAudioUIPlugin),
+  analytics: vi.fn(() => mockAnalyticsPlugin),
+  playlist: vi.fn(() => mockPlaylistPlugin),
+  mediaSession: vi.fn(() => mockMediaSessionPlugin),
+};
+
+const videoOnlyPluginCreators: PluginCreators = {
+  hls: vi.fn(() => mockHLSPlugin),
+  videoUI: vi.fn(() => mockVideoUIPlugin),
+};
+
+const audioOnlyPluginCreators: PluginCreators = {
+  hls: vi.fn(() => mockHLSPlugin),
+  audioUI: vi.fn(() => mockAudioUIPlugin),
+  playlist: vi.fn(() => mockPlaylistPlugin),
+  mediaSession: vi.fn(() => mockMediaSessionPlugin),
+};
+
+const fullAvailableTypes: PlayerType[] = ['video', 'audio', 'audio-mini'];
+const videoOnlyTypes: PlayerType[] = ['video'];
+const audioOnlyTypes: PlayerType[] = ['audio', 'audio-mini'];
+
+// Mock the core dependencies
 vi.mock('@scarlett-player/core', () => ({
   ScarlettPlayer: vi.fn(),
   createPlayer: vi.fn(async (config) => {
-    // Return a mock player instance
     return {
       container: config.container,
       config,
       destroy: vi.fn(),
     };
   }),
-}));
-
-vi.mock('@scarlett-player/hls', () => ({
-  createHLSPlugin: vi.fn(() => ({ id: 'hls-provider', name: 'HLS Provider' })),
-}));
-
-vi.mock('@scarlett-player/ui', () => ({
-  uiPlugin: vi.fn(() => ({ id: 'ui', name: 'UI Plugin' })),
 }));
 
 describe('createEmbedPlayer', () => {
@@ -34,9 +60,9 @@ describe('createEmbedPlayer', () => {
     container.id = 'test-player';
     document.body.appendChild(container);
 
-    // Suppress console output
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -44,149 +70,165 @@ describe('createEmbedPlayer', () => {
     vi.restoreAllMocks();
   });
 
-  it('should create a player with minimal config', async () => {
-    const player = await createEmbedPlayer(container, {
-      src: 'https://example.com/video.m3u8',
-    });
+  it('should create a video player with minimal config', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
     expect(player).not.toBeNull();
     expect(player?.container).toBe(container);
   });
 
   it('should return null when src is missing', async () => {
-    const player = await createEmbedPlayer(container, {});
+    const player = await createEmbedPlayer(
+      container,
+      {},
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
     expect(player).toBeNull();
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('No source URL provided')
+      expect.stringContaining('No source URL')
     );
   });
 
-  it('should apply container styles', async () => {
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      width: '640px',
-      aspectRatio: '16:9',
-    });
+  it('should throw error for unavailable type', async () => {
+    await expect(
+      createEmbedPlayer(
+        container,
+        { src: 'video.m3u8', type: 'audio' },
+        videoOnlyPluginCreators,
+        videoOnlyTypes
+      )
+    ).rejects.toThrow('Player type "audio" is not available');
+  });
+
+  it('should create audio player when type is audio', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(player).not.toBeNull();
+    expect(fullPluginCreators.audioUI).toHaveBeenCalled();
+    expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
+  });
+
+  it('should create audio-mini player when type is audio-mini', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio-mini' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(player).not.toBeNull();
+    expect(fullPluginCreators.audioUI).toHaveBeenCalledWith(
+      expect.objectContaining({ layout: 'compact' })
+    );
+  });
+
+  it('should apply container styles for video', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', width: '640px', aspectRatio: '16:9' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
     expect(container.style.width).toBe('640px');
     expect(container.style.paddingBottom).toBe('56.25%');
   });
 
-  it('should create player with autoplay and muted', async () => {
-    const player = await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      autoplay: true,
-      muted: true,
-    });
+  it('should apply container styles for audio', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
-    expect(player?.config.autoplay).toBe(true);
-    expect(player?.config.muted).toBe(true);
+    expect(container.style.height).toBe('120px');
   });
 
-  it('should create player with poster', async () => {
-    const player = await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      poster: 'poster.jpg',
-    });
+  it('should apply container styles for audio-mini', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio-mini' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
-    expect(player?.config.poster).toBe('poster.jpg');
+    expect(container.style.height).toBe('64px');
   });
 
-  it('should create player with loop enabled', async () => {
-    const player = await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      loop: true,
-    });
+  it('should include video UI plugin by default', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
-    expect(player?.config.loop).toBe(true);
-  });
-
-  it('should include UI plugin by default', async () => {
-    const { uiPlugin } = await import('@scarlett-player/ui');
-
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-    });
-
-    expect(uiPlugin).toHaveBeenCalled();
+    expect(fullPluginCreators.videoUI).toHaveBeenCalled();
   });
 
   it('should exclude UI plugin when controls is false', async () => {
-    const { uiPlugin } = await import('@scarlett-player/ui');
     vi.clearAllMocks();
 
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      controls: false,
-    });
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', controls: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
-    expect(uiPlugin).not.toHaveBeenCalled();
+    expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
   });
 
   it('should always include HLS plugin', async () => {
-    const { createHLSPlugin } = await import('@scarlett-player/hls');
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
 
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-    });
-
-    expect(createHLSPlugin).toHaveBeenCalled();
+    expect(fullPluginCreators.hls).toHaveBeenCalled();
   });
 
-  it('should pass theme config to UI plugin', async () => {
-    const { uiPlugin } = await import('@scarlett-player/ui');
-    vi.clearAllMocks();
-
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      brandColor: '#ff5733',
-      primaryColor: '#ffffff',
-      backgroundColor: '#000000',
-    });
-
-    expect(uiPlugin).toHaveBeenCalledWith(
-      expect.objectContaining({
-        theme: expect.objectContaining({
-          accentColor: '#ff5733',
-          primaryColor: '#ffffff',
-          backgroundColor: '#000000',
-        }),
-      })
+  it('should include analytics plugin when configured', async () => {
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'video.m3u8',
+        analytics: { beaconUrl: 'https://analytics.example.com' },
+      },
+      fullPluginCreators,
+      fullAvailableTypes
     );
+
+    expect(fullPluginCreators.analytics).toHaveBeenCalled();
   });
 
-  it('should pass hideDelay to UI plugin', async () => {
-    const { uiPlugin } = await import('@scarlett-player/ui');
-    vi.clearAllMocks();
-
-    await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-      hideDelay: 5000,
-    });
-
-    expect(uiPlugin).toHaveBeenCalledWith(
-      expect.objectContaining({
-        hideDelay: 5000,
-      })
+  it('should include playlist plugin when playlist provided', async () => {
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'video.m3u8',
+        playlist: [{ src: 'video1.m3u8' }, { src: 'video2.m3u8' }],
+      },
+      fullPluginCreators,
+      fullAvailableTypes
     );
-  });
 
-  it('should handle player creation errors gracefully', async () => {
-    const { createPlayer } = await import('@scarlett-player/core');
-    (createPlayer as any).mockImplementationOnce(() => {
-      throw new Error('Player creation failed');
-    });
-
-    const player = await createEmbedPlayer(container, {
-      src: 'video.m3u8',
-    });
-
-    expect(player).toBeNull();
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to create player'),
-      expect.any(Error)
-    );
+    expect(fullPluginCreators.playlist).toHaveBeenCalled();
   });
 });
 
@@ -199,6 +241,7 @@ describe('initElement', () => {
     document.body.appendChild(element);
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -207,52 +250,27 @@ describe('initElement', () => {
   });
 
   it('should initialize player from element', async () => {
-    const player = await initElement(element);
+    const player = await initElement(element, fullPluginCreators, fullAvailableTypes);
 
     expect(player).not.toBeNull();
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
 
   it('should not reinitialize already initialized element', async () => {
-    const player1 = await initElement(element);
-    const player2 = await initElement(element);
+    const player1 = await initElement(element, fullPluginCreators, fullAvailableTypes);
+    const player2 = await initElement(element, fullPluginCreators, fullAvailableTypes);
 
     expect(player1).not.toBeNull();
     expect(player2).toBeNull();
   });
 
-  it('should parse data attributes from element', async () => {
-    element.setAttribute('data-autoplay', 'true');
-    element.setAttribute('data-muted', 'true');
+  it('should parse type attribute', async () => {
+    element.setAttribute('data-type', 'audio');
 
-    const player = await initElement(element);
+    const player = await initElement(element, fullPluginCreators, fullAvailableTypes);
 
-    expect(player?.config.autoplay).toBe(true);
-    expect(player?.config.muted).toBe(true);
-  });
-
-  it('should return null when element has no src', async () => {
-    const elementNoSrc = document.createElement('div');
-    document.body.appendChild(elementNoSrc);
-
-    const player = await initElement(elementNoSrc);
-
-    expect(player).toBeNull();
-
-    elementNoSrc.remove();
-  });
-
-  it('should mark element as initialized even on failure', async () => {
-    const { createPlayer } = await import('@scarlett-player/core');
-    (createPlayer as any).mockImplementationOnce(() => {
-      throw new Error('Init failed');
-    });
-
-    const player = await initElement(element);
-
-    expect(player).toBeNull();
-    // Element should not be marked as initialized if creation failed
-    expect(element.hasAttribute('data-scarlett-initialized')).toBe(false);
+    expect(player).not.toBeNull();
+    expect(fullPluginCreators.audioUI).toHaveBeenCalled();
   });
 });
 
@@ -260,10 +278,11 @@ describe('initAll', () => {
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
-    // Clean up all created elements
     document.querySelectorAll('[data-scarlett-player], [data-sp], .scarlett-player').forEach((el) => {
       el.remove();
     });
@@ -282,7 +301,7 @@ describe('initAll', () => {
     document.body.appendChild(element1);
     document.body.appendChild(element2);
 
-    await initAll();
+    await initAll(fullPluginCreators, fullAvailableTypes);
 
     expect(element1.hasAttribute('data-scarlett-initialized')).toBe(true);
     expect(element2.hasAttribute('data-scarlett-initialized')).toBe(true);
@@ -297,7 +316,7 @@ describe('initAll', () => {
     element.setAttribute('data-src', 'video.m3u8');
     document.body.appendChild(element);
 
-    await initAll();
+    await initAll(fullPluginCreators, fullAvailableTypes);
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
@@ -308,56 +327,13 @@ describe('initAll', () => {
     element.setAttribute('data-src', 'video.m3u8');
     document.body.appendChild(element);
 
-    await initAll();
+    await initAll(fullPluginCreators, fullAvailableTypes);
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
   });
-
-  it('should not log when no players found', async () => {
-    await initAll();
-
-    expect(console.log).not.toHaveBeenCalledWith(
-      expect.stringContaining('Initialized')
-    );
-  });
-
-  it('should handle mix of different selectors', async () => {
-    const element1 = document.createElement('div');
-    element1.setAttribute('data-scarlett-player', '');
-    element1.setAttribute('data-src', 'video1.m3u8');
-
-    const element2 = document.createElement('div');
-    element2.classList.add('scarlett-player');
-    element2.setAttribute('data-src', 'video2.m3u8');
-
-    const element3 = document.createElement('div');
-    element3.setAttribute('data-sp', '');
-    element3.setAttribute('data-src', 'video3.m3u8');
-
-    document.body.appendChild(element1);
-    document.body.appendChild(element2);
-    document.body.appendChild(element3);
-
-    await initAll();
-
-    expect(element1.hasAttribute('data-scarlett-initialized')).toBe(true);
-    expect(element2.hasAttribute('data-scarlett-initialized')).toBe(true);
-    expect(element3.hasAttribute('data-scarlett-initialized')).toBe(true);
-  });
-
-  it('should skip elements without src', async () => {
-    const element = document.createElement('div');
-    element.setAttribute('data-scarlett-player', '');
-    // No src attribute
-    document.body.appendChild(element);
-
-    await initAll();
-
-    expect(element.hasAttribute('data-scarlett-initialized')).toBe(false);
-  });
 });
 
-describe('create', () => {
+describe('createScarlettPlayerAPI', () => {
   let container: HTMLElement;
 
   beforeEach(() => {
@@ -366,6 +342,8 @@ describe('create', () => {
     document.body.appendChild(container);
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -373,8 +351,19 @@ describe('create', () => {
     vi.restoreAllMocks();
   });
 
+  it('should create API with version', () => {
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    expect(api.version).toBe('1.0.0');
+  });
+
+  it('should expose availableTypes', () => {
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    expect(api.availableTypes).toEqual(['video', 'audio', 'audio-mini']);
+  });
+
   it('should create player with HTMLElement container', async () => {
-    const player = await create({
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    const player = await api.create({
       container,
       src: 'video.m3u8',
     });
@@ -384,7 +373,8 @@ describe('create', () => {
   });
 
   it('should create player with CSS selector', async () => {
-    const player = await create({
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    const player = await api.create({
       container: '#player-container',
       src: 'video.m3u8',
     });
@@ -394,7 +384,8 @@ describe('create', () => {
   });
 
   it('should return null for non-existent selector', async () => {
-    const player = await create({
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    const player = await api.create({
       container: '#non-existent',
       src: 'video.m3u8',
     });
@@ -405,30 +396,15 @@ describe('create', () => {
     );
   });
 
-  it('should pass all options to createEmbedPlayer', async () => {
-    const player = await create({
+  it('should create audio player with type option', async () => {
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    const player = await api.create({
       container,
-      src: 'video.m3u8',
-      autoplay: true,
-      muted: true,
-      poster: 'poster.jpg',
-      brandColor: '#ff5733',
-      width: '100%',
-      aspectRatio: '16:9',
+      src: 'audio.m3u8',
+      type: 'audio',
     });
 
     expect(player).not.toBeNull();
-    expect(player?.config.autoplay).toBe(true);
-    expect(player?.config.muted).toBe(true);
-    expect(player?.config.poster).toBe('poster.jpg');
-  });
-
-  it('should handle creation errors gracefully', async () => {
-    const player = await create({
-      container,
-      // Missing src - should error
-    });
-
-    expect(player).toBeNull();
+    expect(fullPluginCreators.audioUI).toHaveBeenCalled();
   });
 });

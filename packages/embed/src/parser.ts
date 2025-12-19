@@ -1,4 +1,4 @@
-import type { EmbedConfig } from './types';
+import type { EmbedConfig, PlayerType } from './types';
 
 /**
  * Helper to get attribute with fallback aliases
@@ -14,9 +14,7 @@ function getAttr(element: HTMLElement, ...names: string[]): string | null {
 
 /**
  * Parse data attributes from an element into EmbedConfig
- * Supports multiple attribute naming conventions for flexibility:
- * - Full: data-src, data-autoplay, data-brand-color
- * - Short: src, autoplay, color
+ * Supports multiple attribute naming conventions for flexibility
  */
 export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> {
   const config: Partial<EmbedConfig> = {};
@@ -27,7 +25,13 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.src = src;
   }
 
-  // Boolean attributes (supports: data-autoplay or just autoplay)
+  // Player type (video, audio, audio-mini)
+  const type = getAttr(element, 'data-type', 'type') as PlayerType | null;
+  if (type && ['video', 'audio', 'audio-mini'].includes(type)) {
+    config.type = type;
+  }
+
+  // Boolean attributes
   const autoplay = getAttr(element, 'data-autoplay', 'autoplay');
   if (autoplay !== null) {
     config.autoplay = autoplay !== 'false';
@@ -53,13 +57,35 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.loop = loop !== 'false';
   }
 
-  // String attributes (supports: data-poster or just poster)
+  // String attributes
   const poster = getAttr(element, 'data-poster', 'poster');
   if (poster) {
     config.poster = poster;
   }
 
-  // Brand color (supports: data-brand-color, data-color, color)
+  // Artwork (alias for poster, for audio)
+  const artwork = getAttr(element, 'data-artwork', 'artwork');
+  if (artwork) {
+    config.artwork = artwork;
+  }
+
+  // Audio metadata
+  const title = getAttr(element, 'data-title', 'title');
+  if (title) {
+    config.title = title;
+  }
+
+  const artist = getAttr(element, 'data-artist', 'artist');
+  if (artist) {
+    config.artist = artist;
+  }
+
+  const album = getAttr(element, 'data-album', 'album');
+  if (album) {
+    config.album = album;
+  }
+
+  // Theme colors
   const brandColor = getAttr(element, 'data-brand-color', 'data-color', 'color');
   if (brandColor) {
     config.brandColor = brandColor;
@@ -75,6 +101,7 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.backgroundColor = backgroundColor;
   }
 
+  // Dimensions
   const width = element.getAttribute('data-width');
   if (width) {
     config.width = width;
@@ -120,6 +147,26 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     }
   }
 
+  // Playlist (JSON)
+  const playlist = element.getAttribute('data-playlist');
+  if (playlist) {
+    try {
+      config.playlist = JSON.parse(playlist);
+    } catch {
+      console.warn('[ScarlettPlayer] Invalid playlist JSON');
+    }
+  }
+
+  // Analytics
+  const analyticsBeaconUrl = element.getAttribute('data-analytics-beacon-url');
+  if (analyticsBeaconUrl) {
+    config.analytics = {
+      beaconUrl: analyticsBeaconUrl,
+      apiKey: element.getAttribute('data-analytics-api-key') || undefined,
+      videoId: element.getAttribute('data-analytics-video-id') || undefined,
+    };
+  }
+
   return config;
 }
 
@@ -137,12 +184,14 @@ export function aspectRatioToPercent(ratio: string): number {
 }
 
 /**
- * Apply container styles based on config
+ * Apply container styles based on config and player type
  */
 export function applyContainerStyles(
   container: HTMLElement,
   config: Partial<EmbedConfig>
 ): void {
+  const type = config.type || 'video';
+
   // Apply custom class
   if (config.className) {
     container.classList.add(...config.className.split(' '));
@@ -153,13 +202,24 @@ export function applyContainerStyles(
     container.style.width = config.width;
   }
 
-  // Apply height or aspect ratio
-  if (config.height) {
-    container.style.height = config.height;
-  } else if (config.aspectRatio) {
-    // Use padding-bottom technique for aspect ratio
-    container.style.position = 'relative';
-    container.style.paddingBottom = `${aspectRatioToPercent(config.aspectRatio)}%`;
-    container.style.height = '0';
+  if (type === 'video') {
+    // Video: use aspect ratio padding technique
+    if (config.height) {
+      container.style.height = config.height;
+    } else if (config.aspectRatio) {
+      container.style.position = 'relative';
+      container.style.paddingBottom = `${aspectRatioToPercent(config.aspectRatio)}%`;
+      container.style.height = '0';
+    }
+  } else if (type === 'audio') {
+    // Audio full: fixed height
+    container.style.position = container.style.position || 'relative';
+    container.style.height = config.height || '120px';
+    container.style.width = container.style.width || '100%';
+  } else if (type === 'audio-mini') {
+    // Audio mini: compact height
+    container.style.position = container.style.position || 'relative';
+    container.style.height = config.height || '64px';
+    container.style.width = container.style.width || '100%';
   }
 }

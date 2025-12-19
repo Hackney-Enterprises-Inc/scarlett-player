@@ -1,45 +1,54 @@
 /**
- * Scarlett Player - Audio Embed Package
+ * Scarlett Player - Audio Only Build
  *
- * Optimized for audio streaming: podcasts, music, live audio.
- * Includes: HLS, Audio UI, Media Session, Playlist
+ * Audio player with:
+ * - Audio UI (full + mini layouts)
+ * - HLS streaming
+ * - Playlist management
+ * - Media Session (lock screen controls)
+ *
+ * Does NOT include: Video UI, Analytics
+ * Use embed.js for full features or embed.video.js for video.
  *
  * @packageDocumentation
  */
 
-import { initAll, create } from './embed-audio';
+import { createHLSPlugin } from '@scarlett-player/hls';
+import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
+import { createPlaylistPlugin } from '@scarlett-player/playlist';
+import { createMediaSessionPlugin } from '@scarlett-player/media-session';
+import type { ScarlettPlayerGlobal, PlayerType } from './types';
+import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 
-export type { AudioEmbedConfig } from './embed-audio';
-export { createAudioPlayer, initElement, initAll, create, parseAudioDataAttributes } from './embed-audio';
+// Re-export types
+export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
+export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-const VERSION = '0.1.2-audio';
+const VERSION = '0.3.0-audio';
 
-interface ScarlettAudioGlobal {
-  create: typeof create;
-  initAll: typeof initAll;
-  version: string;
-}
+const AVAILABLE_TYPES: PlayerType[] = ['audio', 'audio-mini'];
 
-const ScarlettAudioAPI: ScarlettAudioGlobal = {
-  create,
-  initAll,
-  version: VERSION,
+const pluginCreators: PluginCreators = {
+  hls: createHLSPlugin,
+  audioUI: createAudioUIPlugin,
+  playlist: createPlaylistPlugin,
+  mediaSession: createMediaSessionPlugin,
+  // Video UI not available in this build
+  // Analytics not available in this build
 };
 
-// Expose on window
+// Create and expose global API
+const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
+  pluginCreators,
+  AVAILABLE_TYPES,
+  VERSION
+);
+
 if (typeof window !== 'undefined') {
-  (window as any).ScarlettAudio = ScarlettAudioAPI;
+  window.ScarlettPlayer = ScarlettPlayerAPI;
 }
 
 // Auto-initialize on DOMContentLoaded
-if (typeof document !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      initAll();
-    });
-  } else {
-    initAll();
-  }
-}
+setupAutoInit(pluginCreators, AVAILABLE_TYPES);
 
-export default ScarlettAudioAPI;
+export default ScarlettPlayerAPI;

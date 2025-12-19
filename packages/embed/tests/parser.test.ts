@@ -12,6 +12,32 @@ describe('parseDataAttributes', () => {
     element = document.createElement('div');
   });
 
+  describe('player type parsing', () => {
+    it('should parse data-type attribute for video', () => {
+      element.setAttribute('data-type', 'video');
+      const config = parseDataAttributes(element);
+      expect(config.type).toBe('video');
+    });
+
+    it('should parse data-type attribute for audio', () => {
+      element.setAttribute('data-type', 'audio');
+      const config = parseDataAttributes(element);
+      expect(config.type).toBe('audio');
+    });
+
+    it('should parse data-type attribute for audio-mini', () => {
+      element.setAttribute('data-type', 'audio-mini');
+      const config = parseDataAttributes(element);
+      expect(config.type).toBe('audio-mini');
+    });
+
+    it('should ignore invalid type values', () => {
+      element.setAttribute('data-type', 'invalid');
+      const config = parseDataAttributes(element);
+      expect(config.type).toBeUndefined();
+    });
+  });
+
   describe('source URL parsing', () => {
     it('should parse data-src attribute', () => {
       element.setAttribute('data-src', 'https://example.com/video.m3u8');
