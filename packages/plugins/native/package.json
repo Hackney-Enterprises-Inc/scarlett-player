@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/native",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Native Video Provider Plugin for Scarlett Player (MP4, WebM, MOV, MKV)",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -23,7 +23,7 @@
     "test:watch": "vitest"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^0.2.2"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
