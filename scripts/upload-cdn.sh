@@ -13,18 +13,12 @@ MINIO_BUCKET="${MINIO_BUCKET:-}"
 # Get version from package.json
 VERSION=$(node -p "require('./packages/embed/package.json').version")
 
-echo "Uploading Scarlett Player v${VERSION} to MinIO CDN..."
+echo "Uploading Scarlett Player v${VERSION} to CDN..."
 
 # Check required variables
 if [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$MINIO_BUCKET" ]; then
     echo "Error: Missing required environment variables."
     echo "Please set: MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET"
-    echo ""
-    echo "Example:"
-    echo "  export MINIO_ENDPOINT=https://s3.example.com"
-    echo "  export MINIO_ACCESS_KEY=your-access-key"
-    echo "  export MINIO_SECRET_KEY=your-secret-key"
-    echo "  export MINIO_BUCKET=your-bucket"
     exit 1
 fi
 
@@ -38,51 +32,63 @@ fi
 export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
 export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
 
-# Upload to versioned path (immutable, 1 year cache)
-echo "Uploading to s3://${MINIO_BUCKET}/scarlett-player/v${VERSION}/..."
+BASE_PATH="s3://${MINIO_BUCKET}/scarlett-player"
 
-aws s3 cp packages/embed/dist/embed.js "s3://${MINIO_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.js" \
-    --endpoint-url "${MINIO_ENDPOINT}" \
-    --content-type "application/javascript" \
-    --cache-control "public, max-age=31536000, immutable"
+# Upload a file to both versioned and latest paths
+upload() {
+    local src="$1"
+    local dest="$2"
+    echo "  ${dest}"
 
-aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${MINIO_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.umd.js" \
-    --endpoint-url "${MINIO_ENDPOINT}" \
-    --content-type "application/javascript" \
-    --cache-control "public, max-age=31536000, immutable"
+    # Versioned (immutable, 1 year cache)
+    aws s3 cp "$src" "${BASE_PATH}/v${VERSION}/${dest}" \
+        --endpoint-url "${MINIO_ENDPOINT}" \
+        --content-type "application/javascript" \
+        --cache-control "public, max-age=31536000, immutable" \
+        --quiet
 
-# Upload HLS chunk (find the hashed filename)
+    # Latest (1 hour cache)
+    aws s3 cp "$src" "${BASE_PATH}/latest/${dest}" \
+        --endpoint-url "${MINIO_ENDPOINT}" \
+        --content-type "application/javascript" \
+        --cache-control "public, max-age=3600" \
+        --quiet
+}
+
+echo "Uploading to v${VERSION}/ and latest/..."
+
+# Default build
+upload "packages/embed/dist/embed.js" "embed.js"
+upload "packages/embed/dist/embed.umd.cjs" "embed.umd.cjs"
+
+# Light build
+upload "packages/embed/dist/embed.light.js" "embed.light.js"
+upload "packages/embed/dist/embed.light.umd.cjs" "embed.light.umd.cjs"
+
+# Full build
+upload "packages/embed/dist/embed.full.js" "embed.full.js"
+upload "packages/embed/dist/embed.full.umd.cjs" "embed.full.umd.cjs"
+
+# Audio build
+upload "packages/embed/dist/embed.audio.js" "embed.audio.js"
+upload "packages/embed/dist/embed.audio.umd.cjs" "embed.audio.umd.cjs"
+
+# Audio-Light build
+upload "packages/embed/dist/embed.audio.light.js" "embed.audio.light.js"
+upload "packages/embed/dist/embed.audio.light.umd.cjs" "embed.audio.light.umd.cjs"
+
+# HLS chunks
 HLS_FILE=$(ls packages/embed/dist/hls-*.js 2>/dev/null | head -1)
 if [ -n "$HLS_FILE" ]; then
-    aws s3 cp "$HLS_FILE" "s3://${MINIO_BUCKET}/scarlett-player/v${VERSION}/hls.js" \
-        --endpoint-url "${MINIO_ENDPOINT}" \
-        --content-type "application/javascript" \
-        --cache-control "public, max-age=31536000, immutable"
+    upload "$HLS_FILE" "hls.js"
 fi
 
-# Upload to latest path (shorter cache for updates)
-echo "Uploading to s3://${MINIO_BUCKET}/scarlett-player/latest/..."
-
-aws s3 cp packages/embed/dist/embed.js "s3://${MINIO_BUCKET}/scarlett-player/latest/scarlett-player.js" \
-    --endpoint-url "${MINIO_ENDPOINT}" \
-    --content-type "application/javascript" \
-    --cache-control "public, max-age=3600"
-
-aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${MINIO_BUCKET}/scarlett-player/latest/scarlett-player.umd.js" \
-    --endpoint-url "${MINIO_ENDPOINT}" \
-    --content-type "application/javascript" \
-    --cache-control "public, max-age=3600"
-
-if [ -n "$HLS_FILE" ]; then
-    aws s3 cp "$HLS_FILE" "s3://${MINIO_BUCKET}/scarlett-player/latest/hls.js" \
-        --endpoint-url "${MINIO_ENDPOINT}" \
-        --content-type "application/javascript" \
-        --cache-control "public, max-age=3600"
+HLS_LIGHT_FILE=$(ls packages/embed/dist/hls.light-*.js 2>/dev/null | head -1)
+if [ -n "$HLS_LIGHT_FILE" ]; then
+    upload "$HLS_LIGHT_FILE" "hls.light.js"
 fi
 
 echo ""
-echo "✅ Upload complete!"
-echo ""
-echo "CDN URLs:"
-echo "  Versioned: ${MINIO_ENDPOINT}/${MINIO_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.umd.js"
-echo "  Latest:    ${MINIO_ENDPOINT}/${MINIO_BUCKET}/scarlett-player/latest/scarlett-player.umd.js"
+echo "Done! Uploaded to:"
+echo "  /scarlett-player/v${VERSION}/"
+echo "  /scarlett-player/latest/"
