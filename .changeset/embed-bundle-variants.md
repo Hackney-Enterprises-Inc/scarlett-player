@@ -1,9 +1,23 @@
 ---
 "@scarlett-player/embed": minor
-"@scarlett-player/hls": patch
+"@scarlett-player/hls": minor
+"@scarlett-player/core": minor
+"@scarlett-player/ui": minor
+"@scarlett-player/audio-ui": minor
+"@scarlett-player/analytics": minor
+"@scarlett-player/playlist": minor
+"@scarlett-player/media-session": minor
+"@scarlett-player/native": minor
+"@scarlett-player/airplay": minor
+"@scarlett-player/chromecast": minor
+"@scarlett-player/vue": minor
 ---
 
-Refactor embed builds to unified ScarlettPlayer API
+v0.3.0 - Unified ScarlettPlayer API & Bug Fixes
+
+**Bug Fixes:**
+- Fixed video not visible when container uses aspect ratio padding technique (video element now uses `position: absolute`)
+- Fixed autoplay with muted not working (initial muted/volume state is now applied before autoplay)
 
 **Breaking Changes:**
 - Removed separate `ScarlettAudio` global - now use `ScarlettPlayer` with `type` option
