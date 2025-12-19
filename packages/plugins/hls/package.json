@@ -11,14 +11,19 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./light": {
+      "types": "./dist/light.d.ts",
+      "import": "./dist/light.js",
+      "require": "./dist/light.cjs"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "build": "tsup src/index.ts src/light.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts src/light.ts --format esm,cjs --dts --watch",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --coverage"

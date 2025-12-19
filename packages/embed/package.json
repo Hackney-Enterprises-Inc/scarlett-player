@@ -11,6 +11,26 @@
       "import": "./dist/embed.js",
       "require": "./dist/embed.umd.cjs",
       "types": "./dist/index.d.ts"
+    },
+    "./light": {
+      "import": "./dist/embed.light.js",
+      "require": "./dist/embed.light.umd.cjs",
+      "types": "./dist/index-light.d.ts"
+    },
+    "./full": {
+      "import": "./dist/embed.full.js",
+      "require": "./dist/embed.full.umd.cjs",
+      "types": "./dist/index-full.d.ts"
+    },
+    "./audio": {
+      "import": "./dist/embed.audio.js",
+      "require": "./dist/embed.audio.umd.cjs",
+      "types": "./dist/index-audio.d.ts"
+    },
+    "./audio-light": {
+      "import": "./dist/embed.audio.light.js",
+      "require": "./dist/embed.audio.light.umd.cjs",
+      "types": "./dist/index-audio-light.d.ts"
     }
   },
   "files": [
@@ -19,7 +39,10 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && BUILD_LIGHT=true vite build && BUILD_FULL=true vite build && BUILD_AUDIO=true vite build && BUILD_AUDIO_LIGHT=true vite build",
+    "build:video": "tsc && vite build && BUILD_LIGHT=true vite build",
+    "build:full": "tsc && BUILD_FULL=true vite build",
+    "build:audio": "tsc && BUILD_AUDIO=true vite build && BUILD_AUDIO_LIGHT=true vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -51,6 +74,10 @@
     "@scarlett-player/core": "workspace:*",
     "@scarlett-player/hls": "workspace:*",
     "@scarlett-player/ui": "workspace:*",
+    "@scarlett-player/audio-ui": "workspace:*",
+    "@scarlett-player/analytics": "workspace:*",
+    "@scarlett-player/playlist": "workspace:*",
+    "@scarlett-player/media-session": "workspace:*",
     "hls.js": "^1.5.0"
   },
   "devDependencies": {

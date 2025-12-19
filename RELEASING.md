@@ -140,6 +140,7 @@ All packages are versioned together (fixed versioning). When any package changes
 - `@scarlett-player/native`
 - `@scarlett-player/airplay`
 - `@scarlett-player/chromecast`
+- `@scarlett-player/analytics`
 - `@scarlett-player/playlist`
 - `@scarlett-player/media-session`
 - `@scarlett-player/audio-ui`
@@ -213,12 +214,22 @@ pnpm changeset
 After release, the player is available via CDN:
 
 ```html
-<!-- Use specific version (recommended for production) -->
-<script src="https://your-cdn.com/scarlett-player/v0.1.1/scarlett-player.umd.js"></script>
+<!-- Full build (with subtitles, DRM, ID3 support) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/v0.1.1/embed.umd.cjs"></script>
+
+<!-- Light build (~30% smaller, excludes subtitles/DRM/ID3) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/v0.1.1/embed.light.umd.cjs"></script>
 
 <!-- Use latest version (always gets newest release) -->
-<script src="https://your-cdn.com/scarlett-player/latest/scarlett-player.umd.js"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
 <!-- Initialize -->
 <div data-scarlett-player data-src="https://example.com/video.m3u8"></div>
 ```
+
+### Bundle Variants
+
+| Variant | Size (gzip) | Features |
+|---------|-------------|----------|
+| `embed.umd.cjs` | ~177KB | Full hls.js with subtitles, DRM, ID3 |
+| `embed.light.umd.cjs` | ~124KB | hls.js/light (no subtitles/DRM/ID3) |

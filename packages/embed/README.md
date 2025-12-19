@@ -15,12 +15,25 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 
 ### CDN Usage (Recommended for Embeds)
 
+**Video Player:**
 ```html
-<!-- UMD Bundle (works everywhere) -->
-<script src="https://cdn.example.com/scarlett-player/embed.umd.cjs"></script>
+<!-- Standard video player -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- ES Module (for modern browsers) -->
-<script type="module" src="https://cdn.example.com/scarlett-player/embed.js"></script>
+<!-- Light build (~30% smaller, no subtitles/DRM/ID3) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.light.umd.cjs"></script>
+
+<!-- Full build (includes analytics, playlist, media-session) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.full.umd.cjs"></script>
+```
+
+**Audio Player:**
+```html
+<!-- Audio player (compact UI, lock screen controls, playlists) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
+
+<!-- Light audio (~30% smaller) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.light.umd.cjs"></script>
 ```
 
 ### NPM Installation
@@ -41,7 +54,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://cdn.example.com/scarlett-player/embed.umd.cjs"></script>
+  <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 </head>
 <body>
   <!-- Basic player -->
@@ -91,7 +104,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 For dynamic player creation:
 
 ```html
-<script src="https://cdn.example.com/scarlett-player/embed.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
 <div id="my-player"></div>
 
@@ -133,7 +146,7 @@ For secure, sandboxed embeds:
 ```html
 <!-- Basic iframe embed -->
 <iframe
-  src="https://cdn.example.com/scarlett-player/iframe.html?src=https://example.com/stream.m3u8"
+  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/stream.m3u8"
   width="640"
   height="360"
   frameborder="0"
@@ -143,7 +156,7 @@ For secure, sandboxed embeds:
 
 <!-- With customization -->
 <iframe
-  src="https://cdn.example.com/scarlett-player/iframe.html?src=https://example.com/stream.m3u8&autoplay=true&muted=true&brand-color=%23e50914"
+  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/stream.m3u8&autoplay=true&muted=true&brand-color=%23e50914"
   width="100%"
   height="100%"
   frameborder="0"
@@ -159,8 +172,64 @@ All data attributes work as URL parameters (use kebab-case):
 - `autoplay`, `muted`, `loop`
 - `poster`
 - `brand-color`, `primary-color`, `background-color`
-- `hide-delay`, `playback-rate`, `start-time`
-- `controls` (set to `false` to hide)
+
+### 4. Audio Player
+
+For audio streaming (podcasts, music, live audio):
+
+```html
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
+
+<!-- Basic audio player -->
+<div
+  data-scarlett-audio
+  data-src="https://example.com/podcast.m3u8"
+  data-title="Episode 1: Introduction"
+  data-artist="My Podcast"
+></div>
+
+<!-- Compact audio player -->
+<div
+  data-scarlett-audio
+  data-src="https://example.com/music.m3u8"
+  data-compact
+  data-title="Song Title"
+  data-artist="Artist Name"
+  data-artwork="https://example.com/album-art.jpg"
+></div>
+```
+
+#### Audio Programmatic API
+
+```javascript
+// Audio uses ScarlettAudio global
+const player = await ScarlettAudio.create({
+  container: '#audio-player',
+  src: 'https://example.com/stream.m3u8',
+  title: 'Track Title',
+  artist: 'Artist Name',
+  artwork: 'https://example.com/artwork.jpg',
+  compact: true,
+  // Playlist support
+  playlist: [
+    { src: 'track1.m3u8', title: 'Track 1', artist: 'Artist' },
+    { src: 'track2.m3u8', title: 'Track 2', artist: 'Artist' },
+  ],
+});
+```
+
+#### Audio Data Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `data-src` | string | Audio source URL (HLS .m3u8) |
+| `data-title` | string | Track/episode title |
+| `data-artist` | string | Artist/creator name |
+| `data-album` | string | Album name |
+| `data-artwork` | string | Album art / cover image URL |
+| `data-compact` | boolean | Use compact layout |
+| `data-brand-color` | string | Accent color |
+| `data-playlist` | JSON | Playlist as JSON array |
 
 ## Multi-Tenant Branding
 
@@ -190,12 +259,37 @@ After building, you'll get:
 
 ```
 dist/
-├── embed.js          # ES module
-├── embed.umd.cjs     # UMD bundle (for script tags)
-├── embed.d.ts        # TypeScript definitions
-├── embed.js.map      # Source map
-└── embed.umd.cjs.map # Source map for UMD
+├── embed.js                  # ES module - standard video
+├── embed.umd.cjs             # UMD - standard video (~177KB gzip)
+├── embed.light.js            # ES module - light video
+├── embed.light.umd.cjs       # UMD - light video (~124KB gzip)
+├── embed.full.js             # ES module - all plugins
+├── embed.full.umd.cjs        # UMD - all plugins (~183KB gzip)
+├── embed.audio.js            # ES module - audio player
+├── embed.audio.umd.cjs       # UMD - audio player (~175KB gzip)
+├── embed.audio.light.js      # ES module - light audio
+├── embed.audio.light.umd.cjs # UMD - light audio (~122KB gzip)
+├── hls-*.js                  # HLS.js chunk (ESM only)
+├── hls.light-*.js            # HLS.js light chunk (ESM only)
+└── *.map                     # Source maps
 ```
+
+### Bundle Variants
+
+**Video Players:**
+| Variant | Size (gzip) | Features |
+|---------|-------------|----------|
+| `embed.umd.cjs` | ~177KB | Standard: core + HLS + UI |
+| `embed.light.umd.cjs` | ~124KB | Light: HLS light (no subtitles/DRM/ID3) |
+| `embed.full.umd.cjs` | ~183KB | Full: + analytics, playlist, media-session |
+
+**Audio Players:**
+| Variant | Size (gzip) | Features |
+|---------|-------------|----------|
+| `embed.audio.umd.cjs` | ~175KB | Audio: core + HLS + audio-ui + media-session + playlist |
+| `embed.audio.light.umd.cjs` | ~122KB | Light Audio: with HLS light |
+
+Use light variants for most streaming use cases to reduce load time by ~30%.
 
 ## Development
 

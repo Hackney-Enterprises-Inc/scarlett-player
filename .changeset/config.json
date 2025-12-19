@@ -15,6 +15,7 @@
       "@scarlett-player/native",
       "@scarlett-player/airplay",
       "@scarlett-player/chromecast",
+      "@scarlett-player/analytics",
       "@scarlett-player/playlist",
       "@scarlett-player/media-session",
       "@scarlett-player/audio-ui"
