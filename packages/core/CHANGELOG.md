@@ -1,0 +1,3 @@
+# @scarlett-player/core
+
+## 1.0.0
