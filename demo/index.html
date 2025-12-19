@@ -908,11 +908,21 @@ playlist.<span class="function">add</span>([
     let currentMedia = 'video';
     let currentDemo = 'hls';
 
+    // Pause all players helper
+    function pauseAllPlayers() {
+      if (window.player) window.player.pause();
+      if (window.audioPlayer) window.audioPlayer.pause();
+      if (window.miniPlayer) window.miniPlayer.pause();
+    }
+
     // Media type tabs
     document.querySelectorAll('.media-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const mediaType = tab.dataset.media;
         if (!mediaType || mediaType === currentMedia) return;
+
+        // Pause all players when switching
+        pauseAllPlayers();
 
         currentMedia = mediaType;
 
@@ -980,7 +990,11 @@ playlist.<span class="function">add</span>([
     document.querySelectorAll('#audio-submenu .sub-menu-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const demo = btn.dataset.demo;
-        if (!demo) return;
+        if (!demo || demo === currentDemo) return;
+
+        // Pause audio players when switching between them
+        if (window.audioPlayer) window.audioPlayer.pause();
+        if (window.miniPlayer) window.miniPlayer.pause();
 
         currentDemo = demo;
 
