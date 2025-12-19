@@ -270,6 +270,110 @@
       opacity: 0.7;
     }
 
+    /* Media type tabs */
+    .media-tabs {
+      display: flex;
+      gap: 0;
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 16px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .media-tab {
+      flex: 1;
+      background: #2a2a2a;
+      padding: 14px 24px;
+      color: #888;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .media-tab:first-child {
+      border-radius: 8px 0 0 8px;
+    }
+
+    .media-tab:last-child {
+      border-radius: 0 8px 8px 0;
+    }
+
+    .media-tab:hover {
+      background: #3a3a3a;
+      color: #fff;
+    }
+
+    .media-tab.active {
+      background: #e50914;
+      color: #fff;
+    }
+
+    .media-tab svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    .sub-menu {
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 16px;
+    }
+
+    .sub-menu-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .sub-menu-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .sub-menu-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
+
+    .sub-menu-btn:hover {
+      background: #3a3a3a;
+      border-color: #e50914;
+    }
+
+    .sub-menu-btn.active {
+      background: #3a3a3a;
+      border-color: #e50914;
+    }
+
+    .sub-menu-btn .btn-title {
+      font-weight: 600;
+    }
+
+    .sub-menu-btn .btn-format {
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+
     .divider {
       width: 100%;
       max-width: 960px;
@@ -287,6 +391,177 @@
       max-width: 960px;
       width: 100%;
     }
+
+    /* Audio Player Section */
+    .audio-section {
+      width: 100%;
+      max-width: 400px;
+      margin-top: 48px;
+      padding-top: 48px;
+      border-top: 1px solid #333;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .section-subtitle {
+      color: #888;
+      font-size: 0.875rem;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    #audio-player {
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    .audio-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      justify-content: center;
+    }
+
+    /* Player sections */
+    .player-section {
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .audio-player-wrapper {
+      width: 100%;
+      max-width: 400px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    .mini-player-wrapper {
+      width: 100%;
+      max-width: 320px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Code example toggle */
+    .code-toggle {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 16px;
+    }
+
+    .code-toggle-btn {
+      background: transparent;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 8px 16px;
+      color: #888;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .code-toggle-btn:hover {
+      color: #fff;
+      border-color: #666;
+    }
+
+    .code-toggle-btn.active {
+      color: #e50914;
+      border-color: #e50914;
+    }
+
+    .code-toggle-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .code-example {
+      display: none;
+      width: 100%;
+      max-width: 960px;
+      margin-top: 12px;
+      background: #0d0d0d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .code-example.visible {
+      display: block;
+    }
+
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+    }
+
+    .code-lang {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .code-copy-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 4px 10px;
+      color: #888;
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .code-copy-btn:hover {
+      color: #fff;
+      border-color: #666;
+    }
+
+    .code-copy-btn.copied {
+      color: #10b981;
+      border-color: #10b981;
+    }
+
+    .code-content {
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    .code-content pre {
+      margin: 0;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: #e0e0e0;
+    }
+
+    .code-content .keyword { color: #c792ea; }
+    .code-content .string { color: #c3e88d; }
+    .code-content .comment { color: #676e95; font-style: italic; }
+    .code-content .function { color: #82aaff; }
+    .code-content .property { color: #89ddff; }
+    .code-content .number { color: #f78c6c; }
   </style>
 </head>
 <body>
@@ -305,39 +580,241 @@
     </a>
   </div>
 
-  <div class="demo-selector">
-    <div class="demo-selector-label">Demo Videos</div>
-    <div class="demo-buttons">
-      <button class="demo-btn active" data-url="https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8">
-        <span class="demo-title">Big Buck Bunny 4K</span>
-        <span class="demo-format">HLS Adaptive Streaming</span>
+  <!-- Media Type Tabs -->
+  <div class="media-tabs">
+    <button class="media-tab active" data-media="video">
+      <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9.5 7.5v9l7-4.5z"/></svg>
+      Video
+    </button>
+    <button class="media-tab" data-media="audio">
+      <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6zm-2 16c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+      Audio
+    </button>
+  </div>
+
+  <!-- Video Sub-Menu -->
+  <div id="video-submenu" class="sub-menu">
+    <div class="sub-menu-label">Video Demos</div>
+    <div class="sub-menu-buttons">
+      <button class="sub-menu-btn active" data-demo="hls">
+        <span class="btn-title">HLS Adaptive</span>
+        <span class="btn-format">4K Multi-bitrate Stream</span>
       </button>
-      <button class="demo-btn" data-url="https://vod.thestreamplatform.com/demo/bbb-2160p-stereo.mp4">
-        <span class="demo-title">Big Buck Bunny 4K</span>
-        <span class="demo-format">MP4 Progressive</span>
+      <button class="sub-menu-btn" data-demo="mp4">
+        <span class="btn-title">MP4 Progressive</span>
+        <span class="btn-format">4K Direct Download</span>
       </button>
     </div>
   </div>
 
-  <div class="divider"></div>
-  <div class="custom-url-label">Or enter a custom URL</div>
-
-  <div class="url-bar">
-    <input type="text" id="url-input" placeholder="Enter video URL (.m3u8, .mp4, .webm, .mov)" value="https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8">
-    <button id="load-btn">Load</button>
+  <!-- Audio Sub-Menu -->
+  <div id="audio-submenu" class="sub-menu" style="display: none;">
+    <div class="sub-menu-label">Audio Players</div>
+    <div class="sub-menu-buttons">
+      <button class="sub-menu-btn active" data-demo="audio-full">
+        <span class="btn-title">Full Player</span>
+        <span class="btn-format">Artwork, Playlist, Controls</span>
+      </button>
+      <button class="sub-menu-btn" data-demo="audio-mini">
+        <span class="btn-title">Mini Player</span>
+        <span class="btn-format">Compact Embedded</span>
+      </button>
+    </div>
   </div>
 
-  <div id="player"></div>
+  <!-- Video Player Section -->
+  <div id="video-section" class="player-section">
 
-  <div class="info">
-    <h2>Active Plugins</h2>
-    <div class="features">
-      <span class="feature active">Core</span>
-      <span class="feature active">HLS</span>
-      <span class="feature active">Native (MP4/WebM)</span>
-      <span class="feature active">UI Controls</span>
-      <span class="feature active">AirPlay</span>
-      <span class="feature active">Chromecast</span>
+    <div class="divider"></div>
+    <div class="custom-url-label">Or enter a custom URL</div>
+
+    <div class="url-bar">
+      <input type="text" id="url-input" placeholder="Enter video URL (.m3u8, .mp4, .webm, .mov)" value="https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8">
+      <button id="load-btn">Load</button>
+    </div>
+
+    <div id="player"></div>
+
+    <div class="info">
+      <h2>Active Plugins</h2>
+      <div class="features">
+        <span class="feature active">Core</span>
+        <span class="feature active">HLS</span>
+        <span class="feature active">Native (MP4/WebM)</span>
+        <span class="feature active">UI Controls</span>
+        <span class="feature active">AirPlay</span>
+        <span class="feature active">Chromecast</span>
+      </div>
+    </div>
+
+    <div class="code-toggle">
+      <button class="code-toggle-btn" data-target="video-code">
+        <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+        Show Code
+      </button>
+    </div>
+
+    <div id="video-code" class="code-example">
+      <div class="code-header">
+        <span class="code-lang">TypeScript</span>
+        <button class="code-copy-btn" data-code="video-code">Copy</button>
+      </div>
+      <div class="code-content">
+        <pre><span class="keyword">import</span> { ScarlettPlayer } <span class="keyword">from</span> <span class="string">'@scarlett-player/core'</span>;
+<span class="keyword">import</span> { createHLSPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/hls'</span>;
+<span class="keyword">import</span> { createNativePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/native'</span>;
+<span class="keyword">import</span> { uiPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/ui'</span>;
+<span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
+<span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
+
+<span class="comment">// Create the player</span>
+<span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
+  <span class="property">container</span>: document.<span class="function">getElementById</span>(<span class="string">'player'</span>),
+  <span class="property">src</span>: <span class="string">'https://example.com/video.m3u8'</span>,
+  <span class="property">plugins</span>: [
+    <span class="function">createHLSPlugin</span>(),
+    <span class="function">createNativePlugin</span>(),
+    <span class="function">uiPlugin</span>({
+      <span class="property">hideDelay</span>: <span class="number">3000</span>,
+      <span class="property">theme</span>: { <span class="property">accentColor</span>: <span class="string">'#e50914'</span> }
+    }),
+    <span class="function">airplayPlugin</span>(),
+    <span class="function">chromecastPlugin</span>(),
+  ],
+});
+
+<span class="comment">// Initialize and start playback</span>
+<span class="keyword">await</span> player.<span class="function">init</span>();</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Player Section -->
+  <div id="audio-section" class="player-section" style="display: none;">
+    <div class="custom-url-label">Enter Audio URL</div>
+    <div class="url-bar" style="max-width: 400px;">
+      <input type="text" id="audio-url-input" placeholder="Enter audio URL (.mp3, .wav, .flac)" value="https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3">
+      <button id="audio-load-btn">Load</button>
+    </div>
+    <div class="audio-player-wrapper">
+      <div id="audio-player"></div>
+    </div>
+    <div class="info">
+      <h2>Active Plugins</h2>
+      <div class="features">
+        <span class="feature active">Core</span>
+        <span class="feature active">Native Audio</span>
+        <span class="feature active">Playlist</span>
+        <span class="feature active">Media Session</span>
+        <span class="feature active">Audio UI (Full)</span>
+      </div>
+    </div>
+
+    <div class="code-toggle">
+      <button class="code-toggle-btn" data-target="audio-code">
+        <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+        Show Code
+      </button>
+    </div>
+
+    <div id="audio-code" class="code-example">
+      <div class="code-header">
+        <span class="code-lang">TypeScript</span>
+        <button class="code-copy-btn" data-code="audio-code">Copy</button>
+      </div>
+      <div class="code-content">
+        <pre><span class="keyword">import</span> { ScarlettPlayer } <span class="keyword">from</span> <span class="string">'@scarlett-player/core'</span>;
+<span class="keyword">import</span> { createNativePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/native'</span>;
+<span class="keyword">import</span> { createPlaylistPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/playlist'</span>;
+<span class="keyword">import</span> { createMediaSessionPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/media-session'</span>;
+<span class="keyword">import</span> { createAudioUIPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/audio-ui'</span>;
+
+<span class="keyword">const</span> audioPlayer = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
+  <span class="property">container</span>: document.<span class="function">getElementById</span>(<span class="string">'audio-player'</span>),
+  <span class="property">plugins</span>: [
+    <span class="function">createNativePlugin</span>(),
+    <span class="function">createPlaylistPlugin</span>({ <span class="property">autoAdvance</span>: <span class="keyword">true</span> }),
+    <span class="function">createMediaSessionPlugin</span>({ <span class="property">seekOffset</span>: <span class="number">10</span> }),
+    <span class="function">createAudioUIPlugin</span>({
+      <span class="property">layout</span>: <span class="string">'full'</span>,
+      <span class="property">showShuffle</span>: <span class="keyword">true</span>,
+      <span class="property">showRepeat</span>: <span class="keyword">true</span>,
+      <span class="property">theme</span>: {
+        <span class="property">primary</span>: <span class="string">'#6366f1'</span>,
+        <span class="property">background</span>: <span class="string">'#18181b'</span>,
+      },
+    }),
+  ],
+});
+
+<span class="keyword">await</span> audioPlayer.<span class="function">init</span>();
+
+<span class="comment">// Get playlist plugin to add tracks</span>
+<span class="keyword">const</span> playlist = audioPlayer.<span class="function">getPlugin</span>(<span class="string">'playlist'</span>);
+playlist.<span class="function">add</span>([
+  { <span class="property">id</span>: <span class="string">'1'</span>, <span class="property">src</span>: <span class="string">'song.mp3'</span>, <span class="property">title</span>: <span class="string">'Song Title'</span>, <span class="property">artist</span>: <span class="string">'Artist'</span> }
+]);</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mini Player Section -->
+  <div id="mini-section" class="player-section" style="display: none;">
+    <div class="custom-url-label">Enter Audio URL</div>
+    <div class="url-bar" style="max-width: 500px;">
+      <input type="text" id="mini-url-input" placeholder="Enter audio URL (.mp3, .wav, .flac)" value="https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3">
+      <button id="mini-load-btn">Load</button>
+    </div>
+    <div class="mini-player-wrapper" style="max-width: 500px;">
+      <div id="mini-player"></div>
+    </div>
+    <div class="info">
+      <h2>Active Plugins</h2>
+      <div class="features">
+        <span class="feature active">Core</span>
+        <span class="feature active">Native Audio</span>
+        <span class="feature active">Audio UI (Mini)</span>
+      </div>
+    </div>
+
+    <div class="code-toggle">
+      <button class="code-toggle-btn" data-target="mini-code">
+        <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+        Show Code
+      </button>
+    </div>
+
+    <div id="mini-code" class="code-example">
+      <div class="code-header">
+        <span class="code-lang">TypeScript</span>
+        <button class="code-copy-btn" data-code="mini-code">Copy</button>
+      </div>
+      <div class="code-content">
+        <pre><span class="keyword">import</span> { ScarlettPlayer } <span class="keyword">from</span> <span class="string">'@scarlett-player/core'</span>;
+<span class="keyword">import</span> { createNativePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/native'</span>;
+<span class="keyword">import</span> { createAudioUIPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/audio-ui'</span>;
+
+<span class="keyword">const</span> miniPlayer = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
+  <span class="property">container</span>: document.<span class="function">getElementById</span>(<span class="string">'mini-player'</span>),
+  <span class="property">plugins</span>: [
+    <span class="function">createNativePlugin</span>(),
+    <span class="function">createAudioUIPlugin</span>({
+      <span class="property">layout</span>: <span class="string">'mini'</span>,
+      <span class="property">showArtwork</span>: <span class="keyword">false</span>,
+      <span class="property">showArtist</span>: <span class="keyword">false</span>,
+      <span class="property">showTime</span>: <span class="keyword">false</span>,
+      <span class="property">showVolume</span>: <span class="keyword">false</span>,
+      <span class="property">theme</span>: {
+        <span class="property">primary</span>: <span class="string">'#e50914'</span>, <span class="comment">// Accent color for play button</span>
+        <span class="property">background</span>: <span class="string">'#1f2937'</span>,
+      },
+    }),
+  ],
+});
+
+<span class="keyword">await</span> miniPlayer.<span class="function">init</span>();
+<span class="keyword">await</span> miniPlayer.<span class="function">load</span>(<span class="string">'https://example.com/audio.mp3'</span>);</pre>
+      </div>
     </div>
   </div>
 
@@ -367,65 +844,6 @@
     <div class="console-line">Console output will appear here...</div>
   </div>
 
-  <div class="divider" style="margin-top: 48px;"></div>
-
-  <div class="info" style="margin-top: 32px;">
-    <h2>Embed Integration</h2>
-    <p style="color: #888; margin-bottom: 16px;">Drop the player into any site with a single script tag:</p>
-
-    <div class="embed-examples">
-      <div class="embed-example">
-        <div class="embed-label">Simplest Drop-in</div>
-        <pre class="code-block">&lt;script src="https://cdn.../embed.umd.cjs"&gt;&lt;/script&gt;
-&lt;div data-sp src="video.m3u8"&gt;&lt;/div&gt;</pre>
-      </div>
-
-      <div class="embed-example">
-        <div class="embed-label">With Branding</div>
-        <pre class="code-block">&lt;div data-sp src="video.m3u8" color="#e50914"&gt;&lt;/div&gt;</pre>
-      </div>
-
-      <div class="embed-example">
-        <div class="embed-label">iframe Embed</div>
-        <pre class="code-block">&lt;iframe src="https://embed.../v/abc123"&gt;&lt;/iframe&gt;</pre>
-      </div>
-    </div>
-
-    <div style="margin-top: 16px;">
-      <a href="../../../packages/embed/demo.html" class="demo-link" style="color: #e50914; text-decoration: none;">
-        View Full Embed Demo &rarr;
-      </a>
-    </div>
-  </div>
-
-  <style>
-    .embed-examples {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .embed-example {
-      background: #0d0d0d;
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .embed-label {
-      font-size: 0.75rem;
-      color: #e50914;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-    .code-block {
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 0.8rem;
-      color: #4fc3f7;
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-  </style>
-
   <script src="demo.bundle.js"></script>
   <script>
     // Display version from bundle
@@ -434,6 +852,9 @@
     }
   </script>
   <script>
+    // Active player for stats display
+    window.activePlayer = 'video';
+
     // Update stats display
     function formatTime(s) {
       if (!isFinite(s)) return '0:00';
@@ -442,10 +863,19 @@
       return m + ':' + (sec < 10 ? '0' : '') + sec;
     }
 
-    function updateStats() {
-      if (!window.player) return;
+    function getActivePlayer() {
+      switch (window.activePlayer) {
+        case 'audio': return window.audioPlayer;
+        case 'mini': return window.miniPlayer;
+        default: return window.player;
+      }
+    }
 
-      const state = window.player.getState();
+    function updateStats() {
+      const activePlayer = getActivePlayer();
+      if (!activePlayer) return;
+
+      const state = activePlayer.getState();
 
       document.getElementById('state').textContent =
         state.playing ? '▶️ Playing' :
@@ -457,13 +887,133 @@
 
       const quality = state.currentQuality;
       document.getElementById('quality').textContent =
-        quality ? quality.label : 'Auto';
+        quality ? quality.label : (state.mediaType === 'audio' ? 'Audio' : 'Auto');
 
       document.getElementById('buffered').textContent =
         Math.round(state.bufferedAmount * 100) + '%';
     }
 
     setInterval(updateStats, 250);
+
+    // Demo URLs
+    const DEMO_URLS = {
+      hls: 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8',
+      mp4: 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo.mp4',
+      'audio-full': 'https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3',
+      'audio-mini': 'https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3'
+    };
+
+    // Current media type and demo
+    let currentMedia = 'video';
+    let currentDemo = 'hls';
+
+    // Pause all players helper
+    function pauseAllPlayers() {
+      if (window.player) window.player.pause();
+      if (window.audioPlayer) window.audioPlayer.pause();
+      if (window.miniPlayer) window.miniPlayer.pause();
+    }
+
+    // Media type tabs
+    document.querySelectorAll('.media-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const mediaType = tab.dataset.media;
+        if (!mediaType || mediaType === currentMedia) return;
+
+        // Pause all players when switching
+        pauseAllPlayers();
+
+        currentMedia = mediaType;
+
+        // Update tab active state
+        document.querySelectorAll('.media-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Show/hide sub-menus
+        document.getElementById('video-submenu').style.display = mediaType === 'video' ? 'block' : 'none';
+        document.getElementById('audio-submenu').style.display = mediaType === 'audio' ? 'block' : 'none';
+
+        // Show/hide player sections
+        document.getElementById('video-section').style.display = 'none';
+        document.getElementById('audio-section').style.display = 'none';
+        document.getElementById('mini-section').style.display = 'none';
+
+        if (mediaType === 'video') {
+          document.getElementById('video-section').style.display = 'flex';
+          window.activePlayer = 'video';
+          currentDemo = 'hls';
+        } else {
+          // Default to full audio player
+          document.getElementById('audio-section').style.display = 'flex';
+          window.activePlayer = 'audio';
+          currentDemo = 'audio-full';
+          // Reset audio sub-menu selection
+          document.querySelectorAll('#audio-submenu .sub-menu-btn').forEach(b => b.classList.remove('active'));
+          document.querySelector('#audio-submenu .sub-menu-btn[data-demo="audio-full"]').classList.add('active');
+        }
+      });
+    });
+
+    // Sub-menu buttons (video demos)
+    document.querySelectorAll('#video-submenu .sub-menu-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const demo = btn.dataset.demo;
+        if (!demo) return;
+
+        currentDemo = demo;
+
+        // Update active state
+        document.querySelectorAll('#video-submenu .sub-menu-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Load the video
+        const url = DEMO_URLS[demo];
+        if (url && window.player) {
+          urlInput.value = url;
+          loadBtn.disabled = true;
+          loadBtn.textContent = 'Loading...';
+          try {
+            await window.player.load(url);
+            console.log('Loaded:', demo === 'hls' ? 'HLS Adaptive' : 'MP4 Progressive');
+          } catch (e) {
+            console.error('Failed to load:', e.message);
+          } finally {
+            loadBtn.disabled = false;
+            loadBtn.textContent = 'Load';
+          }
+        }
+      });
+    });
+
+    // Sub-menu buttons (audio demos)
+    document.querySelectorAll('#audio-submenu .sub-menu-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const demo = btn.dataset.demo;
+        if (!demo || demo === currentDemo) return;
+
+        // Pause audio players when switching between them
+        if (window.audioPlayer) window.audioPlayer.pause();
+        if (window.miniPlayer) window.miniPlayer.pause();
+
+        currentDemo = demo;
+
+        // Update active state
+        document.querySelectorAll('#audio-submenu .sub-menu-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Show appropriate audio player
+        document.getElementById('audio-section').style.display = 'none';
+        document.getElementById('mini-section').style.display = 'none';
+
+        if (demo === 'audio-full') {
+          document.getElementById('audio-section').style.display = 'flex';
+          window.activePlayer = 'audio';
+        } else if (demo === 'audio-mini') {
+          document.getElementById('mini-section').style.display = 'flex';
+          window.activePlayer = 'mini';
+        }
+      });
+    });
 
     // Override console.log to show in UI
     const consoleEl = document.getElementById('console');
@@ -521,33 +1071,101 @@
       if (e.key === 'Enter') loadUrl();
     });
 
-    // Demo selector functionality
-    const demoButtons = document.querySelectorAll('.demo-btn');
 
-    demoButtons.forEach(btn => {
+    // Audio player URL bar
+    const audioUrlInput = document.getElementById('audio-url-input');
+    const audioLoadBtn = document.getElementById('audio-load-btn');
+
+    async function loadAudioUrl() {
+      const url = audioUrlInput.value.trim();
+      if (!url || !window.audioPlayer) return;
+
+      audioLoadBtn.disabled = true;
+      audioLoadBtn.textContent = 'Loading...';
+
+      try {
+        await window.audioPlayer.load(url);
+        // Extract title from filename
+        const filename = url.split('/').pop()?.split('?')[0] || 'Audio';
+        const title = decodeURIComponent(filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+        console.log('Audio loaded:', title);
+      } catch (e) {
+        console.error('Failed to load audio:', e.message);
+      } finally {
+        audioLoadBtn.disabled = false;
+        audioLoadBtn.textContent = 'Load';
+      }
+    }
+
+    audioLoadBtn?.addEventListener('click', loadAudioUrl);
+    audioUrlInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadAudioUrl();
+    });
+
+    // Mini player URL bar
+    const miniUrlInput = document.getElementById('mini-url-input');
+    const miniLoadBtn = document.getElementById('mini-load-btn');
+
+    async function loadMiniUrl() {
+      const url = miniUrlInput.value.trim();
+      if (!url || !window.miniPlayer) return;
+
+      miniLoadBtn.disabled = true;
+      miniLoadBtn.textContent = 'Loading...';
+
+      try {
+        await window.miniPlayer.load(url);
+        // Extract title from filename
+        const filename = url.split('/').pop()?.split('?')[0] || 'Audio';
+        const title = decodeURIComponent(filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+        console.log('Mini player loaded:', title);
+      } catch (e) {
+        console.error('Failed to load in mini player:', e.message);
+      } finally {
+        miniLoadBtn.disabled = false;
+        miniLoadBtn.textContent = 'Load';
+      }
+    }
+
+    miniLoadBtn?.addEventListener('click', loadMiniUrl);
+    miniUrlInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadMiniUrl();
+    });
+
+    // Code toggle functionality
+    document.querySelectorAll('.code-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const codeExample = document.getElementById(targetId);
+        if (!codeExample) return;
+
+        const isVisible = codeExample.classList.contains('visible');
+        codeExample.classList.toggle('visible');
+        btn.classList.toggle('active');
+        btn.innerHTML = isVisible
+          ? '<svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg> Show Code'
+          : '<svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg> Hide Code';
+      });
+    });
+
+    // Copy button functionality
+    document.querySelectorAll('.code-copy-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const url = btn.dataset.url;
-        if (!url) return;
+        const codeId = btn.dataset.code;
+        const codeEl = document.querySelector(`#${codeId} .code-content pre`);
+        if (!codeEl) return;
 
-        // Update active state
-        demoButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        // Update URL input
-        urlInput.value = url;
-
-        // Load the video
-        loadBtn.disabled = true;
-        loadBtn.textContent = 'Loading...';
-
+        const text = codeEl.textContent || '';
         try {
-          await window.player.load(url);
-          console.log('Loaded:', url);
+          await navigator.clipboard.writeText(text);
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 2000);
         } catch (e) {
-          console.error('Failed to load:', e.message);
-        } finally {
-          loadBtn.disabled = false;
-          loadBtn.textContent = 'Load';
+          console.error('Failed to copy:', e);
         }
       });
     });
