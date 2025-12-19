@@ -1,8 +1,8 @@
 ---
-"@scarlett-player/media-session": minor
-"@scarlett-player/audio-ui": minor
-"@scarlett-player/playlist": minor
-"@scarlett-player/native": minor
+"@scarlett-player/media-session": patch
+"@scarlett-player/audio-ui": patch
+"@scarlett-player/playlist": patch
+"@scarlett-player/native": patch
 ---
 
 Minor updates and QOL Fixes
