@@ -226,7 +226,9 @@ function createStyles(prefix: string, theme: AudioUITheme): string {
       height: 100%;
       background: ${theme.progressFill};
       border-radius: 3px;
-      transition: width 0.1s linear;
+      width: 100%;
+      transform-origin: left center;
+      will-change: transform;
     }
 
     .${prefix}__progress-buffered {
@@ -370,6 +372,12 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
   let layout: AudioUILayout = mergedConfig.layout!;
   let isVisible = true;
 
+  // Smooth progress animation state
+  let animationFrameId: number | null = null;
+  let lastKnownTime = 0;
+  let lastUpdateTimestamp = 0;
+  let isPlaying = false;
+
   // UI Elements
   let artworkImg: HTMLImageElement | null = null;
   let titleEl: HTMLElement | null = null;
@@ -382,6 +390,54 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
   let repeatBtn: HTMLButtonElement | null = null;
   let volumeBtn: HTMLButtonElement | null = null;
   let volumeFill: HTMLElement | null = null;
+
+  /**
+   * Start smooth progress animation using requestAnimationFrame
+   */
+  const startProgressAnimation = (): void => {
+    if (animationFrameId !== null) return;
+
+    const animate = (timestamp: number): void => {
+      if (!api || !isPlaying) {
+        animationFrameId = null;
+        return;
+      }
+
+      const duration = api.getState('duration') || 0;
+      if (duration <= 0) {
+        animationFrameId = requestAnimationFrame(animate);
+        return;
+      }
+
+      // Calculate interpolated time based on elapsed time since last update
+      const elapsed = (timestamp - lastUpdateTimestamp) / 1000;
+      const interpolatedTime = Math.min(lastKnownTime + elapsed, duration);
+      const scale = interpolatedTime / duration;
+
+      if (progressFill) {
+        progressFill.style.transform = `scaleX(${scale})`;
+      }
+
+      if (currentTimeEl) {
+        currentTimeEl.textContent = formatTime(interpolatedTime);
+      }
+
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    lastUpdateTimestamp = performance.now();
+    animationFrameId = requestAnimationFrame(animate);
+  };
+
+  /**
+   * Stop smooth progress animation
+   */
+  const stopProgressAnimation = (): void => {
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+  };
 
   /**
    * Create the UI elements
@@ -445,7 +501,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       <div class="${prefix}__progress">
         ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current">0:00</span>` : ''}
         <div class="${prefix}__progress-bar">
-          <div class="${prefix}__progress-fill" style="width: 0%"></div>
+          <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
         </div>
         ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration">0:00</span>` : ''}
       </div>
@@ -484,7 +540,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ''}
         <div class="${prefix}__progress">
           <div class="${prefix}__progress-bar">
-            <div class="${prefix}__progress-fill" style="width: 0%"></div>
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
@@ -511,7 +567,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         ${mergedConfig.showTitle ? `<div class="${prefix}__title-wrapper"><div class="${prefix}__title">-</div></div>` : ''}
         <div class="${prefix}__progress">
           <div class="${prefix}__progress-bar">
-            <div class="${prefix}__progress-fill" style="width: 0%"></div>
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
@@ -595,24 +651,40 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
   const updateUI = (): void => {
     if (!api || !container) return;
 
-    // Update play/pause button
+    // Update play/pause button and animation state
     const playing = api.getState('playing');
+    const wasPlaying = isPlaying;
+    isPlaying = playing;
+
     if (playPauseBtn) {
       playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
       playPauseBtn.title = playing ? 'Pause' : 'Play';
     }
 
-    // Update progress
+    // Update progress animation state
     const currentTime = api.getState('currentTime') || 0;
     const duration = api.getState('duration') || 0;
-    const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-    if (progressFill) {
-      progressFill.style.width = `${percent}%`;
+    // Always update last known time for animation interpolation
+    lastKnownTime = currentTime;
+    lastUpdateTimestamp = performance.now();
+
+    // Start/stop animation based on play state
+    if (playing && !wasPlaying) {
+      startProgressAnimation();
+    } else if (!playing && wasPlaying) {
+      stopProgressAnimation();
     }
 
-    if (currentTimeEl) {
-      currentTimeEl.textContent = formatTime(currentTime);
+    // Only update progress directly when not playing (animation handles it when playing)
+    if (!playing) {
+      const scale = duration > 0 ? currentTime / duration : 0;
+      if (progressFill) {
+        progressFill.style.transform = `scaleX(${scale})`;
+      }
+      if (currentTimeEl) {
+        currentTimeEl.textContent = formatTime(currentTime);
+      }
     }
 
     if (durationEl) {
@@ -737,6 +809,9 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
     async destroy(): Promise<void> {
       api?.logger.info('Audio UI plugin destroying');
 
+      // Stop animation
+      stopProgressAnimation();
+
       if (container?.parentNode) {
         container.parentNode.removeChild(container);
       }
@@ -756,6 +831,9 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
 
     setLayout(newLayout: AudioUILayout): void {
       if (!container) return;
+
+      // Stop animation before rebuilding UI
+      stopProgressAnimation();
 
       layout = newLayout;
       container.className = `${prefix} ${prefix}--${layout}`;
@@ -784,6 +862,11 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
 
       attachEventListeners();
       updateUI();
+
+      // Restart animation if playing
+      if (isPlaying) {
+        startProgressAnimation();
+      }
     },
 
     setTheme(newTheme: Partial<AudioUITheme>): void {
