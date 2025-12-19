@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/playlist",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Playlist Plugin for Scarlett Player - Queue management, shuffle, repeat, and gapless playback",
   "type": "module",
   "main": "dist/index.cjs",

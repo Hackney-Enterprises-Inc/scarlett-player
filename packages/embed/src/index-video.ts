@@ -1,23 +1,18 @@
 /**
- * Scarlett Player - Full Embed Build
+ * Scarlett Player - Video Only Build
  *
- * Complete player with all features:
+ * Lightweight video player with:
  * - Video UI (full video player controls)
- * - Audio UI (full + mini audio player)
  * - HLS streaming
- * - Analytics
- * - Playlist management
- * - Media Session (lock screen controls)
+ *
+ * Does NOT include: Audio UI, Analytics, Playlist, Media Session
+ * Use embed.js for full features or embed.audio.js for audio.
  *
  * @packageDocumentation
  */
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { uiPlugin } from '@scarlett-player/ui';
-import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
-import { createAnalyticsPlugin } from '@scarlett-player/analytics';
-import { createPlaylistPlugin } from '@scarlett-player/playlist';
-import { createMediaSessionPlugin } from '@scarlett-player/media-session';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 
@@ -25,17 +20,17 @@ import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './c
 export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
 export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.0-video';
 
-const AVAILABLE_TYPES: PlayerType[] = ['video', 'audio', 'audio-mini'];
+const AVAILABLE_TYPES: PlayerType[] = ['video'];
 
 const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
   videoUI: uiPlugin,
-  audioUI: createAudioUIPlugin,
-  analytics: createAnalyticsPlugin,
-  playlist: createPlaylistPlugin,
-  mediaSession: createMediaSessionPlugin,
+  // Audio UI not available in this build
+  // Analytics not available in this build
+  // Playlist not available in this build
+  // Media Session not available in this build
 };
 
 // Create and expose global API

@@ -9,31 +9,22 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 - **Data Attributes** - Configure players via HTML attributes
 - **Global API** - Programmatic control via `window.ScarlettPlayer`
 - **Multi-tenant Ready** - Brand customization via data attributes
+- **Unified API** - Single API for video, audio, and compact audio players
 - **iframe Support** - Helper page for URL-based iframe embeds
 
 ## Installation
 
 ### CDN Usage (Recommended for Embeds)
 
-**Video Player:**
 ```html
-<!-- Standard video player -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.js"></script>
+<!-- Full build (video + audio + all plugins) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Light build (~30% smaller, no subtitles/DRM/ID3) -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.light.js"></script>
+<!-- Video-only build (lightweight) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.video.umd.cjs"></script>
 
-<!-- Full build (includes analytics, playlist, media-session) -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.full.js"></script>
-```
-
-**Audio Player:**
-```html
-<!-- Audio player (compact UI, lock screen controls, playlists) -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.js"></script>
-
-<!-- Light audio (~30% smaller) -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.light.js"></script>
+<!-- Audio-only build (audio + playlist + media-session) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
 ```
 
 ### NPM Installation
@@ -54,16 +45,34 @@ The simplest way to embed a player. Just add the script and use data attributes:
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.js"></script>
+  <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 </head>
 <body>
-  <!-- Basic player -->
+  <!-- Video player (default) -->
   <div
     data-scarlett-player
     data-src="https://example.com/stream.m3u8"
   ></div>
 
-  <!-- Customized player -->
+  <!-- Audio player -->
+  <div
+    data-scarlett-player
+    data-src="https://example.com/podcast.m3u8"
+    data-type="audio"
+    data-title="Episode 1: Introduction"
+    data-artist="My Podcast"
+  ></div>
+
+  <!-- Compact audio player -->
+  <div
+    data-scarlett-player
+    data-src="https://example.com/music.m3u8"
+    data-type="audio-mini"
+    data-title="Song Title"
+    data-artist="Artist Name"
+  ></div>
+
+  <!-- Customized video player -->
   <div
     data-scarlett-player
     data-src="https://example.com/stream.m3u8"
@@ -81,10 +90,11 @@ The simplest way to embed a player. Just add the script and use data attributes:
 
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data-src` | string | **required** | Video source URL (HLS .m3u8) |
+| `data-src` | string | **required** | Media source URL (HLS .m3u8) |
+| `data-type` | string | `video` | Player type: `video`, `audio`, or `audio-mini` |
 | `data-autoplay` | boolean | `false` | Auto-play on load |
 | `data-muted` | boolean | `false` | Start muted |
-| `data-poster` | string | - | Poster image URL |
+| `data-poster` | string | - | Poster/artwork image URL |
 | `data-controls` | boolean | `true` | Show/hide UI controls |
 | `data-brand-color` | string | - | Accent color (e.g., `#e50914`) |
 | `data-primary-color` | string | - | Primary UI color |
@@ -99,18 +109,27 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-start-time` | number | `0` | Start position (seconds) |
 | `data-class` | string | - | Custom CSS class(es) |
 
+#### Audio-specific Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `data-title` | string | Track/episode title |
+| `data-artist` | string | Artist/creator name |
+| `data-album` | string | Album name |
+| `data-artwork` | string | Album art / cover image URL |
+
 ### 2. Programmatic API
 
 For dynamic player creation:
 
 ```html
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.js"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
 <div id="my-player"></div>
 
 <script>
-  // Create player programmatically
-  const player = ScarlettPlayer.create({
+  // Create video player
+  const videoPlayer = await ScarlettPlayer.create({
     container: '#my-player',
     src: 'https://example.com/stream.m3u8',
     autoplay: true,
@@ -119,14 +138,39 @@ For dynamic player creation:
     aspectRatio: '16:9',
   });
 
-  // Access player methods
-  player.play();
-  player.pause();
-  player.setVolume(0.5);
+  // Create audio player
+  const audioPlayer = await ScarlettPlayer.create({
+    container: '#audio-player',
+    src: 'https://example.com/podcast.m3u8',
+    type: 'audio',
+    title: 'Episode Title',
+    artist: 'Podcast Name',
+    artwork: 'https://example.com/artwork.jpg',
+  });
+
+  // Create compact audio player
+  const miniPlayer = await ScarlettPlayer.create({
+    container: '#mini-player',
+    src: 'https://example.com/music.m3u8',
+    type: 'audio-mini',
+    title: 'Song Title',
+    artist: 'Artist Name',
+  });
+
+  // With playlist
+  const playlistPlayer = await ScarlettPlayer.create({
+    container: '#playlist-player',
+    src: 'track1.m3u8',
+    type: 'audio',
+    playlist: [
+      { src: 'track1.m3u8', title: 'Track 1', artist: 'Artist' },
+      { src: 'track2.m3u8', title: 'Track 2', artist: 'Artist' },
+    ],
+  });
 </script>
 ```
 
-#### Global API Methods
+#### Global API
 
 ```typescript
 // Initialize all players on page
@@ -137,6 +181,9 @@ ScarlettPlayer.create(options);
 
 // Check version
 console.log(ScarlettPlayer.version);
+
+// Check available player types in this build
+console.log(ScarlettPlayer.availableTypes); // ['video', 'audio', 'audio-mini']
 ```
 
 ### 3. iframe Embed
@@ -154,6 +201,15 @@ For secure, sandboxed embeds:
   allow="autoplay; fullscreen; picture-in-picture"
 ></iframe>
 
+<!-- Audio player iframe -->
+<iframe
+  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/audio.m3u8&type=audio"
+  width="100%"
+  height="120"
+  frameborder="0"
+  allow="autoplay"
+></iframe>
+
 <!-- With customization -->
 <iframe
   src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/stream.m3u8&autoplay=true&muted=true&brand-color=%23e50914"
@@ -169,67 +225,36 @@ For secure, sandboxed embeds:
 
 All data attributes work as URL parameters (use kebab-case):
 - `src` (required)
+- `type` - `video`, `audio`, or `audio-mini`
 - `autoplay`, `muted`, `loop`
 - `poster`
 - `brand-color`, `primary-color`, `background-color`
 
-### 4. Audio Player
+## Player Types
 
-For audio streaming (podcasts, music, live audio):
+### Video Player (default)
+
+Standard video player with full controls, fullscreen, picture-in-picture support.
 
 ```html
-<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.js"></script>
-
-<!-- Basic audio player -->
-<div
-  data-scarlett-audio
-  data-src="https://example.com/podcast.m3u8"
-  data-title="Episode 1: Introduction"
-  data-artist="My Podcast"
-></div>
-
-<!-- Compact audio player -->
-<div
-  data-scarlett-audio
-  data-src="https://example.com/music.m3u8"
-  data-compact
-  data-title="Song Title"
-  data-artist="Artist Name"
-  data-artwork="https://example.com/album-art.jpg"
-></div>
+<div data-scarlett-player data-src="video.m3u8"></div>
 ```
 
-#### Audio Programmatic API
+### Audio Player
 
-```javascript
-// Audio uses ScarlettAudio global
-const player = await ScarlettAudio.create({
-  container: '#audio-player',
-  src: 'https://example.com/stream.m3u8',
-  title: 'Track Title',
-  artist: 'Artist Name',
-  artwork: 'https://example.com/artwork.jpg',
-  compact: true,
-  // Playlist support
-  playlist: [
-    { src: 'track1.m3u8', title: 'Track 1', artist: 'Artist' },
-    { src: 'track2.m3u8', title: 'Track 2', artist: 'Artist' },
-  ],
-});
+Full-sized audio player with waveform, track info, and media session integration.
+
+```html
+<div data-scarlett-player data-src="audio.m3u8" data-type="audio"></div>
 ```
 
-#### Audio Data Attributes
+### Compact Audio Player
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `data-src` | string | Audio source URL (HLS .m3u8) |
-| `data-title` | string | Track/episode title |
-| `data-artist` | string | Artist/creator name |
-| `data-album` | string | Album name |
-| `data-artwork` | string | Album art / cover image URL |
-| `data-compact` | boolean | Use compact layout |
-| `data-brand-color` | string | Accent color |
-| `data-playlist` | JSON | Playlist as JSON array |
+Minimal audio player for space-constrained layouts (64px height).
+
+```html
+<div data-scarlett-player data-src="audio.m3u8" data-type="audio-mini"></div>
+```
 
 ## Multi-Tenant Branding
 
@@ -255,22 +280,21 @@ Perfect for The Stream Platform's white-label needs:
 
 ## CDN Builds
 
-All builds are gzipped and available at `https://assets.thestreamplatform.com/scarlett-player/latest/`
+All builds are available at `https://assets.thestreamplatform.com/scarlett-player/latest/`
 
-**Video Players:**
-| Build | Size (gzip) | Features |
-|-------|-------------|----------|
-| `embed.js` | ~177KB | Standard: core + HLS + UI |
-| `embed.light.js` | ~124KB | Light: HLS light (no subtitles/DRM/ID3) |
-| `embed.full.js` | ~183KB | Full: + analytics, playlist, media-session |
+| Build | Files | Features |
+|-------|-------|----------|
+| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session |
+| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight) |
+| **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session |
 
-**Audio Players:**
-| Build | Size (gzip) | Features |
-|-------|-------------|----------|
-| `embed.audio.js` | ~175KB | Audio: core + HLS + audio-ui + media-session + playlist |
-| `embed.audio.light.js` | ~122KB | Light Audio: with HLS light |
+**Which build should I use?**
 
-Use light variants for most streaming use cases to reduce load time by ~30%.
+- Use **Full** (`embed.umd.cjs`) if you need both video and audio, or want analytics
+- Use **Video** (`embed.video.umd.cjs`) for video-only sites to reduce bundle size
+- Use **Audio** (`embed.audio.umd.cjs`) for audio-only sites (podcasts, music streaming)
+
+**Note:** Using a build without support for a player type will throw an error. For example, using the Video build and setting `data-type="audio"` will fail with a helpful error message.
 
 ## Development
 
@@ -284,6 +308,9 @@ pnpm build
 # Run in dev mode
 pnpm dev
 
+# Run tests
+pnpm test
+
 # Type checking
 pnpm typecheck
 
@@ -296,16 +323,15 @@ pnpm clean
 Full TypeScript support when using as a module:
 
 ```typescript
-import { create, type EmbedPlayerOptions } from '@scarlett-player/embed';
+import type { EmbedPlayerOptions, PlayerType } from '@scarlett-player/embed';
 
 const options: EmbedPlayerOptions = {
   container: '#player',
   src: 'https://example.com/stream.m3u8',
+  type: 'video' as PlayerType,
   autoplay: true,
   brandColor: '#e50914',
 };
-
-const player = create(options);
 ```
 
 ## Browser Support
@@ -329,7 +355,7 @@ When `data-keyboard` is enabled (default):
 
 ## Examples
 
-### Responsive Player
+### Responsive Video Player
 
 ```html
 <div
@@ -364,15 +390,29 @@ When `data-keyboard` is enabled (default):
 ></div>
 ```
 
-### Controls Hidden (Audio-only)
+### Podcast Player
 
 ```html
 <div
   data-scarlett-player
-  data-src="https://example.com/audio.m3u8"
-  data-controls="false"
-  data-autoplay
-  data-height="50px"
+  data-src="https://example.com/podcast.m3u8"
+  data-type="audio"
+  data-title="Episode 42: Deep Dive"
+  data-artist="Tech Podcast"
+  data-artwork="https://example.com/podcast-cover.jpg"
+></div>
+```
+
+### Music Player (Compact)
+
+```html
+<div
+  data-scarlett-player
+  data-src="https://example.com/track.m3u8"
+  data-type="audio-mini"
+  data-title="Great Song"
+  data-artist="Awesome Artist"
+  data-brand-color="#1DB954"
 ></div>
 ```
 

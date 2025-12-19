@@ -1,14 +1,21 @@
 /**
+ * Player type determines which UI to use
+ */
+export type PlayerType = 'video' | 'audio' | 'audio-mini';
+
+/**
  * Configuration options that can be set via data attributes
  */
 export interface EmbedConfig {
-  /** Video source URL (required) */
+  /** Video/audio source URL (required) */
   src: string;
-  /** Autoplay the video */
+  /** Player type: 'video' (default), 'audio', or 'audio-mini' */
+  type?: PlayerType;
+  /** Autoplay the media */
   autoplay?: boolean;
-  /** Mute the video */
+  /** Mute the media */
   muted?: boolean;
-  /** Poster image URL */
+  /** Poster/artwork image URL */
   poster?: string;
   /** Show/hide UI controls */
   controls?: boolean;
@@ -24,11 +31,11 @@ export interface EmbedConfig {
   width?: string;
   /** Player height (CSS value) */
   height?: string;
-  /** Aspect ratio (e.g., "16:9", "4:3") */
+  /** Aspect ratio (e.g., "16:9", "4:3") - video only */
   aspectRatio?: string;
   /** Enable/disable keyboard shortcuts */
   keyboard?: boolean;
-  /** Loop the video */
+  /** Loop the media */
   loop?: boolean;
   /** Playback rate (speed) */
   playbackRate?: number;
@@ -36,6 +43,39 @@ export interface EmbedConfig {
   startTime?: number;
   /** Custom class name for the container */
   className?: string;
+  /** Media title (for audio/media session) */
+  title?: string;
+  /** Artist name (for audio/media session) */
+  artist?: string;
+  /** Album name (for audio/media session) */
+  album?: string;
+  /** Artwork URL (alias for poster, for audio) */
+  artwork?: string;
+  /** Playlist items */
+  playlist?: PlaylistItem[];
+  /** Analytics configuration */
+  analytics?: AnalyticsConfig;
+}
+
+/**
+ * Playlist item configuration
+ */
+export interface PlaylistItem {
+  src: string;
+  title?: string;
+  artist?: string;
+  poster?: string;
+  artwork?: string;
+  duration?: number;
+}
+
+/**
+ * Analytics configuration
+ */
+export interface AnalyticsConfig {
+  beaconUrl?: string;
+  apiKey?: string;
+  videoId?: string;
 }
 
 /**
@@ -51,11 +91,13 @@ export interface EmbedPlayerOptions extends Partial<EmbedConfig> {
  */
 export interface ScarlettPlayerGlobal {
   /** Create a new player instance programmatically */
-  create(options: EmbedPlayerOptions): any;
+  create(options: EmbedPlayerOptions): Promise<any>;
   /** Initialize all players with data-scarlett-player attribute */
-  initAll(): void;
+  initAll(): Promise<void>;
   /** Version of the embed package */
   version: string;
+  /** Available player types in this build */
+  availableTypes: PlayerType[];
 }
 
 declare global {

@@ -1,37 +1,32 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
-// Determine which variant to build based on environment variables
-const isLight = process.env.BUILD_LIGHT === 'true';
-const isFull = process.env.BUILD_FULL === 'true';
+/**
+ * Build variants:
+ * - Default: Full build with all features (embed.js)
+ * - BUILD_VIDEO=true: Video-only build (embed.video.js)
+ * - BUILD_AUDIO=true: Audio-only build (embed.audio.js)
+ *
+ * All builds expose window.ScarlettPlayer
+ */
+
+const isVideo = process.env.BUILD_VIDEO === 'true';
 const isAudio = process.env.BUILD_AUDIO === 'true';
-const isAudioLight = process.env.BUILD_AUDIO_LIGHT === 'true';
 
 // Determine entry point and output name
 let entry: string;
 let baseName: string;
-let globalName: string;
 
-if (isAudioLight) {
-  entry = resolve(__dirname, 'src/index-audio-light.ts');
-  baseName = 'embed.audio.light';
-  globalName = 'ScarlettAudio';
+if (isVideo) {
+  entry = resolve(__dirname, 'src/index-video.ts');
+  baseName = 'embed.video';
 } else if (isAudio) {
   entry = resolve(__dirname, 'src/index-audio.ts');
   baseName = 'embed.audio';
-  globalName = 'ScarlettAudio';
-} else if (isFull) {
-  entry = resolve(__dirname, 'src/index-full.ts');
-  baseName = 'embed.full';
-  globalName = 'ScarlettPlayer';
-} else if (isLight) {
-  entry = resolve(__dirname, 'src/index-light.ts');
-  baseName = 'embed.light';
-  globalName = 'ScarlettPlayer';
 } else {
+  // Default: full build
   entry = resolve(__dirname, 'src/index.ts');
   baseName = 'embed';
-  globalName = 'ScarlettPlayer';
 }
 
 const fileName = (format: string) => {
@@ -41,14 +36,14 @@ const fileName = (format: string) => {
   return `${baseName}.js`;
 };
 
-// Only empty outDir on first build (default/standard)
-const shouldEmptyOutDir = !isLight && !isFull && !isAudio && !isAudioLight;
+// Only empty outDir on first build (default/full)
+const shouldEmptyOutDir = !isVideo && !isAudio;
 
 export default defineConfig({
   build: {
     lib: {
       entry,
-      name: globalName,
+      name: 'ScarlettPlayer', // All builds use same global name
       formats: ['es', 'umd'],
       fileName,
     },
