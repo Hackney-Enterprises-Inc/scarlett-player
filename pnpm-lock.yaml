@@ -26,6 +26,9 @@ importers:
       '@vitejs/plugin-vue':
         specifier: ^4.5.0
         version: 4.6.2(vite@5.4.21(@types/node@20.19.27)(terser@5.44.1))(vue@3.5.26(typescript@5.9.3))
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
       eslint:
         specifier: ^8.56.0
         version: 8.57.1
@@ -168,10 +171,22 @@ importers:
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/audio-ui:
-    dependencies:
+    devDependencies:
       '@scarlett-player/core':
-        specifier: ^0.1.0
-        version: 0.1.1
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/chromecast:
     devDependencies:
@@ -219,10 +234,22 @@ importers:
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/media-session:
-    dependencies:
+    devDependencies:
       '@scarlett-player/core':
-        specifier: ^0.1.0
-        version: 0.1.1
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/native:
     devDependencies:
@@ -240,10 +267,22 @@ importers:
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/playlist:
-    dependencies:
+    devDependencies:
       '@scarlett-player/core':
-        specifier: ^0.1.0
-        version: 0.1.1
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/plugins/ui:
     devDependencies:
@@ -264,11 +303,10 @@ importers:
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
   packages/vue:
-    dependencies:
-      '@scarlett-player/core':
-        specifier: ^0.1.0
-        version: 0.1.1
     devDependencies:
+      '@scarlett-player/core':
+        specifier: workspace:*
+        version: link:../core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.27
@@ -912,9 +950,6 @@ packages:
     resolution: {integrity: sha512-JRpZUhCfhZ4keB5v0fe02gQJy05GqboPOaxvjugW04RLSYYoB/9t2lx2u/tMs/Na/1NXfY8QYjgRljRpN+MjTQ==}
     cpu: [x64]
     os: [win32]
-
-  '@scarlett-player/core@0.1.1':
-    resolution: {integrity: sha512-57Z7sIA4w7XGloQG1aKpAR2RXLY6JgJ4uerUppm7C6t/agxZTrtjAEHtgmj27bV72aCXPKXQQEcDwimFU03aJQ==}
 
   '@sinclair/typebox@0.27.8':
     resolution: {integrity: sha512-+Fj43pSMwJs4KRrH/938Uf+uAELIgVBmQzg/q1YG10djyfA3TnrU8N8XzqCh/okZdszqBQTZf96idMfE5lnwTA==}
@@ -2971,10 +3006,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.53.5':
     optional: true
-
-  '@scarlett-player/core@0.1.1':
-    dependencies:
-      hls.js: 1.6.15
 
   '@sinclair/typebox@0.27.8': {}
 

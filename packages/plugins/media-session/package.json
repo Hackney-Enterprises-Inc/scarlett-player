@@ -1,23 +1,42 @@
 {
   "name": "@scarlett-player/media-session",
-  "version": "0.1.2",
-  "description": "Media Session Plugin for Scarlett Player - Lock screen and hardware media controls",
+  "version": "0.2.0",
+  "description": "Media Session Plugin for Scarlett Player - Lock screen controls, media keys, and system media UI integration",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "files": [
     "dist"
   ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.1.0"
+    "@scarlett-player/core": "^0.2.0"
+  },
+  "devDependencies": {
+    "@scarlett-player/core": "workspace:*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0",
+    "jsdom": "^24.0.0"
   },
   "keywords": [
     "video",
@@ -26,6 +45,7 @@
     "media-session",
     "lock-screen",
     "media-keys",
+    "notifications",
     "scarlett"
   ],
   "author": "The Stream Platform",
@@ -34,5 +54,9 @@
     "type": "git",
     "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
     "directory": "packages/plugins/media-session"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
+  },
+  "homepage": "https://scarlettplayer.com"
 }
