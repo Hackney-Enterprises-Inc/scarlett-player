@@ -140,6 +140,9 @@ All packages are versioned together (fixed versioning). When any package changes
 - `@scarlett-player/native`
 - `@scarlett-player/airplay`
 - `@scarlett-player/chromecast`
+- `@scarlett-player/playlist`
+- `@scarlett-player/media-session`
+- `@scarlett-player/audio-ui`
 
 ## Changeset Types
 
