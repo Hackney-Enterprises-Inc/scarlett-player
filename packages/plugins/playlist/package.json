@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/playlist",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Playlist Plugin for Scarlett Player - Queue management, shuffle, repeat, and gapless playback",
   "type": "module",
   "main": "dist/index.cjs",
@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^1.0.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
