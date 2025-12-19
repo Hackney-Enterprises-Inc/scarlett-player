@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/audio-ui",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "Audio UI Plugin for Scarlett Player - Compact audio player interface with album art and waveform progress",
   "type": "module",
   "main": "dist/index.cjs",
@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^1.0.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",

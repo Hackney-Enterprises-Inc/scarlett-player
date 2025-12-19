@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/media-session",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "Media Session Plugin for Scarlett Player - Lock screen controls, media keys, and system media UI integration",
   "type": "module",
   "main": "dist/index.cjs",
@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^1.0.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
