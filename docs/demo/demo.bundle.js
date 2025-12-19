@@ -3978,11 +3978,13 @@ ${newDetails.m3u8}`);
             logEncryptedSamplesFoundInUnencryptedStream("ADTS AAC", logger2);
             break;
           }
+        /* falls through */
         case 15:
           if (result.audioPid === -1) {
             result.audioPid = pid;
           }
           break;
+        // Packetized metadata (ID3)
         case 21:
           if (result.id3Pid === -1) {
             result.id3Pid = pid;
@@ -3993,11 +3995,14 @@ ${newDetails.m3u8}`);
             logEncryptedSamplesFoundInUnencryptedStream("H.264", logger2);
             break;
           }
+        /* falls through */
         case 27:
           if (result.videoPid === -1) {
             result.videoPid = pid;
           }
           break;
+        // ISO/IEC 11172-3 (MPEG-1 audio)
+        // or ISO/IEC 13818-3 (MPEG-2 halved sample rate audio)
         case 3:
         case 4:
           if (!typeSupported.mpeg && !typeSupported.mp3) {
@@ -4012,6 +4017,7 @@ ${newDetails.m3u8}`);
             logEncryptedSamplesFoundInUnencryptedStream("AC-3", logger2);
             break;
           }
+        /* falls through */
         case 129:
           {
             if (!typeSupported.ac3) {
@@ -4047,6 +4053,8 @@ ${newDetails.m3u8}`);
           }
           break;
         case 194:
+        // SAMPLE-AES EC3
+        /* falls through */
         case 135:
           emitParsingError(observer, new Error("Unsupported EC-3 in M2TS found"), void 0, logger2);
           return result;
@@ -5606,15 +5614,15 @@ ${newDetails.m3u8}`);
         return typeof value === "number" && Math.abs(value) <= MAX_SAFE_INTEGER;
       };
       MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER || 9007199254740991;
-      ErrorTypes = /* @__PURE__ */ function(ErrorTypes2) {
+      ErrorTypes = /* @__PURE__ */ (function(ErrorTypes2) {
         ErrorTypes2["NETWORK_ERROR"] = "networkError";
         ErrorTypes2["MEDIA_ERROR"] = "mediaError";
         ErrorTypes2["KEY_SYSTEM_ERROR"] = "keySystemError";
         ErrorTypes2["MUX_ERROR"] = "muxError";
         ErrorTypes2["OTHER_ERROR"] = "otherError";
         return ErrorTypes2;
-      }({});
-      ErrorDetails = /* @__PURE__ */ function(ErrorDetails2) {
+      })({});
+      ErrorDetails = /* @__PURE__ */ (function(ErrorDetails2) {
         ErrorDetails2["KEY_SYSTEM_NO_KEYS"] = "keySystemNoKeys";
         ErrorDetails2["KEY_SYSTEM_NO_ACCESS"] = "keySystemNoAccess";
         ErrorDetails2["KEY_SYSTEM_NO_SESSION"] = "keySystemNoSession";
@@ -5666,8 +5674,8 @@ ${newDetails.m3u8}`);
         ErrorDetails2["ATTACH_MEDIA_ERROR"] = "attachMediaError";
         ErrorDetails2["UNKNOWN"] = "unknown";
         return ErrorDetails2;
-      }({});
-      Events = /* @__PURE__ */ function(Events2) {
+      })({});
+      Events = /* @__PURE__ */ (function(Events2) {
         Events2["MEDIA_ATTACHING"] = "hlsMediaAttaching";
         Events2["MEDIA_ATTACHED"] = "hlsMediaAttached";
         Events2["MEDIA_DETACHING"] = "hlsMediaDetaching";
@@ -5743,7 +5751,7 @@ ${newDetails.m3u8}`);
         Events2["PLAYOUT_LIMIT_REACHED"] = "hlsPlayoutLimitReached";
         Events2["EVENT_CUE_ENTER"] = "hlsEventCueEnter";
         return Events2;
-      }({});
+      })({});
       PlaylistContextType = {
         MANIFEST: "manifest",
         LEVEL: "level",
@@ -7286,6 +7294,7 @@ ${newDetails.m3u8}`);
                 data.errorAction = createDoNothingErrorAction();
                 return;
               }
+            // falls through
             case ErrorDetails.FRAG_GAP:
             case ErrorDetails.FRAG_DECRYPT_ERROR: {
               data.errorAction = this.getFragRetryOrSwitchAction(data);
@@ -7543,6 +7552,7 @@ ${newDetails.m3u8}`);
                 break;
               }
             }
+            // eslint-disable-next-line no-fallthrough
             case ErrorActionFlags.MoveAllAlternatesMatchingKey: {
               const levelKey = data.decryptdata;
               if (levelKey) {
@@ -8999,6 +9009,7 @@ ${newDetails.m3u8}`);
                   if (value === "NONE") {
                     break;
                   }
+                // falls through
                 case "ALLOWED-CPC":
                 case "CLASS":
                 case "ASSOC-LANGUAGE":
@@ -9324,13 +9335,13 @@ ${newDetails.m3u8}`);
         PLAYREADY: "com.microsoft.playready",
         WIDEVINE: "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
       };
-      requestMediaKeySystemAccess = function(_optionalSelf$navigat) {
+      requestMediaKeySystemAccess = (function(_optionalSelf$navigat) {
         if (optionalSelf != null && (_optionalSelf$navigat = optionalSelf.navigator) != null && _optionalSelf$navigat.requestMediaKeySystemAccess) {
           return self.navigator.requestMediaKeySystemAccess.bind(self.navigator);
         } else {
           return null;
         }
-      }();
+      })();
       keyUriToKeyIdMap = {};
       LevelKey = class _LevelKey {
         static clearKeyUriToKeyIdMap() {
@@ -11526,13 +11537,13 @@ ${newDetails.m3u8}`);
       workerStore = {};
       HEADER_FOOTER_SIZE = 10;
       FRAME_SIZE = 10;
-      MetadataSchema = /* @__PURE__ */ function(MetadataSchema2) {
+      MetadataSchema = /* @__PURE__ */ (function(MetadataSchema2) {
         MetadataSchema2["audioId3"] = "org.id3";
         MetadataSchema2["dateRange"] = "com.apple.quicktime.HLS";
         MetadataSchema2["emsg"] = "https://aomedia.org/emsg/ID3";
         MetadataSchema2["misbklv"] = "urn:misb:KLV:bin:1910.1";
         return MetadataSchema2;
-      }({});
+      })({});
       BaseAudioDemuxer = class {
         constructor() {
           this._audioTrack = void 0;
@@ -12390,6 +12401,7 @@ ${newDetails.m3u8}`);
           units.forEach((unit) => {
             var _VideoSample2, _VideoSample3;
             switch (unit.type) {
+              // NDR
               case 1: {
                 let iskey = false;
                 push2 = true;
@@ -12426,6 +12438,7 @@ ${newDetails.m3u8}`);
                 VideoSample.key = true;
                 VideoSample.frame = true;
                 break;
+              // SEI
               case 6: {
                 push2 = true;
                 parseSEIMessageFromNALu(unit.data, 1, pes.pts, textTrack.samples);
@@ -12455,10 +12468,12 @@ ${newDetails.m3u8}`);
                 }
                 break;
               }
+              // PPS
               case 8:
                 push2 = true;
                 track.pps = [unit.data];
                 break;
+              // AUD
               case 9:
                 push2 = true;
                 track.audFound = true;
@@ -12470,6 +12485,7 @@ ${newDetails.m3u8}`);
                   VideoSample = this.VideoSample = this.createVideoSample(false, pes.pts, pes.dts);
                 }
                 break;
+              // Filler Data
               case 12:
                 push2 = true;
                 break;
@@ -12679,6 +12695,7 @@ ${newDetails.m3u8}`);
           units.forEach((unit) => {
             var _VideoSample2, _VideoSample3;
             switch (unit.type) {
+              // NON-IDR, NON RANDOM ACCESS SLICE
               case 0:
               case 1:
               case 2:
@@ -12695,6 +12712,7 @@ ${newDetails.m3u8}`);
                 VideoSample.frame = true;
                 push2 = true;
                 break;
+              // CRA, BLA (random access picture)
               case 16:
               case 17:
               case 18:
@@ -12713,6 +12731,7 @@ ${newDetails.m3u8}`);
                 VideoSample.key = true;
                 VideoSample.frame = true;
                 break;
+              // IDR
               case 19:
               case 20:
                 push2 = true;
@@ -12726,6 +12745,7 @@ ${newDetails.m3u8}`);
                 VideoSample.key = true;
                 VideoSample.frame = true;
                 break;
+              // SEI
               case 39:
                 push2 = true;
                 parseSEIMessageFromNALu(
@@ -12736,6 +12756,7 @@ ${newDetails.m3u8}`);
                   textTrack.samples
                 );
                 break;
+              // VPS
               case 32:
                 push2 = true;
                 if (!track.vps) {
@@ -12747,6 +12768,7 @@ ${newDetails.m3u8}`);
                 }
                 track.vps = [unit.data];
                 break;
+              // SPS
               case 33:
                 push2 = true;
                 spsfound = true;
@@ -12774,6 +12796,7 @@ ${newDetails.m3u8}`);
                 }
                 VideoSample.key = true;
                 break;
+              // PPS
               case 34:
                 push2 = true;
                 if (typeof track.params === "object") {
@@ -12787,6 +12810,7 @@ ${newDetails.m3u8}`);
                   this.pushParameterSet(track.pps, unit.data, track.vps);
                 }
                 break;
+              // ACCESS UNIT DELIMITER
               case 35:
                 push2 = true;
                 track.audFound = true;
@@ -13769,6 +13793,7 @@ ${newDetails.m3u8}`);
                 return new Uint8Array([0, 200, 0, 128, 32, 132, 1, 38, 64, 8, 100, 0, 130, 48, 4, 153, 0, 33, 144, 2, 0, 178, 0, 32, 8, 224]);
               }
               break;
+            // handle HE-AAC below (mp4a.40.5 / mp4a.40.29)
             default:
               if (channelCount === 1) {
                 return new Uint8Array([1, 64, 34, 128, 163, 78, 230, 128, 186, 8, 0, 0, 0, 28, 6, 241, 193, 10, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 94]);
@@ -16380,6 +16405,7 @@ ${newDetails.m3u8}`);
                 this.onFlush(data.data);
                 break;
               }
+              // pass logs from the worker thread to the main logger
               case "workerLog": {
                 if (hls.logger[data.data.logType]) {
                   hls.logger[data.data.logType](data.data.message);
@@ -22130,11 +22156,11 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
         }
       };
       ALIGNED_END_THRESHOLD_SECONDS = 0.025;
-      TimelineOccupancy = /* @__PURE__ */ function(TimelineOccupancy2) {
+      TimelineOccupancy = /* @__PURE__ */ (function(TimelineOccupancy2) {
         TimelineOccupancy2[TimelineOccupancy2["Point"] = 0] = "Point";
         TimelineOccupancy2[TimelineOccupancy2["Range"] = 1] = "Range";
         return TimelineOccupancy2;
-      }({});
+      })({});
       InterstitialEvent = class {
         constructor(dateRange, base) {
           this.base = void 0;
@@ -26600,7 +26626,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
       };
-      VTTCue = function() {
+      VTTCue = (function() {
         if (optionalSelf != null && optionalSelf.VTTCue) {
           return self.VTTCue;
         }
@@ -26817,7 +26843,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return WebVTT.convertCueToDOMTree(self, this.text);
         };
         return VTTCue2;
-      }();
+      })();
       StringDecoder = class {
         decode(data, options) {
           if (!data) {
@@ -26972,6 +26998,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                     _this.cue.id = line;
                     continue;
                   }
+                // Process line as start of a cue.
+                /* falls through */
                 case "CUE":
                   if (!_this.cue) {
                     _this.state = "BADCUE";
@@ -34502,7 +34530,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         autoplay: options.autoplay ?? false,
         loop: options.loop ?? false,
         volume: options.volume ?? 1,
-        muted: options.muted ?? false
+        muted: options.muted ?? false,
+        poster: options.poster ?? ""
       });
       this.logger = new Logger({
         level: options.logLevel ?? "warn",
@@ -34618,11 +34647,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.checkDestroyed();
       try {
         this.logger.debug("Play requested");
-        this.stateManager.update({
-          playing: true,
-          paused: false,
-          playbackState: "playing"
-        });
         this.eventBus.emit("playback:play", void 0);
       } catch (error) {
         this.errorHandler.handle(error, { operation: "play" });
@@ -34645,11 +34669,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           clearTimeout(this.seekResumeTimeout);
           this.seekResumeTimeout = null;
         }
-        this.stateManager.update({
-          playing: false,
-          paused: true,
-          playbackState: "paused"
-        });
         this.eventBus.emit("playback:pause", void 0);
       } catch (error) {
         this.errorHandler.handle(error, { operation: "pause" });
@@ -35482,6 +35501,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.preload = "metadata";
       video.controls = false;
       video.playsInline = true;
+      const poster = api?.getState("poster");
+      if (poster) {
+        video.poster = poster;
+      }
       api?.container.appendChild(video);
       return video;
     };
@@ -35890,16 +35913,42 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/core/dist/index.js
+  var ErrorCode2 = /* @__PURE__ */ ((ErrorCode22) => {
+    ErrorCode22["SOURCE_NOT_SUPPORTED"] = "SOURCE_NOT_SUPPORTED";
+    ErrorCode22["SOURCE_LOAD_FAILED"] = "SOURCE_LOAD_FAILED";
+    ErrorCode22["PROVIDER_NOT_FOUND"] = "PROVIDER_NOT_FOUND";
+    ErrorCode22["PROVIDER_SETUP_FAILED"] = "PROVIDER_SETUP_FAILED";
+    ErrorCode22["PLUGIN_SETUP_FAILED"] = "PLUGIN_SETUP_FAILED";
+    ErrorCode22["PLUGIN_NOT_FOUND"] = "PLUGIN_NOT_FOUND";
+    ErrorCode22["PLAYBACK_FAILED"] = "PLAYBACK_FAILED";
+    ErrorCode22["MEDIA_DECODE_ERROR"] = "MEDIA_DECODE_ERROR";
+    ErrorCode22["MEDIA_NETWORK_ERROR"] = "MEDIA_NETWORK_ERROR";
+    ErrorCode22["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
+    return ErrorCode22;
+  })(ErrorCode2 || {});
+
   // packages/plugins/native/src/index.ts
-  var SUPPORTED_EXTENSIONS = ["mp4", "webm", "mov", "mkv", "ogv", "ogg", "m4v"];
+  var VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "mkv", "ogv", "m4v"];
+  var AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus", "weba"];
+  var SUPPORTED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
   var MIME_TYPES = {
+    // Video
     mp4: "video/mp4",
     m4v: "video/mp4",
     webm: "video/webm",
     mov: "video/quicktime",
     mkv: "video/x-matroska",
     ogv: "video/ogg",
-    ogg: "video/ogg"
+    // Audio
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    flac: "audio/flac",
+    aac: "audio/aac",
+    m4a: "audio/mp4",
+    opus: "audio/opus",
+    weba: "audio/webm"
   };
   function createNativePlugin(config) {
     const preload = config?.preload ?? "metadata";
@@ -35920,9 +35969,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const getMimeType = (ext) => {
       return MIME_TYPES[ext] || "video/mp4";
     };
+    const isAudioExtension = (ext) => {
+      return AUDIO_EXTENSIONS.includes(ext);
+    };
     const canBrowserPlay = (mimeType) => {
-      const testVideo = document.createElement("video");
-      const canPlay = testVideo.canPlayType(mimeType);
+      const isAudio = mimeType.startsWith("audio/");
+      const testElement = isAudio ? document.createElement("audio") : document.createElement("video");
+      const canPlay = testElement.canPlayType(mimeType);
       return canPlay === "probably" || canPlay === "maybe";
     };
     const getOrCreateVideo = () => {
@@ -35937,6 +35990,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.preload = preload;
       video.controls = false;
       video.playsInline = true;
+      const poster = api?.getState("poster");
+      if (poster) {
+        video.poster = poster;
+      }
       api?.container.appendChild(video);
       return video;
     };
@@ -36029,7 +36086,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         api?.logger.error("Video error", { code: error?.code, message });
         api?.emit("error", {
-          code: "MEDIA_ERROR",
+          code: ErrorCode2.PLAYBACK_FAILED,
           message,
           fatal: true,
           timestamp: Date.now()
@@ -36052,10 +36109,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const plugin = {
       id: "native-provider",
-      name: "Native Video Provider",
+      name: "Native Media Provider",
       version: "1.0.0",
       type: "provider",
-      description: "Native HTML5 video playback for MP4, WebM, MOV, MKV",
+      description: "Native HTML5 playback for video (MP4, WebM, MOV) and audio (MP3, WAV, FLAC, AAC)",
       canPlay(src) {
         const ext = getExtension(src);
         if (!SUPPORTED_EXTENSIONS.includes(ext)) {
@@ -36117,13 +36174,35 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (!api) throw new Error("Plugin not initialized");
         const ext = getExtension(src);
         const mimeType = getMimeType(ext);
-        api.logger.info("Loading native video source", { src, mimeType });
+        const isAudio = isAudioExtension(ext);
+        api.logger.info("Loading native media source", { src, mimeType, isAudio });
         cleanup();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
+        api.setState("mediaType", isAudio ? "audio" : "video");
+        if (isAudio) {
+          try {
+            const url = new URL(src, window.location.href);
+            const filename = url.pathname.split("/").pop() || "Audio";
+            const title = decodeURIComponent(filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "));
+            api.setState("title", title);
+          } catch {
+            api.setState("title", "Audio");
+          }
+        }
         api.setState("qualities", []);
         api.setState("currentQuality", null);
         const videoEl = getOrCreateVideo();
+        if (isAudio) {
+          videoEl.style.display = "none";
+          videoEl.poster = "";
+        } else {
+          videoEl.style.display = "block";
+          const poster = api.getState("poster");
+          if (poster) {
+            videoEl.poster = poster;
+          }
+        }
         cleanupEvents = setupEventListeners(videoEl);
         return new Promise((resolve, reject) => {
           const onLoaded = () => {
@@ -38112,8 +38191,1344 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/playlist/src/index.ts
+  var DEFAULT_CONFIG2 = {
+    autoAdvance: true,
+    preloadNext: true,
+    persist: false,
+    persistKey: "scarlett-playlist",
+    shuffle: false,
+    repeat: "none"
+  };
+  function generateId() {
+    return `track-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  function shuffleArray(array) {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+  function createPlaylistPlugin(config) {
+    const mergedConfig = { ...DEFAULT_CONFIG2, ...config };
+    let api = null;
+    let tracks = mergedConfig.tracks || [];
+    let currentIndex = -1;
+    let shuffle = mergedConfig.shuffle || false;
+    let repeat = mergedConfig.repeat || "none";
+    let shuffleOrder = [];
+    tracks = tracks.map((t) => ({ ...t, id: t.id || generateId() }));
+    const generateShuffleOrder = () => {
+      const indices = tracks.map((_, i) => i);
+      shuffleOrder = shuffleArray(indices);
+      if (currentIndex >= 0) {
+        const currentPos = shuffleOrder.indexOf(currentIndex);
+        if (currentPos > 0) {
+          shuffleOrder.splice(currentPos, 1);
+          shuffleOrder.unshift(currentIndex);
+        }
+      }
+    };
+    const getActualIndex = (logicalIndex) => {
+      if (!shuffle || shuffleOrder.length === 0) {
+        return logicalIndex;
+      }
+      return shuffleOrder[logicalIndex] ?? logicalIndex;
+    };
+    const getLogicalIndex = (actualIndex) => {
+      if (!shuffle || shuffleOrder.length === 0) {
+        return actualIndex;
+      }
+      return shuffleOrder.indexOf(actualIndex);
+    };
+    const hasNextTrack = () => {
+      if (tracks.length === 0) return false;
+      if (repeat === "one" || repeat === "all") return true;
+      const logicalIndex = getLogicalIndex(currentIndex);
+      return logicalIndex < tracks.length - 1;
+    };
+    const hasPreviousTrack = () => {
+      if (tracks.length === 0) return false;
+      if (repeat === "one" || repeat === "all") return true;
+      const logicalIndex = getLogicalIndex(currentIndex);
+      return logicalIndex > 0;
+    };
+    const getNextIndex = () => {
+      if (tracks.length === 0) return -1;
+      if (repeat === "one") {
+        return currentIndex;
+      }
+      const logicalIndex = getLogicalIndex(currentIndex);
+      let nextLogical = logicalIndex + 1;
+      if (nextLogical >= tracks.length) {
+        if (repeat === "all") {
+          if (shuffle) {
+            generateShuffleOrder();
+          }
+          nextLogical = 0;
+        } else {
+          return -1;
+        }
+      }
+      return getActualIndex(nextLogical);
+    };
+    const getPreviousIndex = () => {
+      if (tracks.length === 0) return -1;
+      if (repeat === "one") {
+        return currentIndex;
+      }
+      const logicalIndex = getLogicalIndex(currentIndex);
+      let prevLogical = logicalIndex - 1;
+      if (prevLogical < 0) {
+        if (repeat === "all") {
+          prevLogical = tracks.length - 1;
+        } else {
+          return -1;
+        }
+      }
+      return getActualIndex(prevLogical);
+    };
+    const persistPlaylist = () => {
+      if (!mergedConfig.persist) return;
+      try {
+        const data = {
+          tracks,
+          currentIndex,
+          shuffle,
+          repeat,
+          shuffleOrder
+        };
+        localStorage.setItem(mergedConfig.persistKey, JSON.stringify(data));
+      } catch (e) {
+        api?.logger.warn("Failed to persist playlist", e);
+      }
+    };
+    const loadPersistedPlaylist = () => {
+      if (!mergedConfig.persist) return;
+      try {
+        const data = localStorage.getItem(mergedConfig.persistKey);
+        if (data) {
+          const parsed = JSON.parse(data);
+          tracks = parsed.tracks || [];
+          currentIndex = parsed.currentIndex ?? -1;
+          shuffle = parsed.shuffle ?? false;
+          repeat = parsed.repeat ?? "none";
+          shuffleOrder = parsed.shuffleOrder || [];
+        }
+      } catch (e) {
+        api?.logger.warn("Failed to load persisted playlist", e);
+      }
+    };
+    const emitChange = () => {
+      const track = currentIndex >= 0 ? tracks[currentIndex] : null;
+      api?.emit("playlist:change", { track, index: currentIndex });
+      persistPlaylist();
+    };
+    const setCurrentTrack = (index) => {
+      if (index < 0 || index >= tracks.length) {
+        api?.logger.warn("Invalid track index", { index });
+        return;
+      }
+      const track = tracks[index];
+      currentIndex = index;
+      api?.logger.info("Track changed", { index, title: track.title, src: track.src });
+      if (track.title) {
+        api?.setState("title", track.title);
+      }
+      if (track.artwork) {
+        api?.setState("poster", track.artwork);
+      }
+      api?.setState("mediaType", track.type || "audio");
+      emitChange();
+    };
+    const plugin = {
+      id: "playlist",
+      name: "Playlist",
+      version: "1.0.0",
+      type: "feature",
+      description: "Playlist management with shuffle, repeat, and gapless playback",
+      async init(pluginApi) {
+        api = pluginApi;
+        api.logger.info("Playlist plugin initialized");
+        loadPersistedPlaylist();
+        if (shuffle && tracks.length > 0) {
+          generateShuffleOrder();
+        }
+        const unsubEnded = api.on("playback:ended", () => {
+          if (!mergedConfig.autoAdvance) return;
+          const nextIdx = getNextIndex();
+          if (nextIdx >= 0) {
+            api?.logger.debug("Auto-advancing to next track", { nextIdx });
+            setCurrentTrack(nextIdx);
+          } else {
+            api?.logger.info("Playlist ended");
+            api?.emit("playlist:ended", void 0);
+          }
+        });
+        api.onDestroy(() => {
+          unsubEnded();
+          persistPlaylist();
+        });
+      },
+      async destroy() {
+        api?.logger.info("Playlist plugin destroying");
+        persistPlaylist();
+        api = null;
+      },
+      add(trackOrTracks) {
+        const newTracks = Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks];
+        newTracks.forEach((track) => {
+          const normalizedTrack = { ...track, id: track.id || generateId() };
+          const index = tracks.length;
+          tracks.push(normalizedTrack);
+          api?.emit("playlist:add", { track: normalizedTrack, index });
+          api?.logger.debug("Track added", { title: normalizedTrack.title, index });
+        });
+        if (shuffle) {
+          const startIndex = tracks.length - newTracks.length;
+          for (let i = startIndex; i < tracks.length; i++) {
+            const insertPos = Math.floor(Math.random() * (shuffleOrder.length - getLogicalIndex(currentIndex))) + getLogicalIndex(currentIndex) + 1;
+            shuffleOrder.splice(Math.min(insertPos, shuffleOrder.length), 0, i);
+          }
+        }
+        persistPlaylist();
+      },
+      insert(index, track) {
+        const normalizedTrack = { ...track, id: track.id || generateId() };
+        const clampedIndex = Math.max(0, Math.min(index, tracks.length));
+        tracks.splice(clampedIndex, 0, normalizedTrack);
+        if (currentIndex >= clampedIndex) {
+          currentIndex++;
+        }
+        if (shuffle) {
+          shuffleOrder = shuffleOrder.map((i) => i >= clampedIndex ? i + 1 : i);
+          const insertPos = Math.floor(Math.random() * shuffleOrder.length);
+          shuffleOrder.splice(insertPos, 0, clampedIndex);
+        }
+        api?.emit("playlist:add", { track: normalizedTrack, index: clampedIndex });
+        persistPlaylist();
+      },
+      remove(idOrIndex) {
+        let index;
+        if (typeof idOrIndex === "string") {
+          index = tracks.findIndex((t) => t.id === idOrIndex);
+          if (index === -1) {
+            api?.logger.warn("Track not found", { id: idOrIndex });
+            return;
+          }
+        } else {
+          index = idOrIndex;
+        }
+        if (index < 0 || index >= tracks.length) {
+          api?.logger.warn("Invalid track index", { index });
+          return;
+        }
+        const [removedTrack] = tracks.splice(index, 1);
+        if (index < currentIndex) {
+          currentIndex--;
+        } else if (index === currentIndex) {
+          if (currentIndex >= tracks.length) {
+            currentIndex = tracks.length - 1;
+          }
+          emitChange();
+        }
+        if (shuffle) {
+          shuffleOrder = shuffleOrder.filter((i) => i !== index).map((i) => i > index ? i - 1 : i);
+        }
+        api?.emit("playlist:remove", { track: removedTrack, index });
+        persistPlaylist();
+      },
+      clear() {
+        tracks = [];
+        currentIndex = -1;
+        shuffleOrder = [];
+        api?.emit("playlist:clear", void 0);
+        emitChange();
+      },
+      play(idOrIndex) {
+        let index;
+        if (idOrIndex === void 0) {
+          index = currentIndex >= 0 ? currentIndex : shuffle ? getActualIndex(0) : 0;
+        } else if (typeof idOrIndex === "string") {
+          index = tracks.findIndex((t) => t.id === idOrIndex);
+          if (index === -1) {
+            api?.logger.warn("Track not found", { id: idOrIndex });
+            return;
+          }
+        } else {
+          index = idOrIndex;
+        }
+        if (tracks.length === 0) {
+          api?.logger.warn("Playlist is empty");
+          return;
+        }
+        setCurrentTrack(index);
+      },
+      next() {
+        const nextIdx = getNextIndex();
+        if (nextIdx >= 0) {
+          setCurrentTrack(nextIdx);
+        } else {
+          api?.logger.info("No next track");
+        }
+      },
+      previous() {
+        const currentTime = api?.getState("currentTime") || 0;
+        if (currentTime > 3) {
+          api?.emit("playback:seeking", { time: 0 });
+          return;
+        }
+        const prevIdx = getPreviousIndex();
+        if (prevIdx >= 0) {
+          setCurrentTrack(prevIdx);
+        } else {
+          api?.logger.info("No previous track");
+        }
+      },
+      toggleShuffle() {
+        this.setShuffle(!shuffle);
+      },
+      setShuffle(enabled) {
+        shuffle = enabled;
+        if (enabled) {
+          generateShuffleOrder();
+        } else {
+          shuffleOrder = [];
+        }
+        api?.emit("playlist:shuffle", { enabled });
+        api?.logger.info("Shuffle mode", { enabled });
+        persistPlaylist();
+      },
+      cycleRepeat() {
+        const modes = ["none", "all", "one"];
+        const currentIdx = modes.indexOf(repeat);
+        const nextIdx = (currentIdx + 1) % modes.length;
+        this.setRepeat(modes[nextIdx]);
+      },
+      setRepeat(mode) {
+        repeat = mode;
+        api?.emit("playlist:repeat", { mode });
+        api?.logger.info("Repeat mode", { mode });
+        persistPlaylist();
+      },
+      move(fromIndex, toIndex) {
+        if (fromIndex < 0 || fromIndex >= tracks.length) return;
+        if (toIndex < 0 || toIndex >= tracks.length) return;
+        if (fromIndex === toIndex) return;
+        const [track] = tracks.splice(fromIndex, 1);
+        tracks.splice(toIndex, 0, track);
+        if (currentIndex === fromIndex) {
+          currentIndex = toIndex;
+        } else if (fromIndex < currentIndex && toIndex >= currentIndex) {
+          currentIndex--;
+        } else if (fromIndex > currentIndex && toIndex <= currentIndex) {
+          currentIndex++;
+        }
+        if (shuffle) {
+          generateShuffleOrder();
+        }
+        api?.emit("playlist:reorder", { tracks: [...tracks] });
+        persistPlaylist();
+      },
+      getState() {
+        return {
+          tracks: [...tracks],
+          currentIndex,
+          currentTrack: currentIndex >= 0 ? tracks[currentIndex] : null,
+          shuffle,
+          repeat,
+          shuffleOrder: [...shuffleOrder],
+          hasNext: hasNextTrack(),
+          hasPrevious: hasPreviousTrack()
+        };
+      },
+      getTracks() {
+        return [...tracks];
+      },
+      getCurrentTrack() {
+        return currentIndex >= 0 ? tracks[currentIndex] : null;
+      },
+      getTrack(id) {
+        return tracks.find((t) => t.id === id) || null;
+      }
+    };
+    return plugin;
+  }
+
+  // packages/plugins/media-session/src/index.ts
+  var DEFAULT_CONFIG3 = {
+    enablePlayPause: true,
+    enableSeek: true,
+    enableTrackNavigation: true,
+    seekOffset: 10,
+    updatePositionState: true
+  };
+  function isMediaSessionSupported() {
+    return typeof navigator !== "undefined" && "mediaSession" in navigator;
+  }
+  function createMediaSessionPlugin(config) {
+    const mergedConfig = { ...DEFAULT_CONFIG3, ...config };
+    let api = null;
+    let currentMetadata = {};
+    const updateMetadata = () => {
+      if (!isMediaSessionSupported()) return;
+      const artwork = [];
+      const artworkSources = currentMetadata.artwork || mergedConfig.defaultArtwork || [];
+      for (const art of artworkSources) {
+        artwork.push({
+          src: art.src,
+          sizes: art.sizes || "512x512",
+          type: art.type || "image/png"
+        });
+      }
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentMetadata.title || "Unknown",
+          artist: currentMetadata.artist || "",
+          album: currentMetadata.album || "",
+          artwork
+        });
+      } catch (e) {
+        api?.logger.warn("Failed to set media session metadata", e);
+      }
+    };
+    const updatePositionState = () => {
+      if (!isMediaSessionSupported() || !mergedConfig.updatePositionState) return;
+      const duration = api?.getState("duration") || 0;
+      const position = api?.getState("currentTime") || 0;
+      const playbackRate = api?.getState("playbackRate") || 1;
+      if (duration > 0 && isFinite(duration)) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration,
+            position: Math.min(position, duration),
+            playbackRate
+          });
+        } catch (e) {
+          api?.logger.debug("Failed to set position state", e);
+        }
+      }
+    };
+    const setupActionHandlers = () => {
+      if (!isMediaSessionSupported()) return;
+      const seekOffset = mergedConfig.seekOffset || 10;
+      if (mergedConfig.enablePlayPause) {
+        try {
+          navigator.mediaSession.setActionHandler("play", () => {
+            api?.logger.debug("Media session: play");
+            api?.emit("playback:play", void 0);
+          });
+          navigator.mediaSession.setActionHandler("pause", () => {
+            api?.logger.debug("Media session: pause");
+            api?.emit("playback:pause", void 0);
+          });
+          navigator.mediaSession.setActionHandler("stop", () => {
+            api?.logger.debug("Media session: stop");
+            api?.emit("playback:pause", void 0);
+            api?.emit("playback:seeking", { time: 0 });
+          });
+        } catch (e) {
+          api?.logger.debug("Some play/pause actions not supported", e);
+        }
+      }
+      if (mergedConfig.enableSeek) {
+        try {
+          navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+            const offset = details.seekOffset || seekOffset;
+            const currentTime = api?.getState("currentTime") || 0;
+            const newTime = Math.max(0, currentTime - offset);
+            api?.logger.debug("Media session: seekbackward", { offset, newTime });
+            api?.emit("playback:seeking", { time: newTime });
+          });
+          navigator.mediaSession.setActionHandler("seekforward", (details) => {
+            const offset = details.seekOffset || seekOffset;
+            const currentTime = api?.getState("currentTime") || 0;
+            const duration = api?.getState("duration") || 0;
+            const newTime = Math.min(duration, currentTime + offset);
+            api?.logger.debug("Media session: seekforward", { offset, newTime });
+            api?.emit("playback:seeking", { time: newTime });
+          });
+          navigator.mediaSession.setActionHandler("seekto", (details) => {
+            if (details.seekTime !== void 0) {
+              api?.logger.debug("Media session: seekto", { time: details.seekTime });
+              api?.emit("playback:seeking", { time: details.seekTime });
+            }
+          });
+        } catch (e) {
+          api?.logger.debug("Some seek actions not supported", e);
+        }
+      }
+      if (mergedConfig.enableTrackNavigation) {
+        try {
+          navigator.mediaSession.setActionHandler("previoustrack", () => {
+            api?.logger.debug("Media session: previoustrack");
+            const playlist = api?.getPlugin("playlist");
+            if (playlist) {
+              playlist.previous();
+            } else {
+              api?.emit("playback:seeking", { time: 0 });
+            }
+          });
+          navigator.mediaSession.setActionHandler("nexttrack", () => {
+            api?.logger.debug("Media session: nexttrack");
+            const playlist = api?.getPlugin("playlist");
+            if (playlist) {
+              playlist.next();
+            }
+          });
+        } catch (e) {
+          api?.logger.debug("Track navigation not supported", e);
+        }
+      }
+    };
+    const clearActionHandlers = () => {
+      if (!isMediaSessionSupported()) return;
+      const actions = [
+        "play",
+        "pause",
+        "stop",
+        "seekbackward",
+        "seekforward",
+        "seekto",
+        "previoustrack",
+        "nexttrack"
+      ];
+      for (const action of actions) {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch (e) {
+        }
+      }
+    };
+    const plugin = {
+      id: "media-session",
+      name: "Media Session",
+      version: "1.0.0",
+      type: "feature",
+      description: "Media Session API integration for system-level media controls",
+      async init(pluginApi) {
+        api = pluginApi;
+        if (!isMediaSessionSupported()) {
+          api.logger.info("Media Session API not supported in this browser");
+          return;
+        }
+        api.logger.info("Media Session plugin initialized");
+        setupActionHandlers();
+        const unsubPlay = api.on("playback:play", () => {
+          if (isMediaSessionSupported()) {
+            navigator.mediaSession.playbackState = "playing";
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          if (isMediaSessionSupported()) {
+            navigator.mediaSession.playbackState = "paused";
+          }
+        });
+        const unsubEnded = api.on("playback:ended", () => {
+          if (isMediaSessionSupported()) {
+            navigator.mediaSession.playbackState = "none";
+          }
+        });
+        let lastPositionUpdate = 0;
+        const unsubTimeUpdate = api.on("playback:timeupdate", () => {
+          const now2 = Date.now();
+          if (now2 - lastPositionUpdate >= 1e3) {
+            lastPositionUpdate = now2;
+            updatePositionState();
+          }
+        });
+        const unsubMetadata = api.on("media:loadedmetadata", () => {
+          updatePositionState();
+        });
+        const unsubState = api.subscribeToState((event) => {
+          if (event.key === "title" && typeof event.value === "string") {
+            currentMetadata.title = event.value;
+            updateMetadata();
+          } else if (event.key === "poster" && typeof event.value === "string") {
+            currentMetadata.artwork = [{ src: event.value, sizes: "512x512" }];
+            updateMetadata();
+          }
+        });
+        const unsubPlaylist = api.on("playlist:change", (payload) => {
+          if (payload?.track) {
+            const track = payload.track;
+            currentMetadata = {
+              title: track.title,
+              artist: track.artist,
+              album: track.album,
+              artwork: track.artwork ? [{ src: track.artwork, sizes: "512x512" }] : void 0
+            };
+            updateMetadata();
+          }
+        });
+        api.onDestroy(() => {
+          unsubPlay();
+          unsubPause();
+          unsubEnded();
+          unsubTimeUpdate();
+          unsubMetadata();
+          unsubState();
+          unsubPlaylist();
+          clearActionHandlers();
+        });
+      },
+      async destroy() {
+        api?.logger.info("Media Session plugin destroying");
+        clearActionHandlers();
+        if (isMediaSessionSupported()) {
+          navigator.mediaSession.metadata = null;
+          navigator.mediaSession.playbackState = "none";
+        }
+        api = null;
+      },
+      isSupported() {
+        return isMediaSessionSupported();
+      },
+      setMetadata(metadata) {
+        currentMetadata = { ...currentMetadata, ...metadata };
+        updateMetadata();
+      },
+      setPlaybackState(state) {
+        if (isMediaSessionSupported()) {
+          navigator.mediaSession.playbackState = state;
+        }
+      },
+      setPositionState(state) {
+        if (isMediaSessionSupported()) {
+          try {
+            navigator.mediaSession.setPositionState(state);
+          } catch (e) {
+            api?.logger.debug("Failed to set position state", e);
+          }
+        }
+      },
+      setActionHandler(action, handler) {
+        if (isMediaSessionSupported()) {
+          try {
+            navigator.mediaSession.setActionHandler(action, handler);
+          } catch (e) {
+            api?.logger.debug(`Action ${action} not supported`, e);
+          }
+        }
+      }
+    };
+    return plugin;
+  }
+
+  // packages/plugins/audio-ui/src/index.ts
+  var DEFAULT_THEME = {
+    primary: "#6366f1",
+    background: "#18181b",
+    text: "#fafafa",
+    textSecondary: "#a1a1aa",
+    progressBackground: "#3f3f46",
+    progressFill: "#6366f1",
+    borderRadius: "12px",
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  };
+  var DEFAULT_CONFIG4 = {
+    layout: "full",
+    showArtwork: true,
+    showTitle: true,
+    showArtist: true,
+    showTime: true,
+    showVolume: true,
+    showShuffle: true,
+    showRepeat: true,
+    showNavigation: true,
+    classPrefix: "scarlett-audio",
+    autoHide: 0,
+    theme: DEFAULT_THEME
+  };
+  function formatTime2(seconds) {
+    if (!isFinite(seconds) || seconds < 0) return "0:00";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+  function createStyles(prefix, theme) {
+    return `
+    .${prefix} {
+      font-family: ${theme.fontFamily};
+      background: ${theme.background};
+      color: ${theme.text};
+      border-radius: ${theme.borderRadius};
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .${prefix}--full {
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 16px;
+      max-width: 400px;
+    }
+
+    .${prefix}--compact {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      gap: 12px;
+    }
+
+    .${prefix}--mini {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      gap: 8px;
+    }
+
+    .${prefix}__artwork {
+      flex-shrink: 0;
+      background: ${theme.progressBackground};
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .${prefix}--full .${prefix}__artwork {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: ${theme.borderRadius};
+    }
+
+    .${prefix}--compact .${prefix}__artwork {
+      width: 56px;
+      height: 56px;
+    }
+
+    .${prefix}--mini .${prefix}__artwork {
+      width: 40px;
+      height: 40px;
+      border-radius: 6px;
+    }
+
+    .${prefix}__artwork img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .${prefix}__artwork-placeholder {
+      width: 50%;
+      height: 50%;
+      opacity: 0.3;
+    }
+
+    .${prefix}__info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .${prefix}__title {
+      font-size: 16px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .${prefix}--mini .${prefix}__title {
+      font-size: 14px;
+      display: inline-block;
+      animation: none;
+    }
+
+    .${prefix}__title-wrapper {
+      overflow: hidden;
+      width: 100%;
+    }
+
+    .${prefix}--mini .${prefix}__title-wrapper .${prefix}__title.scrolling {
+      animation: marquee 8s linear infinite;
+    }
+
+    @keyframes marquee {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    .${prefix}--mini .${prefix}__progress {
+      margin-top: 4px;
+    }
+
+    .${prefix}--mini .${prefix}__progress-bar {
+      height: 4px;
+    }
+
+    .${prefix}__artist {
+      font-size: 14px;
+      color: ${theme.textSecondary};
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .${prefix}--mini .${prefix}__artist {
+      font-size: 12px;
+    }
+
+    .${prefix}__progress {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .${prefix}__progress-bar {
+      flex: 1;
+      height: 6px;
+      background: ${theme.progressBackground};
+      border-radius: 3px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .${prefix}__progress-bar:hover {
+      height: 8px;
+    }
+
+    .${prefix}__progress-fill {
+      height: 100%;
+      background: ${theme.progressFill};
+      border-radius: 3px;
+      width: 100%;
+      transform-origin: left center;
+      will-change: transform;
+    }
+
+    .${prefix}__progress-buffered {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: ${theme.progressBackground};
+      opacity: 0.5;
+      border-radius: 3px;
+    }
+
+    .${prefix}__time {
+      font-size: 12px;
+      color: ${theme.textSecondary};
+      min-width: 40px;
+      text-align: center;
+    }
+
+    .${prefix}__controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .${prefix}__btn {
+      background: transparent;
+      border: none;
+      color: ${theme.text};
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .${prefix}__btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .${prefix}__btn:active {
+      transform: scale(0.95);
+    }
+
+    .${prefix}__btn--primary {
+      background: ${theme.primary};
+      width: 48px;
+      height: 48px;
+    }
+
+    .${prefix}__btn--primary:hover {
+      background: ${theme.primary};
+      opacity: 0.9;
+    }
+
+    .${prefix}--mini .${prefix}__btn--primary {
+      width: 36px;
+      height: 36px;
+    }
+
+    .${prefix}__btn--active {
+      color: ${theme.primary};
+    }
+
+    .${prefix}__btn svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    .${prefix}__btn--primary svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .${prefix}__volume {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .${prefix}__volume-slider {
+      width: 80px;
+      height: 4px;
+      background: ${theme.progressBackground};
+      border-radius: 2px;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .${prefix}__volume-fill {
+      height: 100%;
+      background: ${theme.text};
+      border-radius: 2px;
+    }
+
+    .${prefix}__secondary-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .${prefix}--hidden {
+      display: none;
+    }
+  `;
+  }
+  var ICONS = {
+    play: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`,
+    pause: `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
+    previous: `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`,
+    next: `<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>`,
+    shuffle: `<svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>`,
+    repeatOff: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
+    repeatAll: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
+    repeatOne: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg>`,
+    volumeHigh: `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
+    volumeMuted: `<svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
+    music: `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`
+  };
+  function createAudioUIPlugin(config) {
+    const mergedConfig = { ...DEFAULT_CONFIG4, ...config };
+    const theme = { ...DEFAULT_THEME, ...mergedConfig.theme };
+    const prefix = mergedConfig.classPrefix;
+    let api = null;
+    let container = null;
+    let styleElement = null;
+    let layout = mergedConfig.layout;
+    let isVisible = true;
+    let animationFrameId = null;
+    let lastKnownTime = 0;
+    let lastUpdateTimestamp = 0;
+    let isPlaying = false;
+    let artworkImg = null;
+    let titleEl = null;
+    let artistEl = null;
+    let progressFill = null;
+    let currentTimeEl = null;
+    let durationEl = null;
+    let playPauseBtn = null;
+    let shuffleBtn = null;
+    let repeatBtn = null;
+    let volumeBtn = null;
+    let volumeFill = null;
+    const startProgressAnimation = () => {
+      if (animationFrameId !== null) return;
+      const animate = (timestamp) => {
+        if (!api || !isPlaying) {
+          animationFrameId = null;
+          return;
+        }
+        const duration = api.getState("duration") || 0;
+        if (duration <= 0) {
+          animationFrameId = requestAnimationFrame(animate);
+          return;
+        }
+        const elapsed = (timestamp - lastUpdateTimestamp) / 1e3;
+        const interpolatedTime = Math.min(lastKnownTime + elapsed, duration);
+        const scale = interpolatedTime / duration;
+        if (progressFill) {
+          progressFill.style.transform = `scaleX(${scale})`;
+        }
+        if (currentTimeEl) {
+          currentTimeEl.textContent = formatTime2(interpolatedTime);
+        }
+        animationFrameId = requestAnimationFrame(animate);
+      };
+      lastUpdateTimestamp = performance.now();
+      animationFrameId = requestAnimationFrame(animate);
+    };
+    const stopProgressAnimation = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+    const createUI = () => {
+      if (!api) return;
+      styleElement = document.createElement("style");
+      styleElement.textContent = createStyles(prefix, theme);
+      document.head.appendChild(styleElement);
+      container = document.createElement("div");
+      container.className = `${prefix} ${prefix}--${layout}`;
+      if (layout === "full") {
+        container.innerHTML = buildFullLayout();
+      } else if (layout === "compact") {
+        container.innerHTML = buildCompactLayout();
+      } else {
+        container.innerHTML = buildMiniLayout();
+      }
+      artworkImg = container.querySelector(`.${prefix}__artwork img`);
+      titleEl = container.querySelector(`.${prefix}__title`);
+      artistEl = container.querySelector(`.${prefix}__artist`);
+      progressFill = container.querySelector(`.${prefix}__progress-fill`);
+      currentTimeEl = container.querySelector(`.${prefix}__time--current`);
+      durationEl = container.querySelector(`.${prefix}__time--duration`);
+      playPauseBtn = container.querySelector(`.${prefix}__btn--play`);
+      shuffleBtn = container.querySelector(`.${prefix}__btn--shuffle`);
+      repeatBtn = container.querySelector(`.${prefix}__btn--repeat`);
+      volumeBtn = container.querySelector(`.${prefix}__btn--volume`);
+      volumeFill = container.querySelector(`.${prefix}__volume-fill`);
+      attachEventListeners();
+      api.container.appendChild(container);
+    };
+    const buildFullLayout = () => {
+      return `
+      ${mergedConfig.showArtwork ? `
+        <div class="${prefix}__artwork">
+          <img src="${mergedConfig.defaultArtwork || ""}" alt="Album art" />
+          ${!mergedConfig.defaultArtwork ? `<div class="${prefix}__artwork-placeholder">${ICONS.music}</div>` : ""}
+        </div>
+      ` : ""}
+      <div class="${prefix}__info">
+        ${mergedConfig.showTitle ? `<div class="${prefix}__title">-</div>` : ""}
+        ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ""}
+      </div>
+      <div class="${prefix}__progress">
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current">0:00</span>` : ""}
+        <div class="${prefix}__progress-bar">
+          <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
+        </div>
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration">0:00</span>` : ""}
+      </div>
+      <div class="${prefix}__controls">
+        ${mergedConfig.showShuffle ? `<button class="${prefix}__btn ${prefix}__btn--shuffle" title="Shuffle">${ICONS.shuffle}</button>` : ""}
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ""}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ""}
+        ${mergedConfig.showRepeat ? `<button class="${prefix}__btn ${prefix}__btn--repeat" title="Repeat">${ICONS.repeatOff}</button>` : ""}
+      </div>
+      ${mergedConfig.showVolume ? `
+        <div class="${prefix}__secondary-controls">
+          <div class="${prefix}__volume">
+            <button class="${prefix}__btn ${prefix}__btn--volume" title="Volume">${ICONS.volumeHigh}</button>
+            <div class="${prefix}__volume-slider">
+              <div class="${prefix}__volume-fill" style="width: 100%"></div>
+            </div>
+          </div>
+        </div>
+      ` : ""}
+    `;
+    };
+    const buildCompactLayout = () => {
+      return `
+      ${mergedConfig.showArtwork ? `
+        <div class="${prefix}__artwork">
+          <img src="${mergedConfig.defaultArtwork || ""}" alt="Album art" />
+        </div>
+      ` : ""}
+      <div class="${prefix}__info">
+        ${mergedConfig.showTitle ? `<div class="${prefix}__title">-</div>` : ""}
+        ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ""}
+        <div class="${prefix}__progress">
+          <div class="${prefix}__progress-bar">
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
+          </div>
+        </div>
+      </div>
+      <div class="${prefix}__controls">
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ""}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ""}
+      </div>
+    `;
+    };
+    const buildMiniLayout = () => {
+      return `
+      <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
+      ${mergedConfig.showArtwork ? `
+        <div class="${prefix}__artwork">
+          <img src="${mergedConfig.defaultArtwork || ""}" alt="Album art" />
+        </div>
+      ` : ""}
+      <div class="${prefix}__info">
+        ${mergedConfig.showTitle ? `<div class="${prefix}__title-wrapper"><div class="${prefix}__title">-</div></div>` : ""}
+        <div class="${prefix}__progress">
+          <div class="${prefix}__progress-bar">
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    };
+    const attachEventListeners = () => {
+      if (!container || !api) return;
+      playPauseBtn?.addEventListener("click", () => {
+        const playing = api?.getState("playing");
+        if (playing) {
+          api?.emit("playback:pause", void 0);
+        } else {
+          api?.emit("playback:play", void 0);
+        }
+      });
+      container.querySelector(`.${prefix}__btn--prev`)?.addEventListener("click", () => {
+        const playlist = api?.getPlugin("playlist");
+        if (playlist) {
+          playlist.previous();
+        } else {
+          api?.emit("playback:seeking", { time: 0 });
+        }
+      });
+      container.querySelector(`.${prefix}__btn--next`)?.addEventListener("click", () => {
+        const playlist = api?.getPlugin("playlist");
+        playlist?.next();
+      });
+      shuffleBtn?.addEventListener("click", () => {
+        const playlist = api?.getPlugin("playlist");
+        playlist?.toggleShuffle();
+      });
+      repeatBtn?.addEventListener("click", () => {
+        const playlist = api?.getPlugin("playlist");
+        playlist?.cycleRepeat();
+      });
+      volumeBtn?.addEventListener("click", () => {
+        const muted = api?.getState("muted");
+        api?.emit("volume:mute", { muted: !muted });
+      });
+      const progressBar = container.querySelector(`.${prefix}__progress-bar`);
+      progressBar?.addEventListener("click", (e) => {
+        const mouseEvent = e;
+        const rect = mouseEvent.currentTarget.getBoundingClientRect();
+        const percent = (mouseEvent.clientX - rect.left) / rect.width;
+        const duration = api?.getState("duration") || 0;
+        const time = percent * duration;
+        api?.emit("playback:seeking", { time });
+      });
+      const volumeSlider = container.querySelector(`.${prefix}__volume-slider`);
+      volumeSlider?.addEventListener("click", (e) => {
+        const mouseEvent = e;
+        const rect = mouseEvent.currentTarget.getBoundingClientRect();
+        const percent = Math.max(0, Math.min(1, (mouseEvent.clientX - rect.left) / rect.width));
+        api?.emit("volume:change", { volume: percent, muted: false });
+      });
+    };
+    const updateUI = () => {
+      if (!api || !container) return;
+      const playing = api.getState("playing");
+      const wasPlaying = isPlaying;
+      isPlaying = playing;
+      if (playPauseBtn) {
+        playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
+        playPauseBtn.title = playing ? "Pause" : "Play";
+      }
+      const currentTime = api.getState("currentTime") || 0;
+      const duration = api.getState("duration") || 0;
+      lastKnownTime = currentTime;
+      lastUpdateTimestamp = performance.now();
+      if (playing && !wasPlaying) {
+        startProgressAnimation();
+      } else if (!playing && wasPlaying) {
+        stopProgressAnimation();
+      }
+      if (!playing) {
+        const scale = duration > 0 ? currentTime / duration : 0;
+        if (progressFill) {
+          progressFill.style.transform = `scaleX(${scale})`;
+        }
+        if (currentTimeEl) {
+          currentTimeEl.textContent = formatTime2(currentTime);
+        }
+      }
+      if (durationEl) {
+        durationEl.textContent = formatTime2(duration);
+      }
+      const title = api.getState("title");
+      const poster = api.getState("poster");
+      if (titleEl && title) {
+        titleEl.textContent = title;
+        if (layout === "mini") {
+          const wrapper = titleEl.parentElement;
+          if (wrapper && titleEl.scrollWidth > wrapper.clientWidth) {
+            titleEl.textContent = `${title}     \u2022     ${title}     \u2022     `;
+            titleEl.classList.add("scrolling");
+          } else {
+            titleEl.classList.remove("scrolling");
+          }
+        }
+      }
+      if (artworkImg && poster) {
+        artworkImg.src = poster;
+      }
+      const volume = api.getState("volume") || 1;
+      const muted = api.getState("muted");
+      if (volumeFill) {
+        volumeFill.style.width = `${(muted ? 0 : volume) * 100}%`;
+      }
+      if (volumeBtn) {
+        volumeBtn.innerHTML = muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh;
+      }
+      const playlist = api.getPlugin("playlist");
+      if (playlist) {
+        const state = playlist.getState();
+        if (shuffleBtn) {
+          shuffleBtn.classList.toggle(`${prefix}__btn--active`, state.shuffle);
+        }
+        if (repeatBtn) {
+          repeatBtn.classList.toggle(`${prefix}__btn--active`, state.repeat !== "none");
+          if (state.repeat === "one") {
+            repeatBtn.innerHTML = ICONS.repeatOne;
+          } else if (state.repeat === "all") {
+            repeatBtn.innerHTML = ICONS.repeatAll;
+          } else {
+            repeatBtn.innerHTML = ICONS.repeatOff;
+          }
+        }
+      }
+    };
+    const plugin = {
+      id: "audio-ui",
+      name: "Audio UI",
+      version: "1.0.0",
+      type: "ui",
+      description: "Compact audio player interface",
+      async init(pluginApi) {
+        api = pluginApi;
+        api.logger.info("Audio UI plugin initialized");
+        createUI();
+        const unsubState = api.subscribeToState(() => {
+          updateUI();
+        });
+        const unsubTime = api.on("playback:timeupdate", () => {
+          updateUI();
+        });
+        const unsubPlaylist = api.on("playlist:change", (payload) => {
+          if (payload?.track) {
+            if (titleEl) titleEl.textContent = payload.track.title || "-";
+            if (artistEl) artistEl.textContent = payload.track.artist || "-";
+            if (artworkImg && payload.track.artwork) {
+              artworkImg.src = payload.track.artwork;
+            }
+          }
+        });
+        const unsubShuffle = api.on("playlist:shuffle", () => {
+          updateUI();
+        });
+        const unsubRepeat = api.on("playlist:repeat", () => {
+          updateUI();
+        });
+        api.onDestroy(() => {
+          unsubState();
+          unsubTime();
+          unsubPlaylist();
+          unsubShuffle();
+          unsubRepeat();
+        });
+        updateUI();
+      },
+      async destroy() {
+        api?.logger.info("Audio UI plugin destroying");
+        stopProgressAnimation();
+        if (container?.parentNode) {
+          container.parentNode.removeChild(container);
+        }
+        if (styleElement?.parentNode) {
+          styleElement.parentNode.removeChild(styleElement);
+        }
+        container = null;
+        styleElement = null;
+        api = null;
+      },
+      getElement() {
+        return container;
+      },
+      setLayout(newLayout) {
+        if (!container) return;
+        stopProgressAnimation();
+        layout = newLayout;
+        container.className = `${prefix} ${prefix}--${layout}`;
+        if (layout === "full") {
+          container.innerHTML = buildFullLayout();
+        } else if (layout === "compact") {
+          container.innerHTML = buildCompactLayout();
+        } else {
+          container.innerHTML = buildMiniLayout();
+        }
+        artworkImg = container.querySelector(`.${prefix}__artwork img`);
+        titleEl = container.querySelector(`.${prefix}__title`);
+        artistEl = container.querySelector(`.${prefix}__artist`);
+        progressFill = container.querySelector(`.${prefix}__progress-fill`);
+        currentTimeEl = container.querySelector(`.${prefix}__time--current`);
+        durationEl = container.querySelector(`.${prefix}__time--duration`);
+        playPauseBtn = container.querySelector(`.${prefix}__btn--play`);
+        shuffleBtn = container.querySelector(`.${prefix}__btn--shuffle`);
+        repeatBtn = container.querySelector(`.${prefix}__btn--repeat`);
+        volumeBtn = container.querySelector(`.${prefix}__btn--volume`);
+        volumeFill = container.querySelector(`.${prefix}__volume-fill`);
+        attachEventListeners();
+        updateUI();
+        if (isPlaying) {
+          startProgressAnimation();
+        }
+      },
+      setTheme(newTheme) {
+        Object.assign(theme, newTheme);
+        if (styleElement) {
+          styleElement.textContent = createStyles(prefix, theme);
+        }
+      },
+      show() {
+        isVisible = true;
+        container?.classList.remove(`${prefix}--hidden`);
+      },
+      hide() {
+        isVisible = false;
+        container?.classList.add(`${prefix}--hidden`);
+      },
+      toggle() {
+        if (isVisible) {
+          this.hide();
+        } else {
+          this.show();
+        }
+      }
+    };
+    return plugin;
+  }
+
   // demo/demo.ts
-  var VERSION = true ? "0.1.1" : "dev";
+  var VERSION = true ? "0.2.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
@@ -38125,6 +39540,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const player = new ScarlettPlayer({
       container,
       src: VIDEO_URL,
+      poster: "https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg",
       logLevel: "debug",
       plugins: [
         createHLSPlugin(),
@@ -38151,6 +39567,91 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     window.player = player;
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");
+    const audioContainer = document.getElementById("audio-player");
+    if (audioContainer) {
+      const audioTracks = [
+        {
+          id: "llama",
+          src: "https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3",
+          title: "Winamp - It Really Whips the Llama's Ass",
+          artist: "Winamp",
+          artwork: "https://vod.thestreamplatform.com/demo/scarlett-player-sq-thumb.jpg"
+        }
+      ];
+      const audioPlayer = new ScarlettPlayer({
+        container: audioContainer,
+        logLevel: "debug",
+        plugins: [
+          createNativePlugin(),
+          // Native audio support
+          createPlaylistPlugin({
+            autoAdvance: true,
+            persist: false
+          }),
+          createMediaSessionPlugin({
+            seekOffset: 10
+          }),
+          createAudioUIPlugin({
+            layout: "full",
+            showShuffle: true,
+            showRepeat: true,
+            theme: {
+              primary: "#6366f1",
+              background: "#18181b"
+            }
+          })
+        ].filter(Boolean)
+      });
+      await audioPlayer.init();
+      const playlist = audioPlayer.getPlugin("playlist");
+      audioPlayer.on("playlist:change", async (e) => {
+        if (e?.track?.src) {
+          console.log("\u{1F3B5} Loading track:", e.track.title);
+          try {
+            await audioPlayer.load(e.track.src);
+          } catch (err) {
+            console.error("Failed to load track:", err);
+          }
+        }
+      });
+      if (playlist) {
+        playlist.add(audioTracks);
+        playlist.play(0);
+      }
+      audioPlayer.on("playback:play", () => console.log("\u{1F3B5} Audio Playing"));
+      audioPlayer.on("playback:pause", () => console.log("\u{1F3B5} Audio Paused"));
+      window.audioPlayer = audioPlayer;
+      console.log("\u{1F3B5} Audio Player Demo Ready");
+      console.log("Access audio player via window.audioPlayer");
+    }
+    const miniContainer = document.getElementById("mini-player");
+    if (miniContainer) {
+      const miniPlayer = new ScarlettPlayer({
+        container: miniContainer,
+        logLevel: "debug",
+        plugins: [
+          createNativePlugin(),
+          createAudioUIPlugin({
+            layout: "mini",
+            showArtwork: false,
+            showArtist: false,
+            showTime: false,
+            showVolume: false,
+            showShuffle: false,
+            showRepeat: false,
+            showNavigation: false,
+            theme: {
+              primary: "#e50914",
+              background: "#1f2937"
+            }
+          })
+        ].filter(Boolean)
+      });
+      await miniPlayer.init();
+      await miniPlayer.load("https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3");
+      window.miniPlayer = miniPlayer;
+      console.log("\u{1F3B5} Mini Player Demo Ready");
+    }
   });
 })();
 //# sourceMappingURL=demo.bundle.js.map

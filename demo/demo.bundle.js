@@ -39004,7 +39004,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       height: 100%;
       background: ${theme.progressFill};
       border-radius: 3px;
-      transition: width 0.1s linear;
+      width: 100%;
+      transform-origin: left center;
+      will-change: transform;
     }
 
     .${prefix}__progress-buffered {
@@ -39137,6 +39139,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let styleElement = null;
     let layout = mergedConfig.layout;
     let isVisible = true;
+    let animationFrameId = null;
+    let lastKnownTime = 0;
+    let lastUpdateTimestamp = 0;
+    let isPlaying = false;
     let artworkImg = null;
     let titleEl = null;
     let artistEl = null;
@@ -39148,6 +39154,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let repeatBtn = null;
     let volumeBtn = null;
     let volumeFill = null;
+    const startProgressAnimation = () => {
+      if (animationFrameId !== null) return;
+      const animate = (timestamp) => {
+        if (!api || !isPlaying) {
+          animationFrameId = null;
+          return;
+        }
+        const duration = api.getState("duration") || 0;
+        if (duration <= 0) {
+          animationFrameId = requestAnimationFrame(animate);
+          return;
+        }
+        const elapsed = (timestamp - lastUpdateTimestamp) / 1e3;
+        const interpolatedTime = Math.min(lastKnownTime + elapsed, duration);
+        const scale = interpolatedTime / duration;
+        if (progressFill) {
+          progressFill.style.transform = `scaleX(${scale})`;
+        }
+        if (currentTimeEl) {
+          currentTimeEl.textContent = formatTime2(interpolatedTime);
+        }
+        animationFrameId = requestAnimationFrame(animate);
+      };
+      lastUpdateTimestamp = performance.now();
+      animationFrameId = requestAnimationFrame(animate);
+    };
+    const stopProgressAnimation = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
     const createUI = () => {
       if (!api) return;
       styleElement = document.createElement("style");
@@ -39191,7 +39229,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       <div class="${prefix}__progress">
         ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current">0:00</span>` : ""}
         <div class="${prefix}__progress-bar">
-          <div class="${prefix}__progress-fill" style="width: 0%"></div>
+          <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
         </div>
         ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration">0:00</span>` : ""}
       </div>
@@ -39226,7 +39264,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ""}
         <div class="${prefix}__progress">
           <div class="${prefix}__progress-bar">
-            <div class="${prefix}__progress-fill" style="width: 0%"></div>
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
@@ -39249,7 +39287,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ${mergedConfig.showTitle ? `<div class="${prefix}__title-wrapper"><div class="${prefix}__title">-</div></div>` : ""}
         <div class="${prefix}__progress">
           <div class="${prefix}__progress-bar">
-            <div class="${prefix}__progress-fill" style="width: 0%"></div>
+            <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
@@ -39309,18 +39347,29 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const updateUI = () => {
       if (!api || !container) return;
       const playing = api.getState("playing");
+      const wasPlaying = isPlaying;
+      isPlaying = playing;
       if (playPauseBtn) {
         playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
         playPauseBtn.title = playing ? "Pause" : "Play";
       }
       const currentTime = api.getState("currentTime") || 0;
       const duration = api.getState("duration") || 0;
-      const percent = duration > 0 ? currentTime / duration * 100 : 0;
-      if (progressFill) {
-        progressFill.style.width = `${percent}%`;
+      lastKnownTime = currentTime;
+      lastUpdateTimestamp = performance.now();
+      if (playing && !wasPlaying) {
+        startProgressAnimation();
+      } else if (!playing && wasPlaying) {
+        stopProgressAnimation();
       }
-      if (currentTimeEl) {
-        currentTimeEl.textContent = formatTime2(currentTime);
+      if (!playing) {
+        const scale = duration > 0 ? currentTime / duration : 0;
+        if (progressFill) {
+          progressFill.style.transform = `scaleX(${scale})`;
+        }
+        if (currentTimeEl) {
+          currentTimeEl.textContent = formatTime2(currentTime);
+        }
       }
       if (durationEl) {
         durationEl.textContent = formatTime2(duration);
@@ -39410,6 +39459,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       async destroy() {
         api?.logger.info("Audio UI plugin destroying");
+        stopProgressAnimation();
         if (container?.parentNode) {
           container.parentNode.removeChild(container);
         }
@@ -39425,6 +39475,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       setLayout(newLayout) {
         if (!container) return;
+        stopProgressAnimation();
         layout = newLayout;
         container.className = `${prefix} ${prefix}--${layout}`;
         if (layout === "full") {
@@ -39447,6 +39498,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         volumeFill = container.querySelector(`.${prefix}__volume-fill`);
         attachEventListeners();
         updateUI();
+        if (isPlaying) {
+          startProgressAnimation();
+        }
       },
       setTheme(newTheme) {
         Object.assign(theme, newTheme);
