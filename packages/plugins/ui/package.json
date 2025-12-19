@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/ui",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "UI Controls Plugin for Scarlett Player",
   "type": "module",
   "main": "dist/index.cjs",
@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^0.4.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
