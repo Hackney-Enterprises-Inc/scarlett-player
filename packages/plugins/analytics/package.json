@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/analytics",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Analytics Plugin for Scarlett Player - QoE metrics and engagement tracking",
   "type": "module",
   "main": "dist/index.cjs",
@@ -29,7 +29,7 @@
     "test:coverage": "vitest --coverage"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.2.0"
+    "@scarlett-player/core": "^0.4.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
