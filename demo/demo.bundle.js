@@ -35199,7 +35199,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/hls/src/quality.ts
-  function formatLevel2(level) {
+  function formatLevel(level) {
     if (level.name) {
       return level.name;
     }
@@ -35240,7 +35240,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       width: level.width || 0,
       height: level.height || 0,
       bitrate: level.bitrate || 0,
-      label: formatLevel2(level),
+      label: formatLevel(level),
       codec: level.codecSet
     }));
   }
@@ -35285,7 +35285,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.logger.debug("HLS manifest parsed", { levels: data.levels.length });
       const levels = data.levels.map((level, index) => ({
         id: `level-${index}`,
-        label: formatLevel2(level),
+        label: formatLevel(level),
         width: level.width,
         height: level.height,
         bitrate: level.bitrate,
@@ -35302,7 +35302,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const isAuto = callbacks.getIsAutoQuality?.() ?? hls.autoLevelEnabled;
       api.logger.debug("HLS level switched", { level: data.level, height: level?.height, auto: isAuto });
       if (level) {
-        const label = isAuto ? `Auto (${formatLevel2(level)})` : formatLevel2(level);
+        const label = isAuto ? `Auto (${formatLevel(level)})` : formatLevel(level);
         api.setState("currentQuality", {
           id: isAuto ? "auto" : `level-${data.level}`,
           label,
@@ -35313,7 +35313,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       }
       api.emit("quality:change", {
-        quality: level ? formatLevel2(level) : "auto",
+        quality: level ? formatLevel(level) : "auto",
         auto: isAuto
       });
       callbacks.onLevelSwitched?.(data.level);

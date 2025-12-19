@@ -30,7 +30,7 @@ import {
   getHlsConstructor,
 } from './hls-loader';
 import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
-import { mapLevels, createQualityManager } from './quality';
+import { mapLevels, createQualityManager, formatLevel } from './quality';
 
 // Re-export types
 export type {
