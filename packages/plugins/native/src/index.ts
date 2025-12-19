@@ -139,7 +139,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
     // Create new video element
     video = document.createElement('video');
-    video.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain;background:#000';
+    video.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;object-fit:contain;background:#000';
     video.preload = preload;
     video.controls = false;
     video.playsInline = true;
@@ -433,6 +433,13 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         const onLoaded = () => {
           videoEl.removeEventListener('loadedmetadata', onLoaded);
           videoEl.removeEventListener('error', onError);
+
+          // Apply initial volume/muted state to video element
+          // This must happen before autoplay for muted autoplay to work
+          const muted = api?.getState('muted');
+          const volume = api?.getState('volume');
+          if (muted !== undefined) videoEl.muted = muted;
+          if (volume !== undefined) videoEl.volume = volume;
 
           api?.setState('source', { src, type: mimeType });
           api?.setState('playbackState', 'ready');

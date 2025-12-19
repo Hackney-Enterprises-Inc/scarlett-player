@@ -113,7 +113,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
 
     // Create new video element
     video = document.createElement('video');
-    video.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain;background:#000';
+    video.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;object-fit:contain;background:#000';
     video.preload = 'metadata';
     video.controls = false;
     video.playsInline = true;
@@ -525,6 +525,15 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
         await loadNative(src);
       } else {
         throw new Error('HLS playback not supported in this browser');
+      }
+
+      // Apply initial volume/muted state to video element
+      // This must happen before autoplay for muted autoplay to work
+      if (video) {
+        const muted = api.getState('muted');
+        const volume = api.getState('volume');
+        if (muted !== undefined) video.muted = muted;
+        if (volume !== undefined) video.volume = volume;
       }
 
       api.setState('playbackState', 'ready');
