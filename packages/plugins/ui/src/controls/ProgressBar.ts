@@ -136,11 +136,16 @@ export class ProgressBar implements Control {
       this.isDragging = false;
       this.el.classList.remove('sp-progress--dragging');
 
-      // Resume playback if video was playing before drag (Safari HLS fix)
+      // Resume playback if video was playing before drag
+      // Wait for seeked event to avoid stutter
       if (this.wasPlayingBeforeDrag) {
         const video = getVideo(this.api.container);
         if (video && video.paused) {
-          video.play().catch(() => {});
+          const resumePlayback = () => {
+            video.removeEventListener('seeked', resumePlayback);
+            video.play().catch(() => {});
+          };
+          video.addEventListener('seeked', resumePlayback);
         }
       }
     }

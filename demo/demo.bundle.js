@@ -10,7 +10,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // node_modules/hls.js/dist/hls.mjs
+  // node_modules/.pnpm/hls.js@1.6.15/node_modules/hls.js/dist/hls.mjs
   var hls_exports = {};
   __export(hls_exports, {
     AbrController: () => AbrController,
@@ -139,7 +139,7 @@
         newLogger[key] = getLoggerFn(key, debugConfig, id);
       });
       try {
-        newLogger.log(`Debug logs enabled for "${context}" in hls.js version ${"1.6.13"}`);
+        newLogger.log(`Debug logs enabled for "${context}" in hls.js version ${"1.6.15"}`);
       } catch (e) {
         return createLogger2();
       }
@@ -4920,7 +4920,8 @@ ${newDetails.m3u8}`);
     return `[${segment.event ? '"' + segment.event.identifier + '"' : "primary"}: ${segment.start.toFixed(2)}-${segment.end.toFixed(2)}]`;
   }
   function playWithCatch(media) {
-    media == null || media.play().catch(() => {
+    var _media$play;
+    media == null || (_media$play = media.play()) == null || _media$play.catch(() => {
     });
   }
   function timelineMessage(label, time) {
@@ -5597,7 +5598,7 @@ ${newDetails.m3u8}`);
   }
   var isFiniteNumber, isSafeInteger, MAX_SAFE_INTEGER, ErrorTypes, ErrorDetails, Events, PlaylistContextType, PlaylistLevelType, EWMA, EwmaBandWidthEstimator, Logger2, noop, fakeLogger, exportedLogger, logger, urlToolkit, hasRequiredUrlToolkit, urlToolkitExports, LoadStats, ElementaryStreamTypes, BaseSegment, Fragment, Part, UINT32_MAX$1, push, RemuxerTrackIdConfig, userAgentHevcSupportIsInaccurate, sampleEntryCodesISO, CODEC_COMPATIBLE_NAMES, AUDIO_CODEC_REGEXP, supportedResult, unsupportedResult, SUPPORTED_INFO_DEFAULT, HdcpLevels, VideoRangeValues, HlsSkip, HlsUrlParameters, Level, omitCircularRefsReplacer, stringify, AbrController, BinarySearch, NetworkErrorAction, ErrorActionFlags, ErrorController, FragmentState, FragmentTracker, DecrypterAesMode, AESCrypto, AESDecryptor, FastAESKey, CHUNK_SIZE, Decrypter, MIN_CHUNK_SIZE, FragmentLoader, LoadError, TaskLoop, ChunkMetadata, noopBuffered, BufferHelper, VARIABLE_REPLACEMENT_REGEX, DECIMAL_RESOLUTION_REGEX, ATTR_LIST_REGEX, AttrList, CLASS_INTERSTITIAL, DateRange, DEFAULT_TARGET_DURATION, LevelDetails, optionalSelf, KeySystems, KeySystemFormats, requestMediaKeySystemAccess, keyUriToKeyIdMap, LevelKey, MASTER_PLAYLIST_REGEX, MASTER_PLAYLIST_MEDIA_REGEX, IS_MEDIA_PLAYLIST, LEVEL_PLAYLIST_REGEX_FAST, LEVEL_PLAYLIST_REGEX_SLOW, M3U8Parser, TimeRanges, State, BaseStreamController, ChunkCache, eventemitter3, hasRequiredEventemitter3, eventemitter3Exports, EventEmitter, version, workerStore, HEADER_FOOTER_SIZE, FRAME_SIZE, MetadataSchema, BaseAudioDemuxer, initPTSFn, chromeVersion$1, BitratesMap, SamplingRateMap, SamplesCoefficients, BytesInSlot, AACDemuxer, getAudioBSID, AC3Demuxer, MP3Demuxer, emsgSchemePattern, MP4Demuxer, SampleAesDecrypter, BaseVideoParser, ExpGolomb, AvcVideoParser, HevcVideoParser, PACKET_LENGTH, TSDemuxer, AAC, UINT32_MAX, MP4, MPEG_TS_CLOCK_FREQ_HZ, MAX_SILENT_FRAME_DURATION, AAC_SAMPLES_PER_FRAME, MPEG_AUDIO_SAMPLE_PER_FRAME, AC3_SAMPLES_PER_FRAME, chromeVersion, safariWebkitVersion, MP4Remuxer, PassThroughRemuxer, now, muxConfig, Transmuxer, emptyResult, TransmuxConfig, TransmuxState, transmuxerInstanceCount, TransmuxerInterface, TICK_INTERVAL$3, AudioStreamController, BasePlaylistController, AudioTrackController, BufferOperationQueue, VIDEO_CODEC_PROFILE_REPLACE, TRACK_REMOVED_ERROR_NAME, HlsJsTrackRemovedError, BufferController, CapLevelController, CmObjectType, CmcdObjectType, CmStreamingFormat, CmcdStreamingFormat, SfItem, DICT, SfToken, BARE_ITEM, BOOLEAN, BYTES, INTEGER, DECIMAL, STRING, STRING_REGEX, TOKEN, KEY, CMCD_OBJECT, CMCD_REQUEST, CMCD_SESSION, CMCD_STATUS, CMCD_HEADER_MAP, CmcdHeaderField, CMCD_EVENT_MODE, toRounded, toUrlSafe, toHundred, nor, CMCD_FORMATTER_MAP, CMCD_REQUEST_MODE, CMCD_RESPONSE_MODE, CMCD_COMMON_KEYS, CMCD_EVENT_KEYS, CUSTOM_KEY_REGEX, CMCD_REQUEST_KEYS, CMCD_RESPONSE_KEYS, CMCD_V1_KEYS, filterMap, CMCD_PARAM, REGEX, CMCDController, PATHWAY_PENALTY_DURATION_MS, ContentSteeringController, EMEController, EMEKeyError, FPSController, SubtitleTrackController, ALIGNED_END_THRESHOLD_SECONDS, TimelineOccupancy, InterstitialEvent, HlsAssetPlayer, ABUTTING_THRESHOLD_SECONDS, InterstitialsSchedule, AssetListLoader, InterstitialsController, TICK_INTERVAL$2, SubtitleStreamController, BufferableInstance, specialCea608CharsCodes, getCharForByte, NR_ROWS, NR_COLS, rowsLowCh1, rowsHighCh1, rowsLowCh2, rowsHighCh2, backgroundColors, CaptionsLogger, numArrayToHexArray, PenState, StyledUnicodeChar, Row, CaptionScreen, Cea608Channel, Cea608Parser, VTTCue, StringDecoder, Settings, defaults, center, VTTParser, LINEBREAKS, startsWith, cueString2millis, calculateOffset, IMSC1_CODEC, HMSF_REGEX, TIME_UNIT_REGEX, textAlignToLineAlign, OutputFilter, TimelineController, WHITESPACE_CHAR, Cues, BYTERANGE, FetchLoader, FetchError, AGE_HEADER_LINE_REGEX, XhrLoader, defaultLoadPolicy, hlsDefaultConfig, MAX_START_GAP_JUMP, SKIP_BUFFER_HOLE_STEP_SECONDS, SKIP_BUFFER_RANGE_START, TICK_INTERVAL$1, GapController, MIN_CUE_DURATION, MAX_CUE_ENDTIME, ID3TrackController, LatencyController, LevelController, TICK_INTERVAL, StreamController, KeyLoader, PlaylistLoader, Hls;
   var init_hls = __esm({
-    "node_modules/hls.js/dist/hls.mjs"() {
+    "node_modules/.pnpm/hls.js@1.6.15/node_modules/hls.js/dist/hls.mjs"() {
       isFiniteNumber = Number.isFinite || function(value) {
         return typeof value === "number" && isFinite(value);
       };
@@ -7751,16 +7752,19 @@ ${newDetails.m3u8}`);
           });
           fragmentEntity.loaded = null;
           if (Object.keys(fragmentEntity.range).length) {
-            fragmentEntity.buffered = true;
-            const endList = fragmentEntity.body.endList = frag.endList || fragmentEntity.body.endList;
-            if (endList) {
-              this.endListFragments[fragmentEntity.body.type] = fragmentEntity;
-            }
+            this.bufferedEnd(fragmentEntity, frag);
             if (!isPartial(fragmentEntity)) {
               this.removeParts(frag.sn - 1, frag.type);
             }
           } else {
             this.removeFragment(fragmentEntity.body);
+          }
+        }
+        bufferedEnd(fragmentEntity, frag) {
+          fragmentEntity.buffered = true;
+          const endList = fragmentEntity.body.endList = frag.endList || fragmentEntity.body.endList;
+          if (endList) {
+            this.endListFragments[fragmentEntity.body.type] = fragmentEntity;
           }
         }
         removeParts(snToKeep, levelType) {
@@ -7787,7 +7791,7 @@ ${newDetails.m3u8}`);
           }
           if (fragmentEntity) {
             fragmentEntity.loaded = null;
-            fragmentEntity.buffered = true;
+            this.bufferedEnd(fragmentEntity, frag);
           }
         }
         getBufferedTimes(fragment, part, partial, timeRange) {
@@ -9335,6 +9339,14 @@ ${newDetails.m3u8}`);
         static setKeyIdForUri(uri, keyId) {
           keyUriToKeyIdMap[uri] = keyId;
         }
+        static addKeyIdForUri(uri) {
+          const val = Object.keys(keyUriToKeyIdMap).length % Number.MAX_SAFE_INTEGER;
+          const keyId = new Uint8Array(16);
+          const dv = new DataView(keyId.buffer, 12, 4);
+          dv.setUint32(0, val);
+          keyUriToKeyIdMap[uri] = keyId;
+          return keyId;
+        }
         constructor(method, uri, format2, formatversions = [1], iv = null, keyId) {
           this.uri = void 0;
           this.method = void 0;
@@ -10639,7 +10651,7 @@ ${newDetails.m3u8}`);
             this.nextLoadPosition = frag.start + frag.duration;
           }
           this.state = State.FRAG_LOADING;
-          const dataOnProgress = this.config.progressive;
+          const dataOnProgress = this.config.progressive && frag.type !== PlaylistLevelType.SUBTITLE;
           let result;
           if (dataOnProgress && keyLoadingPromise) {
             result = keyLoadingPromise.then((keyLoadedData) => {
@@ -11408,10 +11420,11 @@ ${newDetails.m3u8}`);
           }, false);
           if (!parsed) {
             var _this$transmuxer;
-            if (level.fragmentError === 0) {
+            const mediaNotFound = ((_this$transmuxer = this.transmuxer) == null ? void 0 : _this$transmuxer.error) === null;
+            if (level.fragmentError === 0 || mediaNotFound && (level.fragmentError < 2 || frag.endList)) {
               this.treatAsGap(frag, level);
             }
-            if (((_this$transmuxer = this.transmuxer) == null ? void 0 : _this$transmuxer.error) === null) {
+            if (mediaNotFound) {
               const error = new Error(`Found no media in fragment ${frag.sn} of ${this.playlistLabel()} ${frag.level} resetting transmuxer to fallback to playlist timing`);
               this.warn(error.message);
               this.hls.trigger(Events.ERROR, {
@@ -11509,7 +11522,7 @@ ${newDetails.m3u8}`);
       eventemitter3 = { exports: {} };
       eventemitter3Exports = requireEventemitter3();
       EventEmitter = /* @__PURE__ */ getDefaultExportFromCjs(eventemitter3Exports);
-      version = "1.6.13";
+      version = "1.6.15";
       workerStore = {};
       HEADER_FOOTER_SIZE = 10;
       FRAME_SIZE = 10;
@@ -15717,7 +15730,7 @@ ${newDetails.m3u8}`);
           }));
           track.samples = [];
           const start = (firstPTS - initTime) / inputTimeScale;
-          const end = nextAudioTs / inputTimeScale;
+          const end = this.nextAudioTs / inputTimeScale;
           const type = "audio";
           const audioData = {
             data1: moof,
@@ -20631,6 +20644,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           this.hls = void 0;
           this.config = void 0;
           this.media = null;
+          this.mediaResolved = void 0;
           this.keyFormatPromise = null;
           this.keySystemAccessPromises = {};
           this._requestLicenseFailureCount = 0;
@@ -21047,6 +21061,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           return this.attemptKeySystemAccess(keySystemsToAttempt);
         }
         attemptSetMediaKeys(keySystem, mediaKeys) {
+          this.mediaResolved = void 0;
           if (this.mediaKeys === mediaKeys) {
             return Promise.resolve();
           }
@@ -21054,8 +21069,16 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           this.log(`Setting media-keys for "${keySystem}"`);
           const setMediaKeysPromise = Promise.all(queue).then(() => {
             if (!this.media) {
-              this.mediaKeys = null;
-              throw new Error("Attempted to set mediaKeys without media element attached");
+              return new Promise((resolve, reject) => {
+                this.mediaResolved = () => {
+                  this.mediaResolved = void 0;
+                  if (!this.media) {
+                    return reject(new Error("Attempted to set mediaKeys without media element attached"));
+                  }
+                  this.mediaKeys = mediaKeys;
+                  this.media.setMediaKeys(mediaKeys).then(resolve).catch(reject);
+                };
+              });
             }
             return this.media.setMediaKeys(mediaKeys);
           });
@@ -21219,6 +21242,8 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
             }
             const keyIdArray = "buffer" in keyId ? new Uint8Array(keyId.buffer, keyId.byteOffset, keyId.byteLength) : new Uint8Array(keyId);
             if (mediaKeySessionContext.keySystem === KeySystems.PLAYREADY && keyIdArray.length === 16) {
+              const originKeyIdWithStatusChange = arrayToHex(keyIdArray);
+              keyStatuses[originKeyIdWithStatusChange] = status2;
               changeEndianness(keyIdArray);
             }
             const keyIdWithStatusChange = arrayToHex(keyIdArray);
@@ -21451,6 +21476,12 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           this.media = media;
           addEventListener(media, "encrypted", this.onMediaEncrypted);
           addEventListener(media, "waitingforkey", this.onWaitingForKey);
+          const mediaResolved = this.mediaResolved;
+          if (mediaResolved) {
+            mediaResolved();
+          } else {
+            this.mediaKeys = media.mediaKeys;
+          }
         }
         onMediaDetached() {
           const media = this.media;
@@ -21466,6 +21497,10 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           this._requestLicenseFailureCount = 0;
           this.keyIdToKeySessionPromise = {};
           this.bannedKeyIds = {};
+          const mediaResolved = this.mediaResolved;
+          if (mediaResolved) {
+            mediaResolved();
+          }
           if (!this.mediaKeys && !this.mediaKeySessions.length) {
             return;
           }
@@ -21500,8 +21535,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           });
         }
         onManifestLoading() {
-          this.keyFormatPromise = null;
-          this.bannedKeyIds = {};
+          this._clear();
         }
         onManifestLoaded(event, {
           sessionKeys
@@ -23184,7 +23218,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
             if (backwardSeek && currentTime < start || currentTime >= start + duration) {
               var _playingItem$event;
               if ((_playingItem$event = playingItem.event) != null && _playingItem$event.appendInPlace) {
-                this.clearInterstitial(playingItem.event, playingItem);
+                this.clearAssetPlayers(playingItem.event, playingItem);
                 this.flushFrontBuffer(currentTime);
               }
               this.setScheduleToAssetAtTime(currentTime, playingAsset);
@@ -24796,10 +24830,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return player;
         }
         clearInterstitial(interstitial, toSegment) {
+          this.clearAssetPlayers(interstitial, toSegment);
+          interstitial.reset();
+        }
+        clearAssetPlayers(interstitial, toSegment) {
           interstitial.assetList.forEach((asset) => {
             this.clearAssetPlayer(asset.identifier, toSegment);
           });
-          interstitial.reset();
         }
         resetAssetPlayer(assetId) {
           const playerIndex = this.getAssetPlayerQueueIndex(assetId);
@@ -24981,9 +25018,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         primaryFallback(interstitial) {
           const flushStart = interstitial.timelineStart;
           const playingItem = this.effectivePlayingItem;
+          let timelinePos = this.timelinePos;
           if (playingItem) {
-            this.log(`Fallback to primary from event "${interstitial.identifier}" start: ${flushStart} pos: ${this.timelinePos} playing: ${segmentToString(playingItem)} error: ${interstitial.error}`);
-            let timelinePos = this.timelinePos;
+            this.log(`Fallback to primary from event "${interstitial.identifier}" start: ${flushStart} pos: ${timelinePos} playing: ${segmentToString(playingItem)} error: ${interstitial.error}`);
             if (timelinePos === -1) {
               timelinePos = this.hls.startPosition;
             }
@@ -24995,14 +25032,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.attachPrimary(flushStart, null);
               this.flushFrontBuffer(flushStart);
             }
-            if (!this.schedule) {
-              return;
-            }
-            const scheduleIndex = this.schedule.findItemIndexAtTime(timelinePos);
-            this.setSchedulePosition(scheduleIndex);
-          } else {
+          } else if (timelinePos === -1) {
             this.checkStart();
+            return;
           }
+          if (!this.schedule) {
+            return;
+          }
+          const scheduleIndex = this.schedule.findItemIndexAtTime(timelinePos);
+          this.setSchedulePosition(scheduleIndex);
         }
         // Asset List loading
         onAssetListLoaded(event, data) {
@@ -25035,7 +25073,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               if (!this.playingItem && this.timelinePos > item.end) {
                 const index = this.schedule.findItemIndexAtTime(this.timelinePos);
                 if (index !== scheduleIndex) {
-                  interstitial.error = new Error(`Interstitial no longer within playback range ${this.timelinePos} ${interstitial}`);
+                  interstitial.error = new Error(`Interstitial ${assets.length ? "no longer within playback range" : "asset-list is empty"} ${this.timelinePos} ${interstitial}`);
+                  this.log(interstitial.error.message);
                   this.updateSchedule(true);
                   this.primaryFallback(interstitial);
                   return;
@@ -30599,7 +30638,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         onAudioTrackSwitching(event, data) {
           const hls = this.hls;
-          const fromAltAudio = this.altAudio === 2;
+          const fromAltAudio = this.altAudio !== 0;
           const altAudio = useAlternateAudio(data.url, hls);
           if (!altAudio) {
             if (this.mediaBuffer !== this.media) {
@@ -30617,6 +30656,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.resetTransmuxer();
             }
             if (fromAltAudio) {
+              this.altAudio = 0;
               this.fragmentTracker.removeAllFragments();
               hls.once(Events.BUFFER_FLUSHED, () => {
                 if (!this.hls) {
@@ -31386,13 +31426,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (!keyInfo.decryptdata.keyId && (_frag$initSegment = frag.initSegment) != null && _frag$initSegment.data) {
               const keyIds = parseKeyIdsFromTenc(frag.initSegment.data);
               if (keyIds.length) {
-                const keyId = keyIds[0];
+                let keyId = keyIds[0];
                 if (keyId.some((b) => b !== 0)) {
                   this.log(`Using keyId found in init segment ${arrayToHex(keyId)}`);
-                  keyInfo.decryptdata.keyId = keyId;
                   LevelKey.setKeyIdForUri(keyInfo.decryptdata.uri, keyId);
+                } else {
+                  keyId = LevelKey.addKeyIdForUri(keyInfo.decryptdata.uri);
+                  this.log(`Generating keyId to patch media ${arrayToHex(keyId)}`);
                 }
+                keyInfo.decryptdata.keyId = keyId;
               }
+            }
+            if (!keyInfo.decryptdata.keyId && !isMediaFragment(frag)) {
+              return Promise.resolve(keyLoadedData);
             }
             const keySessionContextPromise = this.emeController.loadKey(keyLoadedData);
             return (keyInfo.keyLoadPromise = keySessionContextPromise.then((keySessionContext) => {
@@ -35528,7 +35574,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             networkRetryCount++;
             const delay = getRetryDelay2(networkRetryCount - 1);
             api?.logger.info(`Attempting network error recovery (attempt ${networkRetryCount}/${maxRetries}) in ${delay}ms`);
-            api?.emit("error:network", { error: new Error(error.details), retry: networkRetryCount, maxRetries });
+            api?.emit("error:network", { error: new Error(error.details) });
             if (retryTimeout) {
               clearTimeout(retryTimeout);
             }
@@ -35549,7 +35595,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             mediaRetryCount++;
             const delay = getRetryDelay2(mediaRetryCount - 1);
             api?.logger.info(`Attempting media error recovery (attempt ${mediaRetryCount}/${maxRetries}) in ${delay}ms`);
-            api?.emit("error:media", { error: new Error(error.details), retry: mediaRetryCount, maxRetries });
+            api?.emit("error:media", { error: new Error(error.details) });
             if (retryTimeout) {
               clearTimeout(retryTimeout);
             }
@@ -35639,7 +35685,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       canPlay(src) {
         if (!isHLSSupported()) return false;
         const url = src.toLowerCase();
-        if (url.endsWith(".m3u8")) return true;
+        const urlWithoutQuery = url.split("?")[0].split("#")[0];
+        if (urlWithoutQuery.endsWith(".m3u8")) return true;
         if (url.includes("application/x-mpegurl")) return true;
         if (url.includes("application/vnd.apple.mpegurl")) return true;
         return false;
@@ -35693,8 +35740,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             isAutoQuality = false;
             const levelIndex = parseInt(quality.replace("level-", ""), 10);
             if (!isNaN(levelIndex) && levelIndex >= 0 && levelIndex < hls.levels.length) {
-              hls.currentLevel = levelIndex;
-              api?.logger.debug(`Quality: set to level ${levelIndex}`);
+              hls.nextLevel = levelIndex;
+              api?.logger.debug(`Quality: queued switch to level ${levelIndex}`);
             }
           }
         });
@@ -35863,11 +35910,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       try {
         const url = new URL(src, window.location.href);
         const pathname = url.pathname;
-        const ext = pathname.split(".").pop()?.toLowerCase() || "";
+        const ext = pathname.split(".").pop()?.toLowerCase() ?? "";
         return ext;
       } catch {
-        const ext = src.split(".").pop()?.toLowerCase() || "";
-        return ext.split("?")[0];
+        const rawExt = src.split(".").pop()?.toLowerCase() ?? "";
+        return rawExt.split("?")[0] ?? "";
       }
     };
     const getMimeType = (ext) => {
@@ -35902,12 +35949,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       on("playing", () => {
         api?.setState("playing", true);
         api?.setState("paused", false);
-        api?.emit("playback:playing", void 0);
+        api?.emit("playback:play", void 0);
       });
       on("pause", () => {
         api?.setState("playing", false);
         api?.setState("paused", true);
-        api?.emit("playback:paused", void 0);
+        api?.emit("playback:pause", void 0);
       });
       on("ended", () => {
         api?.setState("playing", false);
@@ -35920,14 +35967,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       on("durationchange", () => {
         api?.setState("duration", videoEl.duration || 0);
-        api?.emit("media:durationchange", { duration: videoEl.duration || 0 });
       });
       on("loadedmetadata", () => {
         api?.setState("duration", videoEl.duration || 0);
         api?.emit("media:loadedmetadata", { duration: videoEl.duration || 0 });
-      });
-      on("loadeddata", () => {
-        api?.emit("media:loadeddata", void 0);
       });
       on("canplay", () => {
         api?.setState("buffering", false);
@@ -35959,7 +36002,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       on("volumechange", () => {
         api?.setState("volume", videoEl.volume);
         api?.setState("muted", videoEl.muted);
-        api?.emit("volume:change", { volume: videoEl.volume });
+        api?.emit("volume:change", { volume: videoEl.volume, muted: videoEl.muted });
       });
       on("ratechange", () => {
         api?.setState("playbackRate", videoEl.playbackRate);
@@ -36040,8 +36083,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
           video.currentTime = clampedTime;
         });
-        const unsubVolume = api.on("volume:change", ({ volume }) => {
-          if (video) video.volume = volume;
+        const unsubVolume = api.on("volume:change", ({ volume, muted }) => {
+          if (video) {
+            video.volume = volume;
+            video.muted = muted;
+          }
         });
         const unsubMute = api.on("volume:mute", ({ muted }) => {
           if (video) video.muted = muted;
@@ -36075,6 +36121,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         cleanup();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
+        api.setState("qualities", []);
+        api.setState("currentQuality", null);
         const videoEl = getOrCreateVideo();
         cleanupEvents = setupEventListeners(videoEl);
         return new Promise((resolve, reject) => {
@@ -36770,8 +36818,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (this.wasPlayingBeforeDrag) {
             const video = getVideo(this.api.container);
             if (video && video.paused) {
-              video.play().catch(() => {
-              });
+              const resumePlayback = () => {
+                video.removeEventListener("seeked", resumePlayback);
+                video.play().catch(() => {
+                });
+              };
+              video.addEventListener("seeked", resumePlayback);
             }
           }
         }
@@ -38061,6 +38113,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
+  var VERSION = true ? "0.1.1" : "dev";
+  window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
@@ -38095,7 +38149,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     player.on("quality:levels", (e) => console.log("\u{1F3AF} Quality levels:", e));
     player.on("error", (e) => console.error("\u274C Error:", e));
     window.player = player;
-    console.log("\u{1F3AC} Scarlett Player Demo Ready");
+    console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");
   });
 })();

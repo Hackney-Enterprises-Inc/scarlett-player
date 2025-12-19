@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Core player with plugin system for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "vite",
     "demo": "vite",
-    "build": "tsc && vite build",
+    "build": "rm -f tsconfig.tsbuildinfo && tsc && vite build",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --coverage",

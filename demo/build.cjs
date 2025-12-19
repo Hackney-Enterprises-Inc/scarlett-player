@@ -5,6 +5,13 @@
 
 const esbuild = require('esbuild');
 const path = require('path');
+const fs = require('fs');
+
+// Read version from core package.json
+const corePackage = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../packages/core/package.json'), 'utf8')
+);
+const VERSION = corePackage.version;
 
 async function build() {
   try {
@@ -18,6 +25,7 @@ async function build() {
       minify: false,
       define: {
         'process.env.NODE_ENV': '"development"',
+        '__VERSION__': JSON.stringify(VERSION),
       },
     });
 

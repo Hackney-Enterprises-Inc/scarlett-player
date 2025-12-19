@@ -44,11 +44,12 @@ export interface PlayerOptions {
  * Quality level interface for proxy methods.
  */
 export interface QualityLevel {
-  index: number;
+  id: string;
+  label: string;
   width: number;
   height: number;
   bitrate: number;
-  label: string;
+  active: boolean;
 }
 
 /**

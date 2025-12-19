@@ -8,7 +8,12 @@
     "sourceMap": true,
     "composite": true,
     "jsx": "preserve",
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "baseUrl": ".",
+    "paths": {
+      "@scarlett-player/core": ["../core/dist/index.d.ts"],
+      "@scarlett-player/core/*": ["../core/dist/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts"]

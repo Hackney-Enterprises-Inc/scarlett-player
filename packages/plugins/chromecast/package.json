@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/chromecast",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Chromecast Plugin for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -27,7 +27,7 @@
     "@scarlett-player/core": "^0.1.0"
   },
   "devDependencies": {
-    "@scarlett-player/core": "file:../../core",
+    "@scarlett-player/core": "workspace:*",
     "typescript": "^5.3.0",
     "tsup": "^8.0.0",
     "vitest": "^1.6.0",

@@ -53,41 +53,43 @@ describe('ProgressBar', () => {
     progressBar.destroy();
   });
 
-  it('should render progress bar element', () => {
-    const el = progressBar.render();
-    expect(el.classList.contains('sp-progress')).toBe(true);
+  it('should render progress bar wrapper element', () => {
+    const wrapper = progressBar.render();
+    expect(wrapper.classList.contains('sp-progress-wrapper')).toBe(true);
   });
 
-  it('should have slider role', () => {
-    const el = progressBar.render();
-    expect(el.getAttribute('role')).toBe('slider');
-    expect(el.getAttribute('aria-label')).toBe('Seek');
+  it('should have slider role on inner progress element', () => {
+    const wrapper = progressBar.render();
+    const el = wrapper.querySelector('.sp-progress');
+    expect(el?.getAttribute('role')).toBe('slider');
+    expect(el?.getAttribute('aria-label')).toBe('Seek');
   });
 
   it('should have track, filled, buffered, handle, and tooltip elements', () => {
-    const el = progressBar.render();
-    expect(el.querySelector('.sp-progress__track')).not.toBeNull();
-    expect(el.querySelector('.sp-progress__filled')).not.toBeNull();
-    expect(el.querySelector('.sp-progress__buffered')).not.toBeNull();
-    expect(el.querySelector('.sp-progress__handle')).not.toBeNull();
-    expect(el.querySelector('.sp-progress__tooltip')).not.toBeNull();
+    const wrapper = progressBar.render();
+    expect(wrapper.querySelector('.sp-progress__track')).not.toBeNull();
+    expect(wrapper.querySelector('.sp-progress__filled')).not.toBeNull();
+    expect(wrapper.querySelector('.sp-progress__buffered')).not.toBeNull();
+    expect(wrapper.querySelector('.sp-progress__handle')).not.toBeNull();
+    expect(wrapper.querySelector('.sp-progress__tooltip')).not.toBeNull();
   });
 
   it('should update filled width based on progress', () => {
     progressBar.update();
-    const el = progressBar.render();
-    const filled = el.querySelector('.sp-progress__filled') as HTMLElement;
+    const wrapper = progressBar.render();
+    const filled = wrapper.querySelector('.sp-progress__filled') as HTMLElement;
 
     // 30 / 100 = 30%
     expect(filled.style.width).toBe('30%');
   });
 
-  it('should update aria values', () => {
+  it('should update aria values on inner progress element', () => {
     progressBar.update();
-    const el = progressBar.render();
+    const wrapper = progressBar.render();
+    const el = wrapper.querySelector('.sp-progress');
 
-    expect(el.getAttribute('aria-valuemax')).toBe('100');
-    expect(el.getAttribute('aria-valuenow')).toBe('30');
+    expect(el?.getAttribute('aria-valuemax')).toBe('100');
+    expect(el?.getAttribute('aria-valuenow')).toBe('30');
   });
 
   it('should update buffered width when buffered ranges exist', () => {
@@ -104,23 +106,24 @@ describe('ProgressBar', () => {
     });
 
     progressBar.update();
-    const el = progressBar.render();
-    const buffered = el.querySelector('.sp-progress__buffered') as HTMLElement;
+    const wrapper = progressBar.render();
+    const buffered = wrapper.querySelector('.sp-progress__buffered') as HTMLElement;
 
     expect(buffered.style.width).toBe('60%');
   });
 
-  it('should be keyboard accessible', () => {
-    const el = progressBar.render();
-    expect(el.getAttribute('tabindex')).toBe('0');
+  it('should be keyboard accessible on inner progress element', () => {
+    const wrapper = progressBar.render();
+    const el = wrapper.querySelector('.sp-progress');
+    expect(el?.getAttribute('tabindex')).toBe('0');
   });
 
   it('should remove element on destroy', () => {
-    const el = progressBar.render();
-    document.body.appendChild(el);
-    expect(document.body.contains(el)).toBe(true);
+    const wrapper = progressBar.render();
+    document.body.appendChild(wrapper);
+    expect(document.body.contains(wrapper)).toBe(true);
 
     progressBar.destroy();
-    expect(document.body.contains(el)).toBe(false);
+    expect(document.body.contains(wrapper)).toBe(false);
   });
 });

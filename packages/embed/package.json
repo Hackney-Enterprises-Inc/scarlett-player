@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/embed",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Standalone CDN-ready embed package for Scarlett Player",
   "type": "module",
   "main": "./dist/embed.umd.cjs",
@@ -48,9 +48,9 @@
   },
   "homepage": "https://scarlettplayer.com",
   "dependencies": {
-    "@scarlett-player/core": "file:../core",
-    "@scarlett-player/hls": "file:../plugins/hls",
-    "@scarlett-player/ui": "file:../plugins/ui",
+    "@scarlett-player/core": "workspace:*",
+    "@scarlett-player/hls": "workspace:*",
+    "@scarlett-player/ui": "workspace:*",
     "hls.js": "^1.5.0"
   },
   "devDependencies": {
