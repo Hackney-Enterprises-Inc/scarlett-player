@@ -164,6 +164,12 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     };
 
     // Playback state events
+    // 'play' fires immediately when video.play() is called
+    on('play', () => {
+      api?.setState('paused', false);
+    });
+
+    // 'playing' fires when playback actually starts (after buffering)
     on('playing', () => {
       api?.setState('playing', true);
       api?.setState('paused', false);

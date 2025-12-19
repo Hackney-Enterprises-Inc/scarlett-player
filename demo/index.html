@@ -150,15 +150,15 @@
     }
 
     .console {
-      margin-top: 32px;
+      margin-top: 24px;
       max-width: 960px;
       width: 100%;
       background: #0d0d0d;
       border-radius: 8px;
-      padding: 16px;
+      padding: 12px 16px;
       font-family: 'SF Mono', Monaco, monospace;
-      font-size: 0.75rem;
-      max-height: 200px;
+      font-size: 0.7rem;
+      max-height: 120px;
       overflow-y: auto;
     }
 
@@ -921,7 +921,8 @@ playlist.<span class="function">add</span>([
         const mediaType = tab.dataset.media;
         if (!mediaType || mediaType === currentMedia) return;
 
-        // Pause all players when switching
+        // Clear console and pause all players when switching
+        clearConsole();
         pauseAllPlayers();
 
         currentMedia = mediaType;
@@ -961,6 +962,8 @@ playlist.<span class="function">add</span>([
         const demo = btn.dataset.demo;
         if (!demo) return;
 
+        // Clear console when switching demos
+        clearConsole();
         currentDemo = demo;
 
         // Update active state
@@ -992,7 +995,8 @@ playlist.<span class="function">add</span>([
         const demo = btn.dataset.demo;
         if (!demo || demo === currentDemo) return;
 
-        // Pause audio players when switching between them
+        // Clear console and pause audio players when switching between them
+        clearConsole();
         if (window.audioPlayer) window.audioPlayer.pause();
         if (window.miniPlayer) window.miniPlayer.pause();
 
@@ -1021,6 +1025,10 @@ playlist.<span class="function">add</span>([
     const originalLog = console.log;
     const originalWarn = console.warn;
     const originalError = console.error;
+
+    function clearConsole() {
+      consoleEl.innerHTML = '';
+    }
 
     function addConsoleLine(msg, type = '') {
       const line = document.createElement('div');
