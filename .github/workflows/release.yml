@@ -79,45 +79,56 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           S3_BUCKET="${{ secrets.MINIO_BUCKET }}"
           S3_ENDPOINT="${{ secrets.MINIO_ENDPOINT }}"
+          BASE_PATH="s3://${S3_BUCKET}/scarlett-player"
 
           echo "Deploying v${VERSION} to MinIO CDN..."
 
-          # Upload to versioned path (immutable, 1 year cache)
-          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=31536000, immutable"
-
-          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/scarlett-player.umd.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=31536000, immutable"
-
-          # Upload HLS chunk (find the hashed filename)
-          HLS_FILE=$(ls packages/embed/dist/hls-*.js 2>/dev/null | head -1)
-          if [ -n "$HLS_FILE" ]; then
-            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/v${VERSION}/hls.js" \
+          # Upload function for both versioned and latest paths
+          upload() {
+            local src="$1"
+            local dest="$2"
+            echo "  Uploading ${dest}..."
+            # Versioned (immutable, 1 year cache)
+            aws s3 cp "$src" "${BASE_PATH}/v${VERSION}/${dest}" \
               --endpoint-url "${S3_ENDPOINT}" \
               --content-type "application/javascript" \
               --cache-control "public, max-age=31536000, immutable"
-          fi
-
-          # Upload to latest path (shorter cache for updates)
-          aws s3 cp packages/embed/dist/embed.js "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=3600"
-
-          aws s3 cp packages/embed/dist/embed.umd.cjs "s3://${S3_BUCKET}/scarlett-player/latest/scarlett-player.umd.js" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "application/javascript" \
-            --cache-control "public, max-age=3600"
-
-          if [ -n "$HLS_FILE" ]; then
-            aws s3 cp "$HLS_FILE" "s3://${S3_BUCKET}/scarlett-player/latest/hls.js" \
+            # Latest (1 hour cache)
+            aws s3 cp "$src" "${BASE_PATH}/latest/${dest}" \
               --endpoint-url "${S3_ENDPOINT}" \
               --content-type "application/javascript" \
               --cache-control "public, max-age=3600"
+          }
+
+          # Default build
+          upload "packages/embed/dist/embed.js" "embed.js"
+          upload "packages/embed/dist/embed.umd.cjs" "embed.umd.cjs"
+
+          # Light build
+          upload "packages/embed/dist/embed.light.js" "embed.light.js"
+          upload "packages/embed/dist/embed.light.umd.cjs" "embed.light.umd.cjs"
+
+          # Full build
+          upload "packages/embed/dist/embed.full.js" "embed.full.js"
+          upload "packages/embed/dist/embed.full.umd.cjs" "embed.full.umd.cjs"
+
+          # Audio build
+          upload "packages/embed/dist/embed.audio.js" "embed.audio.js"
+          upload "packages/embed/dist/embed.audio.umd.cjs" "embed.audio.umd.cjs"
+
+          # Audio-Light build
+          upload "packages/embed/dist/embed.audio.light.js" "embed.audio.light.js"
+          upload "packages/embed/dist/embed.audio.light.umd.cjs" "embed.audio.light.umd.cjs"
+
+          # HLS chunks
+          HLS_FILE=$(ls packages/embed/dist/hls-*.js 2>/dev/null | head -1)
+          if [ -n "$HLS_FILE" ]; then
+            upload "$HLS_FILE" "hls.js"
+          fi
+
+          HLS_LIGHT_FILE=$(ls packages/embed/dist/hls.light-*.js 2>/dev/null | head -1)
+          if [ -n "$HLS_LIGHT_FILE" ]; then
+            upload "$HLS_LIGHT_FILE" "hls.light.js"
           fi
 
           echo "✅ Uploaded to ${S3_ENDPOINT}/${S3_BUCKET}/scarlett-player/v${VERSION}/"
@@ -159,12 +170,17 @@ jobs:
           echo "### Version: v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/scarlett-player.umd.js\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versioned:** \`${CDN_BASE}/scarlett-player/v${VERSION}/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest:** \`${CDN_BASE}/scarlett-player/latest/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Available builds:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`embed.umd.cjs\` - default video player" >> $GITHUB_STEP_SUMMARY
+          echo "- \`embed.light.umd.cjs\` - lighter build" >> $GITHUB_STEP_SUMMARY
+          echo "- \`embed.full.umd.cjs\` - all features" >> $GITHUB_STEP_SUMMARY
+          echo "- \`embed.audio.umd.cjs\` - audio player" >> $GITHUB_STEP_SUMMARY
+          echo "- \`embed.audio.light.umd.cjs\` - audio player light" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Forge deployment triggered" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** npm publishing is handled manually" >> $GITHUB_STEP_SUMMARY
