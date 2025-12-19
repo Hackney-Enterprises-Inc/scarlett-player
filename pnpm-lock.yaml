@@ -134,6 +134,27 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
+  packages/plugins/analytics:
+    devDependencies:
+      '@scarlett-player/core':
+        specifier: file:../../core
+        version: link:../../core
+      '@vitest/coverage-v8':
+        specifier: ^1.6.0
+        version: 1.6.1(vitest@1.6.1)
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
   packages/plugins/chromecast:
     devDependencies:
       '@scarlett-player/core':
@@ -3047,7 +3068,7 @@ snapshots:
       std-env: 3.10.0
       strip-literal: 2.1.1
       test-exclude: 6.0.0
-      vitest: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@23.2.0)(terser@5.44.1)
+      vitest: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
     transitivePeerDependencies:
       - supports-color
 
