@@ -29,10 +29,10 @@ describe('createNativePlugin', () => {
     const plugin = createNativePlugin();
 
     expect(plugin.id).toBe('native-provider');
-    expect(plugin.name).toBe('Native Video Provider');
+    expect(plugin.name).toBe('Native Media Provider');
     expect(plugin.version).toBe('1.0.0');
     expect(plugin.type).toBe('provider');
-    expect(plugin.description).toContain('Native HTML5 video');
+    expect(plugin.description).toContain('Native HTML5');
   });
 
   it('has required methods', () => {

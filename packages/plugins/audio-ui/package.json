@@ -1,7 +1,7 @@
 {
-  "name": "@scarlett-player/ui",
+  "name": "@scarlett-player/audio-ui",
   "version": "0.2.0",
-  "description": "UI Controls Plugin for Scarlett Player",
+  "description": "Audio UI Plugin for Scarlett Player - Compact audio player interface with album art and waveform progress",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -39,10 +39,12 @@
     "jsdom": "^24.0.0"
   },
   "keywords": [
-    "video",
+    "audio",
     "player",
     "ui",
-    "controls",
+    "compact",
+    "album-art",
+    "waveform",
     "scarlett"
   ],
   "author": "The Stream Platform",
@@ -50,7 +52,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
-    "directory": "packages/plugins/ui"
+    "directory": "packages/plugins/audio-ui"
   },
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"

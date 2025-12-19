@@ -23,9 +23,12 @@
 npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
 
 # Optional plugins
-npm install @scarlett-player/native      # MP4, WebM, MOV, MKV support
-npm install @scarlett-player/airplay     # AirPlay casting
-npm install @scarlett-player/chromecast  # Chromecast casting
+npm install @scarlett-player/native        # MP4, WebM, MOV, MKV support
+npm install @scarlett-player/airplay       # AirPlay casting
+npm install @scarlett-player/chromecast    # Chromecast casting
+npm install @scarlett-player/playlist      # Playlist/queue management
+npm install @scarlett-player/media-session # Lock screen & media key controls
+npm install @scarlett-player/audio-ui      # Compact audio player UI
 
 # Vue 3 wrapper
 npm install @scarlett-player/vue
@@ -94,7 +97,11 @@ function onPlayerReady(player) {
 | `@scarlett-player/ui` | UI controls with keyboard shortcuts and theming |
 | `@scarlett-player/airplay` | AirPlay casting support |
 | `@scarlett-player/chromecast` | Chromecast casting support |
+| `@scarlett-player/playlist` | Playlist management with shuffle, repeat, and queue |
+| `@scarlett-player/media-session` | Media Session API for lock screen & media key controls |
+| `@scarlett-player/audio-ui` | Compact audio player interface with artwork and progress |
 | `@scarlett-player/vue` | Vue 3 component wrapper |
+| `@scarlett-player/embed` | CDN embed script for no-bundler usage |
 
 ## Keyboard Shortcuts
 
@@ -150,9 +157,13 @@ packages/
     hls/          # HLS provider plugin
     native/       # Native video provider
     ui/           # UI controls plugin
+    audio-ui/     # Compact audio player UI
     airplay/      # AirPlay casting plugin
     chromecast/   # Chromecast casting plugin
+    playlist/     # Playlist & queue management
+    media-session/# Media Session API integration
   vue/            # Vue 3 component wrapper
+  embed/          # CDN embed script
 demo/             # Interactive demo
 docs/             # Landing page
 ```
@@ -173,7 +184,9 @@ docs/             # Landing page
 - [x] Quality selection
 - [x] AirPlay & Chromecast casting
 - [x] Vue 3 component wrapper
-- [ ] Playlists & queue management
+- [x] Playlists & queue management
+- [x] Media Session API (lock screen controls)
+- [x] Audio player UI
 - [ ] Closed captions (WebVTT)
 - [ ] Thumbnail preview on seek
 - [ ] React component wrapper

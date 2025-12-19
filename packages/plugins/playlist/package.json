@@ -1,7 +1,7 @@
 {
-  "name": "@scarlett-player/ui",
+  "name": "@scarlett-player/playlist",
   "version": "0.2.0",
-  "description": "UI Controls Plugin for Scarlett Player",
+  "description": "Playlist Plugin for Scarlett Player - Queue management, shuffle, repeat, and gapless playback",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -40,9 +40,13 @@
   },
   "keywords": [
     "video",
+    "audio",
     "player",
-    "ui",
-    "controls",
+    "playlist",
+    "queue",
+    "shuffle",
+    "repeat",
+    "gapless",
     "scarlett"
   ],
   "author": "The Stream Platform",
@@ -50,7 +54,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
-    "directory": "packages/plugins/ui"
+    "directory": "packages/plugins/playlist"
   },
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"

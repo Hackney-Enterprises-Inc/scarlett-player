@@ -118,6 +118,12 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     video.controls = false;
     video.playsInline = true;
 
+    // Set poster from state if available
+    const poster = api?.getState('poster');
+    if (poster) {
+      video.poster = poster;
+    }
+
     api?.container.appendChild(video);
     return video;
   };

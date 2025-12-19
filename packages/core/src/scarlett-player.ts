@@ -149,6 +149,7 @@ export class ScarlettPlayer {
       loop: options.loop ?? false,
       volume: options.volume ?? 1.0,
       muted: options.muted ?? false,
+      poster: options.poster ?? '',
     });
     this.logger = new Logger({
       level: options.logLevel ?? 'warn',
@@ -297,14 +298,8 @@ export class ScarlettPlayer {
     try {
       this.logger.debug('Play requested');
 
-      // Update state
-      this.stateManager.update({
-        playing: true,
-        paused: false,
-        playbackState: 'playing',
-      });
-
-      // Emit play event
+      // Emit play event - provider will update state when playback actually starts
+      // Don't set playing:true optimistically as it causes state sync issues
       this.eventBus.emit('playback:play', undefined);
     } catch (error) {
       this.errorHandler.handle(error as Error, { operation: 'play' });
@@ -332,14 +327,8 @@ export class ScarlettPlayer {
         this.seekResumeTimeout = null;
       }
 
-      // Update state
-      this.stateManager.update({
-        playing: false,
-        paused: true,
-        playbackState: 'paused',
-      });
-
-      // Emit pause event
+      // Emit pause event - provider will update state when playback actually pauses
+      // Don't set paused:true optimistically as it causes state sync issues
       this.eventBus.emit('playback:pause', undefined);
     } catch (error) {
       this.errorHandler.handle(error as Error, { operation: 'pause' });

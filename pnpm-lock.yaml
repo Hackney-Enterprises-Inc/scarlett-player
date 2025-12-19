@@ -26,6 +26,9 @@ importers:
       '@vitejs/plugin-vue':
         specifier: ^4.5.0
         version: 4.6.2(vite@5.4.21(@types/node@20.19.27)(terser@5.44.1))(vue@3.5.26(typescript@5.9.3))
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
       eslint:
         specifier: ^8.56.0
         version: 8.57.1
@@ -134,6 +137,24 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
+  packages/plugins/audio-ui:
+    devDependencies:
+      '@scarlett-player/core':
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
   packages/plugins/chromecast:
     devDependencies:
       '@scarlett-player/core':
@@ -179,11 +200,47 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
 
+  packages/plugins/media-session:
+    devDependencies:
+      '@scarlett-player/core':
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
   packages/plugins/native:
     devDependencies:
       '@scarlett-player/core':
         specifier: workspace:*
         version: link:../../core
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)(@vitest/ui@1.6.1)(jsdom@24.1.3)(terser@5.44.1)
+
+  packages/plugins/playlist:
+    devDependencies:
+      '@scarlett-player/core':
+        specifier: workspace:*
+        version: link:../../core
+      jsdom:
+        specifier: ^24.0.0
+        version: 24.1.3
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)

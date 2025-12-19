@@ -15,8 +15,8 @@ export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal } from './ty
 export { createEmbedPlayer, initElement, initAll, create } from './embed';
 export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-// Package version
-const VERSION = '0.1.0';
+// Package version - should match package.json
+const VERSION = '0.1.2';
 
 /**
  * Global API exposed as window.ScarlettPlayer
