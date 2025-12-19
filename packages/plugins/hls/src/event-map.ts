@@ -195,6 +195,12 @@ export function setupVideoEventHandlers(
   };
 
   // Playback events
+  // 'play' fires immediately when video.play() is called
+  addHandler('play', () => {
+    api.setState('paused', false);
+  });
+
+  // 'playing' fires when playback actually starts (after buffering)
   addHandler('playing', () => {
     api.setState('playing', true);
     api.setState('paused', false);

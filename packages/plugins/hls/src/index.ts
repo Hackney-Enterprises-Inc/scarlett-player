@@ -30,7 +30,7 @@ import {
   getHlsConstructor,
 } from './hls-loader';
 import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
-import { mapLevels, createQualityManager } from './quality';
+import { mapLevels, createQualityManager, formatLevel } from './quality';
 
 // Re-export types
 export type {
@@ -475,6 +475,20 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           if (!isNaN(levelIndex) && levelIndex >= 0 && levelIndex < hls.levels.length) {
             hls.nextLevel = levelIndex;
             api?.logger.debug(`Quality: queued switch to level ${levelIndex}`);
+
+            // Show pending state - actual switch happens when chunks load
+            const targetLevel = hls.levels[levelIndex];
+            if (targetLevel) {
+              const label = formatLevel(targetLevel);
+              api?.setState('currentQuality', {
+                id: `level-${levelIndex}`,
+                label: `${label}...`, // Ellipsis indicates switching in progress
+                width: targetLevel.width,
+                height: targetLevel.height,
+                bitrate: targetLevel.bitrate,
+                active: false, // Not yet active
+              });
+            }
           }
         }
       });
