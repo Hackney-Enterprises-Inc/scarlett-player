@@ -83,7 +83,6 @@ jobs:
 
           echo "Deploying v${VERSION} to MinIO CDN..."
 
-          # Upload HLS chunk (find the hashed filename)
           # Upload function for both versioned and latest paths
           upload() {
             local src="$1"
