@@ -51,6 +51,8 @@ export default defineConfig({
       external: [],
       output: {
         globals: {},
+        // Use stable chunk names for CDN deployment (no hash)
+        chunkFileNames: 'hls.js',
         assetFileNames: (assetInfo) => {
           if (assetInfo.name === 'style.css') {
             return `${baseName}.css`;

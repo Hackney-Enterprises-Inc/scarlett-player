@@ -58,7 +58,7 @@ jobs:
             echo "Tag v${{ steps.version.outputs.version }} does not exist, will create release"
           fi
 
-      # Create Release Pull Request (versioning only, no npm publish)
+      # Create Release Pull Request or publish packages
       - name: Create Release Pull Request
         id: changesets
         uses: changesets/action@v1
@@ -113,13 +113,37 @@ jobs:
           upload "${DIST}/embed.audio.js" "embed.audio.js"
           upload "${DIST}/embed.audio.umd.cjs" "embed.audio.umd.cjs"
 
-          # HLS chunk (dynamically loaded)
-          HLS_FILE=$(ls ${DIST}/hls-*.js 2>/dev/null | head -1)
-          if [ -n "$HLS_FILE" ]; then
-            upload "$HLS_FILE" "hls.js"
-          fi
+          # HLS chunk (dynamically loaded by ESM builds)
+          upload "${DIST}/hls.js" "hls.js"
+
+          # iframe embed page
+          echo "  Uploading iframe.html..."
+          aws s3 cp "packages/embed/iframe.html" "${BASE_PATH}/v${VERSION}/iframe.html" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "text/html" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp "packages/embed/iframe.html" "${BASE_PATH}/latest/iframe.html" \
+            --endpoint-url "${S3_ENDPOINT}" \
+            --content-type "text/html" \
+            --cache-control "public, max-age=3600"
 
           echo "Done!"
+          echo ""
+          echo "Uploaded files:"
+          echo "  ESM: embed.js, embed.video.js, embed.audio.js"
+          echo "  UMD: embed.umd.cjs, embed.video.umd.cjs, embed.audio.umd.cjs"
+          echo "  HLS: hls.js (loaded on-demand by ESM builds)"
+          echo "  HTML: iframe.html (for iframe embeds)"
+
+      # Publish to npm
+      - name: Publish to npm
+        if: steps.check_release.outputs.exists == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          pnpm publish -r --access public --no-git-checks
+          echo "Published to npm!"
 
       # Create GitHub Release with tag
       - name: Create GitHub Release
@@ -167,4 +191,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
