@@ -33014,6 +33014,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/core/src/state/effect.ts
   var currentEffect = null;
+  var effectCleanups = /* @__PURE__ */ new WeakMap();
+  function trackEffectSubscription(effectFn, unsubscribe) {
+    let cleanups = effectCleanups.get(effectFn);
+    if (!cleanups) {
+      cleanups = /* @__PURE__ */ new Set();
+      effectCleanups.set(effectFn, cleanups);
+    }
+    cleanups.add(unsubscribe);
+  }
 
   // packages/core/src/state/signal.ts
   var Signal = class {
@@ -33028,7 +33037,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     get() {
       if (currentEffect) {
-        this.subscribers.add(currentEffect);
+        const effect2 = currentEffect;
+        this.subscribers.add(effect2);
+        trackEffectSubscription(effect2, () => this.subscribers.delete(effect2));
       }
       return this.value;
     }
@@ -34515,6 +34526,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.seekingWhilePlaying = false;
       /** Seek resume timeout */
       this.seekResumeTimeout = null;
+      /** Counter to detect stale load() calls */
+      this.loadGeneration = 0;
       if (typeof options.container === "string") {
         const el = document.querySelector(options.container);
         if (!el || !(el instanceof HTMLElement)) {
@@ -34588,6 +34601,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     async load(source) {
       this.checkDestroyed();
+      const generation = ++this.loadGeneration;
       try {
         this.logger.info("Loading source", { source });
         this.stateManager.update({
@@ -34606,6 +34620,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           await this.pluginManager.destroyPlugin(previousProviderId);
           this._currentProvider = null;
         }
+        if (generation !== this.loadGeneration) {
+          this.logger.info("Load superseded by newer load call", { source });
+          return;
+        }
         const provider = this.pluginManager.selectProvider(source);
         if (!provider) {
           this.errorHandler.throw(
@@ -34621,18 +34639,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         this._currentProvider = provider;
         this.logger.info("Provider selected", { provider: provider.id });
         await this.pluginManager.initPlugin(provider.id);
+        if (generation !== this.loadGeneration) {
+          this.logger.info("Load superseded by newer load call", { source });
+          return;
+        }
         this.stateManager.set("source", { src: source, type: this.detectMimeType(source) });
         if (typeof provider.loadSource === "function") {
           await provider.loadSource(source);
+        }
+        if (generation !== this.loadGeneration) {
+          this.logger.info("Load superseded by newer load call", { source });
+          return;
         }
         if (this.stateManager.getValue("autoplay")) {
           await this.play();
         }
       } catch (error) {
-        this.errorHandler.handle(error, {
-          operation: "load",
-          source
-        });
+        if (generation === this.loadGeneration) {
+          this.errorHandler.handle(error, {
+            operation: "load",
+            source
+          });
+        }
       }
     }
     /**
@@ -36095,6 +36123,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("playbackRate", videoEl.playbackRate);
         api?.emit("playback:ratechange", { rate: videoEl.playbackRate });
       });
+      on("stalled", () => {
+        api?.setState("buffering", true);
+        api?.emit("media:stalled", void 0);
+        api?.logger.warn("Media stalled - network may be slow");
+      });
+      on("suspend", () => {
+        api?.emit("media:suspend", void 0);
+      });
+      on("abort", () => {
+        api?.emit("media:abort", void 0);
+      });
       on("error", () => {
         const error = videoEl.error;
         let message = "Unknown video error";
@@ -36492,6 +36531,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   border-radius: 4px;
   transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
   flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 @media (hover: hover) {
@@ -37455,6 +37496,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.el.setAttribute("role", "slider");
       this.el.setAttribute("aria-label", "Seek");
       this.el.setAttribute("aria-valuemin", "0");
+      this.el.setAttribute("aria-valuemax", "0");
+      this.el.setAttribute("aria-valuenow", "0");
+      this.el.setAttribute("aria-valuetext", "0:00");
       this.el.setAttribute("tabindex", "0");
       this.wrapper.addEventListener("mousedown", this.onMouseDown);
       this.wrapper.addEventListener("mousemove", this.onMouseMove);
@@ -37717,7 +37761,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.btn.setAttribute("aria-label", label);
       const displayVolume = muted ? 0 : volume;
       this.level.style.width = `${displayVolume * 100}%`;
-      this.slider.setAttribute("aria-valuenow", String(Math.round(displayVolume * 100)));
+      const volumePercent = Math.round(displayVolume * 100);
+      this.slider.setAttribute("aria-valuenow", String(volumePercent));
+      this.slider.setAttribute("aria-valuetext", `${volumePercent}%`);
     }
     toggleMute() {
       const video = getVideo(this.api.container);
@@ -37770,7 +37816,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.el.appendChild(this.dot);
       this.el.appendChild(this.label);
       this.el.setAttribute("role", "button");
-      this.el.setAttribute("aria-label", "Seek to live");
+      this.el.setAttribute("aria-label", "Live broadcast - currently at live edge");
       this.el.setAttribute("tabindex", "0");
       this.el.addEventListener("click", this.handleClick);
       this.el.addEventListener("keydown", this.handleKeyDown);
@@ -37785,11 +37831,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (liveEdge) {
         this.el.classList.remove("sp-live--behind");
         this.label.textContent = "LIVE";
-        this.el.setAttribute("aria-label", "At live edge");
+        this.dot.setAttribute("aria-hidden", "true");
+        this.el.setAttribute("aria-label", "Live broadcast - currently at live edge");
       } else {
         this.el.classList.add("sp-live--behind");
         this.label.textContent = "GO LIVE";
-        this.el.setAttribute("aria-label", "Seek to live");
+        this.dot.setAttribute("aria-hidden", "true");
+        this.el.setAttribute("aria-label", "Live broadcast - behind live edge, click to seek to live");
       }
     }
     seekToLive() {
@@ -38281,6 +38329,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.close();
             this.btn.focus();
           }
+          return;
+        }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          e.stopPropagation();
+          this.navigateItems(e.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          e.stopPropagation();
+          this.navigateItems(e.shiftKey ? -1 : 1);
         }
       };
       document.addEventListener("keydown", this.keyHandler);
@@ -38316,6 +38376,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.renderMainPanel();
       this.panel.classList.add("sp-settings-panel--open");
       this.btn.setAttribute("aria-expanded", "true");
+      this.focusFirstItem();
     }
     close() {
       this.isOpen = false;
@@ -38339,6 +38400,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.renderCaptionsPanel();
           break;
       }
+      this.focusFirstItem();
     }
     renderMainPanel() {
       this.panel.innerHTML = "";
@@ -38556,6 +38618,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           Math.abs(currentRate - value) < 0.01
         );
       });
+    }
+    getFocusableItems() {
+      return Array.from(
+        this.panel.querySelectorAll('[role="menuitem"]')
+      );
+    }
+    focusFirstItem() {
+      requestAnimationFrame(() => {
+        const items = this.getFocusableItems();
+        if (items.length > 0) {
+          items[0].focus();
+        }
+      });
+    }
+    navigateItems(direction) {
+      const items = this.getFocusableItems();
+      if (items.length === 0) return;
+      const active = document.activeElement;
+      const currentIndex = items.indexOf(active);
+      let nextIndex;
+      if (currentIndex === -1) {
+        nextIndex = direction === 1 ? 0 : items.length - 1;
+      } else {
+        nextIndex = (currentIndex + direction + items.length) % items.length;
+      }
+      items[nextIndex].focus();
     }
     getPanel() {
       return this.currentPanel;
@@ -40275,6 +40363,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       align-items: center;
       justify-content: center;
       transition: background 0.2s, transform 0.1s;
+      min-width: 44px;
+      min-height: 44px;
     }
 
     .${prefix}__btn:hover {
@@ -40424,6 +40514,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       document.head.appendChild(styleElement);
       container = document.createElement("div");
       container.className = `${prefix} ${prefix}--${layout}`;
+      container.setAttribute("role", "region");
+      container.setAttribute("aria-label", "Audio player");
       if (layout === "full") {
         container.innerHTML = buildFullLayout();
       } else if (layout === "compact") {
@@ -40458,24 +40550,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ""}
       </div>
       <div class="${prefix}__progress">
-        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current">0:00</span>` : ""}
-        <div class="${prefix}__progress-bar">
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current" aria-label="Current time">0:00</span>` : ""}
+        <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
           <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
         </div>
-        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration">0:00</span>` : ""}
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration" aria-label="Duration">0:00</span>` : ""}
       </div>
-      <div class="${prefix}__controls">
-        ${mergedConfig.showShuffle ? `<button class="${prefix}__btn ${prefix}__btn--shuffle" title="Shuffle">${ICONS.shuffle}</button>` : ""}
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ""}
-        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ""}
-        ${mergedConfig.showRepeat ? `<button class="${prefix}__btn ${prefix}__btn--repeat" title="Repeat">${ICONS.repeatOff}</button>` : ""}
+      <div class="${prefix}__controls" role="group" aria-label="Playback controls">
+        ${mergedConfig.showShuffle ? `<button class="${prefix}__btn ${prefix}__btn--shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false">${ICONS.shuffle}</button>` : ""}
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous" aria-label="Previous track">${ICONS.previous}</button>` : ""}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next" aria-label="Next track">${ICONS.next}</button>` : ""}
+        ${mergedConfig.showRepeat ? `<button class="${prefix}__btn ${prefix}__btn--repeat" title="Repeat" aria-label="Repeat" aria-pressed="false">${ICONS.repeatOff}</button>` : ""}
       </div>
       ${mergedConfig.showVolume ? `
         <div class="${prefix}__secondary-controls">
-          <div class="${prefix}__volume">
-            <button class="${prefix}__btn ${prefix}__btn--volume" title="Volume">${ICONS.volumeHigh}</button>
-            <div class="${prefix}__volume-slider">
+          <div class="${prefix}__volume" role="group" aria-label="Volume controls">
+            <button class="${prefix}__btn ${prefix}__btn--volume" title="Volume" aria-label="Mute">${ICONS.volumeHigh}</button>
+            <div class="${prefix}__volume-slider" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="100%" tabindex="0">
               <div class="${prefix}__volume-fill" style="width: 100%"></div>
             </div>
           </div>
@@ -40494,21 +40586,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ${mergedConfig.showTitle ? `<div class="${prefix}__title">-</div>` : ""}
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ""}
         <div class="${prefix}__progress">
-          <div class="${prefix}__progress-bar">
+          <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
             <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
-      <div class="${prefix}__controls">
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ""}
-        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ""}
+      <div class="${prefix}__controls" role="group" aria-label="Playback controls">
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous" aria-label="Previous track">${ICONS.previous}</button>` : ""}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next" aria-label="Next track">${ICONS.next}</button>` : ""}
       </div>
     `;
     };
     const buildMiniLayout = () => {
       return `
-      <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
+      <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
       ${mergedConfig.showArtwork ? `
         <div class="${prefix}__artwork">
           <img src="${mergedConfig.defaultArtwork || ""}" alt="Album art" />
@@ -40517,7 +40609,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       <div class="${prefix}__info">
         ${mergedConfig.showTitle ? `<div class="${prefix}__title-wrapper"><div class="${prefix}__title">-</div></div>` : ""}
         <div class="${prefix}__progress">
-          <div class="${prefix}__progress-bar">
+          <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
             <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
@@ -40583,6 +40675,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (playPauseBtn) {
         playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
         playPauseBtn.title = playing ? "Pause" : "Play";
+        playPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
       }
       const currentTime = api.getState("currentTime") || 0;
       const duration = api.getState("duration") || 0;
@@ -40604,6 +40697,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       if (durationEl) {
         durationEl.textContent = formatTime2(duration);
+      }
+      const progressBar = container?.querySelector(`.${prefix}__progress-bar`);
+      if (progressBar) {
+        progressBar.setAttribute("aria-valuemax", String(Math.floor(duration)));
+        progressBar.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
+        progressBar.setAttribute("aria-valuetext", formatTime2(currentTime));
       }
       const title = api.getState("title");
       const poster = api.getState("poster");
@@ -40629,21 +40728,34 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       if (volumeBtn) {
         volumeBtn.innerHTML = muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh;
+        volumeBtn.setAttribute("aria-label", muted || volume === 0 ? "Unmute" : "Mute");
+      }
+      const volumeSlider = container?.querySelector(`.${prefix}__volume-slider`);
+      if (volumeSlider) {
+        const displayVolume = Math.round((muted ? 0 : volume) * 100);
+        volumeSlider.setAttribute("aria-valuenow", String(displayVolume));
+        volumeSlider.setAttribute("aria-valuetext", `${displayVolume}%`);
       }
       const playlist = api.getPlugin("playlist");
       if (playlist) {
         const state = playlist.getState();
         if (shuffleBtn) {
           shuffleBtn.classList.toggle(`${prefix}__btn--active`, state.shuffle);
+          shuffleBtn.setAttribute("aria-pressed", String(state.shuffle));
+          shuffleBtn.setAttribute("aria-label", state.shuffle ? "Shuffle on" : "Shuffle off");
         }
         if (repeatBtn) {
           repeatBtn.classList.toggle(`${prefix}__btn--active`, state.repeat !== "none");
+          repeatBtn.setAttribute("aria-pressed", String(state.repeat !== "none"));
           if (state.repeat === "one") {
             repeatBtn.innerHTML = ICONS.repeatOne;
+            repeatBtn.setAttribute("aria-label", "Repeat one");
           } else if (state.repeat === "all") {
             repeatBtn.innerHTML = ICONS.repeatAll;
+            repeatBtn.setAttribute("aria-label", "Repeat all");
           } else {
             repeatBtn.innerHTML = ICONS.repeatOff;
+            repeatBtn.setAttribute("aria-label", "Repeat off");
           }
         }
       }
@@ -40759,7 +40871,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "0.5.1" : "dev";
+  var VERSION = true ? "0.5.2" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
