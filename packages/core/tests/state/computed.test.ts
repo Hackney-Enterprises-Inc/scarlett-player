@@ -344,7 +344,7 @@ describe('Computed', () => {
   describe('lazy evaluation', () => {
     it('should not compute until accessed', () => {
       const fn = vi.fn(() => 42);
-      const c = new Computed(fn);
+      new Computed(fn);
 
       // Signal dependency changes but computed not accessed
       const count = signal(0);

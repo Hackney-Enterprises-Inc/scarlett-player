@@ -96,9 +96,9 @@ describe('EventBus', () => {
       const handler2 = vi.fn();
       const handler3 = vi.fn();
 
-      const unsub1 = bus.on('playback:play', handler1);
+      bus.on('playback:play', handler1);
       const unsub2 = bus.on('playback:play', handler2);
-      const unsub3 = bus.on('playback:play', handler3);
+      bus.on('playback:play', handler3);
 
       bus.emit('playback:play', undefined);
       expect(handler1).toHaveBeenCalledTimes(1);
@@ -617,12 +617,12 @@ describe('EventBus', () => {
     });
 
     it('should handle listener removing itself during emit', () => {
-      let unsub: (() => void) | undefined;
+      const ref: { unsub?: () => void } = {};
       const handler = vi.fn(() => {
-        if (unsub) unsub();
+        ref.unsub?.();
       });
 
-      unsub = bus.on('playback:play', handler);
+      ref.unsub = bus.on('playback:play', handler);
 
       bus.emit('playback:play', undefined);
       expect(handler).toHaveBeenCalledTimes(1);

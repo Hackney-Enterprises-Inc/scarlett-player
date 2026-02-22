@@ -13,7 +13,6 @@ import type { IPluginAPI, PluginType } from '@scarlett-player/core';
 import type {
   MediaSessionPluginConfig,
   MediaSessionMetadata,
-  MediaSessionArtwork,
   IMediaSessionPlugin,
 } from './types';
 

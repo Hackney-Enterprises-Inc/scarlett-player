@@ -24,7 +24,7 @@ describe('icons', () => {
   });
 
   it('should be valid SVG strings', () => {
-    for (const [name, svg] of Object.entries(icons)) {
+    for (const svg of Object.values(icons)) {
       expect(svg).toMatch(/^<svg/);
       expect(svg).toMatch(/<\/svg>$/);
     }

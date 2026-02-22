@@ -4,9 +4,9 @@
  * Target: 95%+ code coverage
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Signal, signal } from '../../src/state/signal';
-import { effect, currentEffect } from '../../src/state/effect';
+import { effect } from '../../src/state/effect';
 
 describe('Signal', () => {
   describe('constructor and initialization', () => {
@@ -344,7 +344,7 @@ describe('Signal', () => {
       const b = signal(2);
       const fn = vi.fn();
 
-      const outsideValue = a.get(); // Not tracked
+      a.get(); // Not tracked (outside effect - not subscribed)
 
       effect(() => {
         b.get();
@@ -400,12 +400,12 @@ describe('Signal', () => {
 
     it('should safely unsubscribe during notification', () => {
       const s = signal(0);
-      let unsub: (() => void) | undefined;
+      const ref: { unsub?: () => void } = {};
       const fn = vi.fn(() => {
-        if (unsub) unsub();
+        if (ref.unsub) ref.unsub();
       });
 
-      unsub = s.subscribe(fn);
+      ref.unsub = s.subscribe(fn);
 
       s.set(1);
       expect(fn).toHaveBeenCalledTimes(1);

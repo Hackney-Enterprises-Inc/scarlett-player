@@ -10,7 +10,7 @@ import { PluginAPI } from '../src/plugin-api';
 import { EventBus } from '../src/events/event-bus';
 import { StateManager } from '../src/state/state-manager';
 import { Logger } from '../src/logger';
-import type { Plugin, IPluginAPI, PluginConfig } from '../src/types/plugin';
+import type { Plugin, IPluginAPI } from '../src/types/plugin';
 
 // Helper to create mock plugins
 const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
@@ -359,7 +359,9 @@ describe('PluginManager', () => {
 
       try {
         await pluginManager.initPlugin('test-plugin');
-      } catch {}
+      } catch {
+        // Expected to throw
+      }
 
       expect(pluginManager.getPluginState('test-plugin')).toBe('error');
     });

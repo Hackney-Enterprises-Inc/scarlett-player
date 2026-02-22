@@ -29,16 +29,8 @@ const videoOnlyPluginCreators: PluginCreators = {
   videoUI: vi.fn(() => mockVideoUIPlugin),
 };
 
-const audioOnlyPluginCreators: PluginCreators = {
-  hls: vi.fn(() => mockHLSPlugin),
-  audioUI: vi.fn(() => mockAudioUIPlugin),
-  playlist: vi.fn(() => mockPlaylistPlugin),
-  mediaSession: vi.fn(() => mockMediaSessionPlugin),
-};
-
 const fullAvailableTypes: PlayerType[] = ['video', 'audio', 'audio-mini'];
 const videoOnlyTypes: PlayerType[] = ['video'];
-const audioOnlyTypes: PlayerType[] = ['audio', 'audio-mini'];
 
 // Mock the core dependencies
 vi.mock('@scarlett-player/core', () => ({

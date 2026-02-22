@@ -26,6 +26,7 @@ npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
 npm install @scarlett-player/native        # MP4, WebM, MOV, MKV support
 npm install @scarlett-player/airplay       # AirPlay casting
 npm install @scarlett-player/chromecast    # Chromecast casting
+npm install @scarlett-player/analytics    # QoE metrics & engagement tracking
 npm install @scarlett-player/playlist      # Playlist/queue management
 npm install @scarlett-player/media-session # Lock screen & media key controls
 npm install @scarlett-player/audio-ui      # Compact audio player UI
@@ -97,6 +98,7 @@ function onPlayerReady(player) {
 | `@scarlett-player/ui` | UI controls with keyboard shortcuts and theming |
 | `@scarlett-player/airplay` | AirPlay casting support |
 | `@scarlett-player/chromecast` | Chromecast casting support |
+| `@scarlett-player/analytics` | QoE metrics, engagement tracking, and beacon transport |
 | `@scarlett-player/playlist` | Playlist management with shuffle, repeat, and queue |
 | `@scarlett-player/media-session` | Media Session API for lock screen & media key controls |
 | `@scarlett-player/audio-ui` | Compact audio player interface with artwork and progress |
@@ -160,6 +162,7 @@ packages/
     audio-ui/     # Compact audio player UI
     airplay/      # AirPlay casting plugin
     chromecast/   # Chromecast casting plugin
+    analytics/    # QoE metrics & engagement tracking
     playlist/     # Playlist & queue management
     media-session/# Media Session API integration
   vue/            # Vue 3 component wrapper
@@ -187,8 +190,11 @@ docs/             # Landing page
 - [x] Playlists & queue management
 - [x] Media Session API (lock screen controls)
 - [x] Audio player UI
-- [ ] Closed captions (WebVTT)
-- [ ] Thumbnail preview on seek
+- [x] Closed captions (WebVTT)
+- [x] Thumbnail preview on seek
+- [x] Analytics & QoE tracking
+- [x] Live DVR controls
+- [x] Touch/mobile support
 - [ ] React component wrapper
 
 ## License

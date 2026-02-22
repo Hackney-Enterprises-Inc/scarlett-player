@@ -1046,7 +1046,7 @@ describe('ScarlettPlayer', () => {
         loadSource: vi.fn().mockResolvedValue(undefined),
       });
 
-      const player = await createPlayer({
+      await createPlayer({
         container,
         src: 'video.m3u8',
         plugins: [provider],

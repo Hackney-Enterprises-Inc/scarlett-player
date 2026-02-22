@@ -92,7 +92,7 @@ export const createHLSProvider = (): Plugin<HLSProviderConfig> => {
       });
     });
 
-    videoElement.addEventListener('error', (e) => {
+    videoElement.addEventListener('error', (_e) => {
       const error = videoElement?.error;
       api?.logger.error('Video element error', {
         code: error?.code,

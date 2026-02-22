@@ -7,8 +7,8 @@
  * @packageDocumentation
  */
 
-import type { Plugin, IPluginAPI } from '@scarlett-player/core';
-import { loadCastSDK, isCastSDKLoaded, isCastSupported } from './cast-loader';
+import type { IPluginAPI } from '@scarlett-player/core';
+import { loadCastSDK, isCastSupported } from './cast-loader';
 import type {
   IChromecastPlugin,
   CastFramework,

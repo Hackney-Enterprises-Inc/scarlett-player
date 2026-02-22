@@ -2,7 +2,7 @@
  * HLS Plugin Types
  */
 
-import type { Plugin, IPluginAPI } from '@scarlett-player/core';
+import type { Plugin } from '@scarlett-player/core';
 
 /** HLS plugin configuration options */
 export interface HLSPluginConfig {

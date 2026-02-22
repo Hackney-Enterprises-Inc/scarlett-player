@@ -18,11 +18,9 @@ import type {
   HLSLiveInfo,
   IHLSPlugin,
   HlsInstance,
-  HlsConstructor,
 } from './types';
 import {
   supportsNativeHLS,
-  shouldPreferNativeHLS,
   isHLSSupported,
   isHlsJsSupported,
   loadHlsJs,
@@ -30,7 +28,7 @@ import {
   getHlsConstructor,
 } from './hls-loader';
 import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
-import { mapLevels, createQualityManager, formatLevel } from './quality';
+import { mapLevels, formatLevel } from './quality';
 
 // Re-export types
 export type {

@@ -13,7 +13,7 @@
  * - Persistent viewer identification
  */
 
-import type { IPluginAPI, Plugin, PluginType, QualityLevel } from '@scarlett-player/core';
+import type { IPluginAPI, Plugin, QualityLevel } from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
   ViewSession,
