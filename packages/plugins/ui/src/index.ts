@@ -19,15 +19,19 @@ import { styles } from './styles';
 import { icons } from './icons';
 import {
   PlayButton,
+  SkipButton,
   ProgressBar,
   TimeDisplay,
   VolumeControl,
   LiveIndicator,
   QualityMenu,
+  SettingsMenu,
+  CaptionsButton,
   CastButton,
   PipButton,
   FullscreenButton,
   Spacer,
+  ErrorOverlay,
 } from './controls';
 
 export type {
@@ -45,11 +49,14 @@ export { formatTime, formatLiveTime } from './utils';
 /** Default control layout (progress bar is separate, above controls) */
 const DEFAULT_LAYOUT: ControlSlot[] = [
   'play',
+  'skip-backward',
+  'skip-forward',
   'volume',
   'time',
   'live-indicator',
   'spacer',
-  'quality',
+  'settings',
+  'captions',
   'chromecast',
   'airplay',
   'pip',
@@ -83,10 +90,12 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let gradient: HTMLDivElement | null = null;
   let progressBar: ProgressBar | null = null;
   let bufferingIndicator: HTMLDivElement | null = null;
+  let errorOverlay: ErrorOverlay | null = null;
   let styleEl: HTMLStyleElement | null = null;
   let controls: Control[] = [];
   let hideTimeout: ReturnType<typeof setTimeout> | null = null;
   let stateUnsubscribe: (() => void) | null = null;
+  let errorUnsubscribe: (() => void) | null = null;
   let controlsVisible = true;
 
   const layout = config.controls || DEFAULT_LAYOUT;
@@ -99,6 +108,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     switch (slot) {
       case 'play':
         return new PlayButton(api);
+      case 'skip-backward':
+        return new SkipButton(api, 'backward');
+      case 'skip-forward':
+        return new SkipButton(api, 'forward');
       case 'volume':
         return new VolumeControl(api);
       case 'progress':
@@ -110,6 +123,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         return new LiveIndicator(api);
       case 'quality':
         return new QualityMenu(api);
+      case 'settings':
+        return new SettingsMenu(api);
+      case 'captions':
+        return new CaptionsButton(api);
       case 'chromecast':
         return new CastButton(api, 'chromecast');
       case 'airplay':
@@ -140,6 +157,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     const isLoading = playbackState === 'loading';
     const showSpinner = waiting || (seeking && !api?.getState('paused')) || isLoading;
     bufferingIndicator?.classList.toggle('sp-buffering--visible', !!showSpinner);
+
+    // Update error overlay (auto-hide on recovery)
+    errorOverlay?.update();
   };
 
   /**
@@ -213,6 +233,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     const video = api.container.querySelector('video');
     if (!video) return;
 
+    const live = api.getState('live');
+    const seekableRange = api.getState('seekableRange');
+
     switch (e.key) {
       case ' ':
       case 'k':
@@ -233,12 +256,20 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         break;
       case 'ArrowLeft':
         e.preventDefault();
-        video.currentTime = Math.max(0, video.currentTime - 5);
+        if (live && seekableRange) {
+          video.currentTime = Math.max(seekableRange.start, video.currentTime - 5);
+        } else {
+          video.currentTime = Math.max(0, video.currentTime - 5);
+        }
         showControls();
         break;
       case 'ArrowRight':
         e.preventDefault();
-        video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+        if (live && seekableRange) {
+          video.currentTime = Math.min(seekableRange.end, video.currentTime + 5);
+        } else {
+          video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+        }
         showControls();
         break;
       case 'ArrowUp':
@@ -300,6 +331,18 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       bufferingIndicator.innerHTML = icons.spinner;
       bufferingIndicator.setAttribute('aria-hidden', 'true');
       container.appendChild(bufferingIndicator);
+
+      // Create error overlay
+      errorOverlay = new ErrorOverlay(api);
+      container.appendChild(errorOverlay.render());
+
+      // Listen for fatal errors to show the overlay
+      errorUnsubscribe = api.on('error', (payload: { fatal?: boolean; message?: string }) => {
+        if (payload?.fatal) {
+          const error = api.getState('error') || new Error(payload.message || 'Playback error');
+          errorOverlay?.show(error);
+        }
+      });
 
       // Create progress bar (positioned above controls)
       progressBar = new ProgressBar(api);
@@ -374,6 +417,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       stateUnsubscribe?.();
       stateUnsubscribe = null;
 
+      // Remove error listener
+      errorUnsubscribe?.();
+      errorUnsubscribe = null;
+
       // Remove event listeners
       if (api?.container) {
         api.container.removeEventListener('mousemove', handleInteraction);
@@ -392,6 +439,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Destroy progress bar
       progressBar?.destroy();
       progressBar = null;
+
+      // Destroy error overlay
+      errorOverlay?.destroy();
+      errorOverlay = null;
 
       // Remove DOM elements
       controlBar?.remove();

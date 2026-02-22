@@ -562,6 +562,65 @@ describe('HLSPlugin', () => {
     });
   });
 
+  describe('retry jitter', () => {
+    it('should apply jitter to retry delays within 70-100% of base delay', async () => {
+      // Create plugin with known retry config
+      const jitterPlugin = createHLSPlugin({
+        retryDelayMs: 1000,
+        retryBackoffFactor: 2,
+        maxNetworkRetries: 3,
+      });
+
+      const jitterApi = createMockAPI();
+      await jitterPlugin.init(jitterApi);
+
+      // Mock hls.js loading
+      vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockHlsConstructor as any);
+      vi.spyOn(hlsLoader, 'createHlsInstance').mockReturnValue(mockHlsInstance as any);
+      vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockHlsConstructor as any);
+
+      // Capture the error handler
+      let errorHandler: Function | null = null;
+      mockHlsInstance.on.mockImplementation((event: string, handler: Function) => {
+        if (event === 'hlsManifestParsed') {
+          setTimeout(() => handler('hlsManifestParsed', { levels: mockHlsInstance.levels }), 0);
+        }
+        if (event === 'hlsError') {
+          errorHandler = handler;
+        }
+      });
+
+      await jitterPlugin.loadSource('http://example.com/stream.m3u8');
+
+      // Spy on setTimeout to capture the delay
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+
+      // Trigger a fatal network error to invoke retry with backoff + jitter
+      if (errorHandler) {
+        errorHandler('hlsError', {
+          type: 'networkError',
+          details: 'manifestLoadError',
+          fatal: true,
+        });
+      }
+
+      // Find the retry setTimeout call (ignore any 0ms calls from test setup)
+      const retryCall = setTimeoutSpy.mock.calls.find(
+        (call) => typeof call[1] === 'number' && call[1] > 0
+      );
+
+      expect(retryCall).toBeDefined();
+      const delay = retryCall![1] as number;
+
+      // First retry: base delay is 1000 * 2^0 = 1000
+      // Jitter range: 1000 * 0.7 = 700 to 1000 * 1.0 = 1000
+      expect(delay).toBeGreaterThanOrEqual(700);
+      expect(delay).toBeLessThanOrEqual(1000);
+
+      setTimeoutSpy.mockRestore();
+    });
+  });
+
   describe('getLiveInfo()', () => {
     it('should return null for non-live streams', async () => {
       await plugin.init(api);

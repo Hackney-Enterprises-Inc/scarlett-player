@@ -175,11 +175,14 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     levelLoadingRetryDelay: 500,
   });
 
-  /** Calculate retry delay with exponential backoff */
+  /** Calculate retry delay with exponential backoff and jitter */
   const getRetryDelay = (retryCount: number): number => {
     const baseDelay = mergedConfig.retryDelayMs ?? 1000;
     const backoffFactor = mergedConfig.retryBackoffFactor ?? 2;
-    return baseDelay * Math.pow(backoffFactor, retryCount);
+    const delay = baseDelay * Math.pow(backoffFactor, retryCount);
+    // Add jitter (70-100% of calculated delay) to prevent thundering herd
+    const jitter = delay * (0.7 + Math.random() * 0.3);
+    return jitter;
   };
 
   /** Emit fatal error and stop playback */

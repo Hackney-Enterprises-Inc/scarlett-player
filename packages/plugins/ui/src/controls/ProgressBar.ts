@@ -6,7 +6,9 @@
 
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
-import { createElement, getVideo, formatTime } from '../utils';
+import { createElement, getVideo, formatTime, formatLiveTime } from '../utils';
+import { ThumbnailPreview } from './ThumbnailPreview';
+import type { ThumbnailConfig } from './ThumbnailPreview';
 
 export class ProgressBar implements Control {
   private wrapper: HTMLDivElement;
@@ -16,6 +18,7 @@ export class ProgressBar implements Control {
   private buffered: HTMLDivElement;
   private handle: HTMLDivElement;
   private tooltip: HTMLDivElement;
+  private thumbnailPreview: ThumbnailPreview;
   private isDragging = false;
   private lastSeekTime = 0;
   private seekThrottleMs = 100; // Throttle seeks to max 10/sec
@@ -36,10 +39,14 @@ export class ProgressBar implements Control {
     this.tooltip = createElement('div', { className: 'sp-progress__tooltip' });
     this.tooltip.textContent = '0:00';
 
+    // Thumbnail preview
+    this.thumbnailPreview = new ThumbnailPreview();
+
     track.appendChild(this.buffered);
     track.appendChild(this.filled);
     track.appendChild(this.handle);
     this.el.appendChild(track);
+    this.el.appendChild(this.thumbnailPreview.getElement());
     this.el.appendChild(this.tooltip);
     this.wrapper.appendChild(this.el);
 
@@ -72,12 +79,51 @@ export class ProgressBar implements Control {
     this.wrapper.classList.remove('sp-progress-wrapper--visible');
   }
 
+  /** Set thumbnail sprite configuration */
+  setThumbnails(config: ThumbnailConfig | null): void {
+    this.thumbnailPreview.setConfig(config);
+  }
+
   update(): void {
     const currentTime = this.api.getState('currentTime') || 0;
     const duration = this.api.getState('duration') || 0;
     const bufferedRanges = this.api.getState('buffered');
+    const live = this.api.getState('live');
+    const seekableRange = this.api.getState('seekableRange');
 
-    if (duration > 0) {
+    // Pick up thumbnails config from state if available
+    const thumbnails = this.api.getState('thumbnails') as ThumbnailConfig | undefined;
+    if (thumbnails && !this.thumbnailPreview.isConfigured()) {
+      this.thumbnailPreview.setConfig(thumbnails);
+    }
+
+    // Toggle live mode class on progress bar
+    this.el.classList.toggle('sp-progress--live', !!live);
+
+    if (live && seekableRange) {
+      // Live DVR mode: progress is relative to seekable range
+      const rangeLength = seekableRange.end - seekableRange.start;
+      if (rangeLength > 0) {
+        const progress = ((currentTime - seekableRange.start) / rangeLength) * 100;
+        this.filled.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+        this.handle.style.left = `${Math.max(0, Math.min(100, progress))}%`;
+      }
+
+      // Update buffered relative to seekable range
+      if (bufferedRanges && bufferedRanges.length > 0) {
+        const rangeLength = seekableRange.end - seekableRange.start;
+        if (rangeLength > 0) {
+          const bufferedEnd = bufferedRanges.end(bufferedRanges.length - 1);
+          const bufferedPercent = ((bufferedEnd - seekableRange.start) / rangeLength) * 100;
+          this.buffered.style.width = `${Math.max(0, Math.min(100, bufferedPercent))}%`;
+        }
+      }
+
+      // Update aria values for live DVR
+      this.el.setAttribute('aria-valuemax', String(Math.floor(seekableRange.end)));
+      this.el.setAttribute('aria-valuenow', String(Math.floor(currentTime)));
+      this.el.setAttribute('aria-valuetext', `${Math.floor(seekableRange.end - currentTime)} seconds behind live`);
+    } else if (duration > 0) {
       const progress = (currentTime / duration) * 100;
       this.filled.style.width = `${progress}%`;
       this.handle.style.left = `${progress}%`;
@@ -99,6 +145,16 @@ export class ProgressBar implements Control {
   private getTimeFromPosition(clientX: number): number {
     const rect = this.el.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+
+    const live = this.api.getState('live');
+    const seekableRange = this.api.getState('seekableRange');
+
+    if (live && seekableRange) {
+      // Map percentage to seekable range for live DVR
+      const rangeLength = seekableRange.end - seekableRange.start;
+      return seekableRange.start + percent * rangeLength;
+    }
+
     const duration = this.api.getState('duration') || 0;
     return percent * duration;
   }
@@ -108,8 +164,22 @@ export class ProgressBar implements Control {
     const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const time = this.getTimeFromPosition(clientX);
 
-    this.tooltip.textContent = formatTime(time);
+    const live = this.api.getState('live');
+    const seekableRange = this.api.getState('seekableRange');
+
+    if (live && seekableRange) {
+      // Show time behind live edge (e.g., "-1:30" or "LIVE")
+      const behindLive = seekableRange.end - time;
+      this.tooltip.textContent = formatLiveTime(behindLive);
+    } else {
+      this.tooltip.textContent = formatTime(time);
+    }
     this.tooltip.style.left = `${percent * 100}%`;
+
+    // Show thumbnail preview if configured
+    if (this.thumbnailPreview.isConfigured()) {
+      this.thumbnailPreview.show(time, percent);
+    }
   }
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -165,6 +235,7 @@ export class ProgressBar implements Control {
   private onMouseLeave = (): void => {
     if (!this.isDragging) {
       this.tooltip.style.opacity = '0';
+      this.thumbnailPreview.hide();
     }
   };
 
@@ -173,25 +244,49 @@ export class ProgressBar implements Control {
     if (!video) return;
 
     const step = 5; // seconds
-    const duration = this.api.getState('duration') || 0;
+    const live = this.api.getState('live');
+    const seekableRange = this.api.getState('seekableRange');
 
-    switch (e.key) {
-      case 'ArrowLeft':
-        e.preventDefault();
-        video.currentTime = Math.max(0, video.currentTime - step);
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        video.currentTime = Math.min(duration, video.currentTime + step);
-        break;
-      case 'Home':
-        e.preventDefault();
-        video.currentTime = 0;
-        break;
-      case 'End':
-        e.preventDefault();
-        video.currentTime = duration;
-        break;
+    if (live && seekableRange) {
+      // Live DVR: constrain to seekable range
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          video.currentTime = Math.max(seekableRange.start, video.currentTime - step);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          video.currentTime = Math.min(seekableRange.end, video.currentTime + step);
+          break;
+        case 'Home':
+          e.preventDefault();
+          video.currentTime = seekableRange.start;
+          break;
+        case 'End':
+          e.preventDefault();
+          video.currentTime = seekableRange.end;
+          break;
+      }
+    } else {
+      const duration = this.api.getState('duration') || 0;
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - step);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          video.currentTime = Math.min(duration, video.currentTime + step);
+          break;
+        case 'Home':
+          e.preventDefault();
+          video.currentTime = 0;
+          break;
+        case 'End':
+          e.preventDefault();
+          video.currentTime = duration;
+          break;
+      }
     }
   };
 
@@ -216,6 +311,7 @@ export class ProgressBar implements Control {
     this.wrapper.removeEventListener('mouseleave', this.onMouseLeave);
     document.removeEventListener('mousemove', this.onDocMouseMove);
     document.removeEventListener('mouseup', this.onMouseUp);
+    this.thumbnailPreview.destroy();
     this.wrapper.remove();
   }
 }

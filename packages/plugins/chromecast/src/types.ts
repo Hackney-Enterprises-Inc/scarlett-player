@@ -17,7 +17,19 @@ export namespace ChromeCastMedia {
     contentId: string;
     contentType: string;
     streamType?: string;
-    metadata?: object;
+    metadata?: GenericMediaMetadata;
+  }
+
+  export interface GenericMediaMetadata {
+    title?: string;
+    subtitle?: string;
+    images?: ChromeCastImage[];
+  }
+
+  export interface ChromeCastImage {
+    url: string;
+    width?: number;
+    height?: number;
   }
 
   export interface LoadRequest {
@@ -175,7 +187,9 @@ declare global {
           DEFAULT_MEDIA_RECEIVER_APP_ID: string;
           MediaInfo: new (contentId: string, contentType: string) => ChromeCastMedia.MediaInfo;
           LoadRequest: new (mediaInfo: ChromeCastMedia.MediaInfo) => ChromeCastMedia.LoadRequest;
+          GenericMediaMetadata: new () => ChromeCastMedia.GenericMediaMetadata;
         };
+        Image: new (url: string) => ChromeCastMedia.ChromeCastImage;
         AutoJoinPolicy: {
           ORIGIN_SCOPED: string;
           TAB_AND_ORIGIN_SCOPED: string;

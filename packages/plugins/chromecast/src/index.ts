@@ -213,6 +213,17 @@ export function chromecastPlugin(): IChromecastPlugin {
         : 'video/mp4';
 
     const mediaInfo = new window.chrome.cast.media.MediaInfo(src, contentType);
+
+    // Add metadata from player state (title, poster, subtitle)
+    const title = api.getState('title');
+    const poster = api.getState('poster');
+    if (title || poster) {
+      const metadata = new window.chrome.cast.media.GenericMediaMetadata();
+      if (title) metadata.title = title;
+      if (poster) metadata.images = [new window.chrome.cast.Image(poster)];
+      mediaInfo.metadata = metadata;
+    }
+
     const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
     request.currentTime = startTime;
     request.autoplay = true;

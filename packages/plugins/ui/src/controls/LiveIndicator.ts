@@ -1,9 +1,9 @@
 /**
  * Live Indicator Control
  *
- * Shows red dot + LIVE text.
+ * Shows red dot + LIVE text when at live edge.
+ * Shows "GO LIVE" when behind live edge.
  * Click to seek to live edge.
- * Dims when behind live edge.
  */
 
 import type { IPluginAPI } from '@scarlett-player/core';
@@ -13,12 +13,18 @@ import { createElement, getVideo } from '../utils';
 export class LiveIndicator implements Control {
   private el: HTMLDivElement;
   private api: IPluginAPI;
+  private dot: HTMLDivElement;
+  private label: HTMLSpanElement;
 
   constructor(api: IPluginAPI) {
     this.api = api;
 
     this.el = createElement('div', { className: 'sp-live' });
-    this.el.innerHTML = '<div class="sp-live__dot"></div><span>LIVE</span>';
+    this.dot = createElement('div', { className: 'sp-live__dot' }) as HTMLDivElement;
+    this.label = document.createElement('span');
+    this.label.textContent = 'LIVE';
+    this.el.appendChild(this.dot);
+    this.el.appendChild(this.label);
     this.el.setAttribute('role', 'button');
     this.el.setAttribute('aria-label', 'Seek to live');
     this.el.setAttribute('tabindex', '0');
@@ -43,11 +49,15 @@ export class LiveIndicator implements Control {
     // Hide if not live content
     this.el.style.display = live ? '' : 'none';
 
-    // Dim when behind live edge
+    // Update appearance based on live edge state
     if (liveEdge) {
       this.el.classList.remove('sp-live--behind');
+      this.label.textContent = 'LIVE';
+      this.el.setAttribute('aria-label', 'At live edge');
     } else {
       this.el.classList.add('sp-live--behind');
+      this.label.textContent = 'GO LIVE';
+      this.el.setAttribute('aria-label', 'Seek to live');
     }
   }
 
