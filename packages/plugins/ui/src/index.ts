@@ -286,9 +286,12 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         container.style.position = 'relative';
       }
 
+      // Check if video is already playing (autoplay case)
+      const isPlaying = api.getState('playing');
+
       // Create gradient overlay
       gradient = document.createElement('div');
-      gradient.className = 'sp-gradient sp-gradient--visible';
+      gradient.className = isPlaying ? 'sp-gradient' : 'sp-gradient sp-gradient--visible';
       container.appendChild(gradient);
 
       // Create buffering indicator
@@ -301,11 +304,17 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Create progress bar (positioned above controls)
       progressBar = new ProgressBar(api);
       container.appendChild(progressBar.render());
-      progressBar.show(); // Initially visible
+      // Only show initially if not already playing (autoplay case)
+      if (!isPlaying) {
+        progressBar.show();
+      }
 
       // Create control bar
       controlBar = document.createElement('div');
-      controlBar.className = 'sp-controls sp-controls--visible';
+      // Hide controls initially if already playing (autoplay case)
+      controlBar.className = isPlaying
+        ? 'sp-controls sp-controls--hidden'
+        : 'sp-controls sp-controls--visible';
       controlBar.setAttribute('role', 'toolbar');
       controlBar.setAttribute('aria-label', 'Video controls');
 
@@ -340,6 +349,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Make container focusable for keyboard events
       if (!container.hasAttribute('tabindex')) {
         container.setAttribute('tabindex', '0');
+      }
+
+      // Initialize controls visibility based on playing state
+      controlsVisible = !isPlaying;
+      api.setState('controlsVisible', controlsVisible);
+
+      // Start hide timer if already playing (autoplay case)
+      if (isPlaying) {
+        resetHideTimer();
       }
 
       api.logger.debug('UI controls plugin initialized');

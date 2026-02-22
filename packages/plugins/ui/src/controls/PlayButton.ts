@@ -52,12 +52,13 @@ export class PlayButton implements Control {
     if (!video) return;
 
     const ended = this.api.getState('ended');
-    const playing = this.api.getState('playing');
 
     if (ended) {
       video.currentTime = 0;
       video.play().catch(() => {});
-    } else if (playing) {
+    } else if (!video.paused) {
+      // Check video.paused directly for immediate response
+      // (state updates lag behind due to 'playing' event delay)
       video.pause();
     } else {
       video.play().catch(() => {});

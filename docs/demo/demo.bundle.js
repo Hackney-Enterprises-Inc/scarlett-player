@@ -35349,6 +35349,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.addEventListener(event, handler);
       handlers.push({ event, handler });
     };
+    addHandler("play", () => {
+      api.setState("paused", false);
+    });
     addHandler("playing", () => {
       api.setState("playing", true);
       api.setState("paused", false);
@@ -35765,6 +35768,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (!isNaN(levelIndex) && levelIndex >= 0 && levelIndex < hls.levels.length) {
               hls.nextLevel = levelIndex;
               api?.logger.debug(`Quality: queued switch to level ${levelIndex}`);
+              const targetLevel = hls.levels[levelIndex];
+              if (targetLevel) {
+                const label = formatLevel(targetLevel);
+                api?.setState("currentQuality", {
+                  id: `level-${levelIndex}`,
+                  label: `${label}...`,
+                  // Ellipsis indicates switching in progress
+                  width: targetLevel.width,
+                  height: targetLevel.height,
+                  bitrate: targetLevel.bitrate,
+                  active: false
+                  // Not yet active
+                });
+              }
             }
           }
         });
@@ -36009,6 +36026,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         videoEl.addEventListener(event, handler);
         handlers.push([event, handler]);
       };
+      on("play", () => {
+        api?.setState("paused", false);
+      });
       on("playing", () => {
         api?.setState("playing", true);
         api?.setState("paused", false);
@@ -36858,12 +36878,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const video = getVideo(this.api.container);
       if (!video) return;
       const ended = this.api.getState("ended");
-      const playing = this.api.getState("playing");
       if (ended) {
         video.currentTime = 0;
         video.play().catch(() => {
         });
-      } else if (playing) {
+      } else if (!video.paused) {
         video.pause();
       } else {
         video.play().catch(() => {
@@ -37699,8 +37718,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (containerStyle.position === "static") {
           container.style.position = "relative";
         }
+        const isPlaying = api.getState("playing");
         gradient = document.createElement("div");
-        gradient.className = "sp-gradient sp-gradient--visible";
+        gradient.className = isPlaying ? "sp-gradient" : "sp-gradient sp-gradient--visible";
         container.appendChild(gradient);
         bufferingIndicator = document.createElement("div");
         bufferingIndicator.className = "sp-buffering";
@@ -37709,9 +37729,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         container.appendChild(bufferingIndicator);
         progressBar = new ProgressBar(api);
         container.appendChild(progressBar.render());
-        progressBar.show();
+        if (!isPlaying) {
+          progressBar.show();
+        }
         controlBar = document.createElement("div");
-        controlBar.className = "sp-controls sp-controls--visible";
+        controlBar.className = isPlaying ? "sp-controls sp-controls--hidden" : "sp-controls sp-controls--visible";
         controlBar.setAttribute("role", "toolbar");
         controlBar.setAttribute("aria-label", "Video controls");
         for (const slot of layout) {
@@ -37733,6 +37755,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         updateControls();
         if (!container.hasAttribute("tabindex")) {
           container.setAttribute("tabindex", "0");
+        }
+        controlsVisible = !isPlaying;
+        api.setState("controlsVisible", controlsVisible);
+        if (isPlaying) {
+          resetHideTimer();
         }
         api.logger.debug("UI controls plugin initialized");
       },
@@ -39538,7 +39565,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "0.4.0" : "dev";
+  var VERSION = true ? "0.4.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
