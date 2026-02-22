@@ -14,20 +14,10 @@
  * }
  */
 
+import type { ThumbnailConfig } from '@scarlett-player/core';
 import { createElement } from '../utils';
 
-export interface ThumbnailConfig {
-  /** URL to the sprite sheet image */
-  src: string;
-  /** Width of each thumbnail tile in pixels */
-  width: number;
-  /** Height of each thumbnail tile in pixels */
-  height: number;
-  /** Number of columns in the sprite sheet */
-  columns: number;
-  /** Seconds between each thumbnail */
-  interval: number;
-}
+export type { ThumbnailConfig } from '@scarlett-player/core';
 
 export class ThumbnailPreview {
   private el: HTMLDivElement;

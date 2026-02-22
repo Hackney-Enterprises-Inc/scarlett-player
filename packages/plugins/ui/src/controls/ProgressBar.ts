@@ -4,11 +4,10 @@
  * Seekable progress bar with buffered ranges and time tooltip.
  */
 
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { IPluginAPI, ThumbnailConfig } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { createElement, getVideo, formatTime, formatLiveTime } from '../utils';
 import { ThumbnailPreview } from './ThumbnailPreview';
-import type { ThumbnailConfig } from './ThumbnailPreview';
 
 export class ProgressBar implements Control {
   private wrapper: HTMLDivElement;
@@ -96,7 +95,7 @@ export class ProgressBar implements Control {
     const seekableRange = this.api.getState('seekableRange');
 
     // Pick up thumbnails config from state if available
-    const thumbnails = this.api.getState('thumbnails') as ThumbnailConfig | undefined;
+    const thumbnails = this.api.getState('thumbnails');
     if (thumbnails && !this.thumbnailPreview.isConfigured()) {
       this.thumbnailPreview.setConfig(thumbnails);
     }

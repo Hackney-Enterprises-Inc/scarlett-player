@@ -63,6 +63,7 @@ export type {
   TextTrack,
   AudioTrack,
   SeekableRange,
+  ThumbnailConfig,
   // Event Types
   PlayerEventMap,
   EventName,

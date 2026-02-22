@@ -216,6 +216,12 @@ export interface PlayerEventMap {
 
   /** Plugin error */
   'error:plugin': { error: Error; plugin: string };
+
+  /** User retried after error */
+  'error:retry': { src: string };
+
+  /** User dismissed error overlay */
+  'error:dismiss': void;
 }
 
 /**

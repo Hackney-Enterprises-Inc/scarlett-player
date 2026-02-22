@@ -84,6 +84,9 @@ const DEFAULT_STATE: StateStore = {
   chromecastAvailable: false,
   chromecastActive: false,
 
+  // Thumbnail Preview
+  thumbnails: null,
+
   // UI State
   interacting: false,
   hovering: false,
