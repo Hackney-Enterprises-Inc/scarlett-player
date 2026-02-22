@@ -193,3 +193,19 @@ jobs:
           echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
+
+      # Rebuild demo site with latest player and push to main (triggers Forge deploy)
+      - name: Update demo site
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          node demo/build.cjs
+          if git diff --quiet demo/demo.bundle.js demo/demo.bundle.js.map; then
+            echo "Demo bundle unchanged, skipping commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add demo/demo.bundle.js demo/demo.bundle.js.map
+            git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
+            git push
+            echo "- ✅ Demo site updated" >> $GITHUB_STEP_SUMMARY
+          fi
