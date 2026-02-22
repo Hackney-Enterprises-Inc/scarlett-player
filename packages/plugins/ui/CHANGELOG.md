@@ -1,5 +1,20 @@
 # @scarlett-player/ui
 
+## 0.5.1
+
+### Patch Changes
+
+- [#28](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/28) [`4ddc188`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/4ddc18809b81f98133cfe816a857d6f2b5916c59) Thanks [@alexhackney](https://github.com/alexhackney)! - Lint and type safety fixes
+  - Fixed all 31 ESLint warnings across the codebase (unused imports, variables, args)
+  - Added ThumbnailConfig type and thumbnails state to core StateStore
+  - Added error:retry and error:dismiss events to core PlayerEventMap
+  - Fixed VolumeControl missing event listener cleanup in destroy
+  - Fixed LiveIndicator inline handlers converted to proper named methods with cleanup
+  - Updated README with analytics plugin and completed roadmap items
+
+- Updated dependencies [[`4ddc188`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/4ddc18809b81f98133cfe816a857d6f2b5916c59)]:
+  - @scarlett-player/core@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/airplay",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "AirPlay Plugin for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -24,7 +24,7 @@
     "test:coverage": "vitest --coverage"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^0.5.0"
+    "@scarlett-player/core": "^0.5.1"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
