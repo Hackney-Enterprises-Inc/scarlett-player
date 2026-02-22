@@ -199,12 +199,12 @@ jobs:
         if: steps.check_release.outputs.exists == 'false'
         run: |
           node demo/build.cjs
-          if git diff --quiet demo/demo.bundle.js demo/demo.bundle.js.map; then
+          if git diff --quiet demo/ docs/demo/; then
             echo "Demo bundle unchanged, skipping commit"
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add demo/demo.bundle.js demo/demo.bundle.js.map
+            git add demo/demo.bundle.js demo/demo.bundle.js.map docs/demo/demo.bundle.js docs/demo/demo.bundle.js.map
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             git push
             echo "- ✅ Demo site updated" >> $GITHUB_STEP_SUMMARY

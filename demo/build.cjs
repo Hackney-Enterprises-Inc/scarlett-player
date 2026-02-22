@@ -29,12 +29,23 @@ async function build() {
       },
     });
 
-    console.log('✅ Demo built successfully!');
+    // Copy to docs/demo/ (served by Forge at scarlettplayer.com)
+    const docsDemo = path.join(__dirname, '../docs/demo');
+    if (fs.existsSync(docsDemo)) {
+      fs.copyFileSync(
+        path.join(__dirname, 'demo.bundle.js'),
+        path.join(docsDemo, 'demo.bundle.js')
+      );
+      fs.copyFileSync(
+        path.join(__dirname, 'demo.bundle.js.map'),
+        path.join(docsDemo, 'demo.bundle.js.map')
+      );
+      console.log('✅ Demo built and copied to docs/demo/');
+    } else {
+      console.log('✅ Demo built successfully!');
+    }
+    console.log(`📦 Version: ${VERSION}`);
     console.log('📂 Output: demo/demo.bundle.js');
-    console.log('');
-    console.log('To view the demo:');
-    console.log('  cd demo && npx serve .');
-    console.log('  Then open http://localhost:3000');
   } catch (error) {
     console.error('❌ Build failed:', error);
     process.exit(1);
