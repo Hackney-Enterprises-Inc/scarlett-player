@@ -1,5 +1,12 @@
 # @scarlett-player/media-session
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [[`4ddc188`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/4ddc18809b81f98133cfe816a857d6f2b5916c59)]:
+  - @scarlett-player/core@0.5.1
+
 ## 0.5.0
 
 ### Patch Changes
