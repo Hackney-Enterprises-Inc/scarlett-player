@@ -92,7 +92,9 @@ export class VolumeControl implements Control {
     // Update slider
     const displayVolume = muted ? 0 : volume;
     this.level.style.width = `${displayVolume * 100}%`;
-    this.slider.setAttribute('aria-valuenow', String(Math.round(displayVolume * 100)));
+    const volumePercent = Math.round(displayVolume * 100);
+    this.slider.setAttribute('aria-valuenow', String(volumePercent));
+    this.slider.setAttribute('aria-valuetext', `${volumePercent}%`);
   }
 
   private toggleMute(): void {

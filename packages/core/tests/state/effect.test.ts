@@ -406,7 +406,7 @@ describe('effect', () => {
   });
 
   describe('unsubscribe function', () => {
-    it('should exist but currently does nothing', () => {
+    it('should stop effect from re-running after unsubscribe', () => {
       const count = signal(0);
       const fn = vi.fn();
 
@@ -417,12 +417,54 @@ describe('effect', () => {
 
       expect(fn).toHaveBeenCalledTimes(1);
 
-      // Call unsubscribe (currently a no-op)
+      // Unsubscribe
       unsub();
 
-      // Effect still runs because unsubscribe is not implemented
+      // Effect should NOT run after unsubscribe
       count.set(1);
-      expect(fn).toHaveBeenCalledTimes(2);
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle multiple unsubscribe calls gracefully', () => {
+      const count = signal(0);
+      const fn = vi.fn();
+
+      const unsub = effect(() => {
+        count.get();
+        fn();
+      });
+
+      unsub();
+      unsub(); // Second call should be safe
+
+      count.set(1);
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not affect other effects on the same signal', () => {
+      const count = signal(0);
+      const fn1 = vi.fn();
+      const fn2 = vi.fn();
+
+      const unsub1 = effect(() => {
+        count.get();
+        fn1();
+      });
+
+      effect(() => {
+        count.get();
+        fn2();
+      });
+
+      expect(fn1).toHaveBeenCalledTimes(1);
+      expect(fn2).toHaveBeenCalledTimes(1);
+
+      // Unsubscribe only effect 1
+      unsub1();
+
+      count.set(1);
+      expect(fn1).toHaveBeenCalledTimes(1); // Should NOT re-run
+      expect(fn2).toHaveBeenCalledTimes(2); // Should still run
     });
   });
 

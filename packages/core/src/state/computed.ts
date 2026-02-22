@@ -6,7 +6,7 @@
  * Target size: ~400 bytes minified
  */
 
-import { currentEffect, setCurrentEffect, getCurrentEffect, type UnsubscribeFn } from './effect';
+import { currentEffect, setCurrentEffect, getCurrentEffect, trackEffectSubscription, type UnsubscribeFn } from './effect';
 
 /**
  * A computed signal that derives its value from other signals.
@@ -63,7 +63,9 @@ export class Computed<T> {
 
     // Track dependency if in effect context
     if (currentEffect) {
-      this.subscribers.add(currentEffect);
+      const effect = currentEffect;
+      this.subscribers.add(effect);
+      trackEffectSubscription(effect, () => this.subscribers.delete(effect));
     }
 
     return this.value!;

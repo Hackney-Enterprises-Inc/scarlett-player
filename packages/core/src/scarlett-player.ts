@@ -120,6 +120,9 @@ export class ScarlettPlayer {
   /** Initial source URL */
   private initialSrc?: string;
 
+  /** Counter to detect stale load() calls */
+  private loadGeneration = 0;
+
   /**
    * Create a new ScarlettPlayer.
    *
@@ -218,6 +221,9 @@ export class ScarlettPlayer {
   async load(source: string): Promise<void> {
     this.checkDestroyed();
 
+    // Increment generation to invalidate any in-flight load
+    const generation = ++this.loadGeneration;
+
     try {
       this.logger.info('Loading source', { source });
 
@@ -241,6 +247,12 @@ export class ScarlettPlayer {
         this._currentProvider = null;
       }
 
+      // Bail if a newer load() was called while we were awaiting
+      if (generation !== this.loadGeneration) {
+        this.logger.info('Load superseded by newer load call', { source });
+        return;
+      }
+
       // Select provider FIRST (before init)
       const provider = this.pluginManager.selectProvider(source);
       if (!provider) {
@@ -261,6 +273,12 @@ export class ScarlettPlayer {
       // Init ONLY the selected provider (not all plugins)
       await this.pluginManager.initPlugin(provider.id);
 
+      // Bail if superseded
+      if (generation !== this.loadGeneration) {
+        this.logger.info('Load superseded by newer load call', { source });
+        return;
+      }
+
       // Update state
       this.stateManager.set('source', { src: source, type: this.detectMimeType(source) });
 
@@ -270,15 +288,24 @@ export class ScarlettPlayer {
         await (provider as any).loadSource(source);
       }
 
+      // Bail if superseded
+      if (generation !== this.loadGeneration) {
+        this.logger.info('Load superseded by newer load call', { source });
+        return;
+      }
+
       // Auto-play if enabled
       if (this.stateManager.getValue('autoplay')) {
         await this.play();
       }
     } catch (error) {
-      this.errorHandler.handle(error as Error, {
-        operation: 'load',
-        source,
-      });
+      // Only handle error if this is still the active load
+      if (generation === this.loadGeneration) {
+        this.errorHandler.handle(error as Error, {
+          operation: 'load',
+          source,
+        });
+      }
     }
   }
 

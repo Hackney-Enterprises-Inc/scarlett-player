@@ -2,7 +2,7 @@
  * ThumbnailPreview Tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ThumbnailPreview } from '../../src/controls/ThumbnailPreview';
 import type { ThumbnailConfig } from '../../src/controls/ThumbnailPreview';
 

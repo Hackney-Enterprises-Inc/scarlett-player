@@ -702,4 +702,382 @@ describe('SettingsMenu', () => {
     menu.destroy();
     expect(document.body.contains(el)).toBe(false);
   });
+
+  // --- Keyboard Navigation on Items ---
+
+  it('should activate quality item on Enter key', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    // Navigate to quality panel
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+
+    // Select 720p via Enter key
+    const items = el.querySelectorAll('.sp-settings-panel__item');
+    const item720 = Array.from(items).find(
+      (i) => i.getAttribute('data-id') === '720p'
+    ) as HTMLElement;
+    item720.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    expect(api.emit).toHaveBeenCalledWith('quality:select', {
+      quality: '720p',
+      auto: false,
+    });
+  });
+
+  it('should activate quality item on Space key', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+
+    const items = el.querySelectorAll('.sp-settings-panel__item');
+    const item360 = Array.from(items).find(
+      (i) => i.getAttribute('data-id') === '360p'
+    ) as HTMLElement;
+    item360.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+
+    expect(api.emit).toHaveBeenCalledWith('quality:select', {
+      quality: '360p',
+      auto: false,
+    });
+  });
+
+  it('should activate speed item on Enter key', () => {
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    ) as HTMLElement).click();
+
+    const items = el.querySelectorAll('.sp-settings-panel__item');
+    const item05 = Array.from(items).find(
+      (i) => i.getAttribute('data-id') === '0.5'
+    ) as HTMLElement;
+    item05.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    expect(api.emit).toHaveBeenCalledWith('playback:ratechange', { rate: 0.5 });
+  });
+
+  it('should go back from sub-panel header on Enter key', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+    expect(menu.getPanel()).toBe('quality');
+
+    const header = el.querySelector('.sp-settings-panel__header') as HTMLElement;
+    header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(menu.getPanel()).toBe('main');
+  });
+
+  it('should go back from sub-panel header on Space key', () => {
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    ) as HTMLElement).click();
+    expect(menu.getPanel()).toBe('speed');
+
+    const header = el.querySelector('.sp-settings-panel__header') as HTMLElement;
+    header.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(menu.getPanel()).toBe('main');
+  });
+
+  // --- Edge Cases ---
+
+  it('should close menu when selecting quality (not stay open)', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+
+    const autoItem = el.querySelector('.sp-settings-panel__item[data-id="auto"]') as HTMLElement;
+    autoItem.click();
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(menu.getPanel()).toBe('main');
+  });
+
+  it('should close menu when selecting speed (not stay open)', () => {
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    ) as HTMLElement).click();
+
+    const normalItem = el.querySelector('.sp-settings-panel__item[data-id="1"]') as HTMLElement;
+    normalItem.click();
+
+    expect(menu.isMenuOpen()).toBe(false);
+  });
+
+  it('should open to main panel each time after being closed and reopened', () => {
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+
+    // Open and navigate to speed
+    btn.click();
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    ) as HTMLElement).click();
+    expect(menu.getPanel()).toBe('speed');
+
+    // Close
+    btn.click();
+    expect(menu.isMenuOpen()).toBe(false);
+
+    // Reopen - should be at main panel
+    btn.click();
+    expect(menu.isMenuOpen()).toBe(true);
+    expect(menu.getPanel()).toBe('main');
+  });
+
+  it('should handle empty qualities array gracefully', () => {
+    api = createMockApi({ qualities: [] });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    // Only Speed row, no Quality
+    expect(rows.length).toBe(1);
+    const labels = Array.from(rows).map(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent
+    );
+    expect(labels).not.toContain('Quality');
+  });
+
+  it('should handle both qualities and text tracks together', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES, textTracks: MOCK_TRACKS });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    const labels = Array.from(rows).map(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent
+    );
+    expect(labels).toContain('Quality');
+    expect(labels).toContain('Captions');
+    expect(labels).toContain('Speed');
+    expect(rows.length).toBe(3);
+  });
+
+  it('should update captions active states when panel is open', () => {
+    api = createMockApi({
+      textTracks: MOCK_TRACKS,
+      currentTextTrack: MOCK_TRACKS[0], // English
+    });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    // Navigate to captions
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Captions'
+    ) as HTMLElement).click();
+
+    // Verify English is active
+    const enItem = el.querySelector('.sp-settings-panel__item[data-id="en"]');
+    expect(enItem?.classList.contains('sp-settings-panel__item--active')).toBe(true);
+
+    // Simulate track change to Spanish
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'currentTextTrack') return MOCK_TRACKS[1]; // Spanish
+      if (key === 'textTracks') return MOCK_TRACKS;
+      if (key === 'playbackRate') return 1;
+      if (key === 'qualities') return [];
+      return undefined;
+    });
+    menu.update();
+
+    const esItem = el.querySelector('.sp-settings-panel__item[data-id="es"]');
+    expect(esItem?.classList.contains('sp-settings-panel__item--active')).toBe(true);
+    expect(
+      el.querySelector('.sp-settings-panel__item[data-id="en"]')?.classList.contains(
+        'sp-settings-panel__item--active'
+      )
+    ).toBe(false);
+  });
+
+  it('should not update active states when menu is closed', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    menu.render();
+
+    // Menu is closed, update should not throw
+    expect(() => menu.update()).not.toThrow();
+  });
+
+  it('should stop click propagation inside the panel', () => {
+    const el = menu.render();
+    document.body.appendChild(el);
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+    expect(menu.isMenuOpen()).toBe(true);
+
+    // Click inside the panel should not close the menu
+    const panel = el.querySelector('.sp-settings-panel') as HTMLElement;
+    panel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    // Menu should still be open (click stopped propagation)
+    expect(menu.isMenuOpen()).toBe(true);
+
+    document.body.removeChild(el);
+  });
+
+  // --- Sub-panel header accessibility ---
+
+  it('should have correct ARIA attributes on sub-panel header', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+
+    const header = el.querySelector('.sp-settings-panel__header') as HTMLElement;
+    expect(header.getAttribute('role')).toBe('menuitem');
+    expect(header.getAttribute('tabindex')).toBe('0');
+  });
+
+  // --- Cleanup after outside click ---
+
+  it('should not respond to outside clicks after destroy', () => {
+    const el = menu.render();
+    document.body.appendChild(el);
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+    expect(menu.isMenuOpen()).toBe(true);
+
+    menu.destroy();
+
+    // Outside click after destroy should not throw
+    expect(() => {
+      document.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }).not.toThrow();
+  });
+
+  it('should not respond to Escape key after destroy', () => {
+    menu.render();
+    const btn = menu.render().querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    menu.destroy();
+
+    expect(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    }).not.toThrow();
+  });
+
+  // --- Mark active quality when matching ---
+
+  it('should mark correct quality as active when currentQuality matches', () => {
+    api = createMockApi({
+      qualities: MOCK_QUALITIES,
+      currentQuality: { id: '360p', label: '360p' },
+    });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    (Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Quality'
+    ) as HTMLElement).click();
+
+    const item360 = el.querySelector('.sp-settings-panel__item[data-id="360p"]');
+    expect(item360?.classList.contains('sp-settings-panel__item--active')).toBe(true);
+
+    const autoItem = el.querySelector('.sp-settings-panel__item[data-id="auto"]');
+    expect(autoItem?.classList.contains('sp-settings-panel__item--active')).toBe(false);
+  });
+
+  // --- Speed display edge cases ---
+
+  it('should display "0.5x" for 0.5 speed in main panel', () => {
+    api = createMockApi({ playbackRate: 0.5 });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    const speedRow = Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    );
+    const value = speedRow?.querySelector('.sp-settings-panel__value');
+    expect(value?.textContent).toContain('0.5x');
+  });
+
+  it('should display "2x" for 2x speed in main panel', () => {
+    api = createMockApi({ playbackRate: 2 });
+    menu.destroy();
+    menu = new SettingsMenu(api);
+    const el = menu.render();
+    const btn = el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+    btn.click();
+
+    const rows = el.querySelectorAll('.sp-settings-panel__row');
+    const speedRow = Array.from(rows).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    );
+    const value = speedRow?.querySelector('.sp-settings-panel__value');
+    expect(value?.textContent).toContain('2x');
+  });
 });

@@ -252,6 +252,21 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api?.emit('playback:ratechange', { rate: videoEl.playbackRate });
     });
 
+    // Stall detection
+    on('stalled', () => {
+      api?.setState('buffering', true);
+      api?.emit('media:stalled', undefined);
+      api?.logger.warn('Media stalled - network may be slow');
+    });
+
+    on('suspend', () => {
+      api?.emit('media:suspend', undefined);
+    });
+
+    on('abort', () => {
+      api?.emit('media:abort', undefined);
+    });
+
     // Error handling
     on('error', () => {
       const error = videoEl.error;

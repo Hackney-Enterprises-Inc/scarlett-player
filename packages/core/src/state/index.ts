@@ -6,4 +6,4 @@
 
 export { Signal, signal } from './signal';
 export { Computed, computed } from './computed';
-export { effect, currentEffect, setCurrentEffect, getCurrentEffect, type UnsubscribeFn } from './effect';
+export { effect, currentEffect, setCurrentEffect, getCurrentEffect, trackEffectSubscription, type UnsubscribeFn } from './effect';

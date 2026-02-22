@@ -217,6 +217,215 @@ describe('ErrorOverlay', () => {
 
     document.body.removeChild(el);
   });
+
+  // --- Retry behavior ---
+
+  it('should emit error:retry with source on retry click', () => {
+    const el = overlay.render();
+    document.body.appendChild(el);
+
+    overlay.show(new Error('test'));
+
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    retryBtn.click();
+
+    expect(api.emit).toHaveBeenCalledWith('error:retry', {
+      src: 'http://example.com/video.m3u8',
+    });
+
+    document.body.removeChild(el);
+  });
+
+  it('should set video src on retry click', () => {
+    const el = overlay.render();
+    document.body.appendChild(el);
+
+    overlay.show(new Error('test'));
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    retryBtn.click();
+
+    expect(video.src).toContain('example.com/video.m3u8');
+
+    document.body.removeChild(el);
+  });
+
+  it('should disable retry button during retry to prevent double-tap', () => {
+    const el = overlay.render();
+    document.body.appendChild(el);
+
+    overlay.show(new Error('test'));
+
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    retryBtn.click();
+
+    expect(retryBtn.disabled).toBe(true);
+
+    document.body.removeChild(el);
+  });
+
+  it('should re-enable retry button after show is called again', () => {
+    const el = overlay.render();
+
+    overlay.show(new Error('first error'));
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    retryBtn.click();
+    expect(retryBtn.disabled).toBe(true);
+
+    // Show again re-enables
+    overlay.show(new Error('second error'));
+    expect(retryBtn.disabled).toBe(false);
+  });
+
+  it('should not call video methods if retry button is already disabled', () => {
+    const el = overlay.render();
+    document.body.appendChild(el);
+
+    overlay.show(new Error('test'));
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    retryBtn.click();
+
+    // Clear call counts
+    (video.load as any).mockClear();
+    (video.play as any).mockClear();
+
+    // Second click should be blocked
+    retryBtn.click();
+    expect(video.load).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
+
+    document.body.removeChild(el);
+  });
+
+  // --- Show/hide transitions ---
+
+  it('should show then hide then show again correctly', () => {
+    overlay.render();
+
+    overlay.show(new Error('first'));
+    expect(overlay.isVisible()).toBe(true);
+
+    overlay.hide();
+    expect(overlay.isVisible()).toBe(false);
+
+    overlay.show(new Error('second'));
+    expect(overlay.isVisible()).toBe(true);
+  });
+
+  it('should update message when show is called multiple times', () => {
+    const el = overlay.render();
+
+    overlay.show(new Error('Network timeout'));
+    const message = el.querySelector('.sp-error-overlay__message');
+    expect(message?.textContent).toBe(
+      'Having trouble connecting. Check your internet and try again.'
+    );
+
+    overlay.show(new Error('Media decode error'));
+    expect(message?.textContent).toBe("This video can't be played right now.");
+  });
+
+  // --- Auto-hide scenarios ---
+
+  it('should not auto-hide when in loading state', () => {
+    overlay.show(new Error('test'));
+    expect(overlay.isVisible()).toBe(true);
+
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'playbackState') return 'loading';
+      if (key === 'playing') return false;
+      return undefined;
+    });
+
+    overlay.update();
+    expect(overlay.isVisible()).toBe(true);
+  });
+
+  it('should not auto-hide when playbackState is idle and not playing', () => {
+    overlay.show(new Error('test'));
+
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'playbackState') return 'idle';
+      if (key === 'playing') return false;
+      return undefined;
+    });
+
+    overlay.update();
+    expect(overlay.isVisible()).toBe(true);
+  });
+
+  it('should not auto-hide when not visible', () => {
+    // Never shown, so not visible
+    expect(overlay.isVisible()).toBe(false);
+
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'playbackState') return 'playing';
+      if (key === 'playing') return true;
+      return undefined;
+    });
+
+    overlay.update();
+    expect(overlay.isVisible()).toBe(false);
+  });
+
+  // --- Manifest error category ---
+
+  it('should display manifest load error message', () => {
+    const el = overlay.render();
+    overlay.show(new Error('manifest load failed'));
+    const message = el.querySelector('.sp-error-overlay__message');
+    // "manifest" without network keywords falls into manifest category
+    expect(message?.textContent).toBe('Unable to load video. Please try again.');
+  });
+
+  // --- Structure ---
+
+  it('should have icon, message, and actions in content area', () => {
+    const el = overlay.render();
+    const content = el.querySelector('.sp-error-overlay__content');
+    expect(content).toBeTruthy();
+    expect(content?.querySelector('.sp-error-overlay__icon')).toBeTruthy();
+    expect(content?.querySelector('.sp-error-overlay__message')).toBeTruthy();
+    expect(content?.querySelector('.sp-error-overlay__actions')).toBeTruthy();
+  });
+
+  it('should have button type attribute on both buttons', () => {
+    const el = overlay.render();
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    const dismissBtn = el.querySelector('.sp-error-overlay__dismiss') as HTMLButtonElement;
+    expect(retryBtn.getAttribute('type')).toBe('button');
+    expect(dismissBtn.getAttribute('type')).toBe('button');
+  });
+
+  // --- Cleanup ---
+
+  it('should remove button event listeners on destroy', () => {
+    const el = overlay.render();
+    document.body.appendChild(el);
+
+    overlay.destroy();
+
+    // After destroy, clicking buttons should not trigger handlers
+    // We can verify by checking that emit is not called after destroy
+    const emitCallCount = (api.emit as any).mock.calls.length;
+    const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
+    const dismissBtn = el.querySelector('.sp-error-overlay__dismiss') as HTMLButtonElement;
+
+    // These buttons are detached from DOM after destroy, but we can still dispatch
+    retryBtn.click();
+    dismissBtn.click();
+
+    // emit should not have been called again for error:dismiss
+    // (retryBtn won't emit error:dismiss, dismissBtn handler removed)
+    const newCalls = (api.emit as any).mock.calls.slice(emitCallCount);
+    const dismissCalls = newCalls.filter(
+      (call: unknown[]) => call[0] === 'error:dismiss'
+    );
+    expect(dismissCalls.length).toBe(0);
+  });
 });
 
 describe('getUserMessage', () => {
@@ -255,5 +464,42 @@ describe('getUserMessage', () => {
 
   it('should return generic message for null', () => {
     expect(getUserMessage(null)).toBe('Something went wrong.');
+  });
+
+  it('should return manifest message for plain manifest errors', () => {
+    expect(getUserMessage(new Error('manifest parse error'))).toBe(
+      'Unable to load video. Please try again.'
+    );
+  });
+
+  it('should match network errors case-insensitively via toLowerCase', () => {
+    expect(getUserMessage(new Error('NETWORK ERROR'))).toBe(
+      'Having trouble connecting. Check your internet and try again.'
+    );
+    expect(getUserMessage(new Error('TIMEOUT'))).toBe(
+      'Having trouble connecting. Check your internet and try again.'
+    );
+  });
+
+  it('should return generic message for empty error message', () => {
+    expect(getUserMessage(new Error(''))).toBe('Something went wrong.');
+  });
+
+  it('should prioritize network keywords over manifest keywords', () => {
+    // "manifest load failed: connection refused" has both "manifest" and "connection"
+    // but "connection" is matched by the network check first
+    expect(getUserMessage(new Error('manifest load failed: connection refused'))).toBe(
+      'Having trouble connecting. Check your internet and try again.'
+    );
+  });
+
+  it('should return source message for 404 errors', () => {
+    expect(getUserMessage(new Error('HTTP 404 not found'))).toBe('Video not found.');
+  });
+
+  it('should return media message for codec errors', () => {
+    expect(getUserMessage(new Error('video codec not supported by browser'))).toBe(
+      "This video can't be played right now."
+    );
   });
 });

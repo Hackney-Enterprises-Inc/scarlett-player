@@ -7,7 +7,7 @@
  * Target size: ~500 bytes minified
  */
 
-import { currentEffect, type UnsubscribeFn } from './effect';
+import { currentEffect, trackEffectSubscription, type UnsubscribeFn } from './effect';
 
 /**
  * A reactive signal that holds a value and notifies subscribers on changes.
@@ -43,7 +43,10 @@ export class Signal<T> {
   get(): T {
     // Track dependency if in effect context
     if (currentEffect) {
-      this.subscribers.add(currentEffect);
+      const effect = currentEffect;
+      this.subscribers.add(effect);
+      // Register cleanup so effect can unsubscribe from this signal
+      trackEffectSubscription(effect, () => this.subscribers.delete(effect));
     }
     return this.value;
   }

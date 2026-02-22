@@ -60,6 +60,15 @@ export interface PlayerEventMap {
   /** Media progress (buffering) */
   'media:progress': { buffered: number };
 
+  /** Media stalled (network slow or unresponsive) */
+  'media:stalled': void;
+
+  /** Media download suspended by browser */
+  'media:suspend': void;
+
+  /** Media loading aborted */
+  'media:abort': void;
+
   /** Media error occurred */
   'media:error': { error: Error };
 
