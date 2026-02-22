@@ -15,7 +15,6 @@ import type {
   HLSLiveInfo,
   IHLSPlugin,
   HlsInstance,
-  HlsConstructor,
 } from './types';
 import {
   supportsNativeHLS,

@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { Plugin, IPluginAPI } from '@scarlett-player/core';
+import type { IPluginAPI } from '@scarlett-player/core';
 import type {
   IAirPlayPlugin,
   WebkitVideoElement,

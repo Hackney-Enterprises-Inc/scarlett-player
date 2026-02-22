@@ -73,7 +73,7 @@ export function formatBitrate(bitrate: number): string {
  * @param currentLevel - Currently active level index (-1 for auto)
  * @returns Array of HLSQualityLevel objects
  */
-export function mapLevels(levels: HlsLevel[], currentLevel: number): HLSQualityLevel[] {
+export function mapLevels(levels: HlsLevel[], _currentLevel: number): HLSQualityLevel[] {
   return levels.map((level, index) => ({
     index,
     width: level.width || 0,

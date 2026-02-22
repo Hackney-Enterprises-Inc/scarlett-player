@@ -125,7 +125,7 @@ async function initializePlayer() {
 }
 
 // Example: VOD Content with Analytics
-async function initializeVODPlayer() {
+export async function initializeVODPlayer() {
   const player = await createPlayer({
     container: '#player',
     src: 'https://cdn.example.com/vod/fight-replay.m3u8',
@@ -152,7 +152,7 @@ async function initializeVODPlayer() {
 }
 
 // Example: Anonymous Viewer (no user ID)
-async function initializeAnonymousPlayer() {
+export async function initializeAnonymousPlayer() {
   const player = await createPlayer({
     container: '#player',
     src: 'https://cdn.example.com/preview.m3u8',
@@ -174,7 +174,7 @@ async function initializeAnonymousPlayer() {
 }
 
 // Example: GDPR Compliant (conditional analytics)
-async function initializePlayerWithConsent() {
+export async function initializePlayerWithConsent() {
   const hasAnalyticsConsent = checkUserConsent();
 
   const player = await createPlayer({
@@ -199,7 +199,7 @@ async function initializePlayerWithConsent() {
 }
 
 // Helper functions (implement these based on your backend)
-async function purchaseEvent(eventId: string, price: number) {
+async function purchaseEvent(_eventId: string, _price: number) {
   // Call your payment API
   return {
     success: true,

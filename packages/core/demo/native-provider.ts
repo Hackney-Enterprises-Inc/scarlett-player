@@ -89,7 +89,7 @@ export const createNativeProvider = (): Plugin<NativeProviderConfig> => {
       });
     });
 
-    videoElement.addEventListener('error', (e) => {
+    videoElement.addEventListener('error', (_e) => {
       const error = videoElement?.error;
       api?.logger.error('Video error', {
         code: error?.code,

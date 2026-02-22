@@ -3,10 +3,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { chromecastPlugin, isCastSupported } from '../src/index';
+import { chromecastPlugin } from '../src/index';
 import { resetCastLoader } from '../src/cast-loader';
 import type { IPluginAPI } from '@scarlett-player/core';
-import type { CastFramework } from '../src/types';
 
 // Mock Cast SDK
 const createMockCastSDK = () => {

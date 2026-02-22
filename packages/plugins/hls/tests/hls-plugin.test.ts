@@ -105,7 +105,7 @@ describe('HLSPlugin', () => {
     HTMLVideoElement.prototype.pause = vi.fn();
 
     // Mock canPlayType for native HLS detection
-    HTMLVideoElement.prototype.canPlayType = vi.fn((type: string) => {
+    HTMLVideoElement.prototype.canPlayType = vi.fn((_type: string) => {
       // Simulate non-Safari (no native HLS support)
       return '';
     });
@@ -657,7 +657,7 @@ describe('event-map', () => {
         on: vi.fn((event: string, handler: Function) => {
           handlerMap.set(event, handler);
         }),
-        off: vi.fn((event: string, handler: Function) => {
+        off: vi.fn((event: string, _handler: Function) => {
           handlerMap.delete(event);
         }),
         levels: [

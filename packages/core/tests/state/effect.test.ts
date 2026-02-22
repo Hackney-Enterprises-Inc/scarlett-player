@@ -187,7 +187,6 @@ describe('effect', () => {
     it('should restore currentEffect after nested effects', () => {
       let outerEffect: (() => void) | null = null;
       let innerEffect: (() => void) | null = null;
-      let afterInner: (() => void) | null = null;
 
       effect(() => {
         outerEffect = currentEffect;
@@ -195,8 +194,6 @@ describe('effect', () => {
         effect(() => {
           innerEffect = currentEffect;
         });
-
-        afterInner = currentEffect;
       });
 
       expect(outerEffect).toBeTruthy();

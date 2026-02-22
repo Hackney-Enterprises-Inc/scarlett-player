@@ -5,13 +5,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Logger, createLogger, type LogEntry, type LogHandler } from '../src/logger';
+import { Logger, createLogger } from '../src/logger';
 
 describe('Logger', () => {
-  let logger: Logger;
-
   beforeEach(() => {
-    logger = new Logger();
     // Suppress console output during tests
     vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.spyOn(console, 'info').mockImplementation(() => {});
