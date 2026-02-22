@@ -113,7 +113,12 @@ export const styles = `
   transition: height 0.15s ease;
 }
 
-.sp-progress-wrapper:hover .sp-progress,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress {
+    height: 5px;
+  }
+}
+
 .sp-progress--dragging {
   height: 5px;
 }
@@ -159,7 +164,12 @@ export const styles = `
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__handle,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__handle {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 .sp-progress--dragging .sp-progress__handle {
   transform: translate(-50%, -50%) scale(1);
 }
@@ -201,8 +211,10 @@ export const styles = `
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__tooltip {
-  opacity: 1;
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__tooltip {
+    opacity: 1;
+  }
 }
 
 /* ============================================
@@ -222,9 +234,11 @@ export const styles = `
   flex-shrink: 0;
 }
 
-.sp-control:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-control:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-control:active {
@@ -293,7 +307,12 @@ export const styles = `
   transition: width 0.2s ease;
 }
 
-.sp-volume:hover .sp-volume__slider-wrap,
+@media (hover: hover) {
+  .sp-volume:hover .sp-volume__slider-wrap {
+    width: 64px;
+  }
+}
+
 .sp-volume:focus-within .sp-volume__slider-wrap {
   width: 64px;
 }
@@ -336,8 +355,10 @@ export const styles = `
   transition: background 0.15s ease, opacity 0.15s ease;
 }
 
-.sp-live:hover {
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-live:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-live__dot {

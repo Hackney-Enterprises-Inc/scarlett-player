@@ -54,9 +54,13 @@ export class VolumeControl implements Control {
 
     // Events
     this.slider.addEventListener('mousedown', this.onMouseDown);
+    this.slider.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.slider.addEventListener('keydown', this.onKeyDown);
     document.addEventListener('mousemove', this.onDocMouseMove);
     document.addEventListener('mouseup', this.onMouseUp);
+    document.addEventListener('touchmove', this.onDocTouchMove, { passive: false });
+    document.addEventListener('touchend', this.onTouchEnd);
+    document.addEventListener('touchcancel', this.onTouchEnd);
   }
 
   render(): HTMLElement {
@@ -130,6 +134,23 @@ export class VolumeControl implements Control {
     this.isDragging = false;
   };
 
+  private onTouchStart = (e: TouchEvent): void => {
+    e.preventDefault();
+    this.isDragging = true;
+    this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
+  };
+
+  private onDocTouchMove = (e: TouchEvent): void => {
+    if (this.isDragging) {
+      e.preventDefault();
+      this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
+    }
+  };
+
+  private onTouchEnd = (): void => {
+    this.isDragging = false;
+  };
+
   private onKeyDown = (e: KeyboardEvent): void => {
     const video = getVideo(this.api.container);
     if (!video) return;
@@ -151,8 +172,14 @@ export class VolumeControl implements Control {
   };
 
   destroy(): void {
+    this.slider.removeEventListener('mousedown', this.onMouseDown);
+    this.slider.removeEventListener('touchstart', this.onTouchStart);
+    this.slider.removeEventListener('keydown', this.onKeyDown);
     document.removeEventListener('mousemove', this.onDocMouseMove);
     document.removeEventListener('mouseup', this.onMouseUp);
+    document.removeEventListener('touchmove', this.onDocTouchMove);
+    document.removeEventListener('touchend', this.onTouchEnd);
+    document.removeEventListener('touchcancel', this.onTouchEnd);
     this.el.remove();
   }
 }

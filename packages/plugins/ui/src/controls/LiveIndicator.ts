@@ -29,13 +29,8 @@ export class LiveIndicator implements Control {
     this.el.setAttribute('aria-label', 'Seek to live');
     this.el.setAttribute('tabindex', '0');
 
-    this.el.onclick = () => this.seekToLive();
-    this.el.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        this.seekToLive();
-      }
-    };
+    this.el.addEventListener('click', this.handleClick);
+    this.el.addEventListener('keydown', this.handleKeyDown);
   }
 
   render(): HTMLElement {
@@ -61,6 +56,17 @@ export class LiveIndicator implements Control {
     }
   }
 
+  private handleClick = (): void => {
+    this.seekToLive();
+  };
+
+  private handleKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      this.seekToLive();
+    }
+  };
+
   private seekToLive(): void {
     const video = getVideo(this.api.container);
     if (!video) return;
@@ -72,6 +78,8 @@ export class LiveIndicator implements Control {
   }
 
   destroy(): void {
+    this.el.removeEventListener('click', this.handleClick);
+    this.el.removeEventListener('keydown', this.handleKeyDown);
     this.el.remove();
   }
 }

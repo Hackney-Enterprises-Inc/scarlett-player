@@ -61,6 +61,11 @@ export class ThumbnailPreview {
       preload.onload = () => {
         this.loaded = true;
       };
+      preload.onerror = () => {
+        // Sprite sheet failed to load, disable thumbnails
+        this.config = null;
+        this.loaded = false;
+      };
       preload.src = config.src;
     }
   }

@@ -230,6 +230,17 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     // Only handle when focused on container or its children
     if (!api.container.contains(document.activeElement)) return;
 
+    // Don't intercept keys when user is typing in an input field
+    const activeEl = document.activeElement;
+    if (
+      activeEl instanceof HTMLInputElement ||
+      activeEl instanceof HTMLTextAreaElement ||
+      activeEl instanceof HTMLSelectElement ||
+      (activeEl as HTMLElement)?.isContentEditable
+    ) {
+      return;
+    }
+
     const video = api.container.querySelector('video');
     if (!video) return;
 

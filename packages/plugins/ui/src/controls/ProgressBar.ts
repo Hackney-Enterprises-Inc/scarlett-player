@@ -60,9 +60,13 @@ export class ProgressBar implements Control {
     this.wrapper.addEventListener('mousedown', this.onMouseDown);
     this.wrapper.addEventListener('mousemove', this.onMouseMove);
     this.wrapper.addEventListener('mouseleave', this.onMouseLeave);
+    this.wrapper.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.el.addEventListener('keydown', this.onKeyDown);
     document.addEventListener('mousemove', this.onDocMouseMove);
     document.addEventListener('mouseup', this.onMouseUp);
+    document.addEventListener('touchmove', this.onDocTouchMove, { passive: false });
+    document.addEventListener('touchend', this.onTouchEnd);
+    document.addEventListener('touchcancel', this.onTouchEnd);
   }
 
   render(): HTMLElement {
@@ -228,6 +232,51 @@ export class ProgressBar implements Control {
     this.handle.style.left = `${percent * 100}%`;
   }
 
+  private onTouchStart = (e: TouchEvent): void => {
+    e.preventDefault();
+    const video = getVideo(this.api.container);
+    this.wasPlayingBeforeDrag = video ? !video.paused : false;
+    this.isDragging = true;
+    this.el.classList.add('sp-progress--dragging');
+    this.lastSeekTime = 0;
+    this.seek(e.touches[0].clientX, true);
+  };
+
+  private onDocTouchMove = (e: TouchEvent): void => {
+    if (this.isDragging) {
+      e.preventDefault();
+      this.seek(e.touches[0].clientX);
+      this.updateVisualPosition(e.touches[0].clientX);
+    }
+  };
+
+  private onTouchEnd = (e: TouchEvent): void => {
+    if (this.isDragging) {
+      const clientX = e.changedTouches?.[0]?.clientX;
+      if (clientX !== undefined) {
+        this.seek(clientX, true);
+      }
+      this.isDragging = false;
+      this.el.classList.remove('sp-progress--dragging');
+
+      // Resume playback if was playing before drag
+      if (this.wasPlayingBeforeDrag) {
+        const video = getVideo(this.api.container);
+        if (video && video.paused) {
+          const resumePlayback = () => {
+            video.removeEventListener('seeked', resumePlayback);
+            video.play().catch(() => {});
+          };
+          video.addEventListener('seeked', resumePlayback);
+        }
+      }
+
+      // Hide tooltip on touch end
+      this.tooltip.style.opacity = '0';
+      this.thumbnailPreview.hide();
+    }
+  };
+
   private onMouseMove = (e: MouseEvent): void => {
     this.updateTooltip(e.clientX);
   };
@@ -309,8 +358,12 @@ export class ProgressBar implements Control {
     this.wrapper.removeEventListener('mousedown', this.onMouseDown);
     this.wrapper.removeEventListener('mousemove', this.onMouseMove);
     this.wrapper.removeEventListener('mouseleave', this.onMouseLeave);
+    this.wrapper.removeEventListener('touchstart', this.onTouchStart);
     document.removeEventListener('mousemove', this.onDocMouseMove);
     document.removeEventListener('mouseup', this.onMouseUp);
+    document.removeEventListener('touchmove', this.onDocTouchMove);
+    document.removeEventListener('touchend', this.onTouchEnd);
+    document.removeEventListener('touchcancel', this.onTouchEnd);
     this.thumbnailPreview.destroy();
     this.wrapper.remove();
   }
