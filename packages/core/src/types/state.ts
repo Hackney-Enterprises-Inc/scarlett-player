@@ -122,6 +122,26 @@ export interface QualityLevel {
 }
 
 /**
+ * Thumbnail sprite sheet configuration for seek preview.
+ */
+export interface ThumbnailConfig {
+  /** URL to the sprite sheet image */
+  src: string;
+
+  /** Width of each thumbnail tile in pixels */
+  width: number;
+
+  /** Height of each thumbnail tile in pixels */
+  height: number;
+
+  /** Number of columns in the sprite sheet */
+  columns: number;
+
+  /** Seconds between each thumbnail */
+  interval: number;
+}
+
+/**
  * Seekable time range for live/DVR content.
  */
 export interface SeekableRange {
@@ -273,6 +293,10 @@ export interface StateStore {
 
   /** Whether currently casting via Chromecast */
   chromecastActive: boolean;
+
+  // === Thumbnail Preview ===
+  /** Thumbnail sprite sheet config for seek preview (null if not configured) */
+  thumbnails: ThumbnailConfig | null;
 
   // === UI State ===
   /** Whether user is currently interacting with player */

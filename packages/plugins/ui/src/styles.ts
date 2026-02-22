@@ -113,7 +113,12 @@ export const styles = `
   transition: height 0.15s ease;
 }
 
-.sp-progress-wrapper:hover .sp-progress,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress {
+    height: 5px;
+  }
+}
+
 .sp-progress--dragging {
   height: 5px;
 }
@@ -159,9 +164,32 @@ export const styles = `
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__handle,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__handle {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 .sp-progress--dragging .sp-progress__handle {
   transform: translate(-50%, -50%) scale(1);
+}
+
+/* Thumbnail Preview */
+.sp-thumbnail-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: none;
+  z-index: 21;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.sp-thumbnail-preview__img {
+  background-repeat: no-repeat;
 }
 
 /* Progress Tooltip */
@@ -183,8 +211,10 @@ export const styles = `
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__tooltip {
-  opacity: 1;
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__tooltip {
+    opacity: 1;
+  }
 }
 
 /* ============================================
@@ -204,9 +234,11 @@ export const styles = `
   flex-shrink: 0;
 }
 
-.sp-control:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-control:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-control:active {
@@ -275,7 +307,12 @@ export const styles = `
   transition: width 0.2s ease;
 }
 
-.sp-volume:hover .sp-volume__slider-wrap,
+@media (hover: hover) {
+  .sp-volume:hover .sp-volume__slider-wrap {
+    width: 64px;
+  }
+}
+
 .sp-volume:focus-within .sp-volume__slider-wrap {
   width: 64px;
 }
@@ -318,8 +355,10 @@ export const styles = `
   transition: background 0.15s ease, opacity 0.15s ease;
 }
 
-.sp-live:hover {
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-live:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-live__dot {
@@ -336,6 +375,16 @@ export const styles = `
 
 .sp-live--behind .sp-live__dot {
   animation: none;
+}
+
+.sp-live--behind span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Progress bar live mode: accent color for filled bar */
+.sp-progress--live .sp-progress__filled {
+  background: var(--sp-accent, #e50914);
 }
 
 @keyframes sp-pulse {
@@ -419,6 +468,169 @@ export const styles = `
 }
 
 /* ============================================
+   Settings Menu (Gear Icon)
+   ============================================ */
+.sp-settings {
+  position: relative;
+}
+
+.sp-settings__btn {
+  display: flex;
+  align-items: center;
+}
+
+.sp-settings-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  min-width: 200px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  z-index: 20;
+  overflow: hidden;
+}
+
+.sp-settings-panel--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Main menu rows */
+.sp-settings-panel--main {
+  padding: 4px 0;
+}
+
+.sp-settings-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.sp-settings-panel__row:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sp-settings-panel__label {
+  font-weight: 500;
+}
+
+.sp-settings-panel__value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.sp-settings-panel__arrow {
+  display: flex;
+  align-items: center;
+  transform: rotate(-90deg);
+}
+
+.sp-settings-panel__arrow svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* Sub-menu panels */
+.sp-settings-panel--sub {
+  padding: 0;
+}
+
+.sp-settings-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.1s ease;
+}
+
+.sp-settings-panel__header:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sp-settings-panel__back {
+  display: flex;
+  align-items: center;
+  transform: rotate(-90deg);
+}
+
+.sp-settings-panel__back svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.sp-settings-panel__header-label {
+  flex: 1;
+}
+
+.sp-settings-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.sp-settings-panel__item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.sp-settings-panel__item--active {
+  color: var(--sp-accent, #e50914);
+}
+
+.sp-settings-panel__check {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  margin-left: 8px;
+  opacity: 0;
+}
+
+.sp-settings-panel__check svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.sp-settings-panel__item--active .sp-settings-panel__check {
+  opacity: 1;
+}
+
+/* ============================================
+   Captions Button
+   ============================================ */
+.sp-captions--active {
+  color: var(--sp-accent, #e50914);
+}
+
+/* ============================================
    Cast Button States
    ============================================ */
 .sp-cast--active {
@@ -427,6 +639,122 @@ export const styles = `
 
 .sp-cast--unavailable {
   opacity: 0.4;
+}
+
+/* ============================================
+   Error Overlay
+   ============================================ */
+.sp-error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s;
+}
+
+.sp-error-overlay--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sp-error-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px;
+  max-width: 360px;
+}
+
+.sp-error-overlay__icon {
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 16px;
+}
+
+.sp-error-overlay__icon svg {
+  width: 48px;
+  height: 48px;
+  fill: currentColor;
+}
+
+.sp-error-overlay__message {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0 0 24px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.sp-error-overlay__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.sp-error-overlay__retry {
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 120px;
+  min-height: 44px;
+  transition: background 0.15s ease, transform 0.15s ease;
+  font-family: inherit;
+}
+
+.sp-error-overlay__retry:hover {
+  filter: brightness(1.1);
+}
+
+.sp-error-overlay__retry:active {
+  transform: scale(0.96);
+}
+
+.sp-error-overlay__retry:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.sp-error-overlay__dismiss {
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 100px;
+  min-height: 44px;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  font-family: inherit;
+}
+
+.sp-error-overlay__dismiss:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.sp-error-overlay__dismiss:active {
+  transform: scale(0.96);
+}
+
+.sp-error-overlay__dismiss:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* ============================================
@@ -476,7 +804,14 @@ export const styles = `
   .sp-control,
   .sp-volume__slider-wrap,
   .sp-quality-menu,
-  .sp-buffering {
+  .sp-settings-panel,
+  .sp-settings-panel__row,
+  .sp-settings-panel__item,
+  .sp-settings-panel__header,
+  .sp-buffering,
+  .sp-error-overlay,
+  .sp-error-overlay__retry,
+  .sp-error-overlay__dismiss {
     transition: none;
   }
 

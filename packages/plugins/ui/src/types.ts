@@ -9,11 +9,15 @@ import type { Plugin, IPluginAPI } from '@scarlett-player/core';
  */
 export type ControlSlot =
   | 'play'
+  | 'skip-backward'
+  | 'skip-forward'
   | 'volume'
   | 'progress'
   | 'time'
   | 'live-indicator'
   | 'quality'
+  | 'settings'
+  | 'captions'
   | 'airplay'
   | 'chromecast'
   | 'pip'

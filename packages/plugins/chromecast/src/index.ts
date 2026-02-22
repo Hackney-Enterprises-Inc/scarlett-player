@@ -128,9 +128,13 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     switch (event.sessionState) {
       case SessionState.SESSION_STARTED:
-      case SessionState.SESSION_RESUMED:
         currentSession = castContext!.getCurrentSession();
         onSessionConnected();
+        break;
+
+      case SessionState.SESSION_RESUMED:
+        currentSession = castContext!.getCurrentSession();
+        onSessionResumed();
         break;
 
       case SessionState.SESSION_ENDED:
@@ -177,6 +181,28 @@ export function chromecastPlugin(): IChromecastPlugin {
   };
 
   /**
+   * Handle session resumed (reconnecting to existing session).
+   * Unlike onSessionConnected, this does NOT reload media since
+   * the cast device is already playing.
+   */
+  const onSessionResumed = (): void => {
+    if (!currentSession) return;
+
+    const deviceName = currentSession.getCastDevice()?.friendlyName || 'Chromecast';
+
+    api.setState('chromecastActive', true);
+    api.emit('chromecast:connected', { deviceName } as ChromecastConnectedEvent);
+
+    api.logger.info('Chromecast session resumed', { deviceName });
+
+    // Pause local video (cast device is already playing)
+    const video = api.container.querySelector('video');
+    if (video) {
+      video.pause();
+    }
+  };
+
+  /**
    * Handle session disconnected.
    */
   const onSessionDisconnected = (): void => {
@@ -213,6 +239,17 @@ export function chromecastPlugin(): IChromecastPlugin {
         : 'video/mp4';
 
     const mediaInfo = new window.chrome.cast.media.MediaInfo(src, contentType);
+
+    // Add metadata from player state (title, poster, subtitle)
+    const title = api.getState('title');
+    const poster = api.getState('poster');
+    if (title || poster) {
+      const metadata = new window.chrome.cast.media.GenericMediaMetadata();
+      if (title) metadata.title = title;
+      if (poster) metadata.images = [new window.chrome.cast.Image(poster)];
+      mediaInfo.metadata = metadata;
+    }
+
     const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
     request.currentTime = startTime;
     request.autoplay = true;
@@ -284,22 +321,22 @@ export function chromecastPlugin(): IChromecastPlugin {
         }
       }
 
-      // Remove event listeners
-      if (castContext && castStateHandler) {
+      // Remove event listeners (use optional chaining in case SDK was unloaded)
+      if (castContext && castStateHandler && window.cast?.framework) {
         castContext.removeEventListener(
-          window.cast!.framework.CastContextEventType.CAST_STATE_CHANGED,
+          window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
           castStateHandler as any
         );
       }
-      if (castContext && sessionStateHandler) {
+      if (castContext && sessionStateHandler && window.cast?.framework) {
         castContext.removeEventListener(
-          window.cast!.framework.CastContextEventType.SESSION_STATE_CHANGED,
+          window.cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
           sessionStateHandler as any
         );
       }
-      if (remotePlayerController && remotePlayerHandler) {
+      if (remotePlayerController && remotePlayerHandler && window.cast?.framework) {
         remotePlayerController.removeEventListener(
-          window.cast!.framework.RemotePlayerEventType.ANY_CHANGE,
+          window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
           remotePlayerHandler as any
         );
       }

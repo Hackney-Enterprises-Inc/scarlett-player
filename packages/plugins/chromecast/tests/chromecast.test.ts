@@ -109,7 +109,9 @@ const createMockCastSDK = () => {
             DEFAULT_MEDIA_RECEIVER_APP_ID: 'CC1AD845',
             MediaInfo: vi.fn().mockImplementation((id, type) => ({ contentId: id, contentType: type })),
             LoadRequest: vi.fn().mockImplementation((info) => ({ mediaInfo: info, autoplay: false, currentTime: 0 })),
+            GenericMediaMetadata: vi.fn().mockImplementation(() => ({})),
           },
+          Image: vi.fn().mockImplementation((url) => ({ url })),
           AutoJoinPolicy: {
             ORIGIN_SCOPED: 'origin_scoped',
           },
@@ -341,6 +343,78 @@ describe('Chromecast Plugin', () => {
       plugin.endSession();
 
       expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe('media metadata', () => {
+    beforeEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 Chrome/120.0.0.0',
+        configurable: true,
+      });
+      mockSDK = createMockCastSDK();
+      mockSDK.setup();
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 jsdom',
+        configurable: true,
+      });
+    });
+
+    it('should include title in cast media metadata', async () => {
+      const { api, state } = createMockApi();
+      state.title = 'My Video Title';
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      // Simulate session started (triggers loadMedia)
+      mockSDK.sessionHandlers[0]?.({
+        sessionState: 'SESSION_STARTED',
+      });
+
+      // Check that MediaInfo was created and metadata was set
+      const loadMediaCalls = mockSDK.mockSession.loadMedia.mock.calls;
+      expect(loadMediaCalls.length).toBe(1);
+
+      const request = loadMediaCalls[0][0];
+      expect(request.mediaInfo.metadata).toBeTruthy();
+      expect(request.mediaInfo.metadata.title).toBe('My Video Title');
+    });
+
+    it('should include poster as image in cast media metadata', async () => {
+      const { api, state } = createMockApi();
+      state.title = 'Video';
+      state.poster = 'https://example.com/poster.jpg';
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      mockSDK.sessionHandlers[0]?.({
+        sessionState: 'SESSION_STARTED',
+      });
+
+      const request = mockSDK.mockSession.loadMedia.mock.calls[0][0];
+      expect(request.mediaInfo.metadata.images).toBeTruthy();
+      expect(request.mediaInfo.metadata.images[0].url).toBe('https://example.com/poster.jpg');
+    });
+
+    it('should not set metadata when no title or poster', async () => {
+      const { api, state } = createMockApi();
+      delete state.title;
+      delete state.poster;
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      mockSDK.sessionHandlers[0]?.({
+        sessionState: 'SESSION_STARTED',
+      });
+
+      const request = mockSDK.mockSession.loadMedia.mock.calls[0][0];
+      expect(request.mediaInfo.metadata).toBeUndefined();
     });
   });
 

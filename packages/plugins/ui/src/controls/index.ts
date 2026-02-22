@@ -13,3 +13,8 @@ export { CastButton } from './CastButton';
 export { PipButton } from './PipButton';
 export { FullscreenButton } from './FullscreenButton';
 export { Spacer } from './Spacer';
+export { ErrorOverlay } from './ErrorOverlay';
+export { SettingsMenu } from './SettingsMenu';
+export { SkipButton } from './SkipButton';
+export { CaptionsButton } from './CaptionsButton';
+export { ThumbnailPreview } from './ThumbnailPreview';

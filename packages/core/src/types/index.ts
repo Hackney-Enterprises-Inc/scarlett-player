@@ -31,6 +31,7 @@ export type {
   AudioTrack,
   QualityLevel,
   SeekableRange,
+  ThumbnailConfig,
 } from './state';
 
 // Event Types
