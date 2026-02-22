@@ -100,6 +100,9 @@ describe('PlayButton', () => {
     });
 
     const video = api.container.querySelector('video')!;
+    // The toggle() method checks video.paused directly on the DOM element,
+    // so we need to simulate the video actually playing
+    Object.defineProperty(video, 'paused', { value: false, writable: true });
     button.render().click();
     expect(video.pause).toHaveBeenCalled();
   });
