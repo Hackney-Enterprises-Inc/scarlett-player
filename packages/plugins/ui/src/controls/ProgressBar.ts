@@ -53,6 +53,9 @@ export class ProgressBar implements Control {
     this.el.setAttribute('role', 'slider');
     this.el.setAttribute('aria-label', 'Seek');
     this.el.setAttribute('aria-valuemin', '0');
+    this.el.setAttribute('aria-valuemax', '0');
+    this.el.setAttribute('aria-valuenow', '0');
+    this.el.setAttribute('aria-valuetext', '0:00');
     this.el.setAttribute('tabindex', '0');
 
     // Event listeners - attach to wrapper for larger hit area

@@ -232,6 +232,8 @@ export const styles = `
   border-radius: 4px;
   transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
   flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 @media (hover: hover) {

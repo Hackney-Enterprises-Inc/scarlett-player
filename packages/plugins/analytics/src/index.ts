@@ -241,14 +241,15 @@ export function createAnalyticsPlugin(
       session.playTime += timeSinceLastHeartbeat;
     }
 
-    // Calculate average bitrate
+    // Calculate average bitrate (weighted by time spent at each level)
     if (session.bitrateHistory.length > 0) {
       const totalBitrateTime = session.bitrateHistory.reduce((sum, b, i, arr) => {
         const nextTime = i < arr.length - 1 ? arr[i + 1]?.time : now;
         const duration = nextTime - b.time;
         return sum + b.bitrate * duration;
       }, 0);
-      session.avgBitrate = Math.round(totalBitrateTime / session.watchTime);
+      const timeSpan = now - session.bitrateHistory[0].time;
+      session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : 0;
     }
 
     const state = {

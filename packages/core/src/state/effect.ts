@@ -42,6 +42,28 @@ export function getCurrentEffect(): (() => void) | null {
 export type UnsubscribeFn = () => void;
 
 /**
+ * Map from effect execute functions to their cleanup (unsubscribe from all signals).
+ * Signals/Computed call `trackEffectSubscription` when an effect subscribes to them,
+ * so the effect can later remove itself from all subscriber sets.
+ * @internal
+ */
+const effectCleanups = new WeakMap<() => void, Set<() => void>>();
+
+/**
+ * Register a cleanup function for the current effect.
+ * Called by Signal.get() and Computed.get() when they add currentEffect to their subscribers.
+ * @internal
+ */
+export function trackEffectSubscription(effectFn: () => void, unsubscribe: () => void): void {
+  let cleanups = effectCleanups.get(effectFn);
+  if (!cleanups) {
+    cleanups = new Set();
+    effectCleanups.set(effectFn, cleanups);
+  }
+  cleanups.add(unsubscribe);
+}
+
+/**
  * Create a reactive effect that runs when its dependencies change.
  *
  * The effect runs immediately and tracks any signals accessed during execution.
@@ -62,7 +84,11 @@ export type UnsubscribeFn = () => void;
  * ```
  */
 export function effect(fn: () => void): UnsubscribeFn {
+  let disposed = false;
+
   const execute = () => {
+    if (disposed) return;
+
     // Set as current effect for dependency tracking
     setCurrentEffect(execute);
     try {
@@ -79,8 +105,14 @@ export function effect(fn: () => void): UnsubscribeFn {
   // Run immediately to establish dependencies
   execute();
 
-  // Return cleanup function (can be extended for unsubscribing)
+  // Return cleanup function that removes effect from all signal subscriber sets
   return () => {
-    // Future: Add unsubscribe logic if needed
+    disposed = true;
+    const cleanups = effectCleanups.get(execute);
+    if (cleanups) {
+      cleanups.forEach(unsub => unsub());
+      cleanups.clear();
+      effectCleanups.delete(execute);
+    }
   };
 }

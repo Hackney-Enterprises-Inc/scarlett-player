@@ -66,6 +66,7 @@ export class SettingsMenu implements Control {
     // Keyboard handler
     this.keyHandler = (e: KeyboardEvent) => {
       if (!this.isOpen) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -75,6 +76,21 @@ export class SettingsMenu implements Control {
           this.close();
           this.btn.focus();
         }
+        return;
+      }
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.navigateItems(e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+
+      // Focus trap: Tab and Shift+Tab stay within the menu
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.navigateItems(e.shiftKey ? -1 : 1);
       }
     };
     document.addEventListener('keydown', this.keyHandler);
@@ -118,6 +134,7 @@ export class SettingsMenu implements Control {
     this.renderMainPanel();
     this.panel.classList.add('sp-settings-panel--open');
     this.btn.setAttribute('aria-expanded', 'true');
+    this.focusFirstItem();
   }
 
   close(): void {
@@ -143,6 +160,7 @@ export class SettingsMenu implements Control {
         this.renderCaptionsPanel();
         break;
     }
+    this.focusFirstItem();
   }
 
   private renderMainPanel(): void {
@@ -427,6 +445,39 @@ export class SettingsMenu implements Control {
         Math.abs(currentRate - value) < 0.01
       );
     });
+  }
+
+  private getFocusableItems(): HTMLElement[] {
+    return Array.from(
+      this.panel.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    );
+  }
+
+  private focusFirstItem(): void {
+    // Defer to next frame so the DOM is ready
+    requestAnimationFrame(() => {
+      const items = this.getFocusableItems();
+      if (items.length > 0) {
+        items[0].focus();
+      }
+    });
+  }
+
+  private navigateItems(direction: 1 | -1): void {
+    const items = this.getFocusableItems();
+    if (items.length === 0) return;
+
+    const active = document.activeElement as HTMLElement;
+    const currentIndex = items.indexOf(active);
+    let nextIndex: number;
+
+    if (currentIndex === -1) {
+      nextIndex = direction === 1 ? 0 : items.length - 1;
+    } else {
+      nextIndex = (currentIndex + direction + items.length) % items.length;
+    }
+
+    items[nextIndex].focus();
   }
 
   getPanel(): Panel {

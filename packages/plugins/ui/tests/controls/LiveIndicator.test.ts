@@ -111,7 +111,7 @@ describe('LiveIndicator', () => {
     liveIndicator.update();
     const el = liveIndicator.render();
     expect(el.textContent).toContain('LIVE');
-    expect(el.getAttribute('aria-label')).toBe('At live edge');
+    expect(el.getAttribute('aria-label')).toBe('Live broadcast - currently at live edge');
   });
 
   it('should show "GO LIVE" text and "Seek to live" aria when behind live edge', () => {
@@ -124,7 +124,7 @@ describe('LiveIndicator', () => {
     liveIndicator.update();
     const el = liveIndicator.render();
     expect(el.textContent).toContain('GO LIVE');
-    expect(el.getAttribute('aria-label')).toBe('Seek to live');
+    expect(el.getAttribute('aria-label')).toBe('Live broadcast - behind live edge, click to seek to live');
   });
 
   it('should seek to live edge on click', () => {
@@ -147,5 +147,163 @@ describe('LiveIndicator', () => {
 
     liveIndicator.destroy();
     expect(document.body.contains(el)).toBe(false);
+  });
+
+  // --- Keyboard Interactions ---
+
+  it('should seek to live edge on Space key', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(video.currentTime).toBe(100);
+  });
+
+  it('should not seek on unrelated key press', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(video.currentTime).toBe(50);
+  });
+
+  // --- Click when seekable range changes ---
+
+  it('should seek to updated seekable range end on click', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    // Update seekable range to a new end
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return true;
+      if (key === 'liveEdge') return false;
+      if (key === 'seekableRange') return { start: 0, end: 200 };
+      return null;
+    });
+
+    el.click();
+    expect(video.currentTime).toBe(200);
+  });
+
+  it('should not seek if no seekable range is available', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return true;
+      if (key === 'seekableRange') return null;
+      return null;
+    });
+
+    el.click();
+    expect(video.currentTime).toBe(50);
+  });
+
+  // --- State Updates ---
+
+  it('should toggle from behind to at-edge correctly', () => {
+    const el = liveIndicator.render();
+
+    // First behind
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return true;
+      if (key === 'liveEdge') return false;
+      return null;
+    });
+    liveIndicator.update();
+    expect(el.classList.contains('sp-live--behind')).toBe(true);
+    expect(el.textContent).toContain('GO LIVE');
+
+    // Then at edge
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return true;
+      if (key === 'liveEdge') return true;
+      return null;
+    });
+    liveIndicator.update();
+    expect(el.classList.contains('sp-live--behind')).toBe(false);
+    expect(el.textContent).toContain('LIVE');
+  });
+
+  it('should toggle from visible to hidden when stream goes from live to non-live', () => {
+    const el = liveIndicator.render();
+
+    // Live
+    liveIndicator.update();
+    expect(el.style.display).toBe('');
+
+    // Not live anymore
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return false;
+      return null;
+    });
+    liveIndicator.update();
+    expect(el.style.display).toBe('none');
+  });
+
+  it('should toggle from hidden to visible when stream goes from non-live to live', () => {
+    const el = liveIndicator.render();
+
+    // Not live
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return false;
+      return null;
+    });
+    liveIndicator.update();
+    expect(el.style.display).toBe('none');
+
+    // Now live
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return true;
+      if (key === 'liveEdge') return true;
+      return null;
+    });
+    liveIndicator.update();
+    expect(el.style.display).toBe('');
+  });
+
+  // --- Cleanup ---
+
+  it('should remove click event listener on destroy', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    liveIndicator.destroy();
+
+    // Click after destroy should not seek
+    el.click();
+    expect(video.currentTime).toBe(50);
+  });
+
+  it('should remove keydown event listener on destroy', () => {
+    const el = liveIndicator.render();
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
+
+    liveIndicator.destroy();
+
+    // Keydown after destroy should not seek
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(video.currentTime).toBe(50);
+  });
+
+  // --- Initial state ---
+
+  it('should have dot element inside the live indicator', () => {
+    const el = liveIndicator.render();
+    const dot = el.querySelector('.sp-live__dot');
+    expect(dot).not.toBeNull();
+    expect(dot?.tagName).toBe('DIV');
+  });
+
+  it('should have initial aria-label set by constructor', () => {
+    const el = liveIndicator.render();
+    // Constructor sets the at-edge label by default
+    expect(el.getAttribute('aria-label')).toBe('Live broadcast - currently at live edge');
   });
 });

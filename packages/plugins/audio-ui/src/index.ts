@@ -266,6 +266,8 @@ function createStyles(prefix: string, theme: AudioUITheme): string {
       align-items: center;
       justify-content: center;
       transition: background 0.2s, transform 0.1s;
+      min-width: 44px;
+      min-height: 44px;
     }
 
     .${prefix}__btn:hover {
@@ -453,6 +455,8 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
     // Create container
     container = document.createElement('div');
     container.className = `${prefix} ${prefix}--${layout}`;
+    container.setAttribute('role', 'region');
+    container.setAttribute('aria-label', 'Audio player');
 
     // Build UI based on layout
     if (layout === 'full') {
@@ -499,24 +503,24 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ''}
       </div>
       <div class="${prefix}__progress">
-        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current">0:00</span>` : ''}
-        <div class="${prefix}__progress-bar">
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--current" aria-label="Current time">0:00</span>` : ''}
+        <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
           <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
         </div>
-        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration">0:00</span>` : ''}
+        ${mergedConfig.showTime ? `<span class="${prefix}__time ${prefix}__time--duration" aria-label="Duration">0:00</span>` : ''}
       </div>
-      <div class="${prefix}__controls">
-        ${mergedConfig.showShuffle ? `<button class="${prefix}__btn ${prefix}__btn--shuffle" title="Shuffle">${ICONS.shuffle}</button>` : ''}
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ''}
-        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ''}
-        ${mergedConfig.showRepeat ? `<button class="${prefix}__btn ${prefix}__btn--repeat" title="Repeat">${ICONS.repeatOff}</button>` : ''}
+      <div class="${prefix}__controls" role="group" aria-label="Playback controls">
+        ${mergedConfig.showShuffle ? `<button class="${prefix}__btn ${prefix}__btn--shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false">${ICONS.shuffle}</button>` : ''}
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous" aria-label="Previous track">${ICONS.previous}</button>` : ''}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next" aria-label="Next track">${ICONS.next}</button>` : ''}
+        ${mergedConfig.showRepeat ? `<button class="${prefix}__btn ${prefix}__btn--repeat" title="Repeat" aria-label="Repeat" aria-pressed="false">${ICONS.repeatOff}</button>` : ''}
       </div>
       ${mergedConfig.showVolume ? `
         <div class="${prefix}__secondary-controls">
-          <div class="${prefix}__volume">
-            <button class="${prefix}__btn ${prefix}__btn--volume" title="Volume">${ICONS.volumeHigh}</button>
-            <div class="${prefix}__volume-slider">
+          <div class="${prefix}__volume" role="group" aria-label="Volume controls">
+            <button class="${prefix}__btn ${prefix}__btn--volume" title="Volume" aria-label="Mute">${ICONS.volumeHigh}</button>
+            <div class="${prefix}__volume-slider" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="100%" tabindex="0">
               <div class="${prefix}__volume-fill" style="width: 100%"></div>
             </div>
           </div>
@@ -539,15 +543,15 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         ${mergedConfig.showTitle ? `<div class="${prefix}__title">-</div>` : ''}
         ${mergedConfig.showArtist ? `<div class="${prefix}__artist">-</div>` : ''}
         <div class="${prefix}__progress">
-          <div class="${prefix}__progress-bar">
+          <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
             <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
       </div>
-      <div class="${prefix}__controls">
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous">${ICONS.previous}</button>` : ''}
-        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
-        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next">${ICONS.next}</button>` : ''}
+      <div class="${prefix}__controls" role="group" aria-label="Playback controls">
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--prev" title="Previous" aria-label="Previous track">${ICONS.previous}</button>` : ''}
+        <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
+        ${mergedConfig.showNavigation ? `<button class="${prefix}__btn ${prefix}__btn--next" title="Next" aria-label="Next track">${ICONS.next}</button>` : ''}
       </div>
     `;
   };
@@ -557,7 +561,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
    */
   const buildMiniLayout = (): string => {
     return `
-      <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play">${ICONS.play}</button>
+      <button class="${prefix}__btn ${prefix}__btn--primary ${prefix}__btn--play" title="Play" aria-label="Play">${ICONS.play}</button>
       ${mergedConfig.showArtwork ? `
         <div class="${prefix}__artwork">
           <img src="${mergedConfig.defaultArtwork || ''}" alt="Album art" />
@@ -566,7 +570,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       <div class="${prefix}__info">
         ${mergedConfig.showTitle ? `<div class="${prefix}__title-wrapper"><div class="${prefix}__title">-</div></div>` : ''}
         <div class="${prefix}__progress">
-          <div class="${prefix}__progress-bar">
+          <div class="${prefix}__progress-bar" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" tabindex="0">
             <div class="${prefix}__progress-fill" style="transform: scaleX(0)"></div>
           </div>
         </div>
@@ -659,6 +663,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
     if (playPauseBtn) {
       playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
       playPauseBtn.title = playing ? 'Pause' : 'Play';
+      playPauseBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     }
 
     // Update progress animation state
@@ -689,6 +694,14 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
 
     if (durationEl) {
       durationEl.textContent = formatTime(duration);
+    }
+
+    // Update progress bar ARIA attributes
+    const progressBar = container?.querySelector(`.${prefix}__progress-bar`);
+    if (progressBar) {
+      progressBar.setAttribute('aria-valuemax', String(Math.floor(duration)));
+      progressBar.setAttribute('aria-valuenow', String(Math.floor(currentTime)));
+      progressBar.setAttribute('aria-valuetext', formatTime(currentTime));
     }
 
     // Update title/artist
@@ -725,6 +738,15 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
 
     if (volumeBtn) {
       volumeBtn.innerHTML = muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh;
+      volumeBtn.setAttribute('aria-label', muted || volume === 0 ? 'Unmute' : 'Mute');
+    }
+
+    // Update volume slider ARIA attributes
+    const volumeSlider = container?.querySelector(`.${prefix}__volume-slider`);
+    if (volumeSlider) {
+      const displayVolume = Math.round((muted ? 0 : volume) * 100);
+      volumeSlider.setAttribute('aria-valuenow', String(displayVolume));
+      volumeSlider.setAttribute('aria-valuetext', `${displayVolume}%`);
     }
 
     // Update shuffle/repeat from playlist
@@ -734,16 +756,22 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
 
       if (shuffleBtn) {
         shuffleBtn.classList.toggle(`${prefix}__btn--active`, state.shuffle);
+        shuffleBtn.setAttribute('aria-pressed', String(state.shuffle));
+        shuffleBtn.setAttribute('aria-label', state.shuffle ? 'Shuffle on' : 'Shuffle off');
       }
 
       if (repeatBtn) {
         repeatBtn.classList.toggle(`${prefix}__btn--active`, state.repeat !== 'none');
+        repeatBtn.setAttribute('aria-pressed', String(state.repeat !== 'none'));
         if (state.repeat === 'one') {
           repeatBtn.innerHTML = ICONS.repeatOne;
+          repeatBtn.setAttribute('aria-label', 'Repeat one');
         } else if (state.repeat === 'all') {
           repeatBtn.innerHTML = ICONS.repeatAll;
+          repeatBtn.setAttribute('aria-label', 'Repeat all');
         } else {
           repeatBtn.innerHTML = ICONS.repeatOff;
+          repeatBtn.setAttribute('aria-label', 'Repeat off');
         }
       }
     }

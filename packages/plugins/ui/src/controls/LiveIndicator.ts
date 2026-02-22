@@ -26,7 +26,7 @@ export class LiveIndicator implements Control {
     this.el.appendChild(this.dot);
     this.el.appendChild(this.label);
     this.el.setAttribute('role', 'button');
-    this.el.setAttribute('aria-label', 'Seek to live');
+    this.el.setAttribute('aria-label', 'Live broadcast - currently at live edge');
     this.el.setAttribute('tabindex', '0');
 
     this.el.addEventListener('click', this.handleClick);
@@ -48,11 +48,13 @@ export class LiveIndicator implements Control {
     if (liveEdge) {
       this.el.classList.remove('sp-live--behind');
       this.label.textContent = 'LIVE';
-      this.el.setAttribute('aria-label', 'At live edge');
+      this.dot.setAttribute('aria-hidden', 'true');
+      this.el.setAttribute('aria-label', 'Live broadcast - currently at live edge');
     } else {
       this.el.classList.add('sp-live--behind');
       this.label.textContent = 'GO LIVE';
-      this.el.setAttribute('aria-label', 'Seek to live');
+      this.dot.setAttribute('aria-hidden', 'true');
+      this.el.setAttribute('aria-label', 'Live broadcast - behind live edge, click to seek to live');
     }
   }
 
