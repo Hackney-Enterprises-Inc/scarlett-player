@@ -1,9 +1,9 @@
 ---
-'@scarlett-player/core': minor
-'@scarlett-player/ui': minor
-'@scarlett-player/native': minor
-'@scarlett-player/analytics': minor
-'@scarlett-player/audio-ui': minor
+'@scarlett-player/core': patch
+'@scarlett-player/ui': patch
+'@scarlett-player/native': patch
+'@scarlett-player/analytics': patch
+'@scarlett-player/audio-ui': patch
 ---
 
 Stability, accessibility, and test coverage improvements
