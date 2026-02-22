@@ -33155,6 +33155,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     airplayActive: false,
     chromecastAvailable: false,
     chromecastActive: false,
+    // Thumbnail Preview
+    thumbnails: null,
     // UI State
     interacting: false,
     hovering: false,
@@ -35234,7 +35236,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     return `${bitrate} bps`;
   }
-  function mapLevels(levels, currentLevel) {
+  function mapLevels(levels, _currentLevel) {
     return levels.map((level, index) => ({
       index,
       width: level.width || 0,
@@ -35554,7 +35556,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const getRetryDelay2 = (retryCount) => {
       const baseDelay = mergedConfig.retryDelayMs ?? 1e3;
       const backoffFactor = mergedConfig.retryBackoffFactor ?? 2;
-      return baseDelay * Math.pow(backoffFactor, retryCount);
+      const delay = baseDelay * Math.pow(backoffFactor, retryCount);
+      const jitter = delay * (0.7 + Math.random() * 0.3);
+      return jitter;
     };
     const emitFatalError = (error, retriesExhausted) => {
       const message = retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`;
@@ -36369,7 +36373,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transition: height 0.15s ease;
 }
 
-.sp-progress-wrapper:hover .sp-progress,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress {
+    height: 5px;
+  }
+}
+
 .sp-progress--dragging {
   height: 5px;
 }
@@ -36415,9 +36424,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__handle,
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__handle {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 .sp-progress--dragging .sp-progress__handle {
   transform: translate(-50%, -50%) scale(1);
+}
+
+/* Thumbnail Preview */
+.sp-thumbnail-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: none;
+  z-index: 21;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.sp-thumbnail-preview__img {
+  background-repeat: no-repeat;
 }
 
 /* Progress Tooltip */
@@ -36439,8 +36471,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.sp-progress-wrapper:hover .sp-progress__tooltip {
-  opacity: 1;
+@media (hover: hover) {
+  .sp-progress-wrapper:hover .sp-progress__tooltip {
+    opacity: 1;
+  }
 }
 
 /* ============================================
@@ -36460,9 +36494,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   flex-shrink: 0;
 }
 
-.sp-control:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-control:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-control:active {
@@ -36531,7 +36567,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transition: width 0.2s ease;
 }
 
-.sp-volume:hover .sp-volume__slider-wrap,
+@media (hover: hover) {
+  .sp-volume:hover .sp-volume__slider-wrap {
+    width: 64px;
+  }
+}
+
 .sp-volume:focus-within .sp-volume__slider-wrap {
   width: 64px;
 }
@@ -36574,8 +36615,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transition: background 0.15s ease, opacity 0.15s ease;
 }
 
-.sp-live:hover {
-  background: rgba(255, 255, 255, 0.1);
+@media (hover: hover) {
+  .sp-live:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .sp-live__dot {
@@ -36592,6 +36635,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
 .sp-live--behind .sp-live__dot {
   animation: none;
+}
+
+.sp-live--behind span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Progress bar live mode: accent color for filled bar */
+.sp-progress--live .sp-progress__filled {
+  background: var(--sp-accent, #e50914);
 }
 
 @keyframes sp-pulse {
@@ -36675,6 +36728,169 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ============================================
+   Settings Menu (Gear Icon)
+   ============================================ */
+.sp-settings {
+  position: relative;
+}
+
+.sp-settings__btn {
+  display: flex;
+  align-items: center;
+}
+
+.sp-settings-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  min-width: 200px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  z-index: 20;
+  overflow: hidden;
+}
+
+.sp-settings-panel--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Main menu rows */
+.sp-settings-panel--main {
+  padding: 4px 0;
+}
+
+.sp-settings-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.sp-settings-panel__row:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sp-settings-panel__label {
+  font-weight: 500;
+}
+
+.sp-settings-panel__value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.sp-settings-panel__arrow {
+  display: flex;
+  align-items: center;
+  transform: rotate(-90deg);
+}
+
+.sp-settings-panel__arrow svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* Sub-menu panels */
+.sp-settings-panel--sub {
+  padding: 0;
+}
+
+.sp-settings-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.1s ease;
+}
+
+.sp-settings-panel__header:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sp-settings-panel__back {
+  display: flex;
+  align-items: center;
+  transform: rotate(-90deg);
+}
+
+.sp-settings-panel__back svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.sp-settings-panel__header-label {
+  flex: 1;
+}
+
+.sp-settings-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.sp-settings-panel__item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.sp-settings-panel__item--active {
+  color: var(--sp-accent, #e50914);
+}
+
+.sp-settings-panel__check {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  margin-left: 8px;
+  opacity: 0;
+}
+
+.sp-settings-panel__check svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.sp-settings-panel__item--active .sp-settings-panel__check {
+  opacity: 1;
+}
+
+/* ============================================
+   Captions Button
+   ============================================ */
+.sp-captions--active {
+  color: var(--sp-accent, #e50914);
+}
+
+/* ============================================
    Cast Button States
    ============================================ */
 .sp-cast--active {
@@ -36683,6 +36899,122 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
 .sp-cast--unavailable {
   opacity: 0.4;
+}
+
+/* ============================================
+   Error Overlay
+   ============================================ */
+.sp-error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s;
+}
+
+.sp-error-overlay--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sp-error-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px;
+  max-width: 360px;
+}
+
+.sp-error-overlay__icon {
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 16px;
+}
+
+.sp-error-overlay__icon svg {
+  width: 48px;
+  height: 48px;
+  fill: currentColor;
+}
+
+.sp-error-overlay__message {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0 0 24px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.sp-error-overlay__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.sp-error-overlay__retry {
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 120px;
+  min-height: 44px;
+  transition: background 0.15s ease, transform 0.15s ease;
+  font-family: inherit;
+}
+
+.sp-error-overlay__retry:hover {
+  filter: brightness(1.1);
+}
+
+.sp-error-overlay__retry:active {
+  transform: scale(0.96);
+}
+
+.sp-error-overlay__retry:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.sp-error-overlay__dismiss {
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 100px;
+  min-height: 44px;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  font-family: inherit;
+}
+
+.sp-error-overlay__dismiss:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.sp-error-overlay__dismiss:active {
+  transform: scale(0.96);
+}
+
+.sp-error-overlay__dismiss:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* ============================================
@@ -36732,7 +37064,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   .sp-control,
   .sp-volume__slider-wrap,
   .sp-quality-menu,
-  .sp-buffering {
+  .sp-settings-panel,
+  .sp-settings-panel__row,
+  .sp-settings-panel__item,
+  .sp-settings-panel__header,
+  .sp-buffering,
+  .sp-error-overlay,
+  .sp-error-overlay__retry,
+  .sp-error-overlay__dismiss {
     transition: none;
   }
 
@@ -36778,8 +37117,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     spinner: `<svg viewBox="0 0 24 24" fill="currentColor" class="sp-spin"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>`,
     skipForward: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>`,
     skipBack: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>`,
-    forward10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z"/><text x="12" y="15" text-anchor="middle" font-size="7" font-weight="600">10</text></svg>`,
-    replay10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="15" text-anchor="middle" font-size="7" font-weight="600">10</text></svg>`
+    forward10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z"/><path d="M10.9 16V11.73l-.72.36-.48-.86 1.48-.73h.85V16h-1.13zm2.77-2.14c0-.66.13-1.2.38-1.6.26-.41.66-.62 1.2-.62.55 0 .95.21 1.21.62.25.4.38.94.38 1.6 0 .67-.13 1.2-.38 1.61-.26.41-.66.61-1.21.61-.54 0-.94-.2-1.2-.61-.25-.41-.38-.94-.38-1.61zm1.12 0c0 .45.05.79.15 1.03.1.23.26.35.48.35s.38-.12.49-.35c.1-.24.15-.58.15-1.03s-.05-.78-.15-1.02c-.11-.23-.27-.35-.49-.35s-.38.12-.48.35c-.1.24-.15.57-.15 1.02z"/></svg>`,
+    replay10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><path d="M10.9 16V11.73l-.72.36-.48-.86 1.48-.73h.85V16h-1.13zm2.77-2.14c0-.66.13-1.2.38-1.6.26-.41.66-.62 1.2-.62.55 0 .95.21 1.21.62.25.4.38.94.38 1.6 0 .67-.13 1.2-.38 1.61-.26.41-.66.61-1.21.61-.54 0-.94-.2-1.2-.61-.25-.41-.38-.94-.38-1.61zm1.12 0c0 .45.05.79.15 1.03.1.23.26.35.48.35s.38-.12.49-.35c.1-.24.15-.58.15-1.03s-.05-.78-.15-1.02c-.11-.23-.27-.35-.49-.35s-.38.12-.48.35c-.1.24-.15.57-.15 1.02z"/></svg>`,
+    error: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`
   };
 
   // packages/plugins/ui/src/utils/dom.ts
@@ -36895,6 +37235,70 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   };
 
+  // packages/plugins/ui/src/controls/ThumbnailPreview.ts
+  var ThumbnailPreview = class {
+    constructor() {
+      this.config = null;
+      this.loaded = false;
+      this.el = createElement("div", { className: "sp-thumbnail-preview" });
+      this.img = createElement("div", { className: "sp-thumbnail-preview__img" });
+      this.el.appendChild(this.img);
+    }
+    getElement() {
+      return this.el;
+    }
+    setConfig(config) {
+      this.config = config;
+      this.loaded = false;
+      if (config) {
+        this.img.style.width = `${config.width}px`;
+        this.img.style.height = `${config.height}px`;
+        this.el.style.width = `${config.width}px`;
+        this.el.style.height = `${config.height}px`;
+        const preload = new Image();
+        preload.onload = () => {
+          this.loaded = true;
+        };
+        preload.onerror = () => {
+          this.config = null;
+          this.loaded = false;
+        };
+        preload.src = config.src;
+      }
+    }
+    /**
+     * Update the thumbnail to show the frame at the given time.
+     * @param time Time in seconds
+     * @param percent Position as 0-1 fraction (for horizontal positioning)
+     */
+    show(time, percent) {
+      if (!this.config || !this.loaded) {
+        this.el.style.display = "none";
+        return;
+      }
+      const { src, width, height, columns, interval } = this.config;
+      const index = Math.floor(time / interval);
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      this.img.style.backgroundImage = `url(${src})`;
+      this.img.style.backgroundPosition = `-${col * width}px -${row * height}px`;
+      this.img.style.backgroundSize = `${columns * width}px auto`;
+      this.img.style.width = `${width}px`;
+      this.img.style.height = `${height}px`;
+      this.el.style.left = `${percent * 100}%`;
+      this.el.style.display = "";
+    }
+    hide() {
+      this.el.style.display = "none";
+    }
+    isConfigured() {
+      return this.config !== null;
+    }
+    destroy() {
+      this.el.remove();
+    }
+  };
+
   // packages/plugins/ui/src/controls/ProgressBar.ts
   var ProgressBar = class {
     constructor(api) {
@@ -36936,36 +37340,99 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
       };
+      this.onTouchStart = (e) => {
+        e.preventDefault();
+        const video = getVideo(this.api.container);
+        this.wasPlayingBeforeDrag = video ? !video.paused : false;
+        this.isDragging = true;
+        this.el.classList.add("sp-progress--dragging");
+        this.lastSeekTime = 0;
+        this.seek(e.touches[0].clientX, true);
+      };
+      this.onDocTouchMove = (e) => {
+        if (this.isDragging) {
+          e.preventDefault();
+          this.seek(e.touches[0].clientX);
+          this.updateVisualPosition(e.touches[0].clientX);
+        }
+      };
+      this.onTouchEnd = (e) => {
+        if (this.isDragging) {
+          const clientX = e.changedTouches?.[0]?.clientX;
+          if (clientX !== void 0) {
+            this.seek(clientX, true);
+          }
+          this.isDragging = false;
+          this.el.classList.remove("sp-progress--dragging");
+          if (this.wasPlayingBeforeDrag) {
+            const video = getVideo(this.api.container);
+            if (video && video.paused) {
+              const resumePlayback = () => {
+                video.removeEventListener("seeked", resumePlayback);
+                video.play().catch(() => {
+                });
+              };
+              video.addEventListener("seeked", resumePlayback);
+            }
+          }
+          this.tooltip.style.opacity = "0";
+          this.thumbnailPreview.hide();
+        }
+      };
       this.onMouseMove = (e) => {
         this.updateTooltip(e.clientX);
       };
       this.onMouseLeave = () => {
         if (!this.isDragging) {
           this.tooltip.style.opacity = "0";
+          this.thumbnailPreview.hide();
         }
       };
       this.onKeyDown = (e) => {
         const video = getVideo(this.api.container);
         if (!video) return;
         const step = 5;
-        const duration = this.api.getState("duration") || 0;
-        switch (e.key) {
-          case "ArrowLeft":
-            e.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - step);
-            break;
-          case "ArrowRight":
-            e.preventDefault();
-            video.currentTime = Math.min(duration, video.currentTime + step);
-            break;
-          case "Home":
-            e.preventDefault();
-            video.currentTime = 0;
-            break;
-          case "End":
-            e.preventDefault();
-            video.currentTime = duration;
-            break;
+        const live = this.api.getState("live");
+        const seekableRange = this.api.getState("seekableRange");
+        if (live && seekableRange) {
+          switch (e.key) {
+            case "ArrowLeft":
+              e.preventDefault();
+              video.currentTime = Math.max(seekableRange.start, video.currentTime - step);
+              break;
+            case "ArrowRight":
+              e.preventDefault();
+              video.currentTime = Math.min(seekableRange.end, video.currentTime + step);
+              break;
+            case "Home":
+              e.preventDefault();
+              video.currentTime = seekableRange.start;
+              break;
+            case "End":
+              e.preventDefault();
+              video.currentTime = seekableRange.end;
+              break;
+          }
+        } else {
+          const duration = this.api.getState("duration") || 0;
+          switch (e.key) {
+            case "ArrowLeft":
+              e.preventDefault();
+              video.currentTime = Math.max(0, video.currentTime - step);
+              break;
+            case "ArrowRight":
+              e.preventDefault();
+              video.currentTime = Math.min(duration, video.currentTime + step);
+              break;
+            case "Home":
+              e.preventDefault();
+              video.currentTime = 0;
+              break;
+            case "End":
+              e.preventDefault();
+              video.currentTime = duration;
+              break;
+          }
         }
       };
       this.api = api;
@@ -36977,10 +37444,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.handle = createElement("div", { className: "sp-progress__handle" });
       this.tooltip = createElement("div", { className: "sp-progress__tooltip" });
       this.tooltip.textContent = "0:00";
+      this.thumbnailPreview = new ThumbnailPreview();
       track.appendChild(this.buffered);
       track.appendChild(this.filled);
       track.appendChild(this.handle);
       this.el.appendChild(track);
+      this.el.appendChild(this.thumbnailPreview.getElement());
       this.el.appendChild(this.tooltip);
       this.wrapper.appendChild(this.el);
       this.el.setAttribute("role", "slider");
@@ -36990,9 +37459,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.wrapper.addEventListener("mousedown", this.onMouseDown);
       this.wrapper.addEventListener("mousemove", this.onMouseMove);
       this.wrapper.addEventListener("mouseleave", this.onMouseLeave);
+      this.wrapper.addEventListener("touchstart", this.onTouchStart, { passive: false });
       this.el.addEventListener("keydown", this.onKeyDown);
       document.addEventListener("mousemove", this.onDocMouseMove);
       document.addEventListener("mouseup", this.onMouseUp);
+      document.addEventListener("touchmove", this.onDocTouchMove, { passive: false });
+      document.addEventListener("touchend", this.onTouchEnd);
+      document.addEventListener("touchcancel", this.onTouchEnd);
     }
     render() {
       return this.wrapper;
@@ -37005,11 +37478,40 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     hide() {
       this.wrapper.classList.remove("sp-progress-wrapper--visible");
     }
+    /** Set thumbnail sprite configuration */
+    setThumbnails(config) {
+      this.thumbnailPreview.setConfig(config);
+    }
     update() {
       const currentTime = this.api.getState("currentTime") || 0;
       const duration = this.api.getState("duration") || 0;
       const bufferedRanges = this.api.getState("buffered");
-      if (duration > 0) {
+      const live = this.api.getState("live");
+      const seekableRange = this.api.getState("seekableRange");
+      const thumbnails = this.api.getState("thumbnails");
+      if (thumbnails && !this.thumbnailPreview.isConfigured()) {
+        this.thumbnailPreview.setConfig(thumbnails);
+      }
+      this.el.classList.toggle("sp-progress--live", !!live);
+      if (live && seekableRange) {
+        const rangeLength = seekableRange.end - seekableRange.start;
+        if (rangeLength > 0) {
+          const progress = (currentTime - seekableRange.start) / rangeLength * 100;
+          this.filled.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+          this.handle.style.left = `${Math.max(0, Math.min(100, progress))}%`;
+        }
+        if (bufferedRanges && bufferedRanges.length > 0) {
+          const rangeLength2 = seekableRange.end - seekableRange.start;
+          if (rangeLength2 > 0) {
+            const bufferedEnd = bufferedRanges.end(bufferedRanges.length - 1);
+            const bufferedPercent = (bufferedEnd - seekableRange.start) / rangeLength2 * 100;
+            this.buffered.style.width = `${Math.max(0, Math.min(100, bufferedPercent))}%`;
+          }
+        }
+        this.el.setAttribute("aria-valuemax", String(Math.floor(seekableRange.end)));
+        this.el.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
+        this.el.setAttribute("aria-valuetext", `${Math.floor(seekableRange.end - currentTime)} seconds behind live`);
+      } else if (duration > 0) {
         const progress = currentTime / duration * 100;
         this.filled.style.width = `${progress}%`;
         this.handle.style.left = `${progress}%`;
@@ -37026,6 +37528,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     getTimeFromPosition(clientX) {
       const rect = this.el.getBoundingClientRect();
       const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const live = this.api.getState("live");
+      const seekableRange = this.api.getState("seekableRange");
+      if (live && seekableRange) {
+        const rangeLength = seekableRange.end - seekableRange.start;
+        return seekableRange.start + percent * rangeLength;
+      }
       const duration = this.api.getState("duration") || 0;
       return percent * duration;
     }
@@ -37033,8 +37541,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const rect = this.el.getBoundingClientRect();
       const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const time = this.getTimeFromPosition(clientX);
-      this.tooltip.textContent = formatTime(time);
+      const live = this.api.getState("live");
+      const seekableRange = this.api.getState("seekableRange");
+      if (live && seekableRange) {
+        const behindLive = seekableRange.end - time;
+        this.tooltip.textContent = formatLiveTime(behindLive);
+      } else {
+        this.tooltip.textContent = formatTime(time);
+      }
       this.tooltip.style.left = `${percent * 100}%`;
+      if (this.thumbnailPreview.isConfigured()) {
+        this.thumbnailPreview.show(time, percent);
+      }
     }
     updateVisualPosition(clientX) {
       const rect = this.el.getBoundingClientRect();
@@ -37057,8 +37575,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.wrapper.removeEventListener("mousedown", this.onMouseDown);
       this.wrapper.removeEventListener("mousemove", this.onMouseMove);
       this.wrapper.removeEventListener("mouseleave", this.onMouseLeave);
+      this.wrapper.removeEventListener("touchstart", this.onTouchStart);
       document.removeEventListener("mousemove", this.onDocMouseMove);
       document.removeEventListener("mouseup", this.onMouseUp);
+      document.removeEventListener("touchmove", this.onDocTouchMove);
+      document.removeEventListener("touchend", this.onTouchEnd);
+      document.removeEventListener("touchcancel", this.onTouchEnd);
+      this.thumbnailPreview.destroy();
       this.wrapper.remove();
     }
   };
@@ -37111,6 +37634,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.onMouseUp = () => {
         this.isDragging = false;
       };
+      this.onTouchStart = (e) => {
+        e.preventDefault();
+        this.isDragging = true;
+        this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
+      };
+      this.onDocTouchMove = (e) => {
+        if (this.isDragging) {
+          e.preventDefault();
+          this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
+        }
+      };
+      this.onTouchEnd = () => {
+        this.isDragging = false;
+      };
       this.onKeyDown = (e) => {
         const video = getVideo(this.api.container);
         if (!video) return;
@@ -37150,9 +37687,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.el.appendChild(this.btn);
       this.el.appendChild(sliderWrap);
       this.slider.addEventListener("mousedown", this.onMouseDown);
+      this.slider.addEventListener("touchstart", this.onTouchStart, { passive: false });
       this.slider.addEventListener("keydown", this.onKeyDown);
       document.addEventListener("mousemove", this.onDocMouseMove);
       document.addEventListener("mouseup", this.onMouseUp);
+      document.addEventListener("touchmove", this.onDocTouchMove, { passive: false });
+      document.addEventListener("touchend", this.onTouchEnd);
+      document.addEventListener("touchcancel", this.onTouchEnd);
     }
     render() {
       return this.el;
@@ -37197,8 +37738,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     }
     destroy() {
+      this.slider.removeEventListener("mousedown", this.onMouseDown);
+      this.slider.removeEventListener("touchstart", this.onTouchStart);
+      this.slider.removeEventListener("keydown", this.onKeyDown);
       document.removeEventListener("mousemove", this.onDocMouseMove);
       document.removeEventListener("mouseup", this.onMouseUp);
+      document.removeEventListener("touchmove", this.onDocTouchMove);
+      document.removeEventListener("touchend", this.onTouchEnd);
+      document.removeEventListener("touchcancel", this.onTouchEnd);
       this.el.remove();
     }
   };
@@ -37206,19 +37753,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/ui/src/controls/LiveIndicator.ts
   var LiveIndicator = class {
     constructor(api) {
-      this.api = api;
-      this.el = createElement("div", { className: "sp-live" });
-      this.el.innerHTML = '<div class="sp-live__dot"></div><span>LIVE</span>';
-      this.el.setAttribute("role", "button");
-      this.el.setAttribute("aria-label", "Seek to live");
-      this.el.setAttribute("tabindex", "0");
-      this.el.onclick = () => this.seekToLive();
-      this.el.onkeydown = (e) => {
+      this.handleClick = () => {
+        this.seekToLive();
+      };
+      this.handleKeyDown = (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           this.seekToLive();
         }
       };
+      this.api = api;
+      this.el = createElement("div", { className: "sp-live" });
+      this.dot = createElement("div", { className: "sp-live__dot" });
+      this.label = document.createElement("span");
+      this.label.textContent = "LIVE";
+      this.el.appendChild(this.dot);
+      this.el.appendChild(this.label);
+      this.el.setAttribute("role", "button");
+      this.el.setAttribute("aria-label", "Seek to live");
+      this.el.setAttribute("tabindex", "0");
+      this.el.addEventListener("click", this.handleClick);
+      this.el.addEventListener("keydown", this.handleKeyDown);
     }
     render() {
       return this.el;
@@ -37229,8 +37784,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.el.style.display = live ? "" : "none";
       if (liveEdge) {
         this.el.classList.remove("sp-live--behind");
+        this.label.textContent = "LIVE";
+        this.el.setAttribute("aria-label", "At live edge");
       } else {
         this.el.classList.add("sp-live--behind");
+        this.label.textContent = "GO LIVE";
+        this.el.setAttribute("aria-label", "Seek to live");
       }
     }
     seekToLive() {
@@ -37242,6 +37801,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     destroy() {
+      this.el.removeEventListener("click", this.handleClick);
+      this.el.removeEventListener("keydown", this.handleKeyDown);
       this.el.remove();
     }
   };
@@ -37552,14 +38113,588 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   };
 
+  // packages/plugins/ui/src/controls/ErrorOverlay.ts
+  function getUserMessage(error) {
+    if (!error) return "Something went wrong.";
+    const msg = error.message?.toLowerCase() || "";
+    if (msg.includes("network") || msg.includes("timeout") || msg.includes("fetch") || msg.includes("connection")) {
+      return "Having trouble connecting. Check your internet and try again.";
+    }
+    if (msg.includes("manifest")) {
+      return "Unable to load video. Please try again.";
+    }
+    if (msg.includes("decode") || msg.includes("media") || msg.includes("format") || msg.includes("codec")) {
+      return "This video can't be played right now.";
+    }
+    if (msg.includes("not found") || msg.includes("404") || msg.includes("source") || msg.includes("not supported")) {
+      return "Video not found.";
+    }
+    return "Something went wrong.";
+  }
+  var ErrorOverlay = class {
+    constructor(api) {
+      this.visible = false;
+      this.lastSource = null;
+      this.handleRetry = () => {
+        if (this.retryBtn.disabled) return;
+        this.retryBtn.disabled = true;
+        this.hide();
+        const source = this.api.getState("source");
+        const src = source?.src || this.lastSource;
+        if (src) {
+          this.api.emit("error:retry", { src });
+          const video = this.api.container.querySelector("video");
+          if (video) {
+            video.src = src;
+            video.load();
+            video.play().catch(() => {
+            });
+          }
+        }
+        setTimeout(() => {
+          this.retryBtn.disabled = false;
+        }, 1e3);
+      };
+      this.handleDismiss = () => {
+        this.hide();
+        this.api.emit("error:dismiss", void 0);
+      };
+      this.api = api;
+      const overlay = document.createElement("div");
+      overlay.className = "sp-error-overlay";
+      overlay.setAttribute("role", "alert");
+      overlay.setAttribute("aria-live", "assertive");
+      const content = document.createElement("div");
+      content.className = "sp-error-overlay__content";
+      const iconEl = document.createElement("div");
+      iconEl.className = "sp-error-overlay__icon";
+      iconEl.innerHTML = icons.error;
+      const messageEl = document.createElement("p");
+      messageEl.className = "sp-error-overlay__message";
+      messageEl.textContent = "Something went wrong.";
+      const actions = document.createElement("div");
+      actions.className = "sp-error-overlay__actions";
+      this.retryBtn = document.createElement("button");
+      this.retryBtn.className = "sp-error-overlay__retry";
+      this.retryBtn.setAttribute("type", "button");
+      this.retryBtn.setAttribute("aria-label", "Try again");
+      this.retryBtn.textContent = "Try Again";
+      this.retryBtn.addEventListener("click", this.handleRetry);
+      this.dismissBtn = document.createElement("button");
+      this.dismissBtn.className = "sp-error-overlay__dismiss";
+      this.dismissBtn.setAttribute("type", "button");
+      this.dismissBtn.setAttribute("aria-label", "Go back");
+      this.dismissBtn.textContent = "Go Back";
+      this.dismissBtn.addEventListener("click", this.handleDismiss);
+      actions.appendChild(this.retryBtn);
+      actions.appendChild(this.dismissBtn);
+      content.appendChild(iconEl);
+      content.appendChild(messageEl);
+      content.appendChild(actions);
+      overlay.appendChild(content);
+      this.el = overlay;
+    }
+    render() {
+      return this.el;
+    }
+    /** Show the error overlay with the given error */
+    show(error) {
+      const message = getUserMessage(error);
+      const messageEl = this.el.querySelector(".sp-error-overlay__message");
+      if (messageEl) {
+        messageEl.textContent = message;
+      }
+      const source = this.api.getState("source");
+      if (source?.src) {
+        this.lastSource = source.src;
+      }
+      this.visible = true;
+      this.retryBtn.disabled = false;
+      this.el.classList.add("sp-error-overlay--visible");
+    }
+    /** Hide the error overlay */
+    hide() {
+      this.visible = false;
+      this.el.classList.remove("sp-error-overlay--visible");
+    }
+    isVisible() {
+      return this.visible;
+    }
+    update() {
+      const playbackState = this.api.getState("playbackState");
+      if (this.visible && playbackState !== "error" && playbackState !== "loading") {
+        const playing = this.api.getState("playing");
+        if (playing) {
+          this.hide();
+        }
+      }
+    }
+    destroy() {
+      this.retryBtn.removeEventListener("click", this.handleRetry);
+      this.dismissBtn.removeEventListener("click", this.handleDismiss);
+      this.el.remove();
+    }
+  };
+
+  // packages/plugins/ui/src/controls/SettingsMenu.ts
+  var SPEED_OPTIONS = [
+    { label: "0.5x", value: 0.5 },
+    { label: "0.75x", value: 0.75 },
+    { label: "Normal", value: 1 },
+    { label: "1.25x", value: 1.25 },
+    { label: "1.5x", value: 1.5 },
+    { label: "2x", value: 2 }
+  ];
+  var SettingsMenu = class {
+    constructor(api) {
+      this.isOpen = false;
+      this.currentPanel = "main";
+      this.lastQualitiesJson = "";
+      this.api = api;
+      this.el = createElement("div", { className: "sp-settings" });
+      this.btn = createButton("sp-settings__btn", "Settings", icons.settings);
+      this.btn.setAttribute("aria-haspopup", "true");
+      this.btn.setAttribute("aria-expanded", "false");
+      this.btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggle();
+      });
+      this.panel = createElement("div", { className: "sp-settings-panel" });
+      this.panel.setAttribute("role", "menu");
+      this.panel.addEventListener("click", (e) => e.stopPropagation());
+      this.el.appendChild(this.btn);
+      this.el.appendChild(this.panel);
+      this.closeHandler = (e) => {
+        if (!this.el.contains(e.target)) {
+          this.close();
+        }
+      };
+      document.addEventListener("click", this.closeHandler);
+      this.keyHandler = (e) => {
+        if (!this.isOpen) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (this.currentPanel !== "main") {
+            this.showPanel("main");
+          } else {
+            this.close();
+            this.btn.focus();
+          }
+        }
+      };
+      document.addEventListener("keydown", this.keyHandler);
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const qualities = this.api.getState("qualities") || [];
+      const qualitiesJson = JSON.stringify(qualities.map((q) => q.id));
+      if (qualitiesJson !== this.lastQualitiesJson) {
+        this.lastQualitiesJson = qualitiesJson;
+        if (this.isOpen && this.currentPanel === "quality") {
+          this.renderQualityPanel();
+        }
+      }
+      if (this.isOpen) {
+        if (this.currentPanel === "quality") {
+          this.updateQualityActiveStates();
+        } else if (this.currentPanel === "speed") {
+          this.updateSpeedActiveStates();
+        } else if (this.currentPanel === "captions") {
+          this.updateCaptionsActiveStates();
+        }
+      }
+    }
+    toggle() {
+      this.isOpen ? this.close() : this.open();
+    }
+    open() {
+      this.isOpen = true;
+      this.currentPanel = "main";
+      this.renderMainPanel();
+      this.panel.classList.add("sp-settings-panel--open");
+      this.btn.setAttribute("aria-expanded", "true");
+    }
+    close() {
+      this.isOpen = false;
+      this.currentPanel = "main";
+      this.panel.classList.remove("sp-settings-panel--open");
+      this.btn.setAttribute("aria-expanded", "false");
+    }
+    showPanel(panel) {
+      this.currentPanel = panel;
+      switch (panel) {
+        case "main":
+          this.renderMainPanel();
+          break;
+        case "quality":
+          this.renderQualityPanel();
+          break;
+        case "speed":
+          this.renderSpeedPanel();
+          break;
+        case "captions":
+          this.renderCaptionsPanel();
+          break;
+      }
+    }
+    renderMainPanel() {
+      this.panel.innerHTML = "";
+      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--main";
+      const qualities = this.api.getState("qualities") || [];
+      const currentQuality = this.api.getState("currentQuality");
+      const playbackRate = this.api.getState("playbackRate") ?? 1;
+      if (qualities.length > 0) {
+        const qualityRow = this.createMainRow(
+          "Quality",
+          currentQuality?.label || "Auto",
+          () => this.showPanel("quality")
+        );
+        this.panel.appendChild(qualityRow);
+      }
+      const textTracks = this.api.getState("textTracks") || [];
+      if (textTracks.length > 0) {
+        const currentTextTrack = this.api.getState("currentTextTrack");
+        const captionsLabel = currentTextTrack ? currentTextTrack.label : "Off";
+        const captionsRow = this.createMainRow(
+          "Captions",
+          captionsLabel,
+          () => this.showPanel("captions")
+        );
+        this.panel.appendChild(captionsRow);
+      }
+      const speedLabel = playbackRate === 1 ? "Normal" : `${playbackRate}x`;
+      const speedRow = this.createMainRow(
+        "Speed",
+        speedLabel,
+        () => this.showPanel("speed")
+      );
+      this.panel.appendChild(speedRow);
+    }
+    createMainRow(label, value, onClick2) {
+      const row = createElement("div", { className: "sp-settings-panel__row" });
+      row.setAttribute("role", "menuitem");
+      row.setAttribute("tabindex", "0");
+      row.setAttribute("aria-haspopup", "true");
+      const labelEl = createElement("span", { className: "sp-settings-panel__label" });
+      labelEl.textContent = label;
+      const rightSide = createElement("span", { className: "sp-settings-panel__value" });
+      rightSide.textContent = value;
+      const arrow = createElement("span", { className: "sp-settings-panel__arrow" });
+      arrow.innerHTML = icons.chevronDown;
+      rightSide.appendChild(arrow);
+      row.appendChild(labelEl);
+      row.appendChild(rightSide);
+      row.addEventListener("click", (e) => {
+        e.preventDefault();
+        onClick2();
+      });
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick2();
+        }
+      });
+      return row;
+    }
+    renderQualityPanel() {
+      this.panel.innerHTML = "";
+      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
+      const header = this.createSubHeader("Quality");
+      this.panel.appendChild(header);
+      const qualities = this.api.getState("qualities") || [];
+      const currentQuality = this.api.getState("currentQuality");
+      const activeId = currentQuality?.id || "auto";
+      const autoItem = this.createMenuItem("Auto", "auto", activeId === "auto");
+      autoItem.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.selectQuality("auto");
+      });
+      this.panel.appendChild(autoItem);
+      const sorted = [...qualities].sort(
+        (a, b) => b.height - a.height
+      );
+      for (const q of sorted) {
+        if (q.id === "auto") continue;
+        const item = this.createMenuItem(q.label, q.id, q.id === activeId);
+        item.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.selectQuality(q.id);
+        });
+        this.panel.appendChild(item);
+      }
+    }
+    renderSpeedPanel() {
+      this.panel.innerHTML = "";
+      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
+      const header = this.createSubHeader("Speed");
+      this.panel.appendChild(header);
+      const currentRate = this.api.getState("playbackRate") ?? 1;
+      for (const opt of SPEED_OPTIONS) {
+        const isActive = Math.abs(currentRate - opt.value) < 0.01;
+        const item = this.createMenuItem(opt.label, String(opt.value), isActive);
+        item.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.selectSpeed(opt.value);
+        });
+        this.panel.appendChild(item);
+      }
+    }
+    renderCaptionsPanel() {
+      this.panel.innerHTML = "";
+      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
+      const header = this.createSubHeader("Captions");
+      this.panel.appendChild(header);
+      const textTracks = this.api.getState("textTracks") || [];
+      const currentTextTrack = this.api.getState("currentTextTrack");
+      const activeId = currentTextTrack?.id || "off";
+      const offItem = this.createMenuItem("Off", "off", activeId === "off");
+      offItem.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.selectCaption(null);
+      });
+      this.panel.appendChild(offItem);
+      for (const track of textTracks) {
+        const item = this.createMenuItem(track.label, track.id, track.id === activeId);
+        item.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.selectCaption(track.id);
+        });
+        this.panel.appendChild(item);
+      }
+    }
+    selectCaption(trackId) {
+      this.api.emit("track:text", { trackId });
+      this.close();
+    }
+    updateCaptionsActiveStates() {
+      const currentTextTrack = this.api.getState("currentTextTrack");
+      const activeId = currentTextTrack?.id || "off";
+      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
+      items.forEach((item) => {
+        const id = item.getAttribute("data-id");
+        item.classList.toggle("sp-settings-panel__item--active", id === activeId);
+      });
+    }
+    createSubHeader(title) {
+      const header = createElement("div", { className: "sp-settings-panel__header" });
+      header.setAttribute("role", "menuitem");
+      header.setAttribute("tabindex", "0");
+      const backArrow = createElement("span", { className: "sp-settings-panel__back" });
+      backArrow.innerHTML = icons.chevronUp;
+      const label = createElement("span", { className: "sp-settings-panel__header-label" });
+      label.textContent = title;
+      header.appendChild(backArrow);
+      header.appendChild(label);
+      header.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.showPanel("main");
+      });
+      header.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          this.showPanel("main");
+        }
+      });
+      return header;
+    }
+    createMenuItem(label, dataId, isActive) {
+      const item = createElement("div", {
+        className: `sp-settings-panel__item${isActive ? " sp-settings-panel__item--active" : ""}`
+      });
+      item.setAttribute("role", "menuitem");
+      item.setAttribute("tabindex", "0");
+      item.setAttribute("data-id", dataId);
+      const labelEl = createElement("span");
+      labelEl.textContent = label;
+      const check = createElement("span", { className: "sp-settings-panel__check" });
+      check.innerHTML = icons.checkmark;
+      item.appendChild(labelEl);
+      item.appendChild(check);
+      item.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          item.click();
+        }
+      });
+      return item;
+    }
+    selectQuality(qualityId) {
+      this.api.emit("quality:select", {
+        quality: qualityId,
+        auto: qualityId === "auto"
+      });
+      this.close();
+    }
+    selectSpeed(rate) {
+      this.api.emit("playback:ratechange", { rate });
+      const video = this.api.container.querySelector("video");
+      if (video) {
+        video.playbackRate = rate;
+      }
+      this.close();
+    }
+    updateQualityActiveStates() {
+      const currentQuality = this.api.getState("currentQuality");
+      const activeId = currentQuality?.id || "auto";
+      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
+      items.forEach((item) => {
+        const id = item.getAttribute("data-id");
+        item.classList.toggle("sp-settings-panel__item--active", id === activeId);
+      });
+    }
+    updateSpeedActiveStates() {
+      const currentRate = this.api.getState("playbackRate") ?? 1;
+      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
+      items.forEach((item) => {
+        const id = item.getAttribute("data-id");
+        const value = parseFloat(id || "1");
+        item.classList.toggle(
+          "sp-settings-panel__item--active",
+          Math.abs(currentRate - value) < 0.01
+        );
+      });
+    }
+    getPanel() {
+      return this.currentPanel;
+    }
+    isMenuOpen() {
+      return this.isOpen;
+    }
+    destroy() {
+      document.removeEventListener("click", this.closeHandler);
+      document.removeEventListener("keydown", this.keyHandler);
+      this.el.remove();
+    }
+  };
+
+  // packages/plugins/ui/src/controls/SkipButton.ts
+  var DEFAULT_SKIP_SECONDS = 10;
+  var SkipButton = class {
+    constructor(api, direction, seconds = DEFAULT_SKIP_SECONDS) {
+      this.clickHandler = () => {
+        this.skip();
+      };
+      this.api = api;
+      this.direction = direction;
+      this.seconds = seconds;
+      const icon = direction === "backward" ? icons.replay10 : icons.forward10;
+      const label = direction === "backward" ? `Rewind ${seconds} seconds` : `Forward ${seconds} seconds`;
+      this.el = createButton(
+        `sp-skip sp-skip--${direction}`,
+        label,
+        icon
+      );
+      this.el.addEventListener("click", this.clickHandler);
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const live = this.api.getState("live");
+      const duration = this.api.getState("duration") ?? 0;
+      const seekableRange = this.api.getState("seekableRange");
+      if (live && !seekableRange) {
+        this.el.style.display = "none";
+        return;
+      }
+      if (live && seekableRange) {
+        this.el.style.display = "";
+        return;
+      }
+      if (duration === 0) {
+        this.el.style.display = "none";
+        return;
+      }
+      this.el.style.display = "";
+    }
+    skip() {
+      const video = getVideo(this.api.container);
+      if (!video) return;
+      const live = this.api.getState("live");
+      const seekableRange = this.api.getState("seekableRange");
+      if (live && seekableRange) {
+        if (this.direction === "backward") {
+          video.currentTime = Math.max(seekableRange.start, video.currentTime - this.seconds);
+        } else {
+          video.currentTime = Math.min(seekableRange.end, video.currentTime + this.seconds);
+        }
+        return;
+      }
+      const duration = video.duration || 0;
+      if (!duration || !isFinite(duration)) return;
+      if (this.direction === "backward") {
+        video.currentTime = Math.max(0, video.currentTime - this.seconds);
+      } else {
+        video.currentTime = Math.min(duration, video.currentTime + this.seconds);
+      }
+    }
+    destroy() {
+      this.el.removeEventListener("click", this.clickHandler);
+      this.el.remove();
+    }
+  };
+
+  // packages/plugins/ui/src/controls/CaptionsButton.ts
+  var CaptionsButton = class {
+    constructor(api) {
+      this.clickHandler = () => {
+        this.toggle();
+      };
+      this.api = api;
+      this.el = createButton("sp-captions", "Captions", icons.captionsOff);
+      this.el.addEventListener("click", this.clickHandler);
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const textTracks = this.api.getState("textTracks") || [];
+      const currentTrack = this.api.getState("currentTextTrack");
+      if (textTracks.length === 0) {
+        this.el.style.display = "none";
+        return;
+      }
+      this.el.style.display = "";
+      if (currentTrack) {
+        this.el.innerHTML = icons.captions;
+        this.el.setAttribute("aria-label", `Captions: ${currentTrack.label}`);
+        this.el.classList.add("sp-captions--active");
+      } else {
+        this.el.innerHTML = icons.captionsOff;
+        this.el.setAttribute("aria-label", "Captions");
+        this.el.classList.remove("sp-captions--active");
+      }
+    }
+    toggle() {
+      const textTracks = this.api.getState("textTracks") || [];
+      const currentTrack = this.api.getState("currentTextTrack");
+      if (textTracks.length === 0) return;
+      if (currentTrack) {
+        this.api.emit("track:text", { trackId: null });
+      } else {
+        this.api.emit("track:text", { trackId: textTracks[0].id });
+      }
+    }
+    destroy() {
+      this.el.removeEventListener("click", this.clickHandler);
+      this.el.remove();
+    }
+  };
+
   // packages/plugins/ui/src/index.ts
   var DEFAULT_LAYOUT = [
     "play",
+    "skip-backward",
+    "skip-forward",
     "volume",
     "time",
     "live-indicator",
     "spacer",
-    "quality",
+    "settings",
+    "captions",
     "chromecast",
     "airplay",
     "pip",
@@ -37572,10 +38707,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let gradient = null;
     let progressBar = null;
     let bufferingIndicator = null;
+    let errorOverlay = null;
     let styleEl = null;
     let controls = [];
     let hideTimeout = null;
     let stateUnsubscribe = null;
+    let errorUnsubscribe = null;
     let controlsVisible = true;
     const layout = config.controls || DEFAULT_LAYOUT;
     const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
@@ -37583,6 +38720,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       switch (slot) {
         case "play":
           return new PlayButton(api);
+        case "skip-backward":
+          return new SkipButton(api, "backward");
+        case "skip-forward":
+          return new SkipButton(api, "forward");
         case "volume":
           return new VolumeControl(api);
         case "progress":
@@ -37593,6 +38734,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return new LiveIndicator(api);
         case "quality":
           return new QualityMenu(api);
+        case "settings":
+          return new SettingsMenu(api);
+        case "captions":
+          return new CaptionsButton(api);
         case "chromecast":
           return new CastButton(api, "chromecast");
         case "airplay":
@@ -37616,6 +38761,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const isLoading = playbackState === "loading";
       const showSpinner = waiting || seeking && !api?.getState("paused") || isLoading;
       bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
+      errorOverlay?.update();
     };
     const showControls = () => {
       if (controlsVisible) {
@@ -37654,8 +38800,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const handleKeyDown = (e) => {
       if (!api.container.contains(document.activeElement)) return;
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
+        return;
+      }
       const video = api.container.querySelector("video");
       if (!video) return;
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
       switch (e.key) {
         case " ":
         case "k":
@@ -37676,12 +38828,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           break;
         case "ArrowLeft":
           e.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - 5);
+          if (live && seekableRange) {
+            video.currentTime = Math.max(seekableRange.start, video.currentTime - 5);
+          } else {
+            video.currentTime = Math.max(0, video.currentTime - 5);
+          }
           showControls();
           break;
         case "ArrowRight":
           e.preventDefault();
-          video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+          if (live && seekableRange) {
+            video.currentTime = Math.min(seekableRange.end, video.currentTime + 5);
+          } else {
+            video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+          }
           showControls();
           break;
         case "ArrowUp":
@@ -37727,6 +38887,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         bufferingIndicator.innerHTML = icons.spinner;
         bufferingIndicator.setAttribute("aria-hidden", "true");
         container.appendChild(bufferingIndicator);
+        errorOverlay = new ErrorOverlay(api);
+        container.appendChild(errorOverlay.render());
+        errorUnsubscribe = api.on("error", (payload) => {
+          if (payload?.fatal) {
+            const error = api.getState("error") || new Error(payload.message || "Playback error");
+            errorOverlay?.show(error);
+          }
+        });
         progressBar = new ProgressBar(api);
         container.appendChild(progressBar.render());
         if (!isPlaying) {
@@ -37770,6 +38938,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         stateUnsubscribe?.();
         stateUnsubscribe = null;
+        errorUnsubscribe?.();
+        errorUnsubscribe = null;
         if (api?.container) {
           api.container.removeEventListener("mousemove", handleInteraction);
           api.container.removeEventListener("mouseenter", handleInteraction);
@@ -37783,6 +38953,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         controls = [];
         progressBar?.destroy();
         progressBar = null;
+        errorOverlay?.destroy();
+        errorOverlay = null;
         controlBar?.remove();
         controlBar = null;
         gradient?.remove();
@@ -38047,9 +39219,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const SessionState = window.cast.framework.SessionState;
       switch (event.sessionState) {
         case SessionState.SESSION_STARTED:
-        case SessionState.SESSION_RESUMED:
           currentSession = castContext.getCurrentSession();
           onSessionConnected();
+          break;
+        case SessionState.SESSION_RESUMED:
+          currentSession = castContext.getCurrentSession();
+          onSessionResumed();
           break;
         case SessionState.SESSION_ENDED:
           onSessionDisconnected();
@@ -38079,6 +39254,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         loadMediaOnCast(localSrcBeforeCast, localTimeBeforeCast);
       }
     };
+    const onSessionResumed = () => {
+      if (!currentSession) return;
+      const deviceName = currentSession.getCastDevice()?.friendlyName || "Chromecast";
+      api.setState("chromecastActive", true);
+      api.emit("chromecast:connected", { deviceName });
+      api.logger.info("Chromecast session resumed", { deviceName });
+      const video = api.container.querySelector("video");
+      if (video) {
+        video.pause();
+      }
+    };
     const onSessionDisconnected = () => {
       const castTime = remotePlayer?.currentTime || localTimeBeforeCast;
       api.setState("chromecastActive", false);
@@ -38096,6 +39282,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!currentSession || !window.chrome?.cast) return;
       const contentType = src.includes(".m3u8") ? "application/x-mpegurl" : src.includes(".mpd") ? "application/dash+xml" : "video/mp4";
       const mediaInfo = new window.chrome.cast.media.MediaInfo(src, contentType);
+      const title = api.getState("title");
+      const poster = api.getState("poster");
+      if (title || poster) {
+        const metadata = new window.chrome.cast.media.GenericMediaMetadata();
+        if (title) metadata.title = title;
+        if (poster) metadata.images = [new window.chrome.cast.Image(poster)];
+        mediaInfo.metadata = metadata;
+      }
       const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
       request.currentTime = startTime;
       request.autoplay = true;
@@ -38146,19 +39340,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           } catch {
           }
         }
-        if (castContext && castStateHandler) {
+        if (castContext && castStateHandler && window.cast?.framework) {
           castContext.removeEventListener(
             window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
             castStateHandler
           );
         }
-        if (castContext && sessionStateHandler) {
+        if (castContext && sessionStateHandler && window.cast?.framework) {
           castContext.removeEventListener(
             window.cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
             sessionStateHandler
           );
         }
-        if (remotePlayerController && remotePlayerHandler) {
+        if (remotePlayerController && remotePlayerHandler && window.cast?.framework) {
           remotePlayerController.removeEventListener(
             window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
             remotePlayerHandler
@@ -39565,7 +40759,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "0.4.1" : "dev";
+  var VERSION = true ? "0.5.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
