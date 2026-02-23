@@ -614,7 +614,7 @@ export class ScarlettPlayer {
       // Validate index: -1 for auto, or within available quality levels
       if (index !== -1) {
         const levels = this.getQualities();
-        if (levels.length === 0 || index < 0 || index >= levels.length) {
+        if (levels.length > 0 && (index < 0 || index >= levels.length)) {
           this.logger.warn(`Invalid quality index: ${index} (available: ${levels.length})`);
           return;
         }
