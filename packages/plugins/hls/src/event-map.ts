@@ -164,7 +164,33 @@ export function setupHlsEventHandlers(
   // Error handling
   addHandler('hlsError', (_event: string, data: Record<string, unknown>) => {
     const error = parseHlsError(data);
-    api.logger.warn('HLS error', { error });
+
+    // Buffer hole/stall seeking is a common non-fatal recovery action, not a real error
+    const isBufferHoleSeek = !error.fatal && (
+      (error.details as string)?.includes('bufferStalledError') ||
+      (data.reason as string)?.includes('buffer holes')
+    );
+
+    if (isBufferHoleSeek) {
+      api.logger.debug(`HLS buffer recovery: ${error.reason || error.details}`, {
+        details: error.details,
+        reason: error.reason,
+      });
+    } else if (error.fatal) {
+      api.logger.error(`HLS fatal error: ${error.details} (type=${error.type})`, {
+        type: error.type,
+        details: error.details,
+        url: error.url,
+      });
+    } else {
+      api.logger.warn(`HLS error: ${error.details} (type=${error.type}, fatal=${error.fatal})`, {
+        type: error.type,
+        details: error.details,
+        fatal: error.fatal,
+        url: error.url,
+      });
+    }
+
     callbacks.onError?.(error);
   });
 
