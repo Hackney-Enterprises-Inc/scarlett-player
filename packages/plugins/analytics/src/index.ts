@@ -448,6 +448,10 @@ export function createAnalyticsPlugin(
     };
 
     session.errors.push(errorEvent);
+    // Cap errors array to prevent memory growth during long sessions
+    if (session.errors.length > 100) {
+      session.errors = session.errors.slice(-100);
+    }
 
     sendBeacon('error', {
       errorType: errorEvent.type,
@@ -485,6 +489,10 @@ export function createAnalyticsPlugin(
       };
 
       session.bitrateHistory.push(bitrateChange);
+      // Cap bitrate history to prevent memory growth during long sessions
+      if (session.bitrateHistory.length > 500) {
+        session.bitrateHistory = session.bitrateHistory.slice(-500);
+      }
 
       if (currentQuality.bitrate > session.maxBitrate) {
         session.maxBitrate = currentQuality.bitrate;

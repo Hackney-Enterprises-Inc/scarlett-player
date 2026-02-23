@@ -153,10 +153,30 @@ export function setupHlsEventHandlers(
     api.setState('buffering', true);
   });
 
-  // Level loaded - may contain live stream info
-  addHandler('hlsLevelLoaded', (_event: string, data: { details: { live?: boolean } }) => {
+  // Level loaded - may contain live stream info and DVR window
+  addHandler('hlsLevelLoaded', (_event: string, data: { details: { live?: boolean; totalduration?: number; targetduration?: number } }) => {
     if (data.details?.live !== undefined) {
       api.setState('live', data.details.live);
+
+      // For live streams, compute seekable range and live edge state
+      if (data.details.live) {
+        const video = hls.media as HTMLVideoElement | null;
+        if (video && video.seekable && video.seekable.length > 0) {
+          const start = video.seekable.start(0);
+          const end = video.seekable.end(video.seekable.length - 1);
+          api.setState('seekableRange', { start, end });
+
+          // Live edge: within 3x target duration (or 10s fallback) of seekable end
+          const threshold = (data.details.targetduration ?? 3) * 3;
+          const isAtLiveEdge = (end - video.currentTime) < threshold;
+          api.setState('liveEdge', isAtLiveEdge);
+
+          // Latency: how far behind live edge
+          const latency = end - video.currentTime;
+          api.setState('liveLatency', Math.max(0, latency));
+        }
+      }
+
       callbacks.onLiveUpdate?.();
     }
   });
@@ -230,6 +250,8 @@ export function setupVideoEventHandlers(
   addHandler('playing', () => {
     api.setState('playing', true);
     api.setState('paused', false);
+    api.setState('waiting', false);
+    api.setState('buffering', false);
     api.setState('playbackState', 'playing');
   });
 
@@ -250,6 +272,19 @@ export function setupVideoEventHandlers(
   addHandler('timeupdate', () => {
     api.setState('currentTime', video.currentTime);
     api.emit('playback:timeupdate', { currentTime: video.currentTime });
+
+    // Update live stream seekable range and live edge on every timeupdate
+    const isLive = api.getState('live');
+    if (isLive && video.seekable && video.seekable.length > 0) {
+      const start = video.seekable.start(0);
+      const end = video.seekable.end(video.seekable.length - 1);
+      api.setState('seekableRange', { start, end });
+
+      // Live edge: within 10 seconds of seekable end
+      const isAtLiveEdge = (end - video.currentTime) < 10;
+      api.setState('liveEdge', isAtLiveEdge);
+      api.setState('liveLatency', Math.max(0, end - video.currentTime));
+    }
   });
 
   addHandler('durationchange', () => {

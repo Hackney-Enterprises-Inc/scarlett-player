@@ -34788,8 +34788,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     setPlaybackRate(rate) {
       this.checkDestroyed();
-      this.stateManager.set("playbackRate", rate);
-      this.eventBus.emit("playback:ratechange", { rate });
+      const clampedRate = Math.max(0.0625, Math.min(16, rate));
+      this.stateManager.set("playbackRate", clampedRate);
+      this.eventBus.emit("playback:ratechange", { rate: clampedRate });
     }
     /**
      * Set autoplay state.
@@ -34918,6 +34919,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       const provider = this._currentProvider;
       if (typeof provider.setLevel === "function") {
+        if (index !== -1) {
+          const levels = this.getQualities();
+          if (levels.length === 0 || index < 0 || index >= levels.length) {
+            this.logger.warn(`Invalid quality index: ${index} (available: ${levels.length})`);
+            return;
+          }
+        }
         provider.setLevel(index);
         this.eventBus.emit("quality:change", {
           quality: index === -1 ? "auto" : `level-${index}`,
@@ -35158,18 +35166,39 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * @private
      */
     detectMimeType(source) {
-      const ext = source.split(".").pop()?.toLowerCase();
+      let path = source;
+      try {
+        path = new URL(source).pathname;
+      } catch {
+        path = source.split("?")[0].split("#")[0];
+      }
+      const ext = path.split(".").pop()?.toLowerCase();
       switch (ext) {
         case "m3u8":
           return "application/x-mpegURL";
         case "mpd":
           return "application/dash+xml";
         case "mp4":
+        case "m4v":
           return "video/mp4";
         case "webm":
           return "video/webm";
         case "ogg":
+        case "ogv":
           return "video/ogg";
+        case "mov":
+          return "video/quicktime";
+        case "mkv":
+          return "video/x-matroska";
+        case "mp3":
+          return "audio/mpeg";
+        case "wav":
+          return "audio/wav";
+        case "flac":
+          return "audio/flac";
+        case "aac":
+        case "m4a":
+          return "audio/mp4";
         default:
           return "video/mp4";
       }
@@ -35358,12 +35387,44 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("hlsLevelLoaded", (_event, data) => {
       if (data.details?.live !== void 0) {
         api.setState("live", data.details.live);
+        if (data.details.live) {
+          const video = hls.media;
+          if (video && video.seekable && video.seekable.length > 0) {
+            const start = video.seekable.start(0);
+            const end = video.seekable.end(video.seekable.length - 1);
+            api.setState("seekableRange", { start, end });
+            const threshold = (data.details.targetduration ?? 3) * 3;
+            const isAtLiveEdge = end - video.currentTime < threshold;
+            api.setState("liveEdge", isAtLiveEdge);
+            const latency = end - video.currentTime;
+            api.setState("liveLatency", Math.max(0, latency));
+          }
+        }
         callbacks.onLiveUpdate?.();
       }
     });
     addHandler("hlsError", (_event, data) => {
       const error = parseHlsError(data);
-      api.logger.warn("HLS error", { error });
+      const isBufferHoleSeek = !error.fatal && (error.details?.includes("bufferStalledError") || data.reason?.includes("buffer holes"));
+      if (isBufferHoleSeek) {
+        api.logger.debug(`HLS buffer recovery: ${error.reason || error.details}`, {
+          details: error.details,
+          reason: error.reason
+        });
+      } else if (error.fatal) {
+        api.logger.error(`HLS fatal error: ${error.details} (type=${error.type})`, {
+          type: error.type,
+          details: error.details,
+          url: error.url
+        });
+      } else {
+        api.logger.warn(`HLS error: ${error.details} (type=${error.type}, fatal=${error.fatal})`, {
+          type: error.type,
+          details: error.details,
+          fatal: error.fatal,
+          url: error.url
+        });
+      }
       callbacks.onError?.(error);
     });
     return () => {
@@ -35385,6 +35446,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("playing", () => {
       api.setState("playing", true);
       api.setState("paused", false);
+      api.setState("waiting", false);
+      api.setState("buffering", false);
       api.setState("playbackState", "playing");
     });
     addHandler("pause", () => {
@@ -35401,6 +35464,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("timeupdate", () => {
       api.setState("currentTime", video.currentTime);
       api.emit("playback:timeupdate", { currentTime: video.currentTime });
+      const isLive = api.getState("live");
+      if (isLive && video.seekable && video.seekable.length > 0) {
+        const start = video.seekable.start(0);
+        const end = video.seekable.end(video.seekable.length - 1);
+        api.setState("seekableRange", { start, end });
+        const isAtLiveEdge = end - video.currentTime < 10;
+        api.setState("liveEdge", isAtLiveEdge);
+        api.setState("liveLatency", Math.max(0, end - video.currentTime));
+      }
     });
     addHandler("durationchange", () => {
       api.setState("duration", video.duration || 0);

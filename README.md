@@ -190,12 +190,17 @@ docs/             # Landing page
 - [x] Playlists & queue management
 - [x] Media Session API (lock screen controls)
 - [x] Audio player UI
-- [x] Closed captions (WebVTT)
 - [x] Thumbnail preview on seek
 - [x] Analytics & QoE tracking
 - [x] Live DVR controls
-- [x] Touch/mobile support
-- [ ] React component wrapper
+- [x] Touch/mobile support (basic)
+- [ ] Closed captions (WebVTT) — Sprint 1
+- [ ] Mobile gesture controls (double-tap seek, swipe) — Sprint 1
+- [ ] DRM support — Sprint 2
+- [ ] Low-latency HLS (LL-HLS) — Sprint 2
+- [ ] Internationalization (i18n) — Sprint 2
+- [ ] React component wrapper — Sprint 3
+- [ ] Web Component wrapper — Sprint 3
 
 ## License
 

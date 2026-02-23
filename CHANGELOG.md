@@ -4,6 +4,72 @@ All notable changes to the Scarlett Player project will be documented in this fi
 
 This project uses [Changesets](https://github.com/changesets/changesets) for version management. All packages are versioned together (fixed versioning).
 
+## [0.5.2] - 2025-10-15
+
+### Fixed
+- Fix memory leak in effect system — unsubscribe now properly removes effects from all signal subscriber sets
+- Fix analytics avgBitrate calculation — was dividing by total watch time (including paused), now uses actual playback time span
+- Fix race condition in load() — concurrent load calls no longer cause undefined behavior; stale loads are discarded
+- Add stall detection to native provider — handles `stalled`, `suspend`, and `abort` media events
+
+### Added
+- **Accessibility (WCAG):**
+  - Keyboard navigation to SettingsMenu (Arrow Up/Down, Enter/Space, Escape, focus trap)
+  - 44x44px minimum touch targets to all button controls (WCAG 2.5.5)
+  - Descriptive ARIA labels to LiveIndicator (not just color-dependent)
+  - aria-valuetext to VolumeControl and default ARIA values to ProgressBar
+  - Comprehensive ARIA labels to all Audio UI interactive elements
+- **Test Coverage:** 105 new tests for UI controls — total: 1,214 tests
+
+## [0.5.1] - 2025-10-10
+
+### Fixed
+- Fixed all 31 ESLint warnings across the codebase (unused imports, variables, args)
+- Fixed VolumeControl missing event listener cleanup in destroy
+- Fixed LiveIndicator inline handlers converted to proper named methods with cleanup
+
+### Added
+- ThumbnailConfig type and thumbnails state to core StateStore
+- error:retry and error:dismiss events to core PlayerEventMap
+
+## [0.5.0] - 2025-10-01
+
+### Added
+- **Live DVR controls:** LiveIndicator shows "GO LIVE" when behind live edge, ProgressBar supports DVR seeking with live time tooltip, SkipButton respects seekable range bounds
+- **Touch support:** Touch events on ProgressBar and VolumeControl for mobile devices
+- **ThumbnailPreview:** Error handling for failed sprite sheet loads
+
+### Fixed
+- Keyboard shortcuts not being intercepted when typing in input fields
+- ErrorOverlay memory leaks (anonymous listeners, retry button debounce)
+- Wrapped CSS hover states in `@media (hover: hover)` for touch devices
+- Chromecast SESSION_RESUMED handling to avoid reloading media on reconnect
+- Chromecast destroy crash when Cast SDK not loaded (optional chaining)
+- Replaced SVG text-based icons (forward10/replay10) with path-only versions
+- Improved ErrorOverlay user-facing messages (separated manifest vs network errors)
+- VolumeControl and LiveIndicator missing event listener cleanup in destroy
+
+## [0.4.0] - 2025-09-01
+
+### Fixed
+- Several minor issues and version alignment
+- Embed chunking and bundle configuration
+
+## [0.3.0] - 2025-08-01
+
+### Added
+- **@scarlett-player/analytics** — QoE metrics and engagement tracking plugin
+  - Viewer session tracking (startup time, rebuffer ratio, error rate)
+  - Engagement metrics (watch time, pause/seek counts)
+  - Quality tracking (bitrate history, quality changes)
+  - Beacon transport to custom analytics endpoints
+  - Heartbeat reporting at configurable intervals
+
+### Fixed
+- Embed video height issues
+- CDN deployment and upload process
+- Demo site rebuild
+
 ## [0.2.0] - 2024-12-18
 
 ### Added
@@ -120,17 +186,18 @@ All packages follow fixed versioning - they share the same version number:
 
 | Package | Current Version |
 |---------|-----------------|
-| @scarlett-player/core | 0.2.0 |
-| @scarlett-player/hls | 0.2.0 |
-| @scarlett-player/native | 0.2.0 |
-| @scarlett-player/ui | 0.2.0 |
-| @scarlett-player/audio-ui | 0.2.0 |
-| @scarlett-player/airplay | 0.2.0 |
-| @scarlett-player/chromecast | 0.2.0 |
-| @scarlett-player/playlist | 0.2.0 |
-| @scarlett-player/media-session | 0.2.0 |
-| @scarlett-player/vue | 0.2.0 |
-| @scarlett-player/embed | 0.2.0 |
+| @scarlett-player/core | 0.5.2 |
+| @scarlett-player/hls | 0.5.2 |
+| @scarlett-player/native | 0.5.2 |
+| @scarlett-player/ui | 0.5.2 |
+| @scarlett-player/audio-ui | 0.5.2 |
+| @scarlett-player/airplay | 0.5.2 |
+| @scarlett-player/chromecast | 0.5.2 |
+| @scarlett-player/analytics | 0.5.2 |
+| @scarlett-player/playlist | 0.5.2 |
+| @scarlett-player/media-session | 0.5.2 |
+| @scarlett-player/vue | 0.5.2 |
+| @scarlett-player/embed | 0.5.2 |
 
 ---
 
