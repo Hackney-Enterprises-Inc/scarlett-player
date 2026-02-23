@@ -186,18 +186,18 @@ All packages follow fixed versioning - they share the same version number:
 
 | Package | Current Version |
 |---------|-----------------|
-| @scarlett-player/core | 0.5.2 |
-| @scarlett-player/hls | 0.5.2 |
-| @scarlett-player/native | 0.5.2 |
-| @scarlett-player/ui | 0.5.2 |
-| @scarlett-player/audio-ui | 0.5.2 |
-| @scarlett-player/airplay | 0.5.2 |
-| @scarlett-player/chromecast | 0.5.2 |
-| @scarlett-player/analytics | 0.5.2 |
-| @scarlett-player/playlist | 0.5.2 |
-| @scarlett-player/media-session | 0.5.2 |
-| @scarlett-player/vue | 0.5.2 |
-| @scarlett-player/embed | 0.5.2 |
+| @scarlett-player/core | 0.5.3 |
+| @scarlett-player/hls | 0.5.3 |
+| @scarlett-player/native | 0.5.3 |
+| @scarlett-player/ui | 0.5.3 |
+| @scarlett-player/audio-ui | 0.5.3 |
+| @scarlett-player/airplay | 0.5.3 |
+| @scarlett-player/chromecast | 0.5.3 |
+| @scarlett-player/analytics | 0.5.3 |
+| @scarlett-player/playlist | 0.5.3 |
+| @scarlett-player/media-session | 0.5.3 |
+| @scarlett-player/vue | 0.5.3 |
+| @scarlett-player/embed | 0.5.3 |
 
 ---
 
