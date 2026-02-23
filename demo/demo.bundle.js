@@ -35170,9 +35170,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       try {
         path = new URL(source).pathname;
       } catch {
-        path = source.split("?")[0].split("#")[0];
+        const noQuery = source.split("?")[0] ?? source;
+        path = noQuery.split("#")[0] ?? noQuery;
       }
-      const ext = path.split(".").pop()?.toLowerCase();
+      const ext = path.split(".").pop()?.toLowerCase() ?? "";
       switch (ext) {
         case "m3u8":
           return "application/x-mpegURL";

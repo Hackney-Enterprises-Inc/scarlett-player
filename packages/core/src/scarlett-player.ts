@@ -913,9 +913,10 @@ export class ScarlettPlayer {
       path = new URL(source).pathname;
     } catch {
       // Not a valid URL — strip query/fragment manually
-      path = source.split('?')[0].split('#')[0];
+      const noQuery = source.split('?')[0] ?? source;
+      path = noQuery.split('#')[0] ?? noQuery;
     }
-    const ext = path.split('.').pop()?.toLowerCase();
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
 
     switch (ext) {
       case 'm3u8':
