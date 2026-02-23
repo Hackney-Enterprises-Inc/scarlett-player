@@ -20,7 +20,7 @@ import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './c
 export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
 export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-const VERSION = '0.3.0-video';
+const VERSION = '0.5.3-video';
 
 const AVAILABLE_TYPES: PlayerType[] = ['video'];
 

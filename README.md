@@ -1,32 +1,42 @@
 # Scarlett Player
 
-**A lightweight, plugin-based video player for the modern web**
+**A lightweight, plugin-based media player for the modern web**
 
 **[Live Demo](https://scarlettplayer.com/demo/)** | **[Documentation](https://scarlettplayer.com/)**
 
-> **Built for [The Stream Platform](https://thestreamplatform.com)** — the official video player powering live streaming, VOD, and PPV for creators and businesses.
+> **Built for [The Stream Platform](https://thestreamplatform.com)** — the official player powering live streaming, VOD, and PPV for combat sports events.
 
 ## Features
 
-- **Plugin Architecture** - Modular design with core + plugins. Only bundle what you need.
-- **HLS Playback** - Native Safari HLS + hls.js fallback
-- **Native Video** - MP4, WebM, MOV, MKV support
-- **Quality Selection** - Adaptive bitrate with manual override
-- **AirPlay & Chromecast** - Built-in casting support
-- **Modern UI** - Sleek controls with keyboard shortcuts and theming
-- **TypeScript** - Fully typed API
+- **Plugin Architecture** — Modular core + plugins. Only bundle what you need.
+- **HLS Playback** — Native Safari HLS + hls.js fallback with quality selection and live DVR
+- **Native Media** — Video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
+- **Adaptive Bitrate** — ABR with manual quality override
+- **Live Streaming** — Live indicator, DVR seeking, seek-to-live, latency tracking
+- **AirPlay & Chromecast** — Built-in casting with session management
+- **Playlists** — Queue management, shuffle, repeat modes, auto-advance
+- **Analytics** — QoE metrics, engagement tracking, beacon transport
+- **Audio Player** — Compact audio UI with artwork, progress, and media session integration
+- **Modern UI** — Video and audio controls with keyboard shortcuts and theming
+- **Vue 3 Integration** — Component wrapper and composable with reactive state
+- **CDN Embed** — Drop-in script tag, no bundler required
+- **TypeScript** — Fully typed API across all packages
+- **1,200+ Tests** — Comprehensive test coverage with Vitest
 
 ## Installation
 
 ```bash
-# Core + HLS + UI (most common setup)
+# Core + HLS + UI (most common video setup)
 npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
 
+# Audio setup (compact player with lock screen controls)
+npm install @scarlett-player/core @scarlett-player/native @scarlett-player/audio-ui @scarlett-player/media-session
+
 # Optional plugins
-npm install @scarlett-player/native        # MP4, WebM, MOV, MKV support
+npm install @scarlett-player/native        # Native media (MP4, WebM, MP3, WAV, FLAC, etc.)
 npm install @scarlett-player/airplay       # AirPlay casting
 npm install @scarlett-player/chromecast    # Chromecast casting
-npm install @scarlett-player/analytics    # QoE metrics & engagement tracking
+npm install @scarlett-player/analytics     # QoE metrics & engagement tracking
 npm install @scarlett-player/playlist      # Playlist/queue management
 npm install @scarlett-player/media-session # Lock screen & media key controls
 npm install @scarlett-player/audio-ui      # Compact audio player UI
@@ -39,6 +49,8 @@ npm install @scarlett-player/embed
 ```
 
 ## Quick Start
+
+### Video (HLS)
 
 ```typescript
 import { ScarlettPlayer } from '@scarlett-player/core';
@@ -57,11 +69,37 @@ const player = new ScarlettPlayer({
   ],
 });
 
-// Load and play
 await player.load('https://example.com/video.m3u8');
 ```
 
+### Audio (with playlist and lock screen controls)
+
+```typescript
+import { ScarlettPlayer } from '@scarlett-player/core';
+import { createNativePlugin } from '@scarlett-player/native';
+import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
+import { createPlaylistPlugin } from '@scarlett-player/playlist';
+import { createMediaSessionPlugin } from '@scarlett-player/media-session';
+
+const player = new ScarlettPlayer({
+  container: document.getElementById('audio-player'),
+  plugins: [
+    createNativePlugin(),
+    createAudioUIPlugin({ layout: 'full' }),
+    createPlaylistPlugin({
+      tracks: [
+        { id: '1', src: '/track1.mp3', title: 'Track 1', artist: 'Artist', artwork: '/art1.jpg' },
+        { id: '2', src: '/track2.mp3', title: 'Track 2', artist: 'Artist', artwork: '/art2.jpg' },
+      ],
+    }),
+    createMediaSessionPlugin(),
+  ],
+});
+```
+
 ## Vue 3
+
+### Component
 
 ```vue
 <template>
@@ -86,24 +124,73 @@ function onPlayerReady(player) {
 </script>
 ```
 
+### Composable
+
+```vue
+<template>
+  <div ref="container" style="width: 100%; aspect-ratio: 16/9;"></div>
+  <p>{{ currentTime }}s / {{ duration }}s ({{ progress.toFixed(0) }}%)</p>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import { useScarlettPlayer } from '@scarlett-player/vue';
+import { createHLSPlugin } from '@scarlett-player/hls';
+import { uiPlugin } from '@scarlett-player/ui';
+
+const container = ref(null);
+const { player, isReady, currentTime, duration, progress, play, pause, seek } =
+  useScarlettPlayer({
+    container,
+    plugins: [createHLSPlugin(), uiPlugin()],
+    src: 'https://example.com/video.m3u8',
+  });
+</script>
+```
+
 [See full Vue 3 docs →](./packages/vue/README.md)
+
+## CDN Embed (No Bundler)
+
+```html
+<!-- Full build (video + audio + HLS + analytics + playlist) -->
+<script src="https://cdn.example.com/scarlett-player/embed.js"></script>
+
+<!-- Video player via data attributes -->
+<div data-scarlett-player
+     data-type="video"
+     data-src="https://example.com/video.m3u8"
+     data-poster="https://example.com/poster.jpg"
+     style="aspect-ratio: 16/9;">
+</div>
+
+<!-- Audio player -->
+<div data-scarlett-player
+     data-type="audio"
+     data-src="https://example.com/track.mp3"
+     data-title="Track Name"
+     data-artist="Artist">
+</div>
+```
+
+Lighter builds available: `embed.video.js` (video only) and `embed.audio.js` (audio only).
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| `@scarlett-player/core` | Core player engine with state management and event system |
-| `@scarlett-player/hls` | HLS playback provider (hls.js + native Safari fallback) |
-| `@scarlett-player/native` | Native video provider (MP4, WebM, MOV, MKV) |
-| `@scarlett-player/ui` | UI controls with keyboard shortcuts and theming |
-| `@scarlett-player/airplay` | AirPlay casting support |
-| `@scarlett-player/chromecast` | Chromecast casting support |
-| `@scarlett-player/analytics` | QoE metrics, engagement tracking, and beacon transport |
-| `@scarlett-player/playlist` | Playlist management with shuffle, repeat, and queue |
-| `@scarlett-player/media-session` | Media Session API for lock screen & media key controls |
-| `@scarlett-player/audio-ui` | Compact audio player interface with artwork and progress |
-| `@scarlett-player/vue` | Vue 3 component wrapper |
-| `@scarlett-player/embed` | CDN embed script for no-bundler usage |
+| `@scarlett-player/core` | Core engine — reactive state, event bus, plugin system, error handling |
+| `@scarlett-player/hls` | HLS provider — hls.js + native Safari fallback, ABR, quality selection, live DVR |
+| `@scarlett-player/native` | Native provider — video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
+| `@scarlett-player/ui` | Video UI — play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
+| `@scarlett-player/audio-ui` | Audio UI — compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
+| `@scarlett-player/airplay` | AirPlay casting — Safari AirPlay with auto-detect |
+| `@scarlett-player/chromecast` | Chromecast — Google Cast SDK, session management, remote control |
+| `@scarlett-player/analytics` | Analytics — startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport |
+| `@scarlett-player/playlist` | Playlist — queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
+| `@scarlett-player/media-session` | Media Session — lock screen controls, media keys, album art, seek bar |
+| `@scarlett-player/vue` | Vue 3 — `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
+| `@scarlett-player/embed` | CDN embed — auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
 
 ## Keyboard Shortcuts
 
@@ -134,49 +221,54 @@ uiPlugin({
 ## Development
 
 ```bash
-# Install dependencies
-pnpm install
+pnpm install          # Install dependencies
+pnpm build            # Build all packages (core first, then plugins)
+pnpm test             # Run all 1,200+ tests
+pnpm typecheck        # Type check all packages
+pnpm lint             # ESLint
+pnpm format           # Prettier
+pnpm validate         # lint + typecheck + test + build (CI check)
+node demo/build.cjs   # Rebuild demo site
+```
 
-# Build all packages
-pnpm build
+### Versioning
 
-# Run tests
-pnpm test
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning — all 12 packages share the same version number.
 
-# Type check
-pnpm typecheck
-
-# Build demo
-node demo/build.cjs
+```bash
+pnpm changeset        # Create a changeset for your changes
+pnpm version          # Bump versions + update changelogs
+pnpm release          # Build + publish to npm
 ```
 
 ## Project Structure
 
 ```
 packages/
-  core/           # Core player engine
+  core/             # Core engine — state, events, plugins, error handling
   plugins/
-    hls/          # HLS provider plugin
-    native/       # Native video provider
-    ui/           # UI controls plugin
-    audio-ui/     # Compact audio player UI
-    airplay/      # AirPlay casting plugin
-    chromecast/   # Chromecast casting plugin
-    analytics/    # QoE metrics & engagement tracking
-    playlist/     # Playlist & queue management
-    media-session/# Media Session API integration
-  vue/            # Vue 3 component wrapper
-  embed/          # CDN embed script
-demo/             # Interactive demo
-docs/             # Landing page
+    hls/            # HLS provider (hls.js + native Safari)
+    native/         # Native media (video + audio formats)
+    ui/             # Video UI controls
+    audio-ui/       # Audio player UI (full, compact, mini layouts)
+    airplay/        # AirPlay casting
+    chromecast/     # Chromecast casting
+    analytics/      # QoE metrics & engagement
+    playlist/       # Queue, shuffle, repeat
+    media-session/  # Lock screen & media keys
+  vue/              # Vue 3 component + composable
+  embed/            # CDN embed (video, audio, and full builds)
+demo/               # Interactive demo (video + audio players)
+docs/               # Landing page + architecture docs
 ```
 
 ## Browser Support
 
-- Chrome 80+
+- Chrome / Edge 80+
 - Firefox 78+
 - Safari 14+
-- Edge 80+
+- iOS Safari 14+
+- Android Chrome 90+
 
 ## Roadmap
 
@@ -204,12 +296,6 @@ docs/             # Landing page
 
 ## License
 
-MIT License
+MIT License — see [LICENSE](./LICENSE).
 
-### Attribution
-
-Scarlett Player is inspired by [Vidstack Player](https://github.com/vidstack/player) (Copyright 2023 Rahim Alwer, MIT License).
-
----
-
-**Scarlett Player** - Modular. Extensible. Yours.
+Inspired by [Vidstack Player](https://github.com/vidstack/player) (Copyright 2023 Rahim Alwer, MIT License).
