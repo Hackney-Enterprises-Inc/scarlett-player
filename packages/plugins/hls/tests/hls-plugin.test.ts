@@ -817,7 +817,7 @@ describe('event-map', () => {
 
       mockHls.trigger('hlsError', { type: 'networkError', details: 'test', fatal: true });
 
-      expect(mockApi.logger.warn).toHaveBeenCalled();
+      expect(mockApi.logger.error).toHaveBeenCalled();
       expect(onError).toHaveBeenCalled();
     });
   });
