@@ -466,8 +466,11 @@ export class ScarlettPlayer {
   setPlaybackRate(rate: number): void {
     this.checkDestroyed();
 
-    this.stateManager.set('playbackRate', rate);
-    this.eventBus.emit('playback:ratechange', { rate });
+    // Clamp to valid range (HTML5 spec supports 0.0625-16, common players use 0.25-16)
+    const clampedRate = Math.max(0.0625, Math.min(16, rate));
+
+    this.stateManager.set('playbackRate', clampedRate);
+    this.eventBus.emit('playback:ratechange', { rate: clampedRate });
   }
 
   /**
@@ -608,6 +611,14 @@ export class ScarlettPlayer {
 
     const provider = this._currentProvider as any;
     if (typeof provider.setLevel === 'function') {
+      // Validate index: -1 for auto, or within available quality levels
+      if (index !== -1) {
+        const levels = this.getQualities();
+        if (levels.length > 0 && (index < 0 || index >= levels.length)) {
+          this.logger.warn(`Invalid quality index: ${index} (available: ${levels.length})`);
+          return;
+        }
+      }
       provider.setLevel(index);
       this.eventBus.emit('quality:change', {
         quality: index === -1 ? 'auto' : `level-${index}`,
@@ -896,7 +907,16 @@ export class ScarlettPlayer {
    * @private
    */
   private detectMimeType(source: string): string {
-    const ext = source.split('.').pop()?.toLowerCase();
+    // Strip query params, fragments, and blob: prefix before parsing extension
+    let path = source;
+    try {
+      path = new URL(source).pathname;
+    } catch {
+      // Not a valid URL — strip query/fragment manually
+      const noQuery = source.split('?')[0] ?? source;
+      path = noQuery.split('#')[0] ?? noQuery;
+    }
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
 
     switch (ext) {
       case 'm3u8':
@@ -904,11 +924,26 @@ export class ScarlettPlayer {
       case 'mpd':
         return 'application/dash+xml';
       case 'mp4':
+      case 'm4v':
         return 'video/mp4';
       case 'webm':
         return 'video/webm';
       case 'ogg':
+      case 'ogv':
         return 'video/ogg';
+      case 'mov':
+        return 'video/quicktime';
+      case 'mkv':
+        return 'video/x-matroska';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/wav';
+      case 'flac':
+        return 'audio/flac';
+      case 'aac':
+      case 'm4a':
+        return 'audio/mp4';
       default:
         return 'video/mp4'; // Default fallback
     }

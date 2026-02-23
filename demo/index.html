@@ -874,7 +874,7 @@ playlist.<span class="function">add</span>([
 
     function updateStats() {
       const activePlayer = getActivePlayer();
-      if (!activePlayer) return;
+      if (!activePlayer || typeof activePlayer.getState !== 'function') return;
 
       const state = activePlayer.getState();
 

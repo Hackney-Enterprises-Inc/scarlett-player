@@ -817,7 +817,7 @@ describe('event-map', () => {
 
       mockHls.trigger('hlsError', { type: 'networkError', details: 'test', fatal: true });
 
-      expect(mockApi.logger.warn).toHaveBeenCalled();
+      expect(mockApi.logger.error).toHaveBeenCalled();
       expect(onError).toHaveBeenCalled();
     });
   });
@@ -878,6 +878,8 @@ describe('event-map', () => {
 
       expect(mockApi.setState).toHaveBeenCalledWith('playing', true);
       expect(mockApi.setState).toHaveBeenCalledWith('paused', false);
+      expect(mockApi.setState).toHaveBeenCalledWith('waiting', false);
+      expect(mockApi.setState).toHaveBeenCalledWith('buffering', false);
       expect(mockApi.setState).toHaveBeenCalledWith('playbackState', 'playing');
     });
 
