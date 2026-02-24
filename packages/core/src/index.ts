@@ -72,4 +72,6 @@ export type {
   EventInterceptor,
   EventSubscription,
   EventEmitterOptions,
+  // Playlist Track (minimal interface for core events)
+  PlaylistTrack,
 } from './types/index';

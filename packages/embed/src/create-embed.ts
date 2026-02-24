@@ -19,6 +19,8 @@ export interface PluginCreators {
   analytics?: (config: any) => Plugin;
   playlist?: (config: any) => Plugin;
   mediaSession?: (config: any) => Plugin;
+  watermark?: (config: any) => Plugin;
+  captions?: (config: any) => Plugin;
 }
 
 /**
@@ -82,6 +84,16 @@ export async function createEmbedPlayer(
         album: config.album,
         artwork: config.artwork || config.poster || config.playlist?.[0]?.artwork,
       }));
+    }
+
+    // Add watermark plugin if available and configured
+    if (pluginCreators.watermark && config.watermark) {
+      plugins.push(pluginCreators.watermark(config.watermark));
+    }
+
+    // Add captions plugin if available
+    if (pluginCreators.captions) {
+      plugins.push(pluginCreators.captions(config.captions || {}));
     }
 
     // Add analytics plugin if available and configured

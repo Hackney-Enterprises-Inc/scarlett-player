@@ -13,6 +13,8 @@
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { uiPlugin } from '@scarlett-player/ui';
+import { createWatermarkPlugin } from '@scarlett-player/watermark';
+import { createCaptionsPlugin } from '@scarlett-player/captions';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 
@@ -27,6 +29,8 @@ const AVAILABLE_TYPES: PlayerType[] = ['video'];
 const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
   videoUI: uiPlugin,
+  watermark: createWatermarkPlugin,
+  captions: createCaptionsPlugin,
   // Audio UI not available in this build
   // Analytics not available in this build
   // Playlist not available in this build

@@ -36,6 +36,8 @@ const DEFAULT_CONFIG: PlaylistPluginConfig = {
   persistKey: 'scarlett-playlist',
   shuffle: false,
   repeat: 'none',
+  autoLoad: true,
+  advanceDelay: 0,
 };
 
 /**
@@ -260,14 +262,14 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
    */
   const emitChange = (): void => {
     const track = currentIndex >= 0 ? tracks[currentIndex] : null;
-    api?.emit('playlist:change' as any, { track, index: currentIndex });
+    api?.emit('playlist:change', { track, index: currentIndex });
     persistPlaylist();
   };
 
   /**
-   * Set current track (emits playlist:change event)
-   * NOTE: Does NOT load the source directly - the consumer should listen
-   * for playlist:change events and call player.load(track.src)
+   * Set current track (emits playlist:change event).
+   * When autoLoad is enabled (default), also emits media:load-request
+   * so the core player automatically loads the source.
    */
   const setCurrentTrack = (index: number): void => {
     if (index < 0 || index >= tracks.length) {
@@ -289,8 +291,13 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     }
     api?.setState('mediaType', track.type || 'audio');
 
-    // Emit change event - the consumer should handle loading
+    // Emit change event
     emitChange();
+
+    // Automatically request media load if autoLoad is enabled
+    if (mergedConfig.autoLoad !== false && track.src) {
+      api?.emit('media:load-request', { src: track.src, autoplay: true });
+    }
   };
 
   // Plugin implementation
@@ -314,23 +321,35 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       }
 
       // Listen for playback ended to auto-advance
+      let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
       const unsubEnded = api.on('playback:ended', () => {
         if (!mergedConfig.autoAdvance) return;
 
         const nextIdx = getNextIndex();
         if (nextIdx >= 0) {
-          api?.logger.debug('Auto-advancing to next track', { nextIdx });
-          setCurrentTrack(nextIdx);
-          // Note: Consumer should handle loading and playing from playlist:change event
+          const advance = () => {
+            api?.logger.debug('Auto-advancing to next track', { nextIdx });
+            setCurrentTrack(nextIdx);
+          };
+
+          if (mergedConfig.advanceDelay) {
+            advanceTimeout = setTimeout(advance, mergedConfig.advanceDelay);
+          } else {
+            advance();
+          }
         } else {
           api?.logger.info('Playlist ended');
-          api?.emit('playlist:ended' as any, undefined as any);
+          api?.emit('playlist:ended', undefined);
         }
       });
 
       // Register cleanup
       api.onDestroy(() => {
         unsubEnded();
+        if (advanceTimeout) {
+          clearTimeout(advanceTimeout);
+          advanceTimeout = null;
+        }
         persistPlaylist();
       });
     },
@@ -349,7 +368,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
         const index = tracks.length;
         tracks.push(normalizedTrack);
 
-        api?.emit('playlist:add' as any, { track: normalizedTrack, index });
+        api?.emit('playlist:add', { track: normalizedTrack, index });
         api?.logger.debug('Track added', { title: normalizedTrack.title, index });
       });
 
@@ -387,7 +406,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
         shuffleOrder.splice(insertPos, 0, clampedIndex);
       }
 
-      api?.emit('playlist:add' as any, { track: normalizedTrack, index: clampedIndex });
+      api?.emit('playlist:add', { track: normalizedTrack, index: clampedIndex });
       persistPlaylist();
     },
 
@@ -429,7 +448,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
           .map((i) => (i > index ? i - 1 : i));
       }
 
-      api?.emit('playlist:remove' as any, { track: removedTrack, index });
+      api?.emit('playlist:remove', { track: removedTrack, index });
       persistPlaylist();
     },
 
@@ -438,7 +457,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       currentIndex = -1;
       shuffleOrder = [];
 
-      api?.emit('playlist:clear' as any, undefined as any);
+      api?.emit('playlist:clear', undefined);
       emitChange();
     },
 
@@ -507,7 +526,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
         shuffleOrder = [];
       }
 
-      api?.emit('playlist:shuffle' as any, { enabled });
+      api?.emit('playlist:shuffle', { enabled });
       api?.logger.info('Shuffle mode', { enabled });
       persistPlaylist();
     },
@@ -521,7 +540,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
     setRepeat(mode: RepeatMode): void {
       repeat = mode;
-      api?.emit('playlist:repeat' as any, { mode });
+      api?.emit('playlist:repeat', { mode });
       api?.logger.info('Repeat mode', { mode });
       persistPlaylist();
     },
@@ -548,7 +567,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
         generateShuffleOrder();
       }
 
-      api?.emit('playlist:reorder' as any, { tracks: [...tracks] });
+      api?.emit('playlist:reorder', { tracks: [...tracks] });
       persistPlaylist();
     },
 

@@ -197,6 +197,17 @@ export class ScarlettPlayer {
       }
     }
 
+    // Listen for media:load-request events from plugins (e.g., playlist)
+    this.eventBus.on('media:load-request', async ({ src, autoplay }) => {
+      // When Chromecast is active, the Chromecast plugin handles loading
+      if (this.stateManager.getValue('chromecastActive')) return;
+
+      await this.load(src);
+      if (autoplay !== false) {
+        await this.play();
+      }
+    });
+
     // Load initial source if provided
     if (this.initialSrc) {
       await this.load(this.initialSrc);

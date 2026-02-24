@@ -66,6 +66,8 @@
     "@scarlett-player/analytics": "workspace:*",
     "@scarlett-player/playlist": "workspace:*",
     "@scarlett-player/media-session": "workspace:*",
+    "@scarlett-player/watermark": "workspace:*",
+    "@scarlett-player/captions": "workspace:*",
     "hls.js": "^1.6.0"
   },
   "devDependencies": {

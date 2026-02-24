@@ -11,6 +11,7 @@ import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
 import { createPlaylistPlugin } from '../packages/plugins/playlist/src/index';
 import { createMediaSessionPlugin } from '../packages/plugins/media-session/src/index';
 import { createAudioUIPlugin } from '../packages/plugins/audio-ui/src/index';
+import { createWatermarkPlugin } from '../packages/plugins/watermark/src/index';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -48,6 +49,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       }),
       airplayPlugin(),
       chromecastPlugin(),
+      createWatermarkPlugin({
+        imageUrl: 'https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png',
+        position: 'bottom-right',
+        opacity: 0.5,
+      }),
     ].filter(Boolean),
   });
 
@@ -64,6 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Expose player globally for debugging
   (window as any).player = player;
+  (window as any).watermarkPlugin = player.getPlugin('watermark');
 
   console.log(`🎬 Scarlett Player v${VERSION} Demo Ready`);
   console.log('Access player via window.player');

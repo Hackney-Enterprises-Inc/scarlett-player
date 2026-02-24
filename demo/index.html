@@ -557,6 +557,60 @@
       color: #e0e0e0;
     }
 
+    /* Watermark controls */
+    .watermark-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+
+    .watermark-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .watermark-row label {
+      min-width: 80px;
+      font-size: 0.875rem;
+      color: #aaa;
+    }
+
+    .watermark-positions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .position-btn {
+      padding: 6px 12px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #333;
+      color: #ccc;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .position-btn:hover {
+      background: #444;
+      color: #fff;
+    }
+
+    .position-btn.active {
+      background: #e50914;
+      border-color: #e50914;
+      color: #fff;
+    }
+
+    #watermark-opacity {
+      flex: 1;
+    }
+
     .code-content .keyword { color: #c792ea; }
     .code-content .string { color: #c3e88d; }
     .code-content .comment { color: #676e95; font-style: italic; }
@@ -645,6 +699,47 @@
         <span class="feature active">UI Controls</span>
         <span class="feature active">AirPlay</span>
         <span class="feature active">Chromecast</span>
+        <span class="feature active">Watermark</span>
+      </div>
+    </div>
+
+    <div class="info">
+      <h2>Watermark Controls</h2>
+      <div class="watermark-controls">
+        <div class="watermark-row">
+          <label>Image URL</label>
+          <div class="url-bar" style="margin: 0;">
+            <input type="text" id="watermark-image-input"
+              placeholder="Enter image URL"
+              value="https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png">
+            <button id="watermark-image-btn">Apply</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Or Text</label>
+          <div class="url-bar" style="margin: 0;">
+            <input type="text" id="watermark-text-input" placeholder="Enter watermark text">
+            <button id="watermark-text-btn">Apply</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Position</label>
+          <div class="watermark-positions">
+            <button class="position-btn" data-pos="top-left">Top Left</button>
+            <button class="position-btn" data-pos="top-right">Top Right</button>
+            <button class="position-btn" data-pos="center">Center</button>
+            <button class="position-btn" data-pos="bottom-left">Bottom Left</button>
+            <button class="position-btn active" data-pos="bottom-right">Bottom Right</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Opacity: <span id="opacity-value">0.5</span></label>
+          <input type="range" id="watermark-opacity" min="0" max="1" step="0.1" value="0.5">
+        </div>
+        <div class="watermark-row">
+          <button id="watermark-show-btn" class="position-btn">Show</button>
+          <button id="watermark-hide-btn" class="position-btn">Hide</button>
+        </div>
       </div>
     </div>
 
@@ -667,6 +762,7 @@
 <span class="keyword">import</span> { uiPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/ui'</span>;
 <span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
 <span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
+<span class="keyword">import</span> { createWatermarkPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/watermark'</span>;
 
 <span class="comment">// Create the player</span>
 <span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
@@ -681,11 +777,21 @@
     }),
     <span class="function">airplayPlugin</span>(),
     <span class="function">chromecastPlugin</span>(),
+    <span class="function">createWatermarkPlugin</span>({
+      <span class="property">imageUrl</span>: <span class="string">'https://example.com/logo.png'</span>,
+      <span class="property">position</span>: <span class="string">'bottom-right'</span>,
+      <span class="property">opacity</span>: <span class="number">0.5</span>,
+    }),
   ],
 });
 
 <span class="comment">// Initialize and start playback</span>
-<span class="keyword">await</span> player.<span class="function">init</span>();</pre>
+<span class="keyword">await</span> player.<span class="function">init</span>();
+
+<span class="comment">// Runtime watermark control</span>
+<span class="keyword">const</span> watermark = player.<span class="function">getPlugin</span>(<span class="string">'watermark'</span>);
+watermark.<span class="function">setPosition</span>(<span class="string">'top-left'</span>);
+watermark.<span class="function">setOpacity</span>(<span class="number">0.3</span>);</pre>
       </div>
     </div>
   </div>
@@ -1140,6 +1246,37 @@ playlist.<span class="function">add</span>([
     miniUrlInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') loadMiniUrl();
     });
+
+    // Watermark controls
+    const wmPlugin = window.watermarkPlugin;
+
+    document.getElementById('watermark-image-btn').addEventListener('click', () => {
+      const url = document.getElementById('watermark-image-input').value.trim();
+      if (url && wmPlugin) wmPlugin.setImage(url);
+    });
+
+    document.getElementById('watermark-text-btn').addEventListener('click', () => {
+      const text = document.getElementById('watermark-text-input').value.trim();
+      if (text && wmPlugin) wmPlugin.setText(text);
+    });
+
+    document.querySelectorAll('.position-btn[data-pos]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pos = btn.dataset.pos;
+        if (wmPlugin) wmPlugin.setPosition(pos);
+        document.querySelectorAll('.position-btn[data-pos]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    document.getElementById('watermark-opacity').addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      document.getElementById('opacity-value').textContent = val.toFixed(1);
+      if (wmPlugin) wmPlugin.setOpacity(val);
+    });
+
+    document.getElementById('watermark-show-btn').addEventListener('click', () => wmPlugin?.show());
+    document.getElementById('watermark-hide-btn').addEventListener('click', () => wmPlugin?.hide());
 
     // Code toggle functionality
     document.querySelectorAll('.code-toggle-btn').forEach(btn => {

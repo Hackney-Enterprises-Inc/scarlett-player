@@ -530,9 +530,11 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
       api.setState('playbackState', 'loading');
       api.setState('buffering', true);
 
-      // Use hls.js when available for quality control
-      // We'll switch to native HLS dynamically when AirPlay is requested
-      if (isHlsJsSupported()) {
+      // Force native HLS when AirPlay is active (required for wireless playback)
+      if (api.getState('airplayActive') && supportsNativeHLS()) {
+        api.logger.info('Using native HLS (AirPlay active)');
+        await loadNative(src);
+      } else if (isHlsJsSupported()) {
         api.logger.info('Using hls.js for HLS playback');
         await loadWithHlsJs(src);
       } else if (supportsNativeHLS()) {

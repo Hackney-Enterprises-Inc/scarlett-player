@@ -61,8 +61,28 @@ export function airplayPlugin(): IAirPlayPlugin {
 
   const handleTargetChange = (): void => {
     const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
+    const wasActive = api.getState('airplayActive');
     api.setState('airplayActive', active);
     api.emit(active ? 'airplay:connected' : 'airplay:disconnected', undefined);
+
+    // When AirPlay disconnects, switch back to hls.js for quality control
+    if (wasActive && !active) {
+      api.logger.info('AirPlay disconnected, restoring hls.js');
+      const hlsPlugin = api.getPlugin<{
+        isNativeHLS(): boolean;
+        switchToHlsJs(): Promise<void>;
+      }>('hls-provider');
+
+      if (hlsPlugin?.isNativeHLS()) {
+        hlsPlugin.switchToHlsJs().then(() => {
+          // Re-attach to the (potentially new) video element
+          video = null;
+          attachToVideo();
+        }).catch((err: unknown) => {
+          api.logger.warn('Failed to switch back to hls.js', { error: err });
+        });
+      }
+    }
   };
 
   const attachToVideo = (): void => {
