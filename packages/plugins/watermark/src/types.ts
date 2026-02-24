@@ -2,6 +2,8 @@
  * Watermark Plugin Types
  */
 
+import type { Plugin } from '@scarlett-player/core';
+
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
 
 export interface WatermarkConfig {
@@ -23,4 +25,21 @@ export interface WatermarkConfig {
   showDelay?: number;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
+}
+
+export interface IWatermarkPlugin extends Plugin {
+  /** Update the watermark to display the given text */
+  setText(text: string): void;
+  /** Update the watermark to display the given image */
+  setImage(imageUrl: string): void;
+  /** Move the watermark to a new position */
+  setPosition(position: WatermarkPosition): void;
+  /** Set watermark opacity (0-1) */
+  setOpacity(opacity: number): void;
+  /** Show the watermark */
+  show(): void;
+  /** Hide the watermark */
+  hide(): void;
+  /** Get the current watermark configuration */
+  getConfig(): WatermarkConfig;
 }

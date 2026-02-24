@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createWatermarkPlugin } from '../src/index';
+import type { IWatermarkPlugin } from '../src/types';
 
 // Helper to create mock plugin API
 function createMockApi() {
@@ -330,6 +331,83 @@ describe('per-track watermark updates', () => {
 
     const img = mockApi.container.querySelector('.sp-watermark img');
     expect(img?.getAttribute('src')).toBe('https://example.com/wm2.png');
+  });
+});
+
+describe('runtime API', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let plugin: IWatermarkPlugin;
+
+  beforeEach(() => {
+    mockApi = createMockApi();
+    plugin = createWatermarkPlugin({ text: 'initial', position: 'bottom-right', opacity: 0.5 });
+    plugin.init(mockApi);
+  });
+
+  it('setText updates watermark text', () => {
+    plugin.setText('new-text');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.textContent).toBe('new-text');
+  });
+
+  it('setImage updates watermark to show an image', () => {
+    plugin.setImage('https://example.com/logo.png');
+
+    const img = mockApi.container.querySelector('.sp-watermark img');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe('https://example.com/logo.png');
+  });
+
+  it('setPosition moves the watermark', () => {
+    plugin.setPosition('top-left');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.getAttribute('data-position')).toBe('top-left');
+  });
+
+  it('setOpacity changes watermark opacity', () => {
+    plugin.setOpacity(0.3);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.opacity).toBe('0.3');
+  });
+
+  it('setOpacity clamps to 0-1 range', () => {
+    plugin.setOpacity(1.5);
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.opacity).toBe('1');
+
+    plugin.setOpacity(-0.5);
+    expect(el?.style.opacity).toBe('0');
+  });
+
+  it('show and hide toggle visibility', () => {
+    const el = mockApi.container.querySelector('.sp-watermark');
+
+    plugin.show();
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(false);
+
+    plugin.hide();
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+  });
+
+  it('getConfig returns current configuration', () => {
+    const cfg = plugin.getConfig();
+    expect(cfg.position).toBe('bottom-right');
+    expect(cfg.opacity).toBe(0.5);
+    expect(cfg.text).toBe('initial');
+  });
+
+  it('getConfig reflects runtime changes', () => {
+    plugin.setPosition('top-left');
+    plugin.setOpacity(0.8);
+
+    const cfg = plugin.getConfig();
+    expect(cfg.position).toBe('top-left');
+    expect(cfg.opacity).toBe(0.8);
   });
 });
 

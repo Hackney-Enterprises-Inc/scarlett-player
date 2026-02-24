@@ -9,10 +9,10 @@
  * - Per-track watermark updates via playlist:change metadata
  */
 
-import type { IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
-import type { WatermarkConfig, WatermarkPosition } from './types';
+import type { IPluginAPI, PluginType } from '@scarlett-player/core';
+import type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './types';
 
-export type { WatermarkConfig, WatermarkPosition } from './types';
+export type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './types';
 
 const POSITIONS: WatermarkPosition[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'];
 
@@ -49,7 +49,7 @@ const POSITION_STYLES: Record<WatermarkPosition, string> = {
  * });
  * ```
  */
-export function createWatermarkPlugin(config: WatermarkConfig = {}): Plugin {
+export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkPlugin {
   let api: IPluginAPI | null = null;
   let element: HTMLDivElement | null = null;
   let dynamicTimer: ReturnType<typeof setInterval> | null = null;
@@ -255,6 +255,28 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): Plugin {
       api?.logger.debug('Watermark plugin destroyed');
       cleanup();
       api = null;
+    },
+
+    setText(text: string): void {
+      if (element) updateContent(element, undefined, text);
+    },
+
+    setImage(imageUrl: string): void {
+      if (element) updateContent(element, imageUrl);
+    },
+
+    setPosition: setPosition,
+
+    setOpacity(value: number): void {
+      if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
+    },
+
+    show,
+
+    hide,
+
+    getConfig(): WatermarkConfig {
+      return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity };
     },
   };
 }
