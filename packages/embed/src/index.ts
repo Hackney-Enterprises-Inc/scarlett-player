@@ -18,6 +18,8 @@ import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
 import { createPlaylistPlugin } from '@scarlett-player/playlist';
 import { createMediaSessionPlugin } from '@scarlett-player/media-session';
+import { createWatermarkPlugin } from '@scarlett-player/watermark';
+import { createCaptionsPlugin } from '@scarlett-player/captions';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 
@@ -36,6 +38,8 @@ const pluginCreators: PluginCreators = {
   analytics: createAnalyticsPlugin,
   playlist: createPlaylistPlugin,
   mediaSession: createMediaSessionPlugin,
+  watermark: createWatermarkPlugin,
+  captions: createCaptionsPlugin,
 };
 
 // Create and expose global API

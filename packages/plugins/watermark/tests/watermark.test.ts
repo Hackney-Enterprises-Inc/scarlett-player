@@ -1,0 +1,356 @@
+/**
+ * Tests for Watermark Plugin
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createWatermarkPlugin } from '../src/index';
+
+// Helper to create mock plugin API
+function createMockApi() {
+  const container = document.createElement('div');
+  return {
+    container,
+    logger: {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    },
+    on: vi.fn().mockReturnValue(vi.fn()),
+    off: vi.fn(),
+    emit: vi.fn(),
+    setState: vi.fn(),
+    getState: vi.fn().mockReturnValue(null),
+    subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+    onDestroy: vi.fn(),
+    getPlugin: vi.fn(),
+  };
+}
+
+describe('createWatermarkPlugin', () => {
+  it('creates a plugin with correct metadata', () => {
+    const plugin = createWatermarkPlugin();
+
+    expect(plugin.id).toBe('watermark');
+    expect(plugin.name).toBe('Watermark');
+    expect(plugin.type).toBe('feature');
+  });
+
+  it('accepts empty config', () => {
+    const plugin = createWatermarkPlugin();
+    expect(plugin).toBeDefined();
+  });
+
+  it('accepts full config', () => {
+    const plugin = createWatermarkPlugin({
+      text: 'test@example.com',
+      position: 'top-left',
+      opacity: 0.3,
+      fontSize: 16,
+      dynamic: true,
+      dynamicInterval: 5000,
+      showDelay: 1000,
+    });
+    expect(plugin).toBeDefined();
+  });
+});
+
+describe('init and DOM', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockApi = createMockApi();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('creates watermark element in container', () => {
+    const plugin = createWatermarkPlugin({ text: 'Hello' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el).not.toBeNull();
+  });
+
+  it('renders text content', () => {
+    const plugin = createWatermarkPlugin({ text: 'user@test.com' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.textContent).toBe('user@test.com');
+  });
+
+  it('renders image when imageUrl is provided', () => {
+    const plugin = createWatermarkPlugin({ imageUrl: 'https://example.com/wm.png' });
+    plugin.init(mockApi);
+
+    const img = mockApi.container.querySelector('.sp-watermark img');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe('https://example.com/wm.png');
+  });
+
+  it('prefers imageUrl over text', () => {
+    const plugin = createWatermarkPlugin({
+      text: 'should not show',
+      imageUrl: 'https://example.com/wm.png',
+    });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.textContent).toBe('');
+    expect(el?.querySelector('img')).not.toBeNull();
+  });
+
+  it('starts hidden', () => {
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+  });
+
+  it('applies position via data attribute', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', position: 'top-left' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.getAttribute('data-position')).toBe('top-left');
+  });
+
+  it('applies default position (bottom-right)', () => {
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.getAttribute('data-position')).toBe('bottom-right');
+  });
+
+  it('applies opacity style', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', opacity: 0.3 });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.opacity).toBe('0.3');
+  });
+});
+
+describe('show/hide on playback events', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let playCallback: (() => void) | null = null;
+  let pauseCallback: (() => void) | null = null;
+  let endedCallback: (() => void) | null = null;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockApi = createMockApi();
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'playback:play') playCallback = cb as () => void;
+      if (event === 'playback:pause') pauseCallback = cb as () => void;
+      if (event === 'playback:ended') endedCallback = cb as () => void;
+      return vi.fn();
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows watermark on playback:play', () => {
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    playCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+  });
+
+  it('hides watermark on playback:pause', () => {
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    playCallback?.();
+    pauseCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+  });
+
+  it('hides watermark on playback:ended', () => {
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    playCallback?.();
+    endedCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+  });
+
+  it('respects showDelay before showing', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', showDelay: 5000 });
+    plugin.init(mockApi);
+
+    playCallback?.();
+
+    // Should still be hidden
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+
+    // Advance timer
+    vi.advanceTimersByTime(5000);
+
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+  });
+
+  it('cancels showDelay timer on pause', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', showDelay: 5000 });
+    plugin.init(mockApi);
+
+    playCallback?.();
+    pauseCallback?.(); // Pause before delay completes
+
+    vi.advanceTimersByTime(5000);
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+  });
+});
+
+describe('dynamic repositioning', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let playCallback: (() => void) | null = null;
+  let pauseCallback: (() => void) | null = null;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockApi = createMockApi();
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'playback:play') playCallback = cb as () => void;
+      if (event === 'playback:pause') pauseCallback = cb as () => void;
+      return vi.fn();
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('repositions periodically when dynamic=true', () => {
+    const plugin = createWatermarkPlugin({
+      text: 'test',
+      dynamic: true,
+      dynamicInterval: 3000,
+    });
+    plugin.init(mockApi);
+
+    playCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    const initialPosition = el?.getAttribute('data-position');
+
+    // After several intervals, position should change at least once
+    // (it's random so may take multiple intervals)
+    let positionChanged = false;
+    for (let i = 0; i < 10; i++) {
+      vi.advanceTimersByTime(3000);
+      if (el?.getAttribute('data-position') !== initialPosition) {
+        positionChanged = true;
+        break;
+      }
+    }
+
+    expect(positionChanged).toBe(true);
+  });
+
+  it('stops repositioning on pause', () => {
+    const plugin = createWatermarkPlugin({
+      text: 'test',
+      dynamic: true,
+      dynamicInterval: 3000,
+    });
+    plugin.init(mockApi);
+
+    playCallback?.();
+    pauseCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    const posAfterPause = el?.getAttribute('data-position');
+
+    vi.advanceTimersByTime(30000);
+    // Position should remain the same since dynamic timer was stopped
+    expect(el?.getAttribute('data-position')).toBe(posAfterPause);
+  });
+});
+
+describe('per-track watermark updates', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let changeCallback: ((data: unknown) => void) | null = null;
+
+  beforeEach(() => {
+    mockApi = createMockApi();
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'playlist:change') changeCallback = cb as (data: unknown) => void;
+      return vi.fn();
+    });
+  });
+
+  it('updates watermark text from track metadata', () => {
+    const plugin = createWatermarkPlugin({ text: 'initial' });
+    plugin.init(mockApi);
+
+    changeCallback?.({
+      track: {
+        id: '1',
+        src: 'test.mp4',
+        metadata: { watermarkText: 'new-watermark' },
+      },
+      index: 0,
+    });
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(el?.textContent).toBe('new-watermark');
+  });
+
+  it('updates watermark image from track metadata', () => {
+    const plugin = createWatermarkPlugin({ text: 'initial' });
+    plugin.init(mockApi);
+
+    changeCallback?.({
+      track: {
+        id: '1',
+        src: 'test.mp4',
+        metadata: { watermarkUrl: 'https://example.com/wm2.png' },
+      },
+      index: 0,
+    });
+
+    const img = mockApi.container.querySelector('.sp-watermark img');
+    expect(img?.getAttribute('src')).toBe('https://example.com/wm2.png');
+  });
+});
+
+describe('destroy', () => {
+  it('removes DOM element on destroy', () => {
+    const mockApi = createMockApi();
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    expect(mockApi.container.querySelector('.sp-watermark')).not.toBeNull();
+
+    plugin.destroy();
+
+    expect(mockApi.container.querySelector('.sp-watermark')).toBeNull();
+  });
+
+  it('registers onDestroy callback', () => {
+    const mockApi = createMockApi();
+    const plugin = createWatermarkPlugin({ text: 'test' });
+    plugin.init(mockApi);
+
+    expect(mockApi.onDestroy).toHaveBeenCalled();
+  });
+});

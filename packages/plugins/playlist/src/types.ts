@@ -37,6 +37,9 @@ export interface PlaylistTrack {
 
   /** Additional metadata */
   metadata?: Record<string, unknown>;
+
+  /** Allow additional properties for extensibility */
+  [key: string]: unknown;
 }
 
 /**
@@ -97,6 +100,12 @@ export interface PlaylistPluginConfig {
 
   /** Initial repeat mode */
   repeat?: RepeatMode;
+
+  /** Emit media:load-request on track change so core player loads automatically (default: true) */
+  autoLoad?: boolean;
+
+  /** Milliseconds to wait before auto-advancing to next track (default: 0) */
+  advanceDelay?: number;
 
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
@@ -190,31 +199,5 @@ export interface IPlaylistPlugin extends Plugin<PlaylistPluginConfig> {
   getTrack(id: string): PlaylistTrack | null;
 }
 
-/**
- * Playlist events (extend core event map)
- */
-export interface PlaylistEventMap {
-  /** Track added to playlist */
-  'playlist:add': { track: PlaylistTrack; index: number };
-
-  /** Track removed from playlist */
-  'playlist:remove': { track: PlaylistTrack; index: number };
-
-  /** Playlist cleared */
-  'playlist:clear': void;
-
-  /** Current track changed */
-  'playlist:change': { track: PlaylistTrack | null; index: number };
-
-  /** Shuffle mode changed */
-  'playlist:shuffle': { enabled: boolean };
-
-  /** Repeat mode changed */
-  'playlist:repeat': { mode: RepeatMode };
-
-  /** Playlist order changed (reorder/move) */
-  'playlist:reorder': { tracks: PlaylistTrack[] };
-
-  /** Playlist ended (no more tracks) */
-  'playlist:ended': void;
-}
+// Playlist events are defined in @scarlett-player/core PlayerEventMap.
+// No need to redefine them here.

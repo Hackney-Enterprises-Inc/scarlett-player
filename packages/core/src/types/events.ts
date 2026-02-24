@@ -9,6 +9,16 @@ import type { Chapter } from './state';
 import type { PlayerError } from '../error-handler';
 
 /**
+ * Minimal playlist track interface for core event types.
+ * The full PlaylistTrack interface lives in @scarlett-player/playlist.
+ */
+export interface PlaylistTrack {
+  id: string;
+  src: string;
+  [key: string]: unknown;
+}
+
+/**
  * Core player events.
  */
 export interface PlayerEventMap {
@@ -231,6 +241,35 @@ export interface PlayerEventMap {
 
   /** User dismissed error overlay */
   'error:dismiss': void;
+
+  // === Media Load Events ===
+  /** Request to load a new media source (used by plugins like playlist) */
+  'media:load-request': { src: string; autoplay?: boolean };
+
+  // === Playlist Events ===
+  /** Current playlist track changed */
+  'playlist:change': { track: PlaylistTrack | null; index: number };
+
+  /** Track(s) added to playlist */
+  'playlist:add': { track: PlaylistTrack; index: number };
+
+  /** Track removed from playlist */
+  'playlist:remove': { track: PlaylistTrack; index: number };
+
+  /** Playlist cleared */
+  'playlist:clear': void;
+
+  /** Shuffle mode changed */
+  'playlist:shuffle': { enabled: boolean };
+
+  /** Repeat mode changed */
+  'playlist:repeat': { mode: 'none' | 'all' | 'one' };
+
+  /** Playlist order changed */
+  'playlist:reorder': { tracks: PlaylistTrack[] };
+
+  /** Playlist ended (no more tracks) */
+  'playlist:ended': void;
 }
 
 /**

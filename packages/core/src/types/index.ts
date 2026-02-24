@@ -37,6 +37,7 @@ export type {
 // Event Types
 export type {
   PlayerEventMap,
+  PlaylistTrack,
   EventName,
   EventPayload,
   EventHandler,

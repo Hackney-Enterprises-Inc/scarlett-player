@@ -55,6 +55,10 @@ export interface EmbedConfig {
   playlist?: PlaylistItem[];
   /** Analytics configuration */
   analytics?: AnalyticsConfig;
+  /** Watermark configuration */
+  watermark?: WatermarkConfig;
+  /** Captions configuration */
+  captions?: CaptionsConfig;
 }
 
 /**
@@ -76,6 +80,35 @@ export interface AnalyticsConfig {
   beaconUrl?: string;
   apiKey?: string;
   videoId?: string;
+}
+
+/**
+ * Watermark configuration for embed
+ */
+export interface WatermarkConfig {
+  text?: string;
+  imageUrl?: string;
+  position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+  opacity?: number;
+  fontSize?: number;
+  dynamic?: boolean;
+  dynamicInterval?: number;
+  showDelay?: number;
+}
+
+/**
+ * Captions configuration for embed
+ */
+export interface CaptionsConfig {
+  sources?: Array<{
+    language: string;
+    label: string;
+    src: string;
+    kind?: 'subtitles' | 'captions';
+  }>;
+  extractFromHLS?: boolean;
+  autoSelect?: boolean;
+  defaultLanguage?: string;
 }
 
 /**

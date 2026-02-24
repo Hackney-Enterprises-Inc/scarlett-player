@@ -150,6 +150,9 @@ const createMockApi = (): { api: IPluginAPI; state: Record<string, unknown>; vid
     getPlugin: vi.fn(),
     addCleanup: vi.fn(),
     runCleanups: vi.fn(),
+    onDestroy: vi.fn(),
+    off: vi.fn(),
+    subscribeToState: vi.fn(() => () => {}),
   } as unknown as IPluginAPI;
 
   return { api, state, video };

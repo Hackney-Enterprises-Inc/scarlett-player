@@ -15,7 +15,11 @@
       "@scarlett-player/hls": ["../plugins/hls/dist/index.d.ts"],
       "@scarlett-player/hls/*": ["../plugins/hls/dist/*"],
       "@scarlett-player/ui": ["../plugins/ui/dist/index.d.ts"],
-      "@scarlett-player/ui/*": ["../plugins/ui/dist/*"]
+      "@scarlett-player/ui/*": ["../plugins/ui/dist/*"],
+      "@scarlett-player/watermark": ["../plugins/watermark/dist/index.d.ts"],
+      "@scarlett-player/watermark/*": ["../plugins/watermark/dist/*"],
+      "@scarlett-player/captions": ["../plugins/captions/dist/index.d.ts"],
+      "@scarlett-player/captions/*": ["../plugins/captions/dist/*"]
     }
   },
   "include": [

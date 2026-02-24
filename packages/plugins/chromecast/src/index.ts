@@ -53,6 +53,9 @@ export function chromecastPlugin(): IChromecastPlugin {
   let localTimeBeforeCast = 0;
   let localSrcBeforeCast = '';
 
+  // Track previous isMediaLoaded state for media-ended detection
+  let previousIsMediaLoaded = false;
+
   // Event handler references for cleanup
   let castStateHandler: ((event: CastFramework.CastStateEventData) => void) | null = null;
   let sessionStateHandler: ((event: CastFramework.SessionStateEventData) => void) | null = null;
@@ -99,6 +102,12 @@ export function chromecastPlugin(): IChromecastPlugin {
     // Sync remote player state
     remotePlayerController.addEventListener(
       window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
+      remotePlayerHandler as any
+    );
+
+    // Also listen specifically for IS_MEDIA_LOADED_CHANGED for reliable media-ended detection
+    remotePlayerController.addEventListener(
+      window.cast.framework.RemotePlayerEventType.IS_MEDIA_LOADED_CHANGED,
       remotePlayerHandler as any
     );
 
@@ -265,12 +274,21 @@ export function chromecastPlugin(): IChromecastPlugin {
 
   /**
    * Handle remote player state changes.
+   * Detects media-ended via isMediaLoaded transition (true -> false).
    */
   const handleRemotePlayerChange = (): void => {
     if (!remotePlayer) return;
 
     // Only sync state when connected
     if (!api.getState('chromecastActive')) return;
+
+    // Detect media ended on Cast device via isMediaLoaded transition
+    const isMediaLoaded = remotePlayer.isMediaLoaded;
+    if (previousIsMediaLoaded && !isMediaLoaded) {
+      api.logger.debug('Cast media ended (isMediaLoaded transition)');
+      api.emit('playback:ended', undefined);
+    }
+    previousIsMediaLoaded = isMediaLoaded;
 
     // Sync cast state to player state
     api.setState('currentTime', remotePlayer.currentTime);
@@ -293,6 +311,17 @@ export function chromecastPlugin(): IChromecastPlugin {
       // Initialize state
       api.setState('chromecastAvailable', false);
       api.setState('chromecastActive', false);
+
+      // Listen for media:load-request — when Chromecast is active, load on Cast device
+      const unsubLoadRequest = api.on('media:load-request', async ({ src }) => {
+        if (!api.getState('chromecastActive')) return;
+        await loadMediaOnCast(src, 0);
+      });
+
+      // Register cleanup for load-request listener
+      api.onDestroy(() => {
+        unsubLoadRequest();
+      });
 
       // Check if Cast is supported in this browser
       if (!isCastSupported()) {
@@ -337,6 +366,10 @@ export function chromecastPlugin(): IChromecastPlugin {
       if (remotePlayerController && remotePlayerHandler && window.cast?.framework) {
         remotePlayerController.removeEventListener(
           window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
+          remotePlayerHandler as any
+        );
+        remotePlayerController.removeEventListener(
+          window.cast.framework.RemotePlayerEventType.IS_MEDIA_LOADED_CHANGED,
           remotePlayerHandler as any
         );
       }
