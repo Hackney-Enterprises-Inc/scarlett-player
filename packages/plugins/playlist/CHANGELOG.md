@@ -1,5 +1,14 @@
 # @scarlett-player/playlist
 
+## 1.0.1
+
+### Patch Changes
+
+- [#38](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/38) [`8a36597`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8a365974bb67fa7ea945a3f2594112ac27cd75f4) Thanks [@alexhackney](https://github.com/alexhackney)! - Add `initialIndex` config option to playlist plugin. When tracks are provided via config and the player loads the first source through the constructor, `initialIndex` syncs the playlist's internal state so auto-advance works correctly (track 0 → track 1 instead of replaying track 0).
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.0.1
+
 ## 1.0.0
 
 ### Minor Changes

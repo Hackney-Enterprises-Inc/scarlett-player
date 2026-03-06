@@ -1,5 +1,12 @@
 # @scarlett-player/native
 
+## 1.0.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.0.1
+
 ## 1.0.0
 
 ### Patch Changes
