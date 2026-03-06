@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2
+
+### Patch Changes
+
+- Updated dependencies [[`e2d5469`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/e2d54691f9b5297ce564c4089bb7c05482a3269d)]:
+  - @scarlett-player/watermark@1.0.2
+  - @scarlett-player/core@1.0.2
+  - @scarlett-player/hls@1.0.2
+  - @scarlett-player/ui@1.0.2
+  - @scarlett-player/analytics@1.0.2
+  - @scarlett-player/playlist@1.0.2
+  - @scarlett-player/media-session@1.0.2
+  - @scarlett-player/audio-ui@1.0.2
+  - @scarlett-player/captions@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
