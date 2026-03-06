@@ -1,5 +1,12 @@
 # @scarlett-player/chromecast
 
+## 1.0.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes

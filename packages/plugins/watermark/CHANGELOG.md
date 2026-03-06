@@ -1,5 +1,14 @@
 # @scarlett-player/watermark
 
+## 1.0.2
+
+### Patch Changes
+
+- [#41](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/41) [`e2d5469`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/e2d54691f9b5297ce564c4089bb7c05482a3269d) Thanks [@alexhackney](https://github.com/alexhackney)! - Add `imageHeight` and `padding` config options to watermark plugin. Image size is now controlled by `imageHeight` (default 40px) instead of being derived from `fontSize`. Edge offset is controlled by `padding` (default 10px, 40px for bottom positions to clear player controls).
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.0.2
+
 ## 1.0.0
 
 ### Minor Changes
