@@ -29,7 +29,7 @@
     "test:coverage": "vitest --coverage"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.0.0"
+    "@scarlett-player/core": "^1.0.1"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
