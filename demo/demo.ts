@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         imageUrl: 'https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png',
         position: 'bottom-right',
         opacity: 0.5,
+        imageHeight: 64,
       }),
     ].filter(Boolean),
   });
@@ -97,6 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         createNativePlugin(),   // Native audio support
         createPlaylistPlugin({
           autoAdvance: true,
+          autoLoad: false,
           persist: false,
         }),
         createMediaSessionPlugin({

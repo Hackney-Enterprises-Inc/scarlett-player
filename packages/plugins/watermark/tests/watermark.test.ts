@@ -47,6 +47,8 @@ describe('createWatermarkPlugin', () => {
       position: 'top-left',
       opacity: 0.3,
       fontSize: 16,
+      imageHeight: 60,
+      padding: 20,
       dynamic: true,
       dynamicInterval: 5000,
       showDelay: 1000,
@@ -135,6 +137,48 @@ describe('init and DOM', () => {
 
     const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
     expect(el?.style.opacity).toBe('0.3');
+  });
+
+  it('uses imageHeight for image max-height instead of fontSize', () => {
+    const plugin = createWatermarkPlugin({ imageUrl: 'https://example.com/wm.png', imageHeight: 80 });
+    plugin.init(mockApi);
+
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(img?.style.maxHeight).toBe('80px');
+  });
+
+  it('defaults imageHeight to 40px', () => {
+    const plugin = createWatermarkPlugin({ imageUrl: 'https://example.com/wm.png' });
+    plugin.init(mockApi);
+
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(img?.style.maxHeight).toBe('40px');
+  });
+
+  it('applies custom padding to position styles', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', position: 'top-left', padding: 25 });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.top).toBe('25px');
+    expect(el?.style.left).toBe('25px');
+  });
+
+  it('uses custom padding for bottom positions', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', position: 'bottom-right', padding: 20 });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.bottom).toBe('20px');
+    expect(el?.style.right).toBe('20px');
+  });
+
+  it('defaults bottom padding to 40px to clear controls', () => {
+    const plugin = createWatermarkPlugin({ text: 'test', position: 'bottom-right' });
+    plugin.init(mockApi);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.bottom).toBe('40px');
   });
 });
 

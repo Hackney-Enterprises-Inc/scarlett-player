@@ -40,6 +40,8 @@ npm install @scarlett-player/analytics     # QoE metrics & engagement tracking
 npm install @scarlett-player/playlist      # Playlist/queue management
 npm install @scarlett-player/media-session # Lock screen & media key controls
 npm install @scarlett-player/audio-ui      # Compact audio player UI
+npm install @scarlett-player/captions      # Closed captions (WebVTT)
+npm install @scarlett-player/watermark     # Anti-piracy watermark overlay
 
 # Vue 3 wrapper
 npm install @scarlett-player/vue
@@ -189,6 +191,8 @@ Lighter builds available: `embed.video.js` (video only) and `embed.audio.js` (au
 | `@scarlett-player/analytics` | Analytics — startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport |
 | `@scarlett-player/playlist` | Playlist — queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session — lock screen controls, media keys, album art, seek bar |
+| `@scarlett-player/captions` | Captions — WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
+| `@scarlett-player/watermark` | Watermark — anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning |
 | `@scarlett-player/vue` | Vue 3 — `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
 | `@scarlett-player/embed` | CDN embed — auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
 
@@ -256,6 +260,8 @@ packages/
     analytics/      # QoE metrics & engagement
     playlist/       # Queue, shuffle, repeat
     media-session/  # Lock screen & media keys
+    captions/       # WebVTT closed captions
+    watermark/      # Anti-piracy watermark overlay
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
@@ -286,7 +292,8 @@ docs/               # Landing page + architecture docs
 - [x] Analytics & QoE tracking
 - [x] Live DVR controls
 - [x] Touch/mobile support (basic)
-- [ ] Closed captions (WebVTT) — Sprint 1
+- [x] Closed captions (WebVTT)
+- [x] Anti-piracy watermark overlay
 - [ ] Mobile gesture controls (double-tap seek, swipe) — Sprint 1
 - [ ] DRM support — Sprint 2
 - [ ] Low-latency HLS (LL-HLS) — Sprint 2

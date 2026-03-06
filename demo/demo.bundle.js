@@ -35549,6 +35549,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("duration", video.duration);
       api.setState("mediaType", video.videoWidth > 0 ? "video" : "audio");
     });
+    addHandler("loadeddata", () => {
+      if (video.videoWidth > 0) {
+        api.setState("mediaType", "video");
+      }
+    });
     addHandler("error", () => {
       const error = video.error;
       if (error) {
@@ -39714,6 +39719,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let api = null;
     let tracks = mergedConfig.tracks || [];
     let currentIndex = mergedConfig.initialIndex ?? -1;
+    if (currentIndex < -1 || currentIndex >= tracks.length) {
+      currentIndex = -1;
+    }
     let shuffle = mergedConfig.shuffle || false;
     let repeat = mergedConfig.repeat || "none";
     let shuffleOrder = [];
@@ -41066,13 +41074,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/watermark/src/index.ts
   var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
-  var POSITION_STYLES = {
-    "top-left": "top:10px;left:10px;",
-    "top-right": "top:10px;right:10px;",
-    "bottom-left": "bottom:40px;left:10px;",
-    "bottom-right": "bottom:40px;right:10px;",
-    "center": "top:50%;left:50%;transform:translate(-50%,-50%);"
-  };
+  function getPositionStyles(padding, bottomPadding) {
+    return {
+      "top-left": `top:${padding}px;left:${padding}px;`,
+      "top-right": `top:${padding}px;right:${padding}px;`,
+      "bottom-left": `bottom:${bottomPadding}px;left:${padding}px;`,
+      "bottom-right": `bottom:${bottomPadding}px;right:${padding}px;`,
+      "center": "top:50%;left:50%;transform:translate(-50%,-50%);"
+    };
+  }
   function createWatermarkPlugin(config = {}) {
     let api = null;
     let element = null;
@@ -41081,13 +41091,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let currentPosition = config.position || "bottom-right";
     const opacity = config.opacity ?? 0.5;
     const fontSize = config.fontSize ?? 14;
+    const imageHeight = config.imageHeight ?? 40;
+    const padding = config.padding ?? 10;
+    const bottomPadding = config.padding ?? 40;
     const dynamic = config.dynamic ?? false;
     const dynamicInterval = config.dynamicInterval ?? 1e4;
     const showDelay = config.showDelay ?? 0;
+    const positionStyles = getPositionStyles(padding, bottomPadding);
     const createElement2 = () => {
       const el = document.createElement("div");
       el.className = "sp-watermark sp-watermark--hidden";
-      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${POSITION_STYLES[currentPosition]}`;
+      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
       el.setAttribute("data-position", currentPosition);
       updateContent(el);
       return el;
@@ -41099,7 +41113,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (img) {
         const imgEl = document.createElement("img");
         imgEl.src = img;
-        imgEl.style.cssText = `max-height:${fontSize * 2}px;opacity:inherit;display:block;`;
+        imgEl.style.cssText = `max-height:${imageHeight}px;opacity:inherit;display:block;`;
         imgEl.alt = "";
         el.appendChild(imgEl);
       } else if (txt) {
@@ -41114,7 +41128,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles2 = POSITION_STYLES[position];
+      const styles2 = positionStyles[position];
       styles2.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
@@ -41242,7 +41256,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.0.0" : "dev";
+  var VERSION = true ? "1.0.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
@@ -41272,7 +41286,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         createWatermarkPlugin({
           imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
           position: "bottom-right",
-          opacity: 0.5
+          opacity: 0.5,
+          imageHeight: 64
         })
       ].filter(Boolean)
     });
@@ -41306,6 +41321,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           // Native audio support
           createPlaylistPlugin({
             autoAdvance: true,
+            autoLoad: false,
             persist: false
           }),
           createMediaSessionPlugin({

@@ -356,7 +356,15 @@ export function setupVideoEventHandlers(
   // Metadata loaded
   addHandler('loadedmetadata', () => {
     api.setState('duration', video.duration);
+    // videoWidth may be 0 on mobile at loadedmetadata time; updated again on loadeddata
     api.setState('mediaType', video.videoWidth > 0 ? 'video' : 'audio');
+  });
+
+  // Loaded data — re-check mediaType since videoWidth may not be available at loadedmetadata on mobile
+  addHandler('loadeddata', () => {
+    if (video.videoWidth > 0) {
+      api.setState('mediaType', 'video');
+    }
   });
 
   // Errors

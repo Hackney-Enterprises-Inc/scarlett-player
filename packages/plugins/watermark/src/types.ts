@@ -15,8 +15,12 @@ export interface WatermarkConfig {
   position?: WatermarkPosition;
   /** Opacity 0-1 — default: 0.5 */
   opacity?: number;
-  /** Font size in px — default: 14 */
+  /** Font size in px for text watermarks — default: 14 */
   fontSize?: number;
+  /** Image height in px — default: 40. Only applies when imageUrl is set. */
+  imageHeight?: number;
+  /** Padding from edges in px — default: 10 (40 for bottom to clear controls) */
+  padding?: number;
   /** Whether to periodically move the watermark to a random position — default: false */
   dynamic?: boolean;
   /** Interval in ms for dynamic repositioning — default: 10000 */
