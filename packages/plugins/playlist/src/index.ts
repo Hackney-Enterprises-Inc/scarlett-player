@@ -97,7 +97,11 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
   // Plugin state
   let api: IPluginAPI | null = null;
   let tracks: PlaylistTrack[] = mergedConfig.tracks || [];
-  let currentIndex = -1;
+  let currentIndex = mergedConfig.initialIndex ?? -1;
+  // Clamp initialIndex to valid range (-1 to tracks.length - 1)
+  if (currentIndex < -1 || currentIndex >= tracks.length) {
+    currentIndex = -1;
+  }
   let shuffle = mergedConfig.shuffle || false;
   let repeat: RepeatMode = mergedConfig.repeat || 'none';
   let shuffleOrder: number[] = [];
