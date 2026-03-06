@@ -142,6 +142,16 @@ export function setupHlsEventHandlers(
     callbacks.onLevelSwitched?.(data.level);
   });
 
+  // Fragment loaded - update bandwidth estimate
+  let lastBandwidthUpdate = 0;
+  addHandler('hlsFragLoaded', () => {
+    const now = Date.now();
+    if (now - lastBandwidthUpdate >= 2000 && hls.bandwidthEstimate) {
+      lastBandwidthUpdate = now;
+      api.setState('bandwidth', Math.round(hls.bandwidthEstimate));
+    }
+  });
+
   // Fragment buffered - update buffering state
   addHandler('hlsFragBuffered', () => {
     api.setState('buffering', false);

@@ -22,7 +22,8 @@ export type ControlSlot =
   | 'chromecast'
   | 'pip'
   | 'fullscreen'
-  | 'spacer';
+  | 'spacer'
+  | 'bandwidth-indicator';
 
 /**
  * Layout configuration for the control bar.

@@ -113,6 +113,32 @@ export function getBestLevelForBandwidth(
 }
 
 /**
+ * Get an initial bandwidth estimate using the Network Information API.
+ * Falls back to hls.js default (500kbps) when API is unavailable.
+ *
+ * Uses a 0.85 safety factor (not lower) because hls.js applies its own
+ * abrBandWidthUpFactor (0.7) on top when deciding to switch up.
+ *
+ * @param overrideBps - Optional manual override in bits per second
+ * @returns Estimated bandwidth in bits per second
+ */
+export function getInitialBandwidthEstimate(overrideBps?: number): number {
+  const HLS_DEFAULT_ESTIMATE = 500_000; // 500kbps — hls.js default
+
+  if (overrideBps !== undefined && overrideBps > 0) {
+    return overrideBps;
+  }
+
+  const connection = (navigator as any).connection;
+  if (connection?.downlink && connection.downlink > 0) {
+    const bps = connection.downlink * 1_000_000; // Mbps to bps
+    return Math.round(bps * 0.85);
+  }
+
+  return HLS_DEFAULT_ESTIMATE;
+}
+
+/**
  * Find level index by height.
  *
  * @param levels - Available quality levels
