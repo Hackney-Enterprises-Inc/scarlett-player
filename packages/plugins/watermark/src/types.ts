@@ -15,8 +15,12 @@ export interface WatermarkConfig {
   position?: WatermarkPosition;
   /** Opacity 0-1 — default: 0.5 */
   opacity?: number;
-  /** Font size in px — default: 14 */
+  /** Font size in px for text watermarks — default: 14 */
   fontSize?: number;
+  /** Image height in px — default: 40. Only applies when imageUrl is set. */
+  imageHeight?: number;
+  /** Padding from edges in px. Default: 10px for top/side, 40px for bottom to clear controls. When set, applies to all positions. */
+  padding?: number;
   /** Whether to periodically move the watermark to a random position — default: false */
   dynamic?: boolean;
   /** Interval in ms for dynamic repositioning — default: 10000 */
@@ -36,6 +40,10 @@ export interface IWatermarkPlugin extends Plugin {
   setPosition(position: WatermarkPosition): void;
   /** Set watermark opacity (0-1) */
   setOpacity(opacity: number): void;
+  /** Set image height in px */
+  setImageHeight(height: number): void;
+  /** Set padding from edges in px */
+  setPadding(padding: number): void;
   /** Show the watermark */
   show(): void;
   /** Hide the watermark */

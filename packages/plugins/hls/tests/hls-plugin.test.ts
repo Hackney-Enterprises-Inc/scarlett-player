@@ -997,6 +997,24 @@ describe('event-map', () => {
       expect(mockApi.setState).toHaveBeenCalledWith('mediaType', 'video');
     });
 
+    it('should set mediaType to video on loadeddata when videoWidth > 0', () => {
+      Object.defineProperty(video, 'videoWidth', { value: 1920, writable: true });
+      setupVideoEventHandlers(video, mockApi);
+
+      video.dispatchEvent(new Event('loadeddata'));
+
+      expect(mockApi.setState).toHaveBeenCalledWith('mediaType', 'video');
+    });
+
+    it('should not update mediaType on loadeddata when videoWidth is 0', () => {
+      Object.defineProperty(video, 'videoWidth', { value: 0, writable: true });
+      setupVideoEventHandlers(video, mockApi);
+
+      video.dispatchEvent(new Event('loadeddata'));
+
+      expect(mockApi.setState).not.toHaveBeenCalledWith('mediaType', expect.anything());
+    });
+
     it('should handle error event', () => {
       Object.defineProperty(video, 'error', {
         value: { code: 4, message: 'Media load error' },

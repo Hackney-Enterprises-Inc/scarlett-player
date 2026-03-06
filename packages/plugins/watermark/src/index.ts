@@ -16,13 +16,15 @@ export type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './typ
 
 const POSITIONS: WatermarkPosition[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'];
 
-const POSITION_STYLES: Record<WatermarkPosition, string> = {
-  'top-left': 'top:10px;left:10px;',
-  'top-right': 'top:10px;right:10px;',
-  'bottom-left': 'bottom:40px;left:10px;',
-  'bottom-right': 'bottom:40px;right:10px;',
-  'center': 'top:50%;left:50%;transform:translate(-50%,-50%);',
-};
+function getPositionStyles(padding: number, bottomPadding: number): Record<WatermarkPosition, string> {
+  return {
+    'top-left': `top:${padding}px;left:${padding}px;`,
+    'top-right': `top:${padding}px;right:${padding}px;`,
+    'bottom-left': `bottom:${bottomPadding}px;left:${padding}px;`,
+    'bottom-right': `bottom:${bottomPadding}px;right:${padding}px;`,
+    'center': 'top:50%;left:50%;transform:translate(-50%,-50%);',
+  };
+}
 
 /**
  * Create a Watermark Plugin instance.
@@ -58,9 +60,14 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
 
   const opacity = config.opacity ?? 0.5;
   const fontSize = config.fontSize ?? 14;
+  let currentImageHeight = config.imageHeight ?? 40;
+  let currentPadding = config.padding ?? 10;
+  let currentBottomPadding = config.padding ?? 40; // Higher default for bottom to clear player controls
   const dynamic = config.dynamic ?? false;
   const dynamicInterval = config.dynamicInterval ?? 10000;
   const showDelay = config.showDelay ?? 0;
+
+  let positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
 
   /**
    * Create the watermark DOM element.
@@ -68,7 +75,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   const createElement = (): HTMLDivElement => {
     const el = document.createElement('div');
     el.className = 'sp-watermark sp-watermark--hidden';
-    el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${POSITION_STYLES[currentPosition]}`;
+    el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
     el.setAttribute('data-position', currentPosition);
 
     updateContent(el);
@@ -86,7 +93,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     if (img) {
       const imgEl = document.createElement('img');
       imgEl.src = img;
-      imgEl.style.cssText = `max-height:${fontSize * 2}px;opacity:inherit;display:block;`;
+      imgEl.style.cssText = `max-height:${currentImageHeight}px;opacity:inherit;display:block;`;
       imgEl.alt = '';
       el.appendChild(imgEl);
     } else if (txt) {
@@ -109,7 +116,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     element.style.transform = '';
 
     // Apply new position
-    const styles = POSITION_STYLES[position];
+    const styles = positionStyles[position];
     styles.split(';').filter(Boolean).forEach(rule => {
       const colonIdx = rule.indexOf(':');
       if (colonIdx === -1) return;
@@ -271,12 +278,28 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
       if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
     },
 
+    setImageHeight(height: number): void {
+      currentImageHeight = Math.max(1, height);
+      if (element) {
+        const img = element.querySelector('img');
+        if (img) img.style.maxHeight = `${currentImageHeight}px`;
+      }
+    },
+
+    setPadding(value: number): void {
+      currentPadding = Math.max(0, value);
+      currentBottomPadding = currentPadding;
+      positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
+      // Re-apply current position with new padding
+      setPosition(currentPosition);
+    },
+
     show,
 
     hide,
 
     getConfig(): WatermarkConfig {
-      return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity };
+      return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity, imageHeight: currentImageHeight, padding: currentPadding };
     },
   };
 }

@@ -737,6 +737,14 @@
           <input type="range" id="watermark-opacity" min="0" max="1" step="0.1" value="0.5">
         </div>
         <div class="watermark-row">
+          <label>Size: <span id="imageheight-value">64</span>px</label>
+          <input type="range" id="watermark-imageheight" min="20" max="200" step="5" value="64">
+        </div>
+        <div class="watermark-row">
+          <label>Padding: <span id="padding-value">10</span>px</label>
+          <input type="range" id="watermark-padding" min="0" max="100" step="5" value="10">
+        </div>
+        <div class="watermark-row">
           <button id="watermark-show-btn" class="position-btn">Show</button>
           <button id="watermark-hide-btn" class="position-btn">Hide</button>
         </div>
@@ -781,6 +789,8 @@
       <span class="property">imageUrl</span>: <span class="string">'https://example.com/logo.png'</span>,
       <span class="property">position</span>: <span class="string">'bottom-right'</span>,
       <span class="property">opacity</span>: <span class="number">0.5</span>,
+      <span class="property">imageHeight</span>: <span class="number">64</span>,
+      <span class="property">padding</span>: <span class="number">10</span>,
     }),
   ],
 });
@@ -993,8 +1003,9 @@ playlist.<span class="function">add</span>([
         formatTime(state.currentTime) + ' / ' + formatTime(state.duration);
 
       const quality = state.currentQuality;
+      const isAudioPlayer = window.activePlayer === 'audio' || window.activePlayer === 'mini';
       document.getElementById('quality').textContent =
-        quality ? quality.label : (state.mediaType === 'audio' ? 'Audio' : 'Auto');
+        quality ? quality.label : (isAudioPlayer ? 'Audio' : 'Auto');
 
       document.getElementById('buffered').textContent =
         Math.round(state.bufferedAmount * 100) + '%';
@@ -1273,6 +1284,18 @@ playlist.<span class="function">add</span>([
       const val = parseFloat(e.target.value);
       document.getElementById('opacity-value').textContent = val.toFixed(1);
       if (wmPlugin) wmPlugin.setOpacity(val);
+    });
+
+    document.getElementById('watermark-imageheight').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('imageheight-value').textContent = val;
+      if (wmPlugin) wmPlugin.setImageHeight(val);
+    });
+
+    document.getElementById('watermark-padding').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('padding-value').textContent = val;
+      if (wmPlugin) wmPlugin.setPadding(val);
     });
 
     document.getElementById('watermark-show-btn').addEventListener('click', () => wmPlugin?.show());
