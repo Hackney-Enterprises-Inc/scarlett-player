@@ -1,5 +1,12 @@
 # @scarlett-player/ui
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`96bbb45`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/96bbb45881c45f2a183d1a56337bab1e47648ba7)]:
+  - @scarlett-player/core@1.0.0
+
 ## 0.5.3
 
 ### Patch Changes
