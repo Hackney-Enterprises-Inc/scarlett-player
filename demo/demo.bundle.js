@@ -41091,13 +41091,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let currentPosition = config.position || "bottom-right";
     const opacity = config.opacity ?? 0.5;
     const fontSize = config.fontSize ?? 14;
-    const imageHeight = config.imageHeight ?? 40;
-    const padding = config.padding ?? 10;
-    const bottomPadding = config.padding ?? 40;
+    let currentImageHeight = config.imageHeight ?? 40;
+    let currentPadding = config.padding ?? 10;
+    let currentBottomPadding = config.padding ?? 40;
     const dynamic = config.dynamic ?? false;
     const dynamicInterval = config.dynamicInterval ?? 1e4;
     const showDelay = config.showDelay ?? 0;
-    const positionStyles = getPositionStyles(padding, bottomPadding);
+    let positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
     const createElement2 = () => {
       const el = document.createElement("div");
       el.className = "sp-watermark sp-watermark--hidden";
@@ -41113,7 +41113,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (img) {
         const imgEl = document.createElement("img");
         imgEl.src = img;
-        imgEl.style.cssText = `max-height:${imageHeight}px;opacity:inherit;display:block;`;
+        imgEl.style.cssText = `max-height:${currentImageHeight}px;opacity:inherit;display:block;`;
         imgEl.alt = "";
         el.appendChild(imgEl);
       } else if (txt) {
@@ -41247,10 +41247,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       setOpacity(value) {
         if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
       },
+      setImageHeight(height) {
+        currentImageHeight = Math.max(1, height);
+        if (element) {
+          const img = element.querySelector("img");
+          if (img) img.style.maxHeight = `${currentImageHeight}px`;
+        }
+      },
+      setPadding(value) {
+        currentPadding = Math.max(0, value);
+        currentBottomPadding = currentPadding;
+        positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
+        setPosition(currentPosition);
+      },
       show,
       hide,
       getConfig() {
-        return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity };
+        return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity, imageHeight: currentImageHeight, padding: currentPadding };
       }
     };
   }

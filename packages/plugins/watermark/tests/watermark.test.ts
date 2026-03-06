@@ -453,6 +453,40 @@ describe('runtime API', () => {
     expect(cfg.position).toBe('top-left');
     expect(cfg.opacity).toBe(0.8);
   });
+
+  it('setImageHeight updates image max-height', () => {
+    plugin.setImage('https://example.com/logo.png');
+    plugin.setImageHeight(100);
+
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(img?.style.maxHeight).toBe('100px');
+  });
+
+  it('setImageHeight persists across setImage calls', () => {
+    plugin.setImageHeight(100);
+    plugin.setImage('https://example.com/new-logo.png');
+
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(img?.style.maxHeight).toBe('100px');
+  });
+
+  it('setPadding updates position and persists across setPosition calls', () => {
+    plugin.setPadding(25);
+    plugin.setPosition('top-left');
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.style.top).toBe('25px');
+    expect(el?.style.left).toBe('25px');
+  });
+
+  it('getConfig reflects imageHeight and padding changes', () => {
+    plugin.setImageHeight(80);
+    plugin.setPadding(20);
+
+    const cfg = plugin.getConfig();
+    expect(cfg.imageHeight).toBe(80);
+    expect(cfg.padding).toBe(20);
+  });
 });
 
 describe('destroy', () => {

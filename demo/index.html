@@ -1289,23 +1289,13 @@ playlist.<span class="function">add</span>([
     document.getElementById('watermark-imageheight').addEventListener('input', (e) => {
       const val = parseInt(e.target.value, 10);
       document.getElementById('imageheight-value').textContent = val;
-      // Update the image element directly
-      const img = document.querySelector('.sp-watermark img');
-      if (img) img.style.maxHeight = val + 'px';
+      if (wmPlugin) wmPlugin.setImageHeight(val);
     });
 
     document.getElementById('watermark-padding').addEventListener('input', (e) => {
       const val = parseInt(e.target.value, 10);
       document.getElementById('padding-value').textContent = val;
-      // Update position with new padding
-      const el = document.querySelector('.sp-watermark');
-      if (!el) return;
-      const pos = el.getAttribute('data-position');
-      if (pos === 'center') return;
-      if (pos.includes('top')) el.style.top = val + 'px';
-      if (pos.includes('bottom')) el.style.bottom = val + 'px';
-      if (pos.includes('left')) el.style.left = val + 'px';
-      if (pos.includes('right')) el.style.right = val + 'px';
+      if (wmPlugin) wmPlugin.setPadding(val);
     });
 
     document.getElementById('watermark-show-btn').addEventListener('click', () => wmPlugin?.show());
