@@ -103,6 +103,20 @@ describe('createPlaylistPlugin', () => {
     expect(plugin.getState().currentIndex).toBe(-1);
   });
 
+  it('clamps out-of-bounds positive initialIndex to -1', () => {
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, initialIndex: 999 });
+    const state = plugin.getState();
+    expect(state.currentIndex).toBe(-1);
+    expect(state.currentTrack).toBeNull();
+  });
+
+  it('clamps invalid negative initialIndex to -1', () => {
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, initialIndex: -5 });
+    const state = plugin.getState();
+    expect(state.currentIndex).toBe(-1);
+    expect(state.currentTrack).toBeNull();
+  });
+
   it('generates IDs for tracks without them', () => {
     const trackWithoutId = { src: 'test.mp3', title: 'Test' } as PlaylistTrack;
     const plugin = createPlaylistPlugin({ tracks: [trackWithoutId] });

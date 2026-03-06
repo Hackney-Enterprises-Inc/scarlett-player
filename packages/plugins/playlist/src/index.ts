@@ -98,6 +98,10 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
   let api: IPluginAPI | null = null;
   let tracks: PlaylistTrack[] = mergedConfig.tracks || [];
   let currentIndex = mergedConfig.initialIndex ?? -1;
+  // Clamp initialIndex to valid range (-1 to tracks.length - 1)
+  if (currentIndex < -1 || currentIndex >= tracks.length) {
+    currentIndex = -1;
+  }
   let shuffle = mergedConfig.shuffle || false;
   let repeat: RepeatMode = mergedConfig.repeat || 'none';
   let shuffleOrder: number[] = [];
