@@ -91,6 +91,18 @@ describe('createPlaylistPlugin', () => {
     expect(plugin.getTracks()).toHaveLength(4);
   });
 
+  it('accepts initialIndex via config', () => {
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, initialIndex: 0 });
+    const state = plugin.getState();
+    expect(state.currentIndex).toBe(0);
+    expect(state.currentTrack?.title).toBe('Track 1');
+  });
+
+  it('defaults to -1 when initialIndex is not provided', () => {
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+    expect(plugin.getState().currentIndex).toBe(-1);
+  });
+
   it('generates IDs for tracks without them', () => {
     const trackWithoutId = { src: 'test.mp3', title: 'Test' } as PlaylistTrack;
     const plugin = createPlaylistPlugin({ tracks: [trackWithoutId] });
@@ -833,6 +845,29 @@ describe('auto-advance', () => {
 
     // Should still be on first track
     expect(plugin.getCurrentTrack()?.title).toBe('Track 1');
+  });
+
+  it('auto-advances correctly when initialIndex is set', async () => {
+    localStorageMock.clear();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true, initialIndex: 0 });
+    const mockApi = createMockApi();
+
+    let endedCallback: (() => void) | null = null;
+    mockApi.on.mockImplementation((event, cb) => {
+      if (event === 'playback:ended') {
+        endedCallback = cb;
+      }
+      return vi.fn();
+    });
+
+    await plugin.init(mockApi);
+
+    // Without calling play(), initialIndex should already be 0
+    expect(plugin.getCurrentTrack()?.title).toBe('Track 1');
+
+    // Simulate playback ended — should advance to Track 2, not replay Track 1
+    endedCallback?.();
+    expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
   });
 
   it('emits playlist:ended when no more tracks', async () => {
