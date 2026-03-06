@@ -107,6 +107,9 @@ export interface PlaylistPluginConfig {
   /** Milliseconds to wait before auto-advancing to next track (default: 0) */
   advanceDelay?: number;
 
+  /** Initial track index when tracks are provided and the player loads the first source via constructor (default: -1, meaning no track is active yet) */
+  initialIndex?: number;
+
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }

@@ -34581,6 +34581,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           await this.pluginManager.initPlugin(id);
         }
       }
+      this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
+        if (this.stateManager.getValue("chromecastActive")) return;
+        await this.load(src);
+        if (autoplay !== false) {
+          await this.play();
+        }
+      });
       if (this.initialSrc) {
         await this.load(this.initialSrc);
       }
@@ -35304,6 +35311,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       codec: level.codecSet
     }));
   }
+  function getInitialBandwidthEstimate(overrideBps) {
+    const HLS_DEFAULT_ESTIMATE = 5e5;
+    if (overrideBps !== void 0 && overrideBps > 0) {
+      return overrideBps;
+    }
+    const connection = navigator.connection;
+    if (connection?.downlink && connection.downlink > 0) {
+      const bps = connection.downlink * 1e6;
+      return Math.round(bps * 0.85);
+    }
+    return HLS_DEFAULT_ESTIMATE;
+  }
 
   // packages/plugins/hls/src/event-map.ts
   var HLS_ERROR_TYPES = {
@@ -35377,6 +35396,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         auto: isAuto
       });
       callbacks.onLevelSwitched?.(data.level);
+    });
+    let lastBandwidthUpdate = 0;
+    addHandler("hlsFragLoaded", () => {
+      const now2 = Date.now();
+      if (now2 - lastBandwidthUpdate >= 2e3 && hls.bandwidthEstimate) {
+        lastBandwidthUpdate = now2;
+        api.setState("bandwidth", Math.round(hls.bandwidthEstimate));
+      }
     });
     addHandler("hlsFragBuffered", () => {
       api.setState("buffering", false);
@@ -35572,6 +35599,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     maxMaxBufferLength: 600,
     backBufferLength: 30,
     enableWorker: true,
+    capLevelToPlayerSize: true,
     // Error recovery settings
     maxNetworkRetries: 3,
     maxMediaRetries: 2,
@@ -35641,11 +35669,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       startPosition: mergedConfig.startPosition,
       startLevel: -1,
       // Auto quality selection (ABR)
+      abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate),
       lowLatencyMode: mergedConfig.lowLatencyMode,
       maxBufferLength: mergedConfig.maxBufferLength,
       maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
       backBufferLength: mergedConfig.backBufferLength,
       enableWorker: mergedConfig.enableWorker,
+      capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
       // Minimize hls.js internal retries - we handle retries ourselves
       fragLoadingMaxRetry: 1,
       manifestLoadingMaxRetry: 1,
@@ -35916,7 +35946,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         currentSrc = src;
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
-        if (isHlsJsSupported()) {
+        if (api.getState("airplayActive") && supportsNativeHLS()) {
+          api.logger.info("Using native HLS (AirPlay active)");
+          await loadNative(src);
+        } else if (isHlsJsSupported()) {
           api.logger.info("Using hls.js for HLS playback");
           await loadWithHlsJs(src);
         } else if (supportsNativeHLS()) {
@@ -38845,6 +38878,39 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   };
 
+  // packages/plugins/ui/src/controls/BandwidthIndicator.ts
+  var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2"/></svg>`;
+  var BandwidthIndicator = class {
+    constructor(api) {
+      this.api = api;
+      this.el = createElement("div", { className: "sp-bandwidth-indicator" });
+      this.el.innerHTML = ICON_SVG;
+      this.el.setAttribute("aria-label", "Bandwidth is limiting video quality");
+      this.el.setAttribute("title", "Bandwidth is limiting video quality");
+      this.el.style.display = "none";
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const bandwidth = this.api.getState("bandwidth");
+      const qualities = this.api.getState("qualities");
+      if (!bandwidth || !qualities || qualities.length === 0) {
+        this.el.style.display = "none";
+        return;
+      }
+      const highestBitrate = Math.max(...qualities.map((q) => q.bitrate));
+      if (highestBitrate > 0 && bandwidth < highestBitrate) {
+        this.el.style.display = "";
+      } else {
+        this.el.style.display = "none";
+      }
+    }
+    destroy() {
+      this.el.remove();
+    }
+  };
+
   // packages/plugins/ui/src/index.ts
   var DEFAULT_LAYOUT = [
     "play",
@@ -38853,6 +38919,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "volume",
     "time",
     "live-indicator",
+    "bandwidth-indicator",
     "spacer",
     "settings",
     "captions",
@@ -38893,6 +38960,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return new TimeDisplay(api);
         case "live-indicator":
           return new LiveIndicator(api);
+        case "bandwidth-indicator":
+          return new BandwidthIndicator(api);
         case "quality":
           return new QualityMenu(api);
         case "settings":
@@ -39179,8 +39248,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const handleTargetChange = () => {
       const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
+      const wasActive = api.getState("airplayActive");
       api.setState("airplayActive", active);
       api.emit(active ? "airplay:connected" : "airplay:disconnected", void 0);
+      if (wasActive && !active) {
+        api.logger.info("AirPlay disconnected, restoring hls.js");
+        const hlsPlugin = api.getPlugin("hls-provider");
+        if (hlsPlugin?.isNativeHLS()) {
+          hlsPlugin.switchToHlsJs().then(() => {
+            video = null;
+            attachToVideo();
+          }).catch((err) => {
+            api.logger.warn("Failed to switch back to hls.js", { error: err });
+          });
+        }
+      }
     };
     const attachToVideo = () => {
       if (video) return;
@@ -39335,6 +39417,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let remotePlayerController = null;
     let localTimeBeforeCast = 0;
     let localSrcBeforeCast = "";
+    let previousIsMediaLoaded = false;
     let castStateHandler = null;
     let sessionStateHandler = null;
     let remotePlayerHandler = null;
@@ -39363,6 +39446,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       );
       remotePlayerController.addEventListener(
         window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
+        remotePlayerHandler
+      );
+      remotePlayerController.addEventListener(
+        window.cast.framework.RemotePlayerEventType.IS_MEDIA_LOADED_CHANGED,
         remotePlayerHandler
       );
       const initialState = castContext.getCastState();
@@ -39465,6 +39552,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const handleRemotePlayerChange = () => {
       if (!remotePlayer) return;
       if (!api.getState("chromecastActive")) return;
+      const isMediaLoaded = remotePlayer.isMediaLoaded;
+      if (previousIsMediaLoaded && !isMediaLoaded) {
+        api.logger.debug("Cast media ended (isMediaLoaded transition)");
+        api.emit("playback:ended", void 0);
+      }
+      previousIsMediaLoaded = isMediaLoaded;
       api.setState("currentTime", remotePlayer.currentTime);
       api.setState("duration", remotePlayer.duration);
       api.setState("playing", !remotePlayer.isPaused);
@@ -39481,6 +39574,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = pluginApi;
         api.setState("chromecastAvailable", false);
         api.setState("chromecastActive", false);
+        const unsubLoadRequest = api.on("media:load-request", async ({ src }) => {
+          if (!api.getState("chromecastActive")) return;
+          await loadMediaOnCast(src, 0);
+        });
+        api.onDestroy(() => {
+          unsubLoadRequest();
+        });
         if (!isCastSupported()) {
           api.logger.debug("Chromecast not supported in this browser");
           return;
@@ -39516,6 +39616,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (remotePlayerController && remotePlayerHandler && window.cast?.framework) {
           remotePlayerController.removeEventListener(
             window.cast.framework.RemotePlayerEventType.ANY_CHANGE,
+            remotePlayerHandler
+          );
+          remotePlayerController.removeEventListener(
+            window.cast.framework.RemotePlayerEventType.IS_MEDIA_LOADED_CHANGED,
             remotePlayerHandler
           );
         }
@@ -39590,7 +39694,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     persist: false,
     persistKey: "scarlett-playlist",
     shuffle: false,
-    repeat: "none"
+    repeat: "none",
+    autoLoad: true,
+    advanceDelay: 0
   };
   function generateId() {
     return `track-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -39607,7 +39713,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const mergedConfig = { ...DEFAULT_CONFIG2, ...config };
     let api = null;
     let tracks = mergedConfig.tracks || [];
-    let currentIndex = -1;
+    let currentIndex = mergedConfig.initialIndex ?? -1;
     let shuffle = mergedConfig.shuffle || false;
     let repeat = mergedConfig.repeat || "none";
     let shuffleOrder = [];
@@ -39734,6 +39840,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       api?.setState("mediaType", track.type || "audio");
       emitChange();
+      if (mergedConfig.autoLoad !== false && track.src) {
+        api?.emit("media:load-request", { src: track.src, autoplay: true });
+      }
     };
     const plugin = {
       id: "playlist",
@@ -39748,12 +39857,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (shuffle && tracks.length > 0) {
           generateShuffleOrder();
         }
+        let advanceTimeout = null;
         const unsubEnded = api.on("playback:ended", () => {
           if (!mergedConfig.autoAdvance) return;
           const nextIdx = getNextIndex();
           if (nextIdx >= 0) {
-            api?.logger.debug("Auto-advancing to next track", { nextIdx });
-            setCurrentTrack(nextIdx);
+            const advance = () => {
+              api?.logger.debug("Auto-advancing to next track", { nextIdx });
+              setCurrentTrack(nextIdx);
+            };
+            if (mergedConfig.advanceDelay) {
+              advanceTimeout = setTimeout(advance, mergedConfig.advanceDelay);
+            } else {
+              advance();
+            }
           } else {
             api?.logger.info("Playlist ended");
             api?.emit("playlist:ended", void 0);
@@ -39761,6 +39878,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         api.onDestroy(() => {
           unsubEnded();
+          if (advanceTimeout) {
+            clearTimeout(advanceTimeout);
+            advanceTimeout = null;
+          }
           persistPlaylist();
         });
       },
@@ -40943,8 +41064,185 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/plugins/watermark/src/index.ts
+  var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
+  var POSITION_STYLES = {
+    "top-left": "top:10px;left:10px;",
+    "top-right": "top:10px;right:10px;",
+    "bottom-left": "bottom:40px;left:10px;",
+    "bottom-right": "bottom:40px;right:10px;",
+    "center": "top:50%;left:50%;transform:translate(-50%,-50%);"
+  };
+  function createWatermarkPlugin(config = {}) {
+    let api = null;
+    let element = null;
+    let dynamicTimer = null;
+    let showDelayTimer = null;
+    let currentPosition = config.position || "bottom-right";
+    const opacity = config.opacity ?? 0.5;
+    const fontSize = config.fontSize ?? 14;
+    const dynamic = config.dynamic ?? false;
+    const dynamicInterval = config.dynamicInterval ?? 1e4;
+    const showDelay = config.showDelay ?? 0;
+    const createElement2 = () => {
+      const el = document.createElement("div");
+      el.className = "sp-watermark sp-watermark--hidden";
+      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${POSITION_STYLES[currentPosition]}`;
+      el.setAttribute("data-position", currentPosition);
+      updateContent(el);
+      return el;
+    };
+    const updateContent = (el, imageUrl, text) => {
+      const img = imageUrl || config.imageUrl;
+      const txt = text || config.text;
+      el.innerHTML = "";
+      if (img) {
+        const imgEl = document.createElement("img");
+        imgEl.src = img;
+        imgEl.style.cssText = `max-height:${fontSize * 2}px;opacity:inherit;display:block;`;
+        imgEl.alt = "";
+        el.appendChild(imgEl);
+      } else if (txt) {
+        el.textContent = txt;
+      }
+    };
+    const setPosition = (position) => {
+      if (!element) return;
+      currentPosition = position;
+      element.style.top = "";
+      element.style.right = "";
+      element.style.bottom = "";
+      element.style.left = "";
+      element.style.transform = "";
+      const styles2 = POSITION_STYLES[position];
+      styles2.split(";").filter(Boolean).forEach((rule) => {
+        const colonIdx = rule.indexOf(":");
+        if (colonIdx === -1) return;
+        const prop = rule.slice(0, colonIdx).trim();
+        const val = rule.slice(colonIdx + 1).trim();
+        if (prop && val) {
+          element.style.setProperty(prop, val);
+        }
+      });
+      element.setAttribute("data-position", position);
+      const isVisible = element.classList.contains("sp-watermark--visible");
+      const visClass = isVisible ? " sp-watermark--visible" : " sp-watermark--hidden";
+      element.className = `sp-watermark sp-watermark--${position}${visClass}${dynamic ? " sp-watermark--dynamic" : ""}`;
+    };
+    const randomizePosition = () => {
+      const available = POSITIONS.filter((p) => p !== currentPosition);
+      const next = available[Math.floor(Math.random() * available.length)];
+      setPosition(next);
+    };
+    const show = () => {
+      if (!element) return;
+      element.classList.remove("sp-watermark--hidden");
+      element.classList.add("sp-watermark--visible");
+    };
+    const hide = () => {
+      if (!element) return;
+      element.classList.remove("sp-watermark--visible");
+      element.classList.add("sp-watermark--hidden");
+    };
+    const startDynamic = () => {
+      if (!dynamic || dynamicTimer) return;
+      dynamicTimer = setInterval(randomizePosition, dynamicInterval);
+    };
+    const stopDynamic = () => {
+      if (dynamicTimer) {
+        clearInterval(dynamicTimer);
+        dynamicTimer = null;
+      }
+    };
+    const cleanup = () => {
+      stopDynamic();
+      if (showDelayTimer) {
+        clearTimeout(showDelayTimer);
+        showDelayTimer = null;
+      }
+      if (element?.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+      element = null;
+    };
+    return {
+      id: "watermark",
+      name: "Watermark",
+      version: "1.0.0",
+      type: "feature",
+      description: "Anti-piracy watermark overlay with text/image support and dynamic repositioning",
+      init(pluginApi) {
+        api = pluginApi;
+        api.logger.debug("Watermark plugin initialized");
+        element = createElement2();
+        api.container.appendChild(element);
+        const unsubPlay = api.on("playback:play", () => {
+          if (showDelay > 0) {
+            showDelayTimer = setTimeout(() => {
+              show();
+              startDynamic();
+            }, showDelay);
+          } else {
+            show();
+            startDynamic();
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          hide();
+          stopDynamic();
+          if (showDelayTimer) {
+            clearTimeout(showDelayTimer);
+            showDelayTimer = null;
+          }
+        });
+        const unsubEnded = api.on("playback:ended", () => {
+          hide();
+          stopDynamic();
+        });
+        const unsubChange = api.on("playlist:change", ({ track }) => {
+          if (!element || !track) return;
+          const metadata = track.metadata;
+          if (metadata) {
+            const watermarkUrl = metadata.watermarkUrl;
+            const watermarkText = metadata.watermarkText;
+            if (watermarkUrl || watermarkText) {
+              updateContent(element, watermarkUrl, watermarkText);
+            }
+          }
+        });
+        api.onDestroy(() => {
+          unsubPlay();
+          unsubPause();
+          unsubEnded();
+          unsubChange();
+          cleanup();
+        });
+      },
+      destroy() {
+        api?.logger.debug("Watermark plugin destroyed");
+        cleanup();
+        api = null;
+      },
+      setText(text) {
+        if (element) updateContent(element, void 0, text);
+      },
+      setImage(imageUrl) {
+        if (element) updateContent(element, imageUrl);
+      },
+      setPosition,
+      setOpacity(value) {
+        if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
+      },
+      show,
+      hide,
+      getConfig() {
+        return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity };
+      }
+    };
+  }
+
   // demo/demo.ts
-  var VERSION = true ? "0.5.3" : "dev";
+  var VERSION = true ? "1.0.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
@@ -40970,7 +41268,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }),
         airplayPlugin(),
-        chromecastPlugin()
+        chromecastPlugin(),
+        createWatermarkPlugin({
+          imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
+          position: "bottom-right",
+          opacity: 0.5
+        })
       ].filter(Boolean)
     });
     await player.init();
@@ -40981,6 +41284,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     player.on("quality:levels", (e) => console.log("\u{1F3AF} Quality levels:", e));
     player.on("error", (e) => console.error("\u274C Error:", e));
     window.player = player;
+    window.watermarkPlugin = player.getPlugin("watermark");
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");
     const audioContainer = document.getElementById("audio-player");

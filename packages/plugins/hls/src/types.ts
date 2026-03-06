@@ -26,6 +26,10 @@ export interface HLSPluginConfig {
   maxNetworkRetries?: number;
   /** Max media error retries before giving up (default: 2) */
   maxMediaRetries?: number;
+  /** Cap quality to player element dimensions (default: true) */
+  capLevelToPlayerSize?: boolean;
+  /** Override initial bandwidth estimate in bits per second */
+  initialBandwidthEstimate?: number;
   /** Base retry delay in milliseconds (default: 1000) */
   retryDelayMs?: number;
   /** Exponential backoff multiplier (default: 2) */
@@ -139,6 +143,7 @@ export interface HlsInstance {
   targetLatency?: number;
   drift?: number;
   liveSyncPosition?: number;
+  bandwidthEstimate?: number;
   media: HTMLMediaElement | null;
 }
 

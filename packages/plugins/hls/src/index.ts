@@ -28,7 +28,7 @@ import {
   getHlsConstructor,
 } from './hls-loader';
 import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
-import { mapLevels, formatLevel } from './quality';
+import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 
 // Re-export types
 export type {
@@ -49,6 +49,7 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   maxMaxBufferLength: 600,
   backBufferLength: 30,
   enableWorker: true,
+  capLevelToPlayerSize: true,
   // Error recovery settings
   maxNetworkRetries: 3,
   maxMediaRetries: 2,
@@ -159,11 +160,13 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     autoStartLoad: mergedConfig.autoStartLoad,
     startPosition: mergedConfig.startPosition,
     startLevel: -1, // Auto quality selection (ABR)
+    abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate as number | undefined),
     lowLatencyMode: mergedConfig.lowLatencyMode,
     maxBufferLength: mergedConfig.maxBufferLength,
     maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
     backBufferLength: mergedConfig.backBufferLength,
     enableWorker: mergedConfig.enableWorker,
+    capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
     // Minimize hls.js internal retries - we handle retries ourselves
     fragLoadingMaxRetry: 1,
     manifestLoadingMaxRetry: 1,

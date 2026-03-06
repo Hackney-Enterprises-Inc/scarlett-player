@@ -32,6 +32,7 @@ import {
   FullscreenButton,
   Spacer,
   ErrorOverlay,
+  BandwidthIndicator,
 } from './controls';
 
 export type {
@@ -54,6 +55,7 @@ const DEFAULT_LAYOUT: ControlSlot[] = [
   'volume',
   'time',
   'live-indicator',
+  'bandwidth-indicator',
   'spacer',
   'settings',
   'captions',
@@ -121,6 +123,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         return new TimeDisplay(api);
       case 'live-indicator':
         return new LiveIndicator(api);
+      case 'bandwidth-indicator':
+        return new BandwidthIndicator(api);
       case 'quality':
         return new QualityMenu(api);
       case 'settings':
