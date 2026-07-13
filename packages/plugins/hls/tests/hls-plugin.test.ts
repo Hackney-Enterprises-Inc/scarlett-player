@@ -353,6 +353,53 @@ describe('HLSPlugin', () => {
         'Plugin not initialized'
       );
     });
+
+    it('should reject when network error retries are exhausted', async () => {
+      const failingPlugin = createHLSPlugin({ maxNetworkRetries: 0 });
+      await failingPlugin.init(api);
+
+      vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockHlsConstructor as any);
+      vi.spyOn(hlsLoader, 'createHlsInstance').mockReturnValue(mockHlsInstance as any);
+      vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockHlsConstructor as any);
+
+      // Fire a fatal network error instead of a parsed manifest
+      mockHlsInstance.on.mockImplementation((event: string, handler: Function) => {
+        if (event === 'hlsError') {
+          setTimeout(() => handler('hlsError', {
+            type: 'networkError',
+            details: 'manifestLoadError',
+            fatal: true,
+          }), 0);
+        }
+      });
+
+      // Must settle (reject), not hang forever
+      await expect(
+        failingPlugin.loadSource('http://example.com/stream.m3u8')
+      ).rejects.toThrow('manifestLoadError');
+    });
+
+    it('should reject on unrecoverable fatal errors', async () => {
+      await plugin.init(api);
+
+      vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockHlsConstructor as any);
+      vi.spyOn(hlsLoader, 'createHlsInstance').mockReturnValue(mockHlsInstance as any);
+      vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockHlsConstructor as any);
+
+      mockHlsInstance.on.mockImplementation((event: string, handler: Function) => {
+        if (event === 'hlsError') {
+          setTimeout(() => handler('hlsError', {
+            type: 'otherError',
+            details: 'internalException',
+            fatal: true,
+          }), 0);
+        }
+      });
+
+      await expect(
+        plugin.loadSource('http://example.com/stream.m3u8')
+      ).rejects.toThrow('internalException');
+    });
   });
 
   // Skip: These tests require browser MediaSource API not available in jsdom
