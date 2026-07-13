@@ -1,5 +1,14 @@
 # @scarlett-player/hls
 
+## 1.0.3
+
+### Patch Changes
+
+- [#43](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/43) [`5125447`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/5125447248d1c6579db18f5d64585016e02a26a9) Thanks [@alexhackney](https://github.com/alexhackney)! - Reject the pending load() promise when HLS error recovery is exhausted (network/media retries spent, error storm, or unrecoverable fatal error) instead of leaving it pending forever. Previously a stream that failed to load (e.g. manifest 403/404 on a live event) left `player.init()` hanging, so consumers never got control back to tear down or retry cleanly.
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.0.3
+
 ## 1.0.2
 
 ### Patch Changes
