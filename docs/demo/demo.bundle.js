@@ -35710,7 +35710,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const handleHlsError = (error) => {
       const Hls2 = getHlsConstructor();
-      if (!Hls2 || !hls) return;
+      if (!Hls2 || !hls) return false;
       const now2 = Date.now();
       if (now2 - errorWindowStart > ERROR_WINDOW_MS) {
         errorCount = 1;
@@ -35725,7 +35725,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         cleanupHlsEvents = null;
         hls.destroy();
         hls = null;
-        return;
+        return true;
       }
       if (error.fatal) {
         api?.logger.error("Fatal HLS error", { type: error.type, details: error.details });
@@ -35735,7 +35735,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (networkRetryCount >= maxRetries) {
               api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
               emitFatalError(error, true);
-              return;
+              return true;
             }
             networkRetryCount++;
             const delay = getRetryDelay2(networkRetryCount - 1);
@@ -35756,7 +35756,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (mediaRetryCount >= maxRetries) {
               api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
               emitFatalError(error, true);
-              return;
+              return true;
             }
             mediaRetryCount++;
             const delay = getRetryDelay2(mediaRetryCount - 1);
@@ -35774,9 +35774,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           default:
             emitFatalError(error, false);
-            break;
+            return true;
         }
       }
+      return false;
     };
     const loadNative = async (src) => {
       const videoEl = getOrCreateVideo();
@@ -35830,8 +35831,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           onLevelSwitched: () => {
           },
           onError: (error) => {
-            handleHlsError(error);
-            if (error.fatal && !resolved && error.type !== "network" && error.type !== "media") {
+            const terminal = handleHlsError(error);
+            if (terminal && !resolved) {
               resolved = true;
               reject(new Error(error.details));
             }

@@ -204,10 +204,16 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     });
   };
 
-  /** Handle HLS errors with recovery and retry limits */
-  const handleHlsError = (error: HLSError) => {
+  /**
+   * Handle HLS errors with recovery and retry limits.
+   *
+   * @param error - Parsed HLS error
+   * @returns True when the error is terminal (fatal emitted, no further
+   *          recovery will be attempted) so pending load promises can settle
+   */
+  const handleHlsError = (error: HLSError): boolean => {
     const Hls = getHlsConstructor();
-    if (!Hls || !hls) return;
+    if (!Hls || !hls) return false;
 
     // Track all errors (fatal and non-fatal) to detect error storms
     const now = Date.now();
@@ -229,7 +235,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
       cleanupHlsEvents = null;
       hls.destroy();
       hls = null;
-      return;
+      return true;
     }
 
     if (error.fatal) {
@@ -242,7 +248,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           if (networkRetryCount >= maxRetries) {
             api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
             emitFatalError(error, true);
-            return;
+            return true;
           }
 
           networkRetryCount++;
@@ -271,7 +277,7 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           if (mediaRetryCount >= maxRetries) {
             api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
             emitFatalError(error, true);
-            return;
+            return true;
           }
 
           mediaRetryCount++;
@@ -297,9 +303,11 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
         default:
           // Unrecoverable error - no retry
           emitFatalError(error, false);
-          break;
+          return true;
       }
     }
+
+    return false;
   };
 
   /** Load source using native HLS */
@@ -376,8 +384,12 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           // Already handled in event-map
         },
         onError: (error) => {
-          handleHlsError(error);
-          if (error.fatal && !resolved && error.type !== 'network' && error.type !== 'media') {
+          // Reject the pending load once recovery is exhausted (or the error
+          // is unrecoverable) so load()/init() never hang forever. Network and
+          // media errors that are still being retried keep the promise pending
+          // until a retry succeeds (manifest parsed) or gives up.
+          const terminal = handleHlsError(error);
+          if (terminal && !resolved) {
             resolved = true;
             reject(new Error(error.details));
           }
