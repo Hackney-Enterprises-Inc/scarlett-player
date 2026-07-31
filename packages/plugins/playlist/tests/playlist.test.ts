@@ -905,3 +905,38 @@ describe('auto-advance', () => {
     expect(mockApi.emit).toHaveBeenCalledWith('playlist:ended', undefined);
   });
 });
+
+// Regression tests for #45: title state must always be written on track
+// change (empty when the track has none) so a previous track's title never
+// leaks into the next one. Providers fill the fallback when empty.
+describe('title state on track change (#45)', () => {
+  let plugin: ReturnType<typeof createPlaylistPlugin>;
+  let mockApi: ReturnType<typeof createMockApi>;
+
+  const mixedTracks: PlaylistTrack[] = [
+    { id: '1', src: 'titled.mp3', title: 'Has A Title' },
+    { id: '2', src: 'untitled.mp3' },
+  ];
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    plugin = createPlaylistPlugin({ tracks: mixedTracks });
+    mockApi = createMockApi();
+    await plugin.init(mockApi);
+  });
+
+  it('writes the track title on selection', () => {
+    plugin.play(0);
+
+    expect(mockApi.setState).toHaveBeenCalledWith('title', 'Has A Title');
+  });
+
+  it('clears the title when the next track has none', () => {
+    plugin.play(0);
+    plugin.next();
+
+    // Empty write lets the provider derive a fallback (e.g. filename)
+    // instead of showing the previous track's title
+    expect(mockApi.setState).toHaveBeenCalledWith('title', '');
+  });
+});
