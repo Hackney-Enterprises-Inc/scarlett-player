@@ -9,9 +9,35 @@ import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
 
-/** Map internal error codes/messages to user-friendly strings */
-function getUserMessage(error: Error | null): string {
+/** Error shape accepted by the overlay: a structured PlayerError or plain Error */
+export type OverlayError = { code?: string; message?: string } | Error | null;
+
+/**
+ * Map internal error codes/messages to user-friendly strings.
+ *
+ * Structured codes are authoritative when present; the prose match is only a
+ * fallback for plain Errors. Provider prose like "fragLoadError" contains
+ * none of the matched keywords, so without codes every network outage used
+ * to display the generic fallback.
+ */
+function getUserMessage(error: OverlayError): string {
   if (!error) return 'Something went wrong.';
+
+  const code = (error as { code?: string }).code;
+  if (code) {
+    switch (code) {
+      case 'MEDIA_NETWORK_ERROR':
+        return 'Having trouble connecting. Check your internet and try again.';
+      case 'MEDIA_DECODE_ERROR':
+        return "This video can't be played right now.";
+      case 'SOURCE_LOAD_FAILED':
+      case 'SOURCE_NOT_SUPPORTED':
+      case 'PROVIDER_NOT_FOUND':
+        return 'Unable to load video. Please try again.';
+      case 'PLAYBACK_FAILED':
+        return 'Playback stopped unexpectedly. Please try again.';
+    }
+  }
 
   const msg = error.message?.toLowerCase() || '';
 
@@ -120,13 +146,12 @@ export class ErrorOverlay implements Control {
     const source = this.api.getState('source') as { src?: string } | null;
     const src = source?.src || this.lastSource;
     if (src) {
+      // The core player listens for error:retry and reloads through the
+      // normal provider path, restoring the viewer's position (or the live
+      // edge for live streams). Writing to the video element directly here
+      // would bypass the provider and leave e.g. a raw manifest URL on an
+      // MSE-backed element.
       this.api.emit('error:retry', { src });
-      const video = this.api.container.querySelector('video');
-      if (video) {
-        video.src = src;
-        video.load();
-        video.play().catch(() => {});
-      }
     }
 
     // Re-enable after short delay
@@ -145,7 +170,7 @@ export class ErrorOverlay implements Control {
   }
 
   /** Show the error overlay with the given error */
-  show(error: Error | null): void {
+  show(error: OverlayError): void {
     const message = getUserMessage(error);
     const messageEl = this.el.querySelector('.sp-error-overlay__message');
     if (messageEl) {
@@ -160,6 +185,33 @@ export class ErrorOverlay implements Control {
 
     this.visible = true;
     this.retryBtn.disabled = false;
+    this.el.classList.remove('sp-error-overlay--reconnecting');
+    this.el.classList.add('sp-error-overlay--visible');
+  }
+
+  /**
+   * Show the reconnecting state.
+   *
+   * Displayed while the provider auto-reconnects after a fatal error, so the
+   * viewer sees the player working on the problem instead of a dead-end
+   * error. Try Again stays available for viewers who want to force an
+   * immediate attempt.
+   */
+  showReconnecting(): void {
+    const messageEl = this.el.querySelector('.sp-error-overlay__message');
+    if (messageEl) {
+      messageEl.textContent = 'Connection lost. Reconnecting...';
+    }
+
+    // Save source for a manual retry during reconnection
+    const source = this.api.getState('source') as { src?: string } | null;
+    if (source?.src) {
+      this.lastSource = source.src;
+    }
+
+    this.visible = true;
+    this.retryBtn.disabled = false;
+    this.el.classList.add('sp-error-overlay--reconnecting');
     this.el.classList.add('sp-error-overlay--visible');
   }
 
@@ -167,6 +219,7 @@ export class ErrorOverlay implements Control {
   hide(): void {
     this.visible = false;
     this.el.classList.remove('sp-error-overlay--visible');
+    this.el.classList.remove('sp-error-overlay--reconnecting');
   }
 
   isVisible(): boolean {

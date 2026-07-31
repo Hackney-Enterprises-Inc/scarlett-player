@@ -242,6 +242,12 @@ export interface PlayerEventMap {
   /** User dismissed error overlay */
   'error:dismiss': void;
 
+  /** Provider is attempting an automatic reconnect after a fatal error */
+  'error:reconnecting': { attempt: number; delayMs: number };
+
+  /** Playback recovered after a fatal error (auto-reconnect or retry succeeded) */
+  'error:recovered': void;
+
   // === Media Load Events ===
   /** Request to load a new media source (used by plugins like playlist) */
   'media:load-request': { src: string; autoplay?: boolean };

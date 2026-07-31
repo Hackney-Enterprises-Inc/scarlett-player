@@ -7,7 +7,7 @@
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createButton, getVideo } from '../utils';
+import { createButton, getVideo, setHTML, setAttr } from '../utils';
 
 export class FullscreenButton implements Control {
   private el: HTMLButtonElement;
@@ -31,11 +31,11 @@ export class FullscreenButton implements Control {
     const fullscreen = this.api.getState('fullscreen');
 
     if (fullscreen) {
-      this.el.innerHTML = icons.exitFullscreen;
-      this.el.setAttribute('aria-label', 'Exit fullscreen');
+      setHTML(this.el, icons.exitFullscreen);
+      setAttr(this.el, 'aria-label', 'Exit fullscreen');
     } else {
-      this.el.innerHTML = icons.fullscreen;
-      this.el.setAttribute('aria-label', 'Fullscreen');
+      setHTML(this.el, icons.fullscreen);
+      setAttr(this.el, 'aria-label', 'Fullscreen');
     }
   }
 

@@ -5,7 +5,7 @@
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createButton, getVideo } from '../utils';
+import { createButton, getVideo, setHTML, setAttr } from '../utils';
 
 export class PlayButton implements Control {
   private el: HTMLButtonElement;
@@ -43,8 +43,10 @@ export class PlayButton implements Control {
       label = 'Play';
     }
 
-    this.el.innerHTML = icon;
-    this.el.setAttribute('aria-label', label);
+    // Written conditionally: an unconditional innerHTML assignment would
+    // rebuild the icon on every state change and swallow in-flight clicks.
+    setHTML(this.el, icon);
+    setAttr(this.el, 'aria-label', label);
   }
 
   private toggle(): void {

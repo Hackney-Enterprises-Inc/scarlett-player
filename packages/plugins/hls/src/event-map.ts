@@ -78,6 +78,7 @@ export function setupHlsEventHandlers(
     onBufferUpdate?: () => void;
     onError?: (error: HLSError) => void;
     onLiveUpdate?: () => void;
+    onFragLoaded?: () => void;
     getIsAutoQuality?: () => boolean;
   }
 ): () => void {
@@ -150,6 +151,7 @@ export function setupHlsEventHandlers(
       lastBandwidthUpdate = now;
       api.setState('bandwidth', Math.round(hls.bandwidthEstimate));
     }
+    callbacks.onFragLoaded?.();
   });
 
   // Fragment buffered - update buffering state

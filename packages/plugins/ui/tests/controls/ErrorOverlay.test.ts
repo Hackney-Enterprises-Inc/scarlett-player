@@ -137,7 +137,7 @@ describe('ErrorOverlay', () => {
     expect(dismissBtn?.getAttribute('aria-label')).toBe('Go back');
   });
 
-  it('should retry playback when Try Again is clicked', () => {
+  it('should retry through the core player when Try Again is clicked', () => {
     const el = overlay.render();
     document.body.appendChild(el);
 
@@ -148,9 +148,15 @@ describe('ErrorOverlay', () => {
 
     expect(overlay.isVisible()).toBe(false);
 
+    // The retry goes through error:retry -> core load() so the provider path
+    // is used. The overlay must NOT poke the video element directly (that
+    // bypasses the provider and clobbers an MSE-backed element's blob src).
+    expect(api.emit).toHaveBeenCalledWith('error:retry', {
+      src: 'http://example.com/video.m3u8',
+    });
     const video = api.container.querySelector('video') as HTMLVideoElement;
-    expect(video.load).toHaveBeenCalled();
-    expect(video.play).toHaveBeenCalled();
+    expect(video.load).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
 
     document.body.removeChild(el);
   });
@@ -236,17 +242,20 @@ describe('ErrorOverlay', () => {
     document.body.removeChild(el);
   });
 
-  it('should set video src on retry click', () => {
+  it('should not write to the video element on retry click', () => {
     const el = overlay.render();
     document.body.appendChild(el);
 
     overlay.show(new Error('test'));
     const video = api.container.querySelector('video') as HTMLVideoElement;
+    const srcBefore = video.src;
 
     const retryBtn = el.querySelector('.sp-error-overlay__retry') as HTMLButtonElement;
     retryBtn.click();
 
-    expect(video.src).toContain('example.com/video.m3u8');
+    // Reload happens in the core via error:retry; writing the raw source URL
+    // here would leave a manifest URL on an MSE-backed element.
+    expect(video.src).toBe(srcBefore);
 
     document.body.removeChild(el);
   });
@@ -425,6 +434,87 @@ describe('ErrorOverlay', () => {
       (call: unknown[]) => call[0] === 'error:dismiss'
     );
     expect(dismissCalls.length).toBe(0);
+  });
+});
+
+describe('getUserMessage with structured codes', () => {
+  // Structured codes are authoritative: provider prose like "fragLoadError"
+  // contains none of the fallback keywords, so without codes a pure network
+  // outage used to render the generic "Something went wrong."
+  it('should map MEDIA_NETWORK_ERROR to the connection message', () => {
+    expect(
+      getUserMessage({ code: 'MEDIA_NETWORK_ERROR', message: 'HLS error: fragLoadError (max retries exceeded)' })
+    ).toBe('Having trouble connecting. Check your internet and try again.');
+  });
+
+  it('should map MEDIA_DECODE_ERROR to the playback message', () => {
+    expect(
+      getUserMessage({ code: 'MEDIA_DECODE_ERROR', message: 'HLS error: bufferAppendError' })
+    ).toBe("This video can't be played right now.");
+  });
+
+  it('should map source and provider codes to the load message', () => {
+    for (const code of ['SOURCE_LOAD_FAILED', 'SOURCE_NOT_SUPPORTED', 'PROVIDER_NOT_FOUND']) {
+      expect(getUserMessage({ code, message: 'whatever' })).toBe(
+        'Unable to load video. Please try again.'
+      );
+    }
+  });
+
+  it('should map PLAYBACK_FAILED to the stopped message', () => {
+    expect(getUserMessage({ code: 'PLAYBACK_FAILED', message: 'x' })).toBe(
+      'Playback stopped unexpectedly. Please try again.'
+    );
+  });
+
+  it('should fall back to prose matching for unknown codes', () => {
+    expect(getUserMessage({ code: 'SOMETHING_NEW', message: 'network glitch' })).toBe(
+      'Having trouble connecting. Check your internet and try again.'
+    );
+  });
+});
+
+describe('ErrorOverlay reconnecting state', () => {
+  let api: ReturnType<typeof createMockApi>;
+  let overlay: ErrorOverlay;
+
+  beforeEach(() => {
+    api = createMockApi();
+    overlay = new ErrorOverlay(api);
+  });
+
+  afterEach(() => {
+    overlay.destroy();
+  });
+
+  it('should show the reconnecting message and modifier class', () => {
+    const el = overlay.render();
+    overlay.showReconnecting();
+
+    expect(overlay.isVisible()).toBe(true);
+    expect(el.classList.contains('sp-error-overlay--visible')).toBe(true);
+    expect(el.classList.contains('sp-error-overlay--reconnecting')).toBe(true);
+    expect(el.querySelector('.sp-error-overlay__message')?.textContent).toBe(
+      'Connection lost. Reconnecting...'
+    );
+  });
+
+  it('should clear the reconnecting class when a plain error is shown', () => {
+    const el = overlay.render();
+    overlay.showReconnecting();
+    overlay.show(new Error('network timeout'));
+
+    expect(el.classList.contains('sp-error-overlay--reconnecting')).toBe(false);
+    expect(el.classList.contains('sp-error-overlay--visible')).toBe(true);
+  });
+
+  it('should clear the reconnecting class on hide', () => {
+    const el = overlay.render();
+    overlay.showReconnecting();
+    overlay.hide();
+
+    expect(el.classList.contains('sp-error-overlay--reconnecting')).toBe(false);
+    expect(el.classList.contains('sp-error-overlay--visible')).toBe(false);
   });
 });
 

@@ -34,6 +34,24 @@ export interface HLSPluginConfig {
   retryDelayMs?: number;
   /** Exponential backoff multiplier (default: 2) */
   retryBackoffFactor?: number;
+  /**
+   * Watchdog for source loading in milliseconds (default: 30000, 0 disables).
+   * If the manifest has not parsed within this window the load fails with an
+   * error instead of leaving the viewer on a spinner forever.
+   */
+  loadTimeoutMs?: number;
+  /**
+   * Automatically attempt to reconnect after a fatal network/media error
+   * once the stream had been playing (default: true). Viewers should not
+   * have to press anything when a connection blip resolves itself.
+   */
+  autoReconnect?: boolean;
+  /** First auto-reconnect delay in milliseconds (default: 2000) */
+  reconnectBaseDelayMs?: number;
+  /** Cap for the auto-reconnect backoff in milliseconds (default: 30000) */
+  reconnectMaxDelayMs?: number;
+  /** Total window to keep auto-reconnecting in milliseconds (default: 300000 = 5 min) */
+  reconnectWindowMs?: number;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }

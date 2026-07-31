@@ -687,6 +687,17 @@ export const styles = `
   fill: currentColor;
 }
 
+/* Reconnecting: pulse the icon so the overlay reads as active work,
+   not a dead-end error */
+.sp-error-overlay--reconnecting .sp-error-overlay__icon {
+  animation: sp-reconnect-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sp-reconnect-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 .sp-error-overlay__message {
   color: rgba(255, 255, 255, 0.9);
   font-size: 15px;

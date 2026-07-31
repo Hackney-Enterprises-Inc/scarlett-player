@@ -52,6 +52,12 @@ const MIME_TYPES: Record<string, string> = {
 export interface NativePluginConfig {
   /** Preload behavior: 'none' | 'metadata' | 'auto' */
   preload?: 'none' | 'metadata' | 'auto';
+  /**
+   * Watchdog for source loading in milliseconds (default: 30000, 0 disables).
+   * Guarantees a load attempt terminates with an error instead of leaving
+   * the viewer on a spinner when the network stalls without erroring.
+   */
+  loadTimeoutMs?: number;
 }
 
 export interface INativePlugin {
@@ -86,6 +92,7 @@ export interface INativePlugin {
  */
 export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   const preload = config?.preload ?? 'metadata';
+  const load_timeout_ms = config?.loadTimeoutMs ?? 30000;
 
   // Plugin state
   let api: IPluginAPI | null = null;
@@ -451,9 +458,19 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       cleanupEvents = setupEventListeners(videoEl);
 
       return new Promise((resolve, reject) => {
-        const onLoaded = () => {
+        let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+        const settle = () => {
           videoEl.removeEventListener('loadedmetadata', onLoaded);
           videoEl.removeEventListener('error', onError);
+          if (watchdog !== null) {
+            clearTimeout(watchdog);
+            watchdog = null;
+          }
+        };
+
+        const onLoaded = () => {
+          settle();
 
           // Apply initial volume/muted state to video element
           // This must happen before autoplay for muted autoplay to work
@@ -471,12 +488,20 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         };
 
         const onError = () => {
-          videoEl.removeEventListener('loadedmetadata', onLoaded);
-          videoEl.removeEventListener('error', onError);
+          settle();
 
           const error = videoEl.error;
           reject(new Error(error?.message || 'Failed to load video source'));
         };
+
+        // Watchdog: a load must terminate. Without this, a request that
+        // stalls without erroring pins the viewer on a spinner forever.
+        if (load_timeout_ms > 0) {
+          watchdog = setTimeout(() => {
+            settle();
+            reject(new Error('Video took too long to load (network timeout)'));
+          }, load_timeout_ms);
+        }
 
         videoEl.addEventListener('loadedmetadata', onLoaded);
         videoEl.addEventListener('error', onError);
