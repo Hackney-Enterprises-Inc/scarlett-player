@@ -1,5 +1,12 @@
 # @scarlett-player/playlist
 
+## 2.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`29c560d`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/29c560d3a199acb598f99ff1226b7c602775839f)]:
+  - @scarlett-player/core@2.0.0
+
 ## 1.0.3
 
 ### Patch Changes
