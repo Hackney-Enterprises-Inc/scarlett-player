@@ -98,7 +98,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let hideTimeout: ReturnType<typeof setTimeout> | null = null;
   let stateUnsubscribe: (() => void) | null = null;
   let errorUnsubscribe: (() => void) | null = null;
+  let reconnectingUnsubscribe: (() => void) | null = null;
+  let recoveredUnsubscribe: (() => void) | null = null;
   let controlsVisible = true;
+  let rafHandle: number | null = null;
 
   const layout = config.controls || DEFAULT_LAYOUT;
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
@@ -164,6 +167,23 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
     // Update error overlay (auto-hide on recovery)
     errorOverlay?.update();
+  };
+
+  /**
+   * Queue a control render for the next animation frame.
+   *
+   * State changes arrive individually (a single `timeupdate` alone touches
+   * several keys, several times a second). Rendering synchronously on each one
+   * re-renders every control dozens of times per second for no visual gain.
+   * Coalescing to one render per frame keeps the DOM quiet, which also keeps
+   * pointer interactions on the controls from being disturbed mid-gesture.
+   */
+  const scheduleUpdate = (): void => {
+    if (rafHandle !== null) return;
+    rafHandle = requestAnimationFrame(() => {
+      rafHandle = null;
+      updateControls();
+    });
   };
 
   /**
@@ -351,12 +371,25 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       errorOverlay = new ErrorOverlay(api);
       container.appendChild(errorOverlay.render());
 
-      // Listen for fatal errors to show the overlay
-      errorUnsubscribe = api.on('error', (payload: { fatal?: boolean; message?: string }) => {
+      // Listen for fatal errors to show the overlay. The event payload is the
+      // structured PlayerError itself; the state key is populated by the core
+      // from the same event, so either source carries the error code.
+      errorUnsubscribe = api.on('error', (payload: { fatal?: boolean; message?: string; code?: string }) => {
         if (payload?.fatal) {
-          const error = api.getState('error') || new Error(payload.message || 'Playback error');
+          const error = api.getState('error') || payload;
           errorOverlay?.show(error);
         }
+      });
+
+      // While the provider auto-reconnects, tell the viewer the player is
+      // working on it instead of presenting a dead-end error
+      reconnectingUnsubscribe = api.on('error:reconnecting', () => {
+        errorOverlay?.showReconnecting();
+      });
+
+      // Hide the overlay as soon as playback recovers
+      recoveredUnsubscribe = api.on('error:recovered', () => {
+        errorOverlay?.hide();
       });
 
       // Create progress bar (positioned above controls)
@@ -395,13 +428,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       container.addEventListener('click', handleInteraction);
       document.addEventListener('keydown', handleKeyDown);
 
-      // Subscribe to state changes
-      stateUnsubscribe = api.subscribeToState(updateControls);
+      // Subscribe to state changes (coalesced to one render per frame)
+      stateUnsubscribe = api.subscribeToState(scheduleUpdate);
 
       // Listen for fullscreen changes
-      document.addEventListener('fullscreenchange', updateControls);
+      document.addEventListener('fullscreenchange', scheduleUpdate);
 
-      // Initial update
+      // Initial update (synchronous so controls are correct on first paint)
       updateControls();
 
       // Make container focusable for keyboard events
@@ -428,13 +461,23 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         hideTimeout = null;
       }
 
+      // Cancel any queued render
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
+
       // Remove state subscription
       stateUnsubscribe?.();
       stateUnsubscribe = null;
 
-      // Remove error listener
+      // Remove error listeners
       errorUnsubscribe?.();
       errorUnsubscribe = null;
+      reconnectingUnsubscribe?.();
+      reconnectingUnsubscribe = null;
+      recoveredUnsubscribe?.();
+      recoveredUnsubscribe = null;
 
       // Remove event listeners
       if (api?.container) {
@@ -445,7 +488,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         api.container.removeEventListener('click', handleInteraction);
       }
       document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('fullscreenchange', updateControls);
+      document.removeEventListener('fullscreenchange', scheduleUpdate);
 
       // Destroy controls
       controls.forEach((c) => c.destroy());

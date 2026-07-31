@@ -8,7 +8,7 @@
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createButton, getVideo } from '../utils';
+import { createButton, getVideo, setHTML, setAttr } from '../utils';
 
 export type CastType = 'chromecast' | 'airplay';
 
@@ -70,11 +70,11 @@ export class CastButton implements Control {
       this.el.classList.toggle('sp-cast--unavailable', !available && !active);
 
       if (active) {
-        this.el.innerHTML = icons.chromecastConnected;
-        this.el.setAttribute('aria-label', 'Stop casting');
+        setHTML(this.el, icons.chromecastConnected);
+        setAttr(this.el, 'aria-label', 'Stop casting');
       } else {
-        this.el.innerHTML = icons.chromecast;
-        this.el.setAttribute('aria-label', available ? 'Cast' : 'No Cast devices found');
+        setHTML(this.el, icons.chromecast);
+        setAttr(this.el, 'aria-label', available ? 'Cast' : 'No Cast devices found');
       }
     } else {
       // AirPlay - always show in Safari since the picker handles device discovery
@@ -85,7 +85,7 @@ export class CastButton implements Control {
       this.el.disabled = false; // Always enabled - picker will show if devices exist
       this.el.classList.toggle('sp-cast--active', !!active);
       this.el.classList.remove('sp-cast--unavailable');
-      this.el.setAttribute('aria-label', active ? 'Stop AirPlay' : 'AirPlay');
+      setAttr(this.el, 'aria-label', active ? 'Stop AirPlay' : 'AirPlay');
     }
   }
 

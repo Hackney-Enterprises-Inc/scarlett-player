@@ -10,6 +10,7 @@
  * - Live stream support
  */
 
+import { ErrorCode } from '@scarlett-player/core';
 import type { IPluginAPI, PluginType } from '@scarlett-player/core';
 import type {
   HLSPluginConfig,
@@ -55,7 +56,21 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   maxMediaRetries: 2,
   retryDelayMs: 1000,
   retryBackoffFactor: 2,
+  // Load watchdog: never leave the viewer on an endless spinner
+  loadTimeoutMs: 30000,
+  // Self-healing: reconnect automatically after fatal errors mid-playback
+  autoReconnect: true,
+  reconnectBaseDelayMs: 2000,
+  reconnectMaxDelayMs: 30000,
+  reconnectWindowMs: 300000,
 };
+
+/** hls.js error details that occur before a manifest has ever parsed */
+const MANIFEST_PHASE_ERRORS = [
+  'manifestLoadError',
+  'manifestLoadTimeOut',
+  'manifestParsingError',
+];
 
 /**
  * Create an HLS Provider Plugin instance.
@@ -98,6 +113,14 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
   let errorWindowStart = 0;
   const MAX_ERRORS_IN_WINDOW = 10;
   const ERROR_WINDOW_MS = 5000; // 5 seconds
+
+  // Auto-reconnect state - self-healing after a terminal error mid-playback
+  let hasPlayedContent = false; // Manifest parsed at least once for this source
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  let reconnectWindowStart = 0;
+  let reconnectResumePosition = 0; // Viewer position captured at first failure
+  let onlineListener: (() => void) | null = null;
 
   /** Get video element from container */
   const getOrCreateVideo = (): HTMLVideoElement => {
@@ -186,7 +209,26 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     return jitter;
   };
 
-  /** Emit fatal error and stop playback */
+  /** Map an HLS error type to a structured player error code */
+  const mapFatalErrorCode = (error: HLSError): ErrorCode => {
+    switch (error.type) {
+      case 'network':
+        return ErrorCode.MEDIA_NETWORK_ERROR;
+      case 'media':
+      case 'mux':
+        return ErrorCode.MEDIA_DECODE_ERROR;
+      default:
+        return ErrorCode.PLAYBACK_FAILED;
+    }
+  };
+
+  /**
+   * Emit fatal error and stop playback.
+   *
+   * Emits a structured error code (network vs decode) so the UI can show an
+   * accurate message instead of a generic fallback, then hands off to the
+   * auto-reconnect scheduler when the failure class is worth reconnecting for.
+   */
   const emitFatalError = (error: HLSError, retriesExhausted: boolean) => {
     const message = retriesExhausted
       ? `HLS error: ${error.details} (max retries exceeded)`
@@ -197,11 +239,13 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     api?.setState('buffering', false);
 
     api?.emit('error', {
-      code: 'MEDIA_ERROR' as any,
+      code: mapFatalErrorCode(error),
       message,
       fatal: true,
       timestamp: Date.now(),
     });
+
+    maybeScheduleReconnect(error);
   };
 
   /**
@@ -262,9 +306,20 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
             clearTimeout(retryTimeout);
           }
 
-          // Retry with exponential backoff
+          // Retry with exponential backoff.
+          //
+          // startLoad() resumes loading of an already-parsed manifest — it
+          // cannot recover when the manifest itself failed to load (404/403,
+          // expired token, origin down). In that phase no further ERROR event
+          // would ever fire and the retry chain would silently die at attempt
+          // one, leaving the viewer on an endless spinner. Re-issue
+          // loadSource() instead so the manifest request actually repeats.
+          const isManifestPhase = MANIFEST_PHASE_ERRORS.includes(error.details);
           retryTimeout = setTimeout(() => {
-            if (hls) {
+            if (!hls) return;
+            if (isManifestPhase && currentSrc) {
+              hls.loadSource(currentSrc);
+            } else {
               hls.startLoad();
             }
           }, delay);
@@ -321,9 +376,42 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
     }
 
     return new Promise((resolve, reject) => {
-      const onLoaded = () => {
+      let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+      const settle = () => {
         videoEl.removeEventListener('loadedmetadata', onLoaded);
         videoEl.removeEventListener('error', onError);
+        if (watchdog !== null) {
+          clearTimeout(watchdog);
+          watchdog = null;
+        }
+      };
+
+      const onLoaded = () => {
+        settle();
+
+        hasPlayedContent = true;
+
+        // Native HLS has no hls.js error channel. Surface subsequent fatal
+        // video element errors as structured player errors so the UI shows
+        // an overlay (and auto-reconnect can kick in) instead of dying
+        // silently on Safari.
+        const onFatalVideoError = () => {
+          const media_error = videoEl.error;
+          const hls_error: HLSError = {
+            type: media_error?.code === MediaError.MEDIA_ERR_NETWORK ? 'network' : 'media',
+            details: media_error?.message || 'Native HLS playback error',
+            fatal: true,
+          };
+          emitFatalError(hls_error, false);
+        };
+        videoEl.addEventListener('error', onFatalVideoError);
+        const removeFatalListener = () => videoEl.removeEventListener('error', onFatalVideoError);
+        const previous_cleanup = cleanupVideoEvents;
+        cleanupVideoEvents = () => {
+          removeFatalListener();
+          previous_cleanup?.();
+        };
 
         api?.setState('source', { src, type: 'application/x-mpegURL' });
         api?.emit('media:loaded', { src, type: 'application/x-mpegURL' });
@@ -332,12 +420,21 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
       };
 
       const onError = () => {
-        videoEl.removeEventListener('loadedmetadata', onLoaded);
-        videoEl.removeEventListener('error', onError);
+        settle();
 
         const error = videoEl.error;
         reject(new Error(error?.message || 'Failed to load HLS source'));
       };
+
+      // Watchdog: a load must terminate. Without this, a request that never
+      // errors and never produces metadata pins the viewer on a spinner.
+      const timeout_ms = mergedConfig.loadTimeoutMs ?? 30000;
+      if (timeout_ms > 0) {
+        watchdog = setTimeout(() => {
+          settle();
+          reject(new Error('Video took too long to load (network timeout)'));
+        }, timeout_ms);
+      }
 
       videoEl.addEventListener('loadedmetadata', onLoaded);
       videoEl.addEventListener('error', onError);
@@ -369,12 +466,22 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
       }
 
       let resolved = false;
+      let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+      const clearWatchdog = () => {
+        if (watchdog !== null) {
+          clearTimeout(watchdog);
+          watchdog = null;
+        }
+      };
 
       // Setup hls.js event handlers
       cleanupHlsEvents = setupHlsEventHandlers(hls, api, {
         onManifestParsed: () => {
           if (!resolved) {
             resolved = true;
+            clearWatchdog();
+            hasPlayedContent = true;
             api?.setState('source', { src, type: 'application/x-mpegURL' });
             api?.emit('media:loaded', { src, type: 'application/x-mpegURL' });
             resolve();
@@ -391,16 +498,188 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
           const terminal = handleHlsError(error);
           if (terminal && !resolved) {
             resolved = true;
+            clearWatchdog();
             reject(new Error(error.details));
+          }
+        },
+        onFragLoaded: () => {
+          // Media is flowing again: any earlier recovery worked, so restore
+          // the full retry budget. Without this, transient blips spread
+          // across a long live event permanently consume the budget and an
+          // outage hours in becomes instantly terminal.
+          if (networkRetryCount > 0 || mediaRetryCount > 0) {
+            api?.logger.debug('Playback recovered, resetting retry budgets');
+            networkRetryCount = 0;
+            mediaRetryCount = 0;
           }
         },
         getIsAutoQuality: () => isAutoQuality,
       });
 
+      // Watchdog: no code path may leave this promise pending forever. If the
+      // manifest has not parsed and recovery has not reported terminal within
+      // the window, tear down and fail with a real error the UI can show.
+      const timeout_ms = mergedConfig.loadTimeoutMs ?? 30000;
+      if (timeout_ms > 0) {
+        watchdog = setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src });
+
+          // Stop all background activity from the abandoned attempt
+          if (retryTimeout) {
+            clearTimeout(retryTimeout);
+            retryTimeout = null;
+          }
+          cleanupHlsEvents?.();
+          cleanupHlsEvents = null;
+          hls?.destroy();
+          hls = null;
+
+          reject(new Error('Video took too long to load (network timeout)'));
+        }, timeout_ms);
+      }
+
       // Attach to video and load
       hls.attachMedia(videoEl);
       hls.loadSource(src);
     });
+  };
+
+  /** Cancel any pending auto-reconnect and reset its bookkeeping */
+  const cancelReconnect = () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectAttempts = 0;
+    reconnectWindowStart = 0;
+    reconnectResumePosition = 0;
+  };
+
+  /**
+   * Schedule the next auto-reconnect attempt with capped exponential backoff.
+   *
+   * Emits `error:reconnecting` so the UI can tell the viewer the player is
+   * working on it rather than showing a dead-end error.
+   */
+  const scheduleReconnectAttempt = () => {
+    if (reconnectTimer) return; // Already scheduled
+
+    const window_ms = mergedConfig.reconnectWindowMs ?? 300000;
+    if (Date.now() - reconnectWindowStart > window_ms) {
+      api?.logger.warn(`Auto-reconnect window exhausted after ${reconnectAttempts} attempts`);
+      return;
+    }
+
+    const base_delay = mergedConfig.reconnectBaseDelayMs ?? 2000;
+    const max_delay = mergedConfig.reconnectMaxDelayMs ?? 30000;
+    const backoff = Math.min(base_delay * Math.pow(2, reconnectAttempts), max_delay);
+    // Jitter (70-100%) to avoid a thundering herd when a stream comes back
+    const delay = Math.round(backoff * (0.7 + Math.random() * 0.3));
+
+    api?.logger.info(`Scheduling auto-reconnect attempt ${reconnectAttempts + 1} in ${delay}ms`);
+    api?.emit('error:reconnecting', { attempt: reconnectAttempts + 1, delayMs: delay });
+
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void attemptReconnect();
+    }, delay);
+  };
+
+  /**
+   * Start auto-reconnecting after a fatal error, when it makes sense.
+   *
+   * Only kicks in when the stream had previously worked (manifest parsed) and
+   * the failure class is plausibly transient (network/media). Initial-load
+   * failures stay manual: the viewer sees an error with a working Try Again,
+   * because auto-retrying a wrong URL forever would just mask the problem.
+   */
+  const maybeScheduleReconnect = (error: HLSError) => {
+    if (mergedConfig.autoReconnect === false) return;
+    if (!hasPlayedContent || !currentSrc) return;
+    if (error.type !== 'network' && error.type !== 'media') return;
+
+    if (reconnectWindowStart === 0) {
+      reconnectWindowStart = Date.now();
+      // Capture the viewer's position NOW, at the first failure. Failed
+      // reconnect attempts reset the video element to 0, so sampling the
+      // position per-attempt would resume a recovered VOD from the start.
+      reconnectResumePosition = video?.currentTime ?? 0;
+    }
+    scheduleReconnectAttempt();
+  };
+
+  /**
+   * Tear down the dead pipeline and reload the source in place.
+   *
+   * On success the viewer is put back where they were: live streams rejoin
+   * at the live edge, VOD resumes at the previous position, and playback
+   * restarts without any interaction.
+   */
+  const attemptReconnect = async (): Promise<void> => {
+    if (!api || !currentSrc) return;
+
+    reconnectAttempts++;
+    const saved_src = currentSrc;
+    const was_live = api.getState('live');
+    const was_native = isNative;
+    // Position from the first failure, not the current (possibly reset) element
+    const resume_position = reconnectResumePosition;
+
+    api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: saved_src });
+
+    try {
+      // Tear down the dead instance but keep reconnect bookkeeping intact
+      cleanupHlsEvents?.();
+      cleanupHlsEvents = null;
+      cleanupVideoEvents?.();
+      cleanupVideoEvents = null;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
+      hls?.destroy();
+      hls = null;
+
+      // Fresh retry budgets for the new attempt
+      networkRetryCount = 0;
+      mediaRetryCount = 0;
+      errorCount = 0;
+      errorWindowStart = 0;
+
+      currentSrc = saved_src;
+      api.setState('playbackState', 'loading');
+
+      if (was_native && supportsNativeHLS()) {
+        await loadNative(saved_src);
+      } else {
+        // loadWithHlsJs creates its own fresh hls.js instance
+        await loadWithHlsJs(saved_src);
+      }
+
+      // Restore position for VOD; live streams rejoin at the live edge,
+      // which is where a viewer of a live event wants to be after an outage
+      if (!was_live && video && resume_position > 0) {
+        video.currentTime = resume_position;
+      }
+
+      api.setState('playbackState', 'ready');
+      api.setState('buffering', false);
+      api.emit('error:recovered', undefined);
+      api.logger.info('Auto-reconnect succeeded');
+      cancelReconnect();
+
+      try {
+        await video?.play();
+      } catch {
+        // Autoplay policy blocked the resume; the play button now works
+        // reliably, so the viewer is one click away
+      }
+    } catch {
+      api?.logger.warn(`Auto-reconnect attempt ${reconnectAttempts} failed`);
+      scheduleReconnectAttempt();
+    }
   };
 
   // Plugin implementation
@@ -509,6 +788,21 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
         }
       });
 
+      // Reconnect immediately when the browser reports the network is back.
+      // A viewer whose wifi dropped should not wait out a 30s backoff after
+      // their connection has already returned.
+      if (typeof window !== 'undefined') {
+        onlineListener = () => {
+          if (reconnectTimer) {
+            api?.logger.info('Browser back online, reconnecting immediately');
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+            void attemptReconnect();
+          }
+        };
+        window.addEventListener('online', onlineListener);
+      }
+
       // Register cleanup
       api.onDestroy(() => {
         unsubPlay();
@@ -523,6 +817,11 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
 
     async destroy(): Promise<void> {
       api?.logger.info('HLS plugin destroying');
+      cancelReconnect();
+      if (onlineListener && typeof window !== 'undefined') {
+        window.removeEventListener('online', onlineListener);
+        onlineListener = null;
+      }
       cleanup();
 
       if (video?.parentNode) {
@@ -536,6 +835,10 @@ export function createHLSPlugin(config?: Partial<HLSPluginConfig>): IHLSPlugin {
       if (!api) throw new Error('Plugin not initialized');
 
       api.logger.info('Loading HLS source', { src });
+
+      // A user-initiated load supersedes any in-flight auto-reconnect
+      cancelReconnect();
+      hasPlayedContent = false;
 
       // Cleanup previous source
       cleanup();

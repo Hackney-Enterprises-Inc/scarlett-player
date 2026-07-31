@@ -1031,6 +1031,98 @@ describe('ScarlettPlayer', () => {
     });
   });
 
+  describe('error state wiring', () => {
+    it('should populate the error state key from error events', async () => {
+      const player = new ScarlettPlayer({ container });
+
+      // No provider registered -> load() reports PROVIDER_NOT_FOUND
+      await player.load('video.mp4');
+
+      const error = player.getState().error;
+      expect(error).not.toBeNull();
+      expect((error as { code?: string })?.code).toBe('PROVIDER_NOT_FOUND');
+    });
+
+    it('should clear the error state on a successful load', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn((src: string) => src.endsWith('.mp4')),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      // Fail first (no provider matches m3u8), then succeed
+      await player.load('video.m3u8');
+      expect(player.getState().error).not.toBeNull();
+
+      await player.load('video.mp4');
+      expect(player.getState().error).toBeNull();
+    });
+  });
+
+  describe('error:retry handling', () => {
+    it('should reload through the provider path on error:retry', async () => {
+      const loadSource = vi.fn().mockResolvedValue(undefined);
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource,
+      });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.init();
+
+      const emitRetry = (player as any).eventBus.emit.bind((player as any).eventBus);
+      emitRetry('error:retry', { src: 'video.mp4' });
+
+      // Let the async handler run
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(loadSource).toHaveBeenCalledWith('video.mp4');
+    });
+
+    it('should resume VOD position after a successful retry', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.init();
+
+      const seekingSpy = vi.fn();
+      player.on('playback:seeking', seekingSpy);
+
+      // Simulate a viewer 90 seconds in when the error hit
+      (player as any).stateManager.set('currentTime', 90);
+
+      (player as any).eventBus.emit('error:retry', { src: 'video.mp4' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(seekingSpy).toHaveBeenCalledWith({ time: 90 });
+    });
+
+    it('should not seek or play when the retry load fails', async () => {
+      // No provider registered: the retried load fails again
+      const player = new ScarlettPlayer({ container });
+      await player.init();
+
+      const seekingSpy = vi.fn();
+      const playSpy = vi.fn();
+      player.on('playback:seeking', seekingSpy);
+      player.on('playback:play', playSpy);
+
+      (player as any).stateManager.set('currentTime', 42);
+      (player as any).eventBus.emit('error:retry', { src: 'video.mp4' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(seekingSpy).not.toHaveBeenCalled();
+      expect(playSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('createPlayer factory', () => {
     it('should create and initialize player', async () => {
       const player = await createPlayer({ container });

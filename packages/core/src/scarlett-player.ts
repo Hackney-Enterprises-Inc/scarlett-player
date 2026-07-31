@@ -166,6 +166,16 @@ export class ScarlettPlayer {
       { container: this.container }
     );
 
+    // Keep the `error` state key in sync with error events so consumers can
+    // read `player.getState().error` (and the UI can render structured codes).
+    // Cleared again whenever a source loads successfully.
+    this.eventBus.on('error', (err) => {
+      this.stateManager.set('error', err);
+    });
+    this.eventBus.on('media:loaded', () => {
+      this.stateManager.set('error', null);
+    });
+
     // Register plugins if provided
     if (options.plugins) {
       for (const plugin of options.plugins) {
@@ -208,6 +218,29 @@ export class ScarlettPlayer {
       }
     });
 
+    // Listen for retry requests (e.g., the UI error overlay's "Try Again").
+    // Reload through the normal provider path rather than poking the video
+    // element directly, then restore where the viewer was: live streams
+    // rejoin at the live edge, VOD resumes at the previous position.
+    this.eventBus.on('error:retry', async ({ src }) => {
+      const was_live = this.stateManager.getValue('live');
+      const resume_at = this.stateManager.getValue('currentTime');
+
+      await this.load(src);
+
+      // load() reports failures through the ErrorHandler rather than throwing;
+      // if the retry failed, the error state is set again and there is no
+      // provider to seek or play against.
+      if (this.stateManager.getValue('error')) return;
+
+      if (was_live) {
+        this.seekToLive();
+      } else if (resume_at > 0) {
+        this.seek(resume_at);
+      }
+      await this.play();
+    });
+
     // Load initial source if provided
     if (this.initialSrc) {
       await this.load(this.initialSrc);
@@ -248,6 +281,7 @@ export class ScarlettPlayer {
         duration: 0,
         bufferedAmount: 0,
         playbackState: 'loading',
+        error: null,
       });
 
       // Destroy previous provider if switching
@@ -312,10 +346,21 @@ export class ScarlettPlayer {
     } catch (error) {
       // Only handle error if this is still the active load
       if (generation === this.loadGeneration) {
-        this.errorHandler.handle(error as Error, {
-          operation: 'load',
-          source,
-        });
+        // Providers that emit structured fatal errors (e.g. the HLS plugin
+        // after exhausting recovery) have already reported this failure and
+        // populated the error state. Re-classifying the thrown message here
+        // would overwrite the specific code with a generic one.
+        if (this.stateManager.getValue('error')) {
+          this.logger.error('Load failed', {
+            source,
+            error: (error as Error).message,
+          });
+        } else {
+          this.errorHandler.handle(error as Error, {
+            operation: 'load',
+            source,
+          });
+        }
       }
     }
   }

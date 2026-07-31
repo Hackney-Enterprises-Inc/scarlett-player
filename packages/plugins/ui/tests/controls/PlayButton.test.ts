@@ -119,6 +119,59 @@ describe('PlayButton', () => {
     expect(video.play).toHaveBeenCalled();
   });
 
+  // Regression: update() runs on every state change (timeupdate/progress fire
+  // several times a second). Rebuilding the icon each time removes the node
+  // that received the user's mousedown, so the browser never dispatches the
+  // click and the press is silently swallowed.
+  describe('idempotent rendering', () => {
+    it('should not replace icon child nodes when state is unchanged', () => {
+      const el = button.render();
+      button.update();
+
+      const iconBefore = el.firstElementChild;
+      expect(iconBefore).not.toBeNull();
+
+      for (let i = 0; i < 20; i++) {
+        button.update();
+      }
+
+      // Same node object, never torn out and rebuilt
+      expect(el.firstElementChild).toBe(iconBefore);
+    });
+
+    it('should record no DOM mutations across repeated no-op updates', () => {
+      const el = button.render();
+      document.body.appendChild(el);
+      button.update();
+
+      const records: MutationRecord[] = [];
+      const observer = new MutationObserver((recs) => records.push(...recs));
+      observer.observe(el, { childList: true, subtree: true, attributes: true });
+
+      for (let i = 0; i < 10; i++) {
+        button.update();
+      }
+
+      // Flush microtask queue so the observer delivers
+      return Promise.resolve().then(() => {
+        observer.disconnect();
+        expect(records).toHaveLength(0);
+      });
+    });
+
+    it('should still swap the icon when playing state actually changes', () => {
+      const el = button.render();
+      button.update();
+      const pausedIcon = el.innerHTML;
+
+      (api.getState as any).mockImplementation((key: string) => key === 'playing');
+      button.update();
+
+      expect(el.innerHTML).not.toBe(pausedIcon);
+      expect(el.getAttribute('aria-label')).toBe('Pause');
+    });
+  });
+
   it('should remove element on destroy', () => {
     const el = button.render();
     document.body.appendChild(el);

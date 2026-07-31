@@ -9,7 +9,7 @@
 import type { IPluginAPI, TextTrack } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createButton } from '../utils';
+import { createButton, setHTML, setAttr } from '../utils';
 
 export class CaptionsButton implements Control {
   private el: HTMLButtonElement;
@@ -42,12 +42,12 @@ export class CaptionsButton implements Control {
     this.el.style.display = '';
 
     if (currentTrack) {
-      this.el.innerHTML = icons.captions;
-      this.el.setAttribute('aria-label', `Captions: ${currentTrack.label}`);
+      setHTML(this.el, icons.captions);
+      setAttr(this.el, 'aria-label', `Captions: ${currentTrack.label}`);
       this.el.classList.add('sp-captions--active');
     } else {
-      this.el.innerHTML = icons.captionsOff;
-      this.el.setAttribute('aria-label', 'Captions');
+      setHTML(this.el, icons.captionsOff);
+      setAttr(this.el, 'aria-label', 'Captions');
       this.el.classList.remove('sp-captions--active');
     }
   }

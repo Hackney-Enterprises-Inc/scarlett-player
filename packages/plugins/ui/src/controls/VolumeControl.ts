@@ -8,7 +8,7 @@
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createElement, getVideo } from '../utils';
+import { createElement, getVideo, setHTML, setAttr } from '../utils';
 
 export class VolumeControl implements Control {
   private el: HTMLDivElement;
@@ -86,15 +86,18 @@ export class VolumeControl implements Control {
       label = 'Mute';
     }
 
-    this.btn.innerHTML = icon;
-    this.btn.setAttribute('aria-label', label);
+    setHTML(this.btn, icon);
+    setAttr(this.btn, 'aria-label', label);
 
     // Update slider
     const displayVolume = muted ? 0 : volume;
-    this.level.style.width = `${displayVolume * 100}%`;
+    const width = `${displayVolume * 100}%`;
+    if (this.level.style.width !== width) {
+      this.level.style.width = width;
+    }
     const volumePercent = Math.round(displayVolume * 100);
-    this.slider.setAttribute('aria-valuenow', String(volumePercent));
-    this.slider.setAttribute('aria-valuetext', `${volumePercent}%`);
+    setAttr(this.slider, 'aria-valuenow', String(volumePercent));
+    setAttr(this.slider, 'aria-valuetext', `${volumePercent}%`);
   }
 
   private toggleMute(): void {

@@ -6,6 +6,7 @@
  */
 
 import type { Signal } from '../state/signal';
+import type { PlayerError } from '../error-handler';
 
 /**
  * Playback state enumeration.
@@ -268,8 +269,14 @@ export interface StateStore {
   currentChapter: Chapter | null;
 
   // === Error State ===
-  /** Current error (null if no error) */
-  error: Error | null;
+  /**
+   * Current error (null if no error).
+   *
+   * Populated from every `error` event (structured PlayerError from the
+   * ErrorHandler or provider plugins, or a plain Error), cleared when a
+   * source loads successfully.
+   */
+  error: PlayerError | Error | null;
 
   // === Network & Performance ===
   /** Estimated network bandwidth in bits per second */
