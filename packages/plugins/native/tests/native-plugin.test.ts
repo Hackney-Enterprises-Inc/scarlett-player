@@ -178,3 +178,70 @@ describe('init and destroy', () => {
     await expect(plugin.destroy()).resolves.not.toThrow();
   });
 });
+
+// Regression tests for #45: the playlist plugin writes track titles to state
+// BEFORE the load request reaches this plugin, and the audio filename
+// fallback was overwriting them unconditionally.
+describe('audio title fallback (#45)', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, unknown>;
+
+  beforeEach(async () => {
+    plugin = createNativePlugin();
+    state = { title: '', muted: false, volume: 1, poster: '' };
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn().mockReturnValue(vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+  });
+
+  // The title logic runs synchronously at the top of loadSource, before the
+  // returned promise waits on loadedmetadata (which jsdom never fires), so
+  // the tests kick off the load without awaiting it.
+  const startLoad = (src: string): void => {
+    void plugin.loadSource(src).catch(() => {});
+  };
+
+  it('derives a title from the filename when no title is set', () => {
+    startLoad('https://example.com/my-favorite_song.mp3');
+
+    expect(state.title).toBe('my favorite song');
+  });
+
+  it('does not overwrite an externally set title (e.g. playlist track)', () => {
+    state.title = 'Playlist Track Title';
+
+    startLoad('https://example.com/some-file.mp3');
+
+    expect(state.title).toBe('Playlist Track Title');
+  });
+
+  it('replaces its own stale fallback when loading a different source directly', () => {
+    startLoad('https://example.com/first-song.mp3');
+    expect(state.title).toBe('first song');
+
+    // Direct load of a second audio file: the current title is the one WE
+    // derived, so it must be re-derived for the new source
+    startLoad('https://example.com/second-song.mp3');
+    expect(state.title).toBe('second song');
+  });
+
+  it('does not touch the title for video sources', () => {
+    state.title = 'Some Video Title';
+
+    startLoad('https://example.com/movie.mp4');
+
+    expect(state.title).toBe('Some Video Title');
+  });
+});

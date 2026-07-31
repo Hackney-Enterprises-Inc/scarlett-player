@@ -36351,6 +36351,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let api = null;
     let video = null;
     let cleanupEvents = null;
+    let derived_title = null;
     const getExtension = (src) => {
       try {
         const url = new URL(src, window.location.href);
@@ -36579,6 +36580,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         video = null;
         api = null;
+        derived_title = null;
       },
       async loadSource(src) {
         if (!api) throw new Error("Plugin not initialized");
@@ -36591,13 +36593,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.setState("buffering", true);
         api.setState("mediaType", isAudio ? "audio" : "video");
         if (isAudio) {
-          try {
-            const url = new URL(src, window.location.href);
-            const filename = url.pathname.split("/").pop() || "Audio";
-            const title = decodeURIComponent(filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "));
-            api.setState("title", title);
-          } catch {
-            api.setState("title", "Audio");
+          const current_title = api.getState("title");
+          if (!current_title || current_title === derived_title) {
+            try {
+              const url = new URL(src, window.location.href);
+              const filename = url.pathname.split("/").pop() || "Audio";
+              const title = decodeURIComponent(filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "));
+              derived_title = title;
+              api.setState("title", title);
+            } catch {
+              derived_title = "Audio";
+              api.setState("title", "Audio");
+            }
           }
         }
         api.setState("qualities", []);
@@ -40165,9 +40172,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const track = tracks[index];
       currentIndex = index;
       api?.logger.info("Track changed", { index, title: track.title, src: track.src });
-      if (track.title) {
-        api?.setState("title", track.title);
-      }
+      api?.setState("title", track.title || "");
       if (track.artwork) {
         api?.setState("poster", track.artwork);
       }
@@ -41594,7 +41599,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.0.2" : "dev";
+  var VERSION = true ? "1.0.3" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {

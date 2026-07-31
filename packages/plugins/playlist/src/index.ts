@@ -286,10 +286,11 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
     api?.logger.info('Track changed', { index, title: track.title, src: track.src });
 
-    // Update state with track metadata
-    if (track.title) {
-      api?.setState('title', track.title);
-    }
+    // Update state with track metadata. Title is ALWAYS written (empty when
+    // the track has none) so a previous track's title never leaks into the
+    // next one; provider plugins fill in a fallback (e.g. the audio filename)
+    // when it is empty. (#45)
+    api?.setState('title', track.title || '');
     if (track.artwork) {
       api?.setState('poster', track.artwork);
     }

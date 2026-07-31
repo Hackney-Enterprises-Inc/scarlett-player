@@ -98,6 +98,8 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   let api: IPluginAPI | null = null;
   let video: HTMLVideoElement | null = null;
   let cleanupEvents: (() => void) | null = null;
+  /** Last title THIS plugin derived from a filename (never an external title) */
+  let derived_title: string | null = null;
 
   /** Get file extension from URL */
   const getExtension = (src: string): string => {
@@ -405,6 +407,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       }
       video = null;
       api = null;
+      derived_title = null;
     },
 
     async loadSource(src: string): Promise<void> {
@@ -424,15 +427,25 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api.setState('buffering', true);
       api.setState('mediaType', isAudio ? 'audio' : 'video');
 
-      // Set title from filename if audio and no title is already set
+      // Fallback title from the filename for audio (#45).
+      //
+      // Never clobber a title someone else set - e.g. playlist track metadata,
+      // which is written to state BEFORE the load request reaches this plugin.
+      // We remember the last title WE derived so our own stale fallback from a
+      // previous source can be replaced, while an external title is respected.
       if (isAudio) {
-        try {
-          const url = new URL(src, window.location.href);
-          const filename = url.pathname.split('/').pop() || 'Audio';
-          const title = decodeURIComponent(filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
-          api.setState('title', title);
-        } catch {
-          api.setState('title', 'Audio');
+        const current_title = api.getState('title');
+        if (!current_title || current_title === derived_title) {
+          try {
+            const url = new URL(src, window.location.href);
+            const filename = url.pathname.split('/').pop() || 'Audio';
+            const title = decodeURIComponent(filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+            derived_title = title;
+            api.setState('title', title);
+          } catch {
+            derived_title = 'Audio';
+            api.setState('title', 'Audio');
+          }
         }
       }
       // Clear quality levels - native media has only one quality
