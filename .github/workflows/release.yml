@@ -15,6 +15,10 @@ jobs:
       contents: write
       pull-requests: write
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.check_release.outputs.exists == 'false' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,72 +73,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Upload to MinIO S3 CDN (runs when version doesn't have a release yet)
-      - name: Deploy to MinIO CDN
-        if: steps.check_release.outputs.exists == 'false'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          S3_BUCKET="${{ secrets.MINIO_BUCKET }}"
-          S3_ENDPOINT="${{ secrets.MINIO_ENDPOINT }}"
-          BASE_PATH="s3://${S3_BUCKET}/scarlett-player"
-          DIST="packages/embed/dist"
-
-          echo "Deploying v${VERSION} to MinIO CDN..."
-
-          # Upload function for both versioned and latest paths
-          upload() {
-            local src="$1"
-            local dest="$2"
-            echo "  Uploading ${dest}..."
-            # Versioned (immutable, 1 year cache)
-            aws s3 cp "$src" "${BASE_PATH}/v${VERSION}/${dest}" \
-              --endpoint-url "${S3_ENDPOINT}" \
-              --content-type "application/javascript" \
-              --cache-control "public, max-age=31536000, immutable"
-            # Latest (1 hour cache)
-            aws s3 cp "$src" "${BASE_PATH}/latest/${dest}" \
-              --endpoint-url "${S3_ENDPOINT}" \
-              --content-type "application/javascript" \
-              --cache-control "public, max-age=3600"
-          }
-
-          # Full build (default - includes everything)
-          upload "${DIST}/embed.js" "embed.js"
-          upload "${DIST}/embed.umd.cjs" "embed.umd.cjs"
-
-          # Video-only build (lightweight)
-          upload "${DIST}/embed.video.js" "embed.video.js"
-          upload "${DIST}/embed.video.umd.cjs" "embed.video.umd.cjs"
-
-          # Audio-only build
-          upload "${DIST}/embed.audio.js" "embed.audio.js"
-          upload "${DIST}/embed.audio.umd.cjs" "embed.audio.umd.cjs"
-
-          # HLS chunk (dynamically loaded by ESM builds)
-          upload "${DIST}/hls.js" "hls.js"
-
-          # iframe embed page
-          echo "  Uploading iframe.html..."
-          aws s3 cp "packages/embed/iframe.html" "${BASE_PATH}/v${VERSION}/iframe.html" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "text/html" \
-            --cache-control "public, max-age=31536000, immutable"
-          aws s3 cp "packages/embed/iframe.html" "${BASE_PATH}/latest/iframe.html" \
-            --endpoint-url "${S3_ENDPOINT}" \
-            --content-type "text/html" \
-            --cache-control "public, max-age=3600"
-
-          echo "Done!"
-          echo ""
-          echo "Uploaded files:"
-          echo "  ESM: embed.js, embed.video.js, embed.audio.js"
-          echo "  UMD: embed.umd.cjs, embed.video.umd.cjs, embed.audio.umd.cjs"
-          echo "  HLS: hls.js (loaded on-demand by ESM builds)"
-          echo "  HTML: iframe.html (for iframe embeds)"
-
       # Publish to npm
       - name: Publish to npm
         if: steps.check_release.outputs.exists == 'false'
@@ -160,18 +98,160 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Rebuild demo site with latest player and push to main (triggers Forge deploy)
+      - name: Update demo site
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          node demo/build.cjs
+          if git diff --quiet demo/ docs/demo/; then
+            echo "Demo bundle unchanged, skipping commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add demo/demo.bundle.js demo/demo.bundle.js.map docs/demo/demo.bundle.js docs/demo/demo.bundle.js.map
+            git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
+            git push
+            echo "- Demo site updated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # Hand the built bundles to the cdn job. Uploading an artifact rather than
+      # rebuilding there keeps the two jobs publishing byte-identical files, and
+      # lets a failed CDN upload be retried with "Re-run failed jobs" without
+      # rebuilding or re-tagging anything.
+      - name: Upload CDN payload
+        if: steps.check_release.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdn-payload
+          path: |
+            packages/embed/dist/
+            packages/embed/iframe.html
+          if-no-files-found: error
+          retention-days: 30
+
       # Notify on success
       - name: Release Summary
         if: steps.check_release.outputs.exists == 'false'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          CDN="https://assets.thestreamplatform.com/scarlett-player"
 
           echo "## Release Published! :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Version: v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### CDN URLs:" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
+          echo "- npm packages published" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Release created" >> $GITHUB_STEP_SUMMARY
+          echo "- CDN upload runs in the next job" >> $GITHUB_STEP_SUMMARY
+
+  # Publish the embed bundles to the asset CDN (assets.thestreamplatform.com,
+  # backed by the tsp-assets bucket on Backblaze B2).
+  #
+  # This is a separate job on purpose. It used to be a step in the middle of the
+  # release job, so when the old MinIO endpoint stopped answering, the upload
+  # timed out, failed the job, and silently skipped everything after it: the npm
+  # publish, the git tag, the GitHub release and the demo rebuild. That is how
+  # v1.1.0 ended up with none of those. Now the CDN is the last thing to run,
+  # nothing depends on it, and it can be retried on its own.
+  cdn:
+    name: Publish to CDN
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.B2_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_SECRET_KEY }}
+      # B2 signs against the region embedded in its endpoint (us-east-005 for
+      # s3.us-east-005.backblazeb2.com), not us-east-1.
+      AWS_DEFAULT_REGION: ${{ secrets.B2_REGION }}
+      # The AWS CLI started sending CRC32 integrity headers by default in v2.23.
+      # Not every S3-compatible backend accepts them, so only send them where the
+      # operation actually requires them. Remove if B2 handles the default fine.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+    steps:
+      - name: Download CDN payload
+        uses: actions/download-artifact@v4
+        with:
+          name: cdn-payload
+          path: payload
+
+      - name: Upload to B2
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.release.outputs.version }}"
+          BASE_PATH="s3://${{ secrets.B2_BUCKET }}/scarlett-player"
+          ENDPOINT="${{ secrets.B2_ENDPOINT }}"
+          DIST="payload/dist"
+
+          echo "Deploying v${VERSION} to the B2 asset CDN..."
+
+          # Upload to both the immutable versioned path and the rolling latest path.
+          upload() {
+            local src="$1"
+            local dest="$2"
+            local content_type="${3:-application/javascript}"
+            echo "  Uploading ${dest}..."
+            # Versioned (immutable, 1 year cache)
+            aws s3 cp "$src" "${BASE_PATH}/v${VERSION}/${dest}" \
+              --endpoint-url "${ENDPOINT}" \
+              --content-type "${content_type}" \
+              --cache-control "public, max-age=31536000, immutable"
+            # Latest (1 hour cache)
+            aws s3 cp "$src" "${BASE_PATH}/latest/${dest}" \
+              --endpoint-url "${ENDPOINT}" \
+              --content-type "${content_type}" \
+              --cache-control "public, max-age=3600"
+          }
+
+          # Full build (default - includes everything)
+          upload "${DIST}/embed.js" "embed.js"
+          upload "${DIST}/embed.umd.cjs" "embed.umd.cjs"
+
+          # Video-only build (lightweight)
+          upload "${DIST}/embed.video.js" "embed.video.js"
+          upload "${DIST}/embed.video.umd.cjs" "embed.video.umd.cjs"
+
+          # Audio-only build
+          upload "${DIST}/embed.audio.js" "embed.audio.js"
+          upload "${DIST}/embed.audio.umd.cjs" "embed.audio.umd.cjs"
+
+          # HLS chunk (dynamically loaded by ESM builds)
+          upload "${DIST}/hls.js" "hls.js"
+
+          # iframe embed page
+          upload "payload/iframe.html" "iframe.html" "text/html"
+
+          echo "Done!"
+
+      # Prove the CDN is actually serving what we just uploaded. A silent
+      # no-op upload is the failure mode this whole job exists to prevent.
+      - name: Verify CDN
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.release.outputs.version }}"
+          CDN="https://assets.thestreamplatform.com/scarlett-player"
+
+          for path in "v${VERSION}/embed.umd.cjs" "latest/embed.umd.cjs"; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${CDN}/${path}")
+            echo "  ${path} -> ${status}"
+            if [ "$status" != "200" ]; then
+              echo "CDN did not serve ${path} (HTTP ${status})"
+              exit 1
+            fi
+          done
+
+      - name: CDN Summary
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          CDN="https://assets.thestreamplatform.com/scarlett-player"
+
+          echo "## CDN Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Versioned:** \`${CDN}/v${VERSION}/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Latest:** \`${CDN}/latest/\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -188,24 +268,3 @@ jobs:
           echo "<div data-scarlett-player data-src=\"video.m3u8\"></div>" >> $GITHUB_STEP_SUMMARY
           echo "<div data-scarlett-player data-src=\"audio.m3u8\" data-type=\"audio\"></div>" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Deployments:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ S3 CDN uploaded" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ npm packages published" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
-
-      # Rebuild demo site with latest player and push to main (triggers Forge deploy)
-      - name: Update demo site
-        if: steps.check_release.outputs.exists == 'false'
-        run: |
-          node demo/build.cjs
-          if git diff --quiet demo/ docs/demo/; then
-            echo "Demo bundle unchanged, skipping commit"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add demo/demo.bundle.js demo/demo.bundle.js.map docs/demo/demo.bundle.js docs/demo/demo.bundle.js.map
-            git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
-            git push
-            echo "- ✅ Demo site updated" >> $GITHUB_STEP_SUMMARY
-          fi
