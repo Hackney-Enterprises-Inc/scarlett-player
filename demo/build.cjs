@@ -13,6 +13,38 @@ const corePackage = JSON.parse(
 );
 const VERSION = corePackage.version;
 
+/**
+ * Point a demo page's script tag at the current version, as demo.bundle.js?v=<version>.
+ *
+ * The bundle keeps a stable filename, and nginx serves it with no cache-control
+ * header, so browsers fall back to heuristic caching and keep showing an old
+ * build long after a release. The version query makes each release a distinct
+ * URL, so a returning visitor gets the new bundle immediately.
+ *
+ * A no-op when the file is missing or already stamped with this version, so the
+ * release workflow's "did anything change" check stays meaningful.
+ *
+ * @param {string} htmlPath Absolute path to the demo index.html to rewrite.
+ * @returns {void}
+ */
+function stampBundleVersion(htmlPath) {
+  if (!fs.existsSync(htmlPath)) {
+    return;
+  }
+
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const stamped = html.replace(
+    /(<script src="demo\.bundle\.js)(\?v=[^"]*)?(")/g,
+    `$1?v=${VERSION}$3`
+  );
+
+  if (stamped !== html) {
+    fs.writeFileSync(htmlPath, stamped);
+    const relative = path.relative(path.join(__dirname, '..'), htmlPath);
+    console.log(`🔖 Stamped ${relative} with v${VERSION}`);
+  }
+}
+
 async function build() {
   try {
     await esbuild.build({
@@ -44,6 +76,10 @@ async function build() {
     } else {
       console.log('✅ Demo built successfully!');
     }
+
+    stampBundleVersion(path.join(__dirname, 'index.html'));
+    stampBundleVersion(path.join(docsDemo, 'index.html'));
+
     console.log(`📦 Version: ${VERSION}`);
     console.log('📂 Output: demo/demo.bundle.js');
   } catch (error) {

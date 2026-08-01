@@ -109,10 +109,15 @@ jobs:
           pnpm publish -r --access public --no-git-checks
           echo "Published to npm!"
 
-      # Rebuild demo site with latest player and push to main (triggers Forge deploy)
+      # Rebuild demo site with latest player and push to main (triggers Forge deploy).
+      #
+      # Deliberately NOT gated on this being a release. The demo should reflect
+      # main, not the last tagged version: before this, merging a player fix
+      # without a version bump left scarlettplayer.com stale until the next
+      # release unless the author hand-built the bundle and committed it.
+      # Contributors no longer need to do that, see CLAUDE.md.
       - name: Update demo site
         id: demo
-        if: steps.check_release.outputs.exists == 'false'
         continue-on-error: true
         run: |
           node demo/build.cjs
@@ -121,7 +126,10 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add demo/demo.bundle.js demo/demo.bundle.js.map docs/demo/demo.bundle.js docs/demo/demo.bundle.js.map
+            # Whole directories, matching the git diff check above. The build
+            # also stamps ?v=<version> onto the script tag in each index.html,
+            # and an explicit file list would silently leave that out.
+            git add demo/ docs/demo/
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             git push
             echo "- Demo site updated" >> $GITHUB_STEP_SUMMARY
@@ -166,29 +174,45 @@ jobs:
       # Report what each independent target actually did, then fail the job if
       # any of them failed. Every target has already had its chance to run by
       # this point, so one broken target no longer hides the others.
+      #
+      # Runs on every push, not just releases: the demo step is now unconditional
+      # and carries continue-on-error, so without this a demo failure on an
+      # ordinary merge would leave the job green with a stale demo site.
+      #
+      # "skipped" is not a failure. On a non-release push npm and the tag are
+      # legitimately skipped and only the demo runs.
       - name: Publish results
-        if: steps.check_release.outputs.exists == 'false'
+        if: always()
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          RELEASING="${{ steps.check_release.outputs.exists == 'false' }}"
           NPM="${{ steps.npm_publish.outcome }}"
           DEMO="${{ steps.demo.outcome }}"
           TAG="${{ steps.gh_release.outcome }}"
 
+          if [ "$RELEASING" = "true" ]; then
+            heading="Release v${VERSION}"
+            cdn="runs in the next job"
+          else
+            heading="Demo update (v${VERSION} already released)"
+            cdn="skipped, not a release"
+          fi
+
           {
-            echo "## Release v${VERSION}"
+            echo "## ${heading}"
             echo ""
             echo "| Target | Result |"
             echo "|--------|--------|"
             echo "| npm | ${NPM} |"
             echo "| demo site | ${DEMO} |"
             echo "| GitHub release + tag | ${TAG} |"
-            echo "| CDN | runs in the next job |"
+            echo "| CDN | ${cdn} |"
           } >> $GITHUB_STEP_SUMMARY
 
-          if [ "$NPM" != "success" ] || [ "$DEMO" != "success" ]; then
+          if [ "$NPM" = "failure" ] || [ "$DEMO" = "failure" ]; then
             echo ""
-            echo "One or more publish targets failed. No tag was created, so a re-run"
-            echo "of this workflow will retry every target once the cause is fixed."
+            echo "One or more targets failed. No tag was created, so a re-run of"
+            echo "this workflow will retry every target once the cause is fixed."
             exit 1
           fi
 
