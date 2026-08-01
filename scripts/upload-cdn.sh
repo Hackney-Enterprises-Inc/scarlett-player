@@ -1,94 +1,136 @@
-#!/bin/bash
-# Upload Scarlett Player to MinIO CDN
-# Usage: ./scripts/upload-cdn.sh
+#!/usr/bin/env bash
+#
+# Publish the built embed bundles to TSP Assets, the platform asset CDN at
+# assets.thestreamplatform.com (the tsp-assets bucket on Backblaze B2, fronted
+# by Fastly).
+#
+# Usage:
+#   doppler run -- ./scripts/upload-cdn.sh            # version from packages/embed
+#   doppler run -- ./scripts/upload-cdn.sh 1.1.1      # explicit version
+#
+# Reads five values from the environment. Doppler owns all five; CI gets them
+# from the GitHub secrets the Doppler sync mirrors into the repository:
+#   B2_ACCESS_KEY, B2_SECRET_KEY, B2_ENDPOINT, B2_REGION, B2_BUCKET
+#
+# This is the single source of truth for what lands on the CDN. The release
+# workflow calls this script rather than carrying its own copy of the upload
+# logic, so a local publish and a CI publish cannot drift.
 
-set -e
+set -euo pipefail
 
-# Configuration
-MINIO_ENDPOINT="${MINIO_ENDPOINT:-}"
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-}"
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-}"
-MINIO_BUCKET="${MINIO_BUCKET:-}"
-
-VERSION=$(node -p "require('./packages/embed/package.json').version")
-
-echo "Uploading Scarlett Player v${VERSION} to CDN..."
-
-if [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$MINIO_BUCKET" ]; then
-    echo "Error: Missing environment variables."
-    echo "Set: MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET"
-    exit 1
-fi
-
-if [ ! -d "packages/embed/dist" ]; then
-    echo "Error: packages/embed/dist not found. Run 'pnpm run build' first."
-    exit 1
-fi
-
-export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
-export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
-
-BASE_PATH="s3://${MINIO_BUCKET}/scarlett-player"
+CDN_BASE="${CDN_BASE:-https://assets.thestreamplatform.com/scarlett-player}"
 DIST="packages/embed/dist"
-TMP_DIR=$(mktemp -d)
 
-# Upload gzipped file with clean name
+# Every required credential, checked up front. An unset value used to reach the
+# AWS CLI as an empty string and fail deep in the upload with "scheme is
+# missing", which says nothing about the actual problem.
+missing=()
+for var in B2_ACCESS_KEY B2_SECRET_KEY B2_ENDPOINT B2_REGION B2_BUCKET; do
+  if [ -z "${!var:-}" ]; then
+    missing+=("$var")
+  fi
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "Error: missing required environment variables: ${missing[*]}" >&2
+  echo "" >&2
+  echo "Doppler owns these. Locally, run through Doppler so they are injected:" >&2
+  echo "  doppler run -- ./scripts/upload-cdn.sh" >&2
+  echo "" >&2
+  echo "In CI they arrive as GitHub repository secrets via the Doppler sync." >&2
+  echo "A name listed above means that secret did not sync, or the workflow" >&2
+  echo "step is not passing it through in its env block." >&2
+  exit 1
+fi
+
+VERSION="${1:-$(node -p "require('./packages/embed/package.json').version")}"
+
+if [ ! -d "$DIST" ]; then
+  echo "Error: ${DIST} not found. Run 'pnpm run build' first." >&2
+  exit 1
+fi
+
+# The AWS CLI talks to B2 over its S3-compatible API. Region must match the one
+# in the endpoint host (us-east-005 for s3.us-east-005.backblazeb2.com).
+export AWS_ACCESS_KEY_ID="$B2_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$B2_SECRET_KEY"
+export AWS_DEFAULT_REGION="$B2_REGION"
+
+# The AWS CLI began sending CRC32 integrity headers by default in v2.23 and not
+# every S3-compatible backend accepts them. Only send them where the operation
+# requires them. Override by exporting these before calling the script.
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
+
+BASE_PATH="s3://${B2_BUCKET}/scarlett-player"
+
+echo "Publishing Scarlett Player v${VERSION} to TSP Assets"
+echo "  bucket:   ${B2_BUCKET}"
+echo "  endpoint: ${B2_ENDPOINT}"
+echo "  region:   ${B2_REGION}"
+echo ""
+
+# Write each file twice: an immutable versioned copy, and the rolling latest
+# copy on a short TTL.
 upload() {
-    local src="$1"
-    local dest="$2"
-    local gzipped="${TMP_DIR}/${dest}"
+  local src="$1"
+  local dest="$2"
+  local content_type="${3:-application/javascript}"
 
-    # Gzip the file
-    mkdir -p "$(dirname "$gzipped")"
-    gzip -9 -c "$src" > "$gzipped"
+  if [ ! -f "$src" ]; then
+    echo "Error: expected build artifact not found: ${src}" >&2
+    exit 1
+  fi
 
-    local original_size=$(wc -c < "$src" | tr -d ' ')
-    local gzipped_size=$(wc -c < "$gzipped" | tr -d ' ')
-    echo "  ${dest} (${gzipped_size} bytes gzipped, was ${original_size})"
+  echo "  ${dest}"
 
-    # Upload to versioned path (immutable, 1 year cache)
-    aws s3 cp "$gzipped" "${BASE_PATH}/v${VERSION}/${dest}" \
-        --endpoint-url "${MINIO_ENDPOINT}" \
-        --content-type "application/javascript" \
-        --content-encoding "gzip" \
-        --cache-control "public, max-age=31536000, immutable" \
-        --quiet
+  aws s3 cp "$src" "${BASE_PATH}/v${VERSION}/${dest}" \
+    --endpoint-url "${B2_ENDPOINT}" \
+    --content-type "${content_type}" \
+    --cache-control "public, max-age=31536000, immutable" \
+    --only-show-errors
 
-    # Upload to latest path (1 hour cache)
-    aws s3 cp "$gzipped" "${BASE_PATH}/latest/${dest}" \
-        --endpoint-url "${MINIO_ENDPOINT}" \
-        --content-type "application/javascript" \
-        --content-encoding "gzip" \
-        --cache-control "public, max-age=3600" \
-        --quiet
+  aws s3 cp "$src" "${BASE_PATH}/latest/${dest}" \
+    --endpoint-url "${B2_ENDPOINT}" \
+    --content-type "${content_type}" \
+    --cache-control "public, max-age=3600" \
+    --only-show-errors
 }
 
-echo "Uploading to v${VERSION}/ and latest/..."
+# Full build (default, includes everything)
+upload "${DIST}/embed.js" "embed.js"
+upload "${DIST}/embed.umd.cjs" "embed.umd.cjs"
 
-# Video players (UMD builds with clean names)
-upload "${DIST}/embed.umd.cjs" "embed.js"
-upload "${DIST}/embed.light.umd.cjs" "embed.light.js"
-upload "${DIST}/embed.full.umd.cjs" "embed.full.js"
+# Video-only build (lightweight)
+upload "${DIST}/embed.video.js" "embed.video.js"
+upload "${DIST}/embed.video.umd.cjs" "embed.video.umd.cjs"
 
-# Audio players
-upload "${DIST}/embed.audio.umd.cjs" "embed.audio.js"
-upload "${DIST}/embed.audio.light.umd.cjs" "embed.audio.light.js"
+# Audio-only build
+upload "${DIST}/embed.audio.js" "embed.audio.js"
+upload "${DIST}/embed.audio.umd.cjs" "embed.audio.umd.cjs"
 
-# HLS chunks (for ES module usage)
-HLS_FILE=$(ls ${DIST}/hls-*.js 2>/dev/null | head -1)
-if [ -n "$HLS_FILE" ]; then
-    upload "$HLS_FILE" "hls.js"
+# HLS chunk (dynamically loaded by the ESM builds)
+upload "${DIST}/hls.js" "hls.js"
+
+# iframe embed page
+upload "packages/embed/iframe.html" "iframe.html" "text/html"
+
+# Prove the CDN is serving what we just wrote. A publish that uploads to the
+# wrong bucket, or to a bucket nothing fronts, otherwise looks like a success.
+if [ "${SKIP_VERIFY:-0}" != "1" ]; then
+  echo ""
+  echo "Verifying..."
+  for path in "v${VERSION}/embed.umd.cjs" "latest/embed.umd.cjs"; do
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${CDN_BASE}/${path}")
+    echo "  ${path} -> ${status}"
+    if [ "$status" != "200" ]; then
+      echo "Error: CDN did not serve ${path} (HTTP ${status})" >&2
+      exit 1
+    fi
+  done
 fi
-
-HLS_LIGHT_FILE=$(ls ${DIST}/hls.light-*.js 2>/dev/null | head -1)
-if [ -n "$HLS_LIGHT_FILE" ]; then
-    upload "$HLS_LIGHT_FILE" "hls.light.js"
-fi
-
-# Cleanup
-rm -rf "$TMP_DIR"
 
 echo ""
-echo "Done! CDN URLs:"
-echo "  https://assets.thestreamplatform.com/scarlett-player/latest/embed.js"
-echo "  https://assets.thestreamplatform.com/scarlett-player/v${VERSION}/embed.js"
+echo "Done. CDN URLs:"
+echo "  ${CDN_BASE}/v${VERSION}/embed.umd.cjs"
+echo "  ${CDN_BASE}/latest/embed.umd.cjs"
