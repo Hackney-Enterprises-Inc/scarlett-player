@@ -45,3 +45,6 @@ Thumbs.db
 # Build artifacts
 *.zip
 *.tar.gz
+
+# Generated test fixtures (recreate with: node scripts/hls-fixture.mjs)
+scripts/fixtures/

@@ -1059,6 +1059,22 @@ describe('ScarlettPlayer', () => {
       await player.load('video.mp4');
       expect(player.getState().error).toBeNull();
     });
+
+    it('records media:error events in history without touching error state', () => {
+      const player = new ScarlettPlayer({ container });
+
+      (player as any).eventBus.emit('media:error', {
+        error: new Error('MEDIA_ELEMENT_ERROR: Empty src attribute'),
+      });
+
+      // Advisory channel: visible in history for diagnostics...
+      const history = (player as any).errorHandler.getHistory();
+      expect(history).toHaveLength(1);
+      expect(history[0].context?.channel).toBe('media:error');
+
+      // ...but never flips the error state the retry path checks
+      expect(player.getState().error).toBeNull();
+    });
   });
 
   describe('error:retry handling', () => {

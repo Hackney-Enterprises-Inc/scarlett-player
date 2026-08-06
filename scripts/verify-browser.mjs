@@ -9,26 +9,63 @@
  *   2. Mid-playback network outage -> reconnecting overlay, then automatic
  *      recovery with zero interaction and VOD position preserved.
  *   3. First-click-on-play regression (idempotent control rendering).
+ *   4. Load churn + destroy mid-append against a LOCAL fixture with the
+ *      real transmuxer worker: zero uncaught errors or unhandled
+ *      rejections (the detached-ArrayBuffer / Sentry 2BR class).
+ *   5. Malformed live playlist refreshes (error page mid-stream): playback
+ *      survives on the previous playlist and recovers, zero uncaught
+ *      errors (the undefined-segments / Sentry 2D8 class).
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
  *   python3 -m http.server 8899 --bind 127.0.0.1   # from repo root
  *   npx -y playwright@latest node scripts/verify-browser.mjs   # or: node scripts/verify-browser.mjs
  *
- * Requires the `playwright` package to be importable and a local Chrome
- * (launched via channel: 'chrome'). Exits non-zero on any failed assertion.
+ * Requires the `playwright` package to be importable, a local Chrome
+ * (launched via channel: 'chrome'), and ffmpeg on PATH (scenarios 4-5
+ * auto-generate a local HLS fixture via scripts/hls-fixture.mjs).
+ * Exits non-zero on any failed assertion.
  *
- * NOTE: uses the live demo stream (vod.thestreamplatform.com). To move this
- * into CI, swap in a local HLS fixture first.
+ * NOTE: scenarios 1-3 still use the live demo stream
+ * (vod.thestreamplatform.com); scenarios 4-5 are fully local. PiP is not
+ * exercised here (headless Chrome cannot enter PiP); the readiness gate
+ * is covered by unit tests in @scarlett-player/ui.
  */
 import { chromium } from 'playwright';
+import { ensureHlsFixture } from './hls-fixture.mjs';
 
 const URL = 'http://127.0.0.1:8899/demo/index.html';
+const FIXTURE_VOD = 'http://127.0.0.1:8899/scripts/fixtures/hls/vod.m3u8';
+const FIXTURE_SEG = (i) => `http://127.0.0.1:8899/scripts/fixtures/hls/seg${i}.ts`;
+
+ensureHlsFixture();
+
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const results = [];
 const record = (name, pass, detail) => {
   results.push({ name, pass, detail });
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? '  -- ' + detail : ''}`);
+};
+
+/**
+ * Open a page that counts uncaught exceptions and unhandled rejections.
+ * The absorbed error classes must never reach either channel.
+ */
+const newTrackedPage = async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = { pageErrors: [], rejections: [] };
+  page.on('pageerror', (err) => errors.pageErrors.push(String(err)));
+  await page.addInitScript(() => {
+    window.__unhandledRejections = [];
+    window.addEventListener('unhandledrejection', (e) => {
+      window.__unhandledRejections.push(String(e.reason));
+    });
+  });
+  const collect = async () => {
+    errors.rejections = await page.evaluate(() => window.__unhandledRejections ?? []);
+    return errors;
+  };
+  return { page, errors, collect };
 };
 
 const state = (page) => page.evaluate(() => {
@@ -146,6 +183,152 @@ const state = (page) => page.evaluate(() => {
     await page.close();
   }
   record('first click works on fresh loads', dropped === 0, `${dropped}/6 dropped`);
+}
+
+// ============================================================ SCENARIO 4
+// Load churn + destroy mid-append against the local fixture, with the real
+// transmuxer worker and MSE pipeline. This is the browser-level version of
+// the jsdom lifecycle tests: superseding loads while segments are in
+// flight and destroying mid-append must produce ZERO uncaught errors and
+// ZERO unhandled rejections (the detached-ArrayBuffer class).
+{
+  console.log('\n--- Scenario 4: load churn + destroy mid-append (local fixture) ---');
+  const { page, collect } = await newTrackedPage();
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('video', { timeout: 30000 });
+  // The container div's id shadows window.player until demo.ts finishes
+  // init and assigns the real instance
+  await page.waitForFunction(
+    () => window.player && typeof window.player.load === 'function',
+    { timeout: 30000 }
+  );
+
+  await page.evaluate(async (src) => {
+    await window.player.load(src);
+    await document.querySelector('video').play().catch(() => {});
+  }, FIXTURE_VOD);
+  await page.waitForTimeout(2500); // segments appending
+
+  const playing = await page.evaluate(() => !document.querySelector('video').paused);
+  record('fixture playback started', playing, '');
+
+  // Interleave superseding loads mid-append, then destroy with work in flight
+  await page.evaluate(async (src) => {
+    const p = window.player;
+    for (let i = 0; i < 5; i++) {
+      p.load(`${src}?churn=${i}`).catch(() => {});
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    p.load(src).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400)); // destroy mid-load
+    await p.destroy?.();
+    // Clear the demo page's reference the way a real integrator does, so
+    // its 250ms stats poller stops calling into the destroyed instance
+    // (getState() on a destroyed player throws by design)
+    window.player = null;
+  }, FIXTURE_VOD);
+  await page.waitForTimeout(2000);
+
+  const errs = await collect();
+  record(
+    'zero uncaught errors during churn + destroy',
+    errs.pageErrors.length === 0,
+    errs.pageErrors.slice(0, 3).join(' | ')
+  );
+  record(
+    'zero unhandled rejections during churn + destroy',
+    errs.rejections.length === 0,
+    errs.rejections.slice(0, 3).join(' | ')
+  );
+  await page.close();
+}
+
+// ============================================================ SCENARIO 5
+// Malformed live playlist refresh: a "live" stream (no ENDLIST, playlist
+// re-fetched continuously) starts returning an HTML error page mid-stream.
+// The player must keep playing off the previous playlist, never dead-end,
+// and recover once the endpoint returns real playlists again.
+{
+  console.log('\n--- Scenario 5: malformed live playlist refresh (local fixture) ---');
+  const { page, collect } = await newTrackedPage();
+
+  // Live-style playlist over the whole fixture window (a stalled-but-valid
+  // live stream that hls.js keeps refreshing)
+  const livePlaylist = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-TARGETDURATION:2',
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    ...Array.from({ length: 30 }, (_, i) => `#EXTINF:2.000000,\n${FIXTURE_SEG(i)}`),
+  ].join('\n');
+
+  let mode = 'valid';
+  let garbage_refreshes = 0;
+  await page.route('**/live-test.m3u8', (r) => {
+    if (mode === 'garbage') {
+      garbage_refreshes++;
+      return r.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!DOCTYPE html><html><body><h1>502 Bad Gateway</h1></body></html>',
+      });
+    }
+    return r.fulfill({
+      status: 200,
+      contentType: 'application/vnd.apple.mpegurl',
+      body: livePlaylist,
+    });
+  });
+
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('video', { timeout: 30000 });
+  await page.waitForFunction(
+    () => window.player && typeof window.player.load === 'function',
+    { timeout: 30000 }
+  );
+  await page.evaluate(async () => {
+    await window.player.load('http://127.0.0.1:8899/live-test.m3u8');
+    await document.querySelector('video').play().catch(() => {});
+  });
+  await page.waitForTimeout(6000);
+
+  const before = await state(page);
+  record('live fixture playing before corruption', !before.paused && before.t > 0, `t=${before.t}`);
+
+  // The refresh endpoint starts serving an error page
+  mode = 'garbage';
+  await page.waitForTimeout(6000);
+  const during = await state(page);
+  record('garbage refreshes actually served', garbage_refreshes > 0, `${garbage_refreshes} refreshes`);
+  record(
+    'viewer not dead-ended during garbage refreshes (playing or reconnecting)',
+    (!during.paused && !during.overlay) || during.reconnecting === true,
+    JSON.stringify({ paused: during.paused, overlay: during.overlay, reconnecting: during.reconnecting })
+  );
+
+  // Endpoint recovers
+  mode = 'valid';
+  await page.waitForTimeout(10000);
+  const after = await state(page);
+  record(
+    'playback healthy after refresh endpoint recovers',
+    !after.paused && after.overlay === false,
+    JSON.stringify({ paused: after.paused, overlay: after.overlay, t: after.t })
+  );
+
+  const errs = await collect();
+  record(
+    'zero uncaught errors across malformed refreshes',
+    errs.pageErrors.length === 0,
+    errs.pageErrors.slice(0, 3).join(' | ')
+  );
+  record(
+    'zero unhandled rejections across malformed refreshes',
+    errs.rejections.length === 0,
+    errs.rejections.slice(0, 3).join(' | ')
+  );
+  await page.close();
 }
 
 // ============================================================ SUMMARY
