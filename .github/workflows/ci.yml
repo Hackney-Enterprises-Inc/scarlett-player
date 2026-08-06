@@ -15,15 +15,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # No version pin on purpose: action-setup reads packageManager from
+      # package.json (pnpm@10.25.0). The old pin installed pnpm 8, which
+      # cannot read the v9 lockfile, so this job died at install and tests
+      # never ran. release.yml got this fix during the trusted-publishing
+      # migration; this file is the same fix applied to CI.
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
 
       - name: Install dependencies
