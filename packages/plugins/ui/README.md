@@ -30,9 +30,14 @@ const player = new ScarlettPlayer({
 
 - Play/pause, seek, volume controls
 - Fullscreen toggle
+- Picture-in-Picture toggle (disabled until media metadata is loaded; hidden
+  when the browser has no PiP support; Safari webkit presentation mode
+  supported)
 - Quality selector
 - Progress bar with buffering indicator
 - Time display (current / duration)
+- Error overlay with viewer-friendly copy per error code, a Try Again action,
+  and a reconnecting state while the player self-heals
 - Keyboard shortcuts
 - Customizable theming
 - Auto-hide controls
