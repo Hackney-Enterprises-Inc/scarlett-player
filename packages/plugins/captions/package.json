@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/captions",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Captions Plugin for Scarlett Player - WebVTT subtitles and closed captions",
   "type": "module",
   "main": "dist/index.cjs",
