@@ -176,6 +176,13 @@ export class ScarlettPlayer {
       this.stateManager.set('error', null);
     });
 
+    // Media element errors are advisory: the provider's own recovery path
+    // decides whether they become fatal. Record them for diagnostics
+    // without flipping the error state the retry flow checks.
+    this.eventBus.on('media:error', ({ error }) => {
+      this.errorHandler.record(error, { channel: 'media:error' });
+    });
+
     // Register plugins if provided
     if (options.plugins) {
       for (const plugin of options.plugins) {

@@ -467,6 +467,24 @@ describe('getUserMessage with structured codes', () => {
     );
   });
 
+  it('should map MEDIA_APPEND_ERROR to the interrupted message', () => {
+    expect(
+      getUserMessage({ code: 'MEDIA_APPEND_ERROR', message: 'HLS error: bufferAppendError (max retries exceeded)' })
+    ).toBe('Video playback was interrupted. Please try again.');
+  });
+
+  it('should map MEDIA_BUFFER_FULL to the device memory message', () => {
+    expect(
+      getUserMessage({ code: 'MEDIA_BUFFER_FULL', message: 'HLS error: bufferFullError' })
+    ).toBe('Your device is low on video memory. Close other apps or tabs and try again.');
+  });
+
+  it('should map PLAYLIST_INVALID to the stream unavailable message', () => {
+    expect(
+      getUserMessage({ code: 'PLAYLIST_INVALID', message: 'playlist refresh returned an invalid document' })
+    ).toBe('The stream is temporarily unavailable. Please try again.');
+  });
+
   it('should fall back to prose matching for unknown codes', () => {
     expect(getUserMessage({ code: 'SOMETHING_NEW', message: 'network glitch' })).toBe(
       'Having trouble connecting. Check your internet and try again.'

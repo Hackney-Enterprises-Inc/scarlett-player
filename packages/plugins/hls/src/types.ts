@@ -52,6 +52,14 @@ export interface HLSPluginConfig {
   reconnectMaxDelayMs?: number;
   /** Total window to keep auto-reconnecting in milliseconds (default: 300000 = 5 min) */
   reconnectWindowMs?: number;
+  /**
+   * Validate every playlist response before it reaches the M3U8 parser
+   * (default: true). A live refresh that returns an error page, a
+   * master-only response, or an empty document becomes a normal network
+   * error (bounded retries, then reconnect, then the retry UI) instead of
+   * being indexed blindly.
+   */
+  validatePlaylists?: boolean;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }
@@ -171,4 +179,6 @@ export interface HlsConstructor {
   isSupported(): boolean;
   Events: Record<string, string>;
   ErrorTypes: Record<string, string>;
+  /** hls.js default config (provides the base loader class for pLoader wrapping) */
+  DefaultConfig?: Record<string, unknown>;
 }

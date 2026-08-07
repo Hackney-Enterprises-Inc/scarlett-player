@@ -10,6 +10,7 @@
 
 - **Plugin Architecture** — Modular core + plugins. Only bundle what you need.
 - **HLS Playback** — Native Safari HLS + hls.js fallback with quality selection and live DVR
+- **Self-Healing Playback** - Auto-reconnect with backoff, load watchdog, playlist refresh validation, structured error codes, and a retry UI; a playback fault recovers silently or offers Try Again, never a dead end
 - **Native Media** — Video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
 - **Adaptive Bitrate** — ABR with manual quality override
 - **Live Streaming** — Live indicator, DVR seeking, seek-to-live, latency tracking
@@ -21,7 +22,7 @@
 - **Vue 3 Integration** — Component wrapper and composable with reactive state
 - **CDN Embed** — Drop-in script tag, no bundler required
 - **TypeScript** — Fully typed API across all packages
-- **1,200+ Tests** — Comprehensive test coverage with Vitest
+- **1,300+ Tests** — Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -182,7 +183,7 @@ Lighter builds available: `embed.video.js` (video only) and `embed.audio.js` (au
 | Package | Description |
 |---------|-------------|
 | `@scarlett-player/core` | Core engine — reactive state, event bus, plugin system, error handling |
-| `@scarlett-player/hls` | HLS provider — hls.js + native Safari fallback, ABR, quality selection, live DVR |
+| `@scarlett-player/hls` | HLS provider — hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
 | `@scarlett-player/native` | Native provider — video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
 | `@scarlett-player/ui` | Video UI — play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
 | `@scarlett-player/audio-ui` | Audio UI — compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
@@ -227,7 +228,7 @@ uiPlugin({
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all 1,200+ tests
+pnpm test             # Run all 1,300+ tests
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
@@ -235,9 +236,23 @@ pnpm validate         # lint + typecheck + test + build (CI check)
 node demo/build.cjs   # Rebuild demo site
 ```
 
+### Browser verification harness
+
+Real-browser checks that jsdom cannot cover (error recovery, reconnects,
+destroy-mid-append races, malformed live playlist refreshes). Requires a local
+Chrome and ffmpeg on PATH; the HLS fixture is generated on first run into the
+gitignored `scripts/fixtures/`.
+
+```bash
+pnpm build && node demo/build.cjs
+python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
+node scripts/verify-browser.mjs                # 21 checks, exits non-zero on failure
+node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
+```
+
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning — all 12 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning — all 14 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -266,6 +281,7 @@ packages/
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
 docs/               # Landing page + architecture docs
+scripts/            # Browser verification harness + HLS fixture generator
 ```
 
 ## Browser Support
@@ -294,6 +310,7 @@ docs/               # Landing page + architecture docs
 - [x] Touch/mobile support (basic)
 - [x] Closed captions (WebVTT)
 - [x] Anti-piracy watermark overlay
+- [x] Self-healing error recovery (auto-reconnect, load watchdog, playlist validation, PiP readiness gate)
 - [ ] Mobile gesture controls (double-tap seek, swipe) — Sprint 1
 - [ ] DRM support — Sprint 2
 - [ ] Low-latency HLS (LL-HLS) — Sprint 2

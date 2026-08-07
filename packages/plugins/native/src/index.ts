@@ -307,6 +307,40 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       });
     });
 
+    // Picture-in-Picture events (standard API). Without these the `pip`
+    // state key never updates on the native provider and the UI's PiP
+    // button reports a stale state.
+    on('enterpictureinpicture', () => {
+      api?.setState('pip', true);
+      api?.logger.debug('PiP: entered (standard)');
+    });
+
+    on('leavepictureinpicture', () => {
+      api?.setState('pip', false);
+      api?.logger.debug('PiP: exited (standard)');
+      // Resume playback if it was playing
+      if (!videoEl.paused || api?.getState('playing')) {
+        videoEl.play().catch(() => {});
+      }
+    });
+
+    // Safari Picture-in-Picture events (webkit API)
+    const webkitVideo = videoEl as HTMLVideoElement & {
+      webkitPresentationMode?: string;
+    };
+    if ('webkitPresentationMode' in videoEl) {
+      on('webkitpresentationmodechanged', () => {
+        const mode = webkitVideo.webkitPresentationMode;
+        api?.setState('pip', mode === 'picture-in-picture');
+        api?.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
+
+        // Resume playback when exiting PiP on Safari
+        if (mode === 'inline' && videoEl.paused) {
+          videoEl.play().catch(() => {});
+        }
+      });
+    }
+
     // Return cleanup function
     return () => {
       handlers.forEach(([event, handler]) => {

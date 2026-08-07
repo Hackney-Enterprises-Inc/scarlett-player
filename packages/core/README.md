@@ -69,7 +69,10 @@ player.on('playback:seeking', ({ time }) => {});
 player.on('volume:change', ({ volume, muted }) => {});
 player.on('fullscreen:change', ({ fullscreen }) => {});
 player.on('quality:change', ({ quality, auto }) => {});
-player.on('error', (error) => {});
+player.on('error', (error) => {});                    // Structured PlayerError { code, message, fatal }
+player.on('error:reconnecting', ({ attempt, delayMs }) => {}); // Self-heal attempt scheduled
+player.on('error:recovered', () => {});               // Self-heal succeeded, playback resumed
+player.on('error:retry', ({ src }) => {});            // Viewer pressed Try Again
 ```
 
 ## Plugins

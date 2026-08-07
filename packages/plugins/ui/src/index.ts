@@ -275,7 +275,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       case ' ':
       case 'k':
         e.preventDefault();
-        video.paused ? video.play() : video.pause();
+        // play() rejections (autoplay policy, AbortError) must never
+        // escape as unhandled rejections
+        if (video.paused) {
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
         break;
       case 'm':
         e.preventDefault();
@@ -283,10 +289,12 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         break;
       case 'f':
         e.preventDefault();
+        // Fullscreen promises reject when the browser denies the request;
+        // swallow them the same way FullscreenButton does
         if (document.fullscreenElement) {
-          document.exitFullscreen();
+          document.exitFullscreen().catch(() => {});
         } else {
-          api.container.requestFullscreen?.();
+          api.container.requestFullscreen?.().catch(() => {});
         }
         break;
       case 'ArrowLeft':

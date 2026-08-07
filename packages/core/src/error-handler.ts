@@ -30,6 +30,12 @@ export enum ErrorCode {
   PLAYBACK_FAILED = 'PLAYBACK_FAILED',
   MEDIA_DECODE_ERROR = 'MEDIA_DECODE_ERROR',
   MEDIA_NETWORK_ERROR = 'MEDIA_NETWORK_ERROR',
+  /** MSE append failed (detached ArrayBuffer, InvalidStateError, SourceBuffer errors) */
+  MEDIA_APPEND_ERROR = 'MEDIA_APPEND_ERROR',
+  /** MSE buffer quota exceeded (QuotaExceededError) */
+  MEDIA_BUFFER_FULL = 'MEDIA_BUFFER_FULL',
+  /** A playlist refresh returned a malformed or empty document */
+  PLAYLIST_INVALID = 'PLAYLIST_INVALID',
 
   // General errors
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
@@ -153,6 +159,26 @@ export class ErrorHandler {
 
     // Emit error event
     this.eventBus.emit('error', playerError);
+
+    return playerError;
+  }
+
+  /**
+   * Record an error into history and logs WITHOUT emitting an `error` event.
+   *
+   * Used for advisory channels (e.g. media element errors that a provider's
+   * recovery path is already handling) that should be visible in
+   * getHistory() for diagnostics but must not flip the player's error state.
+   *
+   * @param error - Error to record (native or PlayerError)
+   * @param context - Optional context (what was happening)
+   * @returns Normalized PlayerError
+   */
+  record(error: Error | PlayerError, context?: Record<string, any>): PlayerError {
+    const playerError = this.normalizeError(error, context);
+
+    this.addToHistory(playerError);
+    this.logError(playerError);
 
     return playerError;
   }
@@ -288,6 +314,18 @@ export class ErrorHandler {
   private getErrorCode(error: Error): ErrorCode {
     const message = error.message.toLowerCase();
 
+    // MSE buffer classes first: their messages can also contain generic
+    // words ("buffer", "media") that would misclassify further down
+    if (message.includes('quota')) {
+      return ErrorCode.MEDIA_BUFFER_FULL;
+    }
+    if (
+      message.includes('append') ||
+      message.includes('sourcebuffer') ||
+      message.includes('arraybuffer')
+    ) {
+      return ErrorCode.MEDIA_APPEND_ERROR;
+    }
     if (message.includes('network')) {
       return ErrorCode.MEDIA_NETWORK_ERROR;
     }

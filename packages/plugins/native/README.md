@@ -25,11 +25,19 @@ await player.load('https://example.com/video.mp4');
 
 ## Supported Formats
 
+Video:
+
 - **MP4** - H.264/AAC (most common)
 - **WebM** - VP8/VP9/Opus
 - **MOV** - QuickTime (H.264/AAC)
 - **MKV** - Matroska (browser support varies)
 - **OGV/OGG** - Theora/Vorbis
+
+Audio:
+
+- **MP3**, **WAV**, **OGG**, **FLAC**, **AAC**, **M4A**, **Opus** (pairs with
+  `@scarlett-player/audio-ui` and `@scarlett-player/media-session` for a full
+  audio player)
 
 ## Configuration
 

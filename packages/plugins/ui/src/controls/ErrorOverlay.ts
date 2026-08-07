@@ -36,6 +36,12 @@ function getUserMessage(error: OverlayError): string {
         return 'Unable to load video. Please try again.';
       case 'PLAYBACK_FAILED':
         return 'Playback stopped unexpectedly. Please try again.';
+      case 'MEDIA_APPEND_ERROR':
+        return 'Video playback was interrupted. Please try again.';
+      case 'MEDIA_BUFFER_FULL':
+        return 'Your device is low on video memory. Close other apps or tabs and try again.';
+      case 'PLAYLIST_INVALID':
+        return 'The stream is temporarily unavailable. Please try again.';
     }
   }
 

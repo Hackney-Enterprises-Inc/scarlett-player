@@ -34000,6 +34000,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return playerError;
     }
     /**
+     * Record an error into history and logs WITHOUT emitting an `error` event.
+     *
+     * Used for advisory channels (e.g. media element errors that a provider's
+     * recovery path is already handling) that should be visible in
+     * getHistory() for diagnostics but must not flip the player's error state.
+     *
+     * @param error - Error to record (native or PlayerError)
+     * @param context - Optional context (what was happening)
+     * @returns Normalized PlayerError
+     */
+    record(error, context) {
+      const playerError = this.normalizeError(error, context);
+      this.addToHistory(playerError);
+      this.logError(playerError);
+      return playerError;
+    }
+    /**
      * Create and handle an error from code.
      *
      * @param code - Error code
@@ -34109,6 +34126,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     getErrorCode(error) {
       const message = error.message.toLowerCase();
+      if (message.includes("quota")) {
+        return "MEDIA_BUFFER_FULL" /* MEDIA_BUFFER_FULL */;
+      }
+      if (message.includes("append") || message.includes("sourcebuffer") || message.includes("arraybuffer")) {
+        return "MEDIA_APPEND_ERROR" /* MEDIA_APPEND_ERROR */;
+      }
       if (message.includes("network")) {
         return "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */;
       }
@@ -34564,6 +34587,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       this.eventBus.on("media:loaded", () => {
         this.stateManager.set("error", null);
+      });
+      this.eventBus.on("media:error", ({ error }) => {
+        this.errorHandler.record(error, { channel: "media:error" });
       });
       if (options.plugins) {
         for (const plugin of options.plugins) {
@@ -35239,28 +35265,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   };
 
-  // packages/core/dist/index.js
-  var ErrorCode2 = /* @__PURE__ */ ((ErrorCode22) => {
-    ErrorCode22["SOURCE_NOT_SUPPORTED"] = "SOURCE_NOT_SUPPORTED";
-    ErrorCode22["SOURCE_LOAD_FAILED"] = "SOURCE_LOAD_FAILED";
-    ErrorCode22["PROVIDER_NOT_FOUND"] = "PROVIDER_NOT_FOUND";
-    ErrorCode22["PROVIDER_SETUP_FAILED"] = "PROVIDER_SETUP_FAILED";
-    ErrorCode22["PLUGIN_SETUP_FAILED"] = "PLUGIN_SETUP_FAILED";
-    ErrorCode22["PLUGIN_NOT_FOUND"] = "PLUGIN_NOT_FOUND";
-    ErrorCode22["PLAYBACK_FAILED"] = "PLAYBACK_FAILED";
-    ErrorCode22["MEDIA_DECODE_ERROR"] = "MEDIA_DECODE_ERROR";
-    ErrorCode22["MEDIA_NETWORK_ERROR"] = "MEDIA_NETWORK_ERROR";
-    ErrorCode22["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
-    return ErrorCode22;
-  })(ErrorCode2 || {});
-
   // packages/plugins/hls/src/hls-loader.ts
+  var hls_loader_exports = {};
+  __export(hls_loader_exports, {
+    createHlsInstance: () => createHlsInstance,
+    getHlsConstructor: () => getHlsConstructor,
+    isHLSSupported: () => isHLSSupported,
+    isHlsJsSupported: () => isHlsJsSupported,
+    loadHlsJs: () => loadHlsJs,
+    resetLoader: () => resetLoader,
+    shouldPreferNativeHLS: () => shouldPreferNativeHLS,
+    supportsNativeHLS: () => supportsNativeHLS
+  });
   var hlsConstructor = null;
   var loadingPromise = null;
   function supportsNativeHLS() {
     if (typeof document === "undefined") return false;
     const video = document.createElement("video");
     return video.canPlayType("application/vnd.apple.mpegurl") !== "";
+  }
+  function shouldPreferNativeHLS() {
+    if (!supportsNativeHLS()) return false;
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent;
+    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua) && !/CriOS/.test(ua);
+    return isSafari;
   }
   function isHlsJsSupported() {
     if (hlsConstructor) {
@@ -35305,6 +35334,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   function getHlsConstructor() {
     return hlsConstructor;
   }
+  function resetLoader() {
+    hlsConstructor = null;
+    loadingPromise = null;
+  }
+
+  // packages/core/dist/index.js
+  var ErrorCode2 = /* @__PURE__ */ ((ErrorCode22) => {
+    ErrorCode22["SOURCE_NOT_SUPPORTED"] = "SOURCE_NOT_SUPPORTED";
+    ErrorCode22["SOURCE_LOAD_FAILED"] = "SOURCE_LOAD_FAILED";
+    ErrorCode22["PROVIDER_NOT_FOUND"] = "PROVIDER_NOT_FOUND";
+    ErrorCode22["PROVIDER_SETUP_FAILED"] = "PROVIDER_SETUP_FAILED";
+    ErrorCode22["PLUGIN_SETUP_FAILED"] = "PLUGIN_SETUP_FAILED";
+    ErrorCode22["PLUGIN_NOT_FOUND"] = "PLUGIN_NOT_FOUND";
+    ErrorCode22["PLAYBACK_FAILED"] = "PLAYBACK_FAILED";
+    ErrorCode22["MEDIA_DECODE_ERROR"] = "MEDIA_DECODE_ERROR";
+    ErrorCode22["MEDIA_NETWORK_ERROR"] = "MEDIA_NETWORK_ERROR";
+    ErrorCode22["MEDIA_APPEND_ERROR"] = "MEDIA_APPEND_ERROR";
+    ErrorCode22["MEDIA_BUFFER_FULL"] = "MEDIA_BUFFER_FULL";
+    ErrorCode22["PLAYLIST_INVALID"] = "PLAYLIST_INVALID";
+    ErrorCode22["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
+    return ErrorCode22;
+  })(ErrorCode2 || {});
 
   // packages/plugins/hls/src/quality.ts
   function formatLevel(level) {
@@ -35636,7 +35687,51 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
-  // packages/plugins/hls/src/index.ts
+  // packages/plugins/hls/src/playlist-validation.ts
+  var PLAYLIST_INVALID_TEXT = "Invalid playlist document";
+  var MEDIA_PLAYLIST_CONTEXTS = ["level", "audioTrack", "subtitleTrack"];
+  function isValidPlaylistDocument(data, contextType) {
+    if (typeof data !== "string" || data.length === 0) return false;
+    const text = data.trimStart();
+    if (!text.startsWith("#EXTM3U")) return false;
+    if (contextType && MEDIA_PLAYLIST_CONTEXTS.includes(contextType)) {
+      return /^#EXT(?:INF|-X-TARGETDURATION):/m.test(text);
+    }
+    return true;
+  }
+  function createValidatingPlaylistLoader(Hls2) {
+    const BaseLoader = Hls2.DefaultConfig.loader;
+    return class ValidatingPlaylistLoader extends BaseLoader {
+      /**
+       * Load a playlist, validating the response document before it reaches
+       * the M3U8 parser.
+       *
+       * @param context - hls.js loader context
+       * @param config - hls.js loader config
+       * @param callbacks - hls.js loader callbacks
+       */
+      load(context, config, callbacks) {
+        const wrapped = {
+          ...callbacks,
+          onSuccess: (response, stats, ctx, networkDetails) => {
+            if (!isValidPlaylistDocument(response?.data, ctx?.type)) {
+              callbacks.onError(
+                { code: 0, text: PLAYLIST_INVALID_TEXT },
+                ctx,
+                networkDetails,
+                stats
+              );
+              return;
+            }
+            callbacks.onSuccess(response, stats, ctx, networkDetails);
+          }
+        };
+        super.load(context, config, wrapped);
+      }
+    };
+  }
+
+  // packages/plugins/hls/src/create-hls-plugin.ts
   var DEFAULT_CONFIG = {
     debug: false,
     autoStartLoad: true,
@@ -35658,14 +35753,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     autoReconnect: true,
     reconnectBaseDelayMs: 2e3,
     reconnectMaxDelayMs: 3e4,
-    reconnectWindowMs: 3e5
+    reconnectWindowMs: 3e5,
+    // Never index a malformed live playlist refresh blindly
+    validatePlaylists: true
   };
   var MANIFEST_PHASE_ERRORS = [
     "manifestLoadError",
     "manifestLoadTimeOut",
     "manifestParsingError"
   ];
-  function createHLSPlugin(config) {
+  function createHLSPluginWith(loader, variant, config) {
     const mergedConfig = { ...DEFAULT_CONFIG, ...config };
     let api = null;
     let hls = null;
@@ -35675,6 +35772,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupHlsEvents = null;
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
+    let loadSession = 0;
+    let abortPendingLoad = null;
     let networkRetryCount = 0;
     let mediaRetryCount = 0;
     let retryTimeout = null;
@@ -35707,7 +35806,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.container.appendChild(video);
       return video;
     };
-    const cleanup = () => {
+    const teardownPipeline = (reason) => {
+      abortPendingLoad?.(reason ?? new Error("HLS load cancelled"));
+      abortPendingLoad = null;
       cleanupHlsEvents?.();
       cleanupHlsEvents = null;
       cleanupVideoEvents?.();
@@ -35720,6 +35821,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         hls.destroy();
         hls = null;
       }
+    };
+    const cleanup = (reason) => {
+      teardownPipeline(reason);
       currentSrc = null;
       isNative = false;
       isAutoQuality = true;
@@ -35728,7 +35832,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       errorCount = 0;
       errorWindowStart = 0;
     };
-    const buildHlsConfig = () => ({
+    const buildHlsConfig = () => {
+      const config2 = buildBaseHlsConfig();
+      if (mergedConfig.validatePlaylists !== false) {
+        const Hls2 = loader.getHlsConstructor();
+        if (Hls2 && Hls2.DefaultConfig?.loader) {
+          config2.pLoader = createValidatingPlaylistLoader(Hls2);
+        }
+      }
+      return config2;
+    };
+    const buildBaseHlsConfig = () => ({
       debug: mergedConfig.debug,
       autoStartLoad: mergedConfig.autoStartLoad,
       startPosition: mergedConfig.startPosition,
@@ -35756,7 +35870,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const jitter = delay * (0.7 + Math.random() * 0.3);
       return jitter;
     };
+    const APPEND_ERROR_DETAILS = [
+      "bufferAppendError",
+      "bufferAppendingError",
+      "bufferAddCodecError"
+    ];
     const mapFatalErrorCode = (error) => {
+      if (error.response?.text === PLAYLIST_INVALID_TEXT) {
+        return ErrorCode2.PLAYLIST_INVALID;
+      }
+      if (error.details === "bufferFullError") {
+        return ErrorCode2.MEDIA_BUFFER_FULL;
+      }
+      if (APPEND_ERROR_DETAILS.includes(error.details)) {
+        return ErrorCode2.MEDIA_APPEND_ERROR;
+      }
       switch (error.type) {
         case "network":
           return ErrorCode2.MEDIA_NETWORK_ERROR;
@@ -35781,7 +35909,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       maybeScheduleReconnect(error);
     };
     const handleHlsError = (error) => {
-      const Hls2 = getHlsConstructor();
+      const Hls2 = loader.getHlsConstructor();
       if (!Hls2 || !hls) return false;
       const now2 = Date.now();
       if (now2 - errorWindowStart > ERROR_WINDOW_MS) {
@@ -35793,10 +35921,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (errorCount >= MAX_ERRORS_IN_WINDOW) {
         api?.logger.error(`Too many errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
         emitFatalError(error, true);
-        cleanupHlsEvents?.();
-        cleanupHlsEvents = null;
-        hls.destroy();
-        hls = null;
+        teardownPipeline(new Error(error.details));
         return true;
       }
       if (error.fatal) {
@@ -35817,8 +35942,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               clearTimeout(retryTimeout);
             }
             const isManifestPhase = MANIFEST_PHASE_ERRORS.includes(error.details);
+            const retry_session = loadSession;
             retryTimeout = setTimeout(() => {
-              if (!hls) return;
+              if (retry_session !== loadSession || !hls) return;
               if (isManifestPhase && currentSrc) {
                 hls.loadSource(currentSrc);
               } else {
@@ -35841,10 +35967,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (retryTimeout) {
               clearTimeout(retryTimeout);
             }
+            const retry_session = loadSession;
             retryTimeout = setTimeout(() => {
-              if (hls) {
-                hls.recoverMediaError();
-              }
+              if (retry_session !== loadSession || !hls) return;
+              hls.recoverMediaError();
             }, delay);
             break;
           }
@@ -35856,6 +35982,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return false;
     };
     const loadNative = async (src) => {
+      const session = loadSession;
       const videoEl = getOrCreateVideo();
       isNative = true;
       if (api) {
@@ -35863,7 +35990,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return new Promise((resolve, reject) => {
         let watchdog = null;
+        let settled = false;
         const settle = () => {
+          settled = true;
+          if (abortPendingLoad === abort) {
+            abortPendingLoad = null;
+          }
           videoEl.removeEventListener("loadedmetadata", onLoaded);
           videoEl.removeEventListener("error", onError);
           if (watchdog !== null) {
@@ -35871,7 +36003,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             watchdog = null;
           }
         };
+        const abort = (reason) => {
+          if (settled) return;
+          settle();
+          reject(reason);
+        };
+        abortPendingLoad = abort;
         const onLoaded = () => {
+          if (settled) return;
+          if (session !== loadSession) {
+            settle();
+            reject(new Error("HLS load cancelled"));
+            return;
+          }
           settle();
           hasPlayedContent = true;
           const onFatalVideoError = () => {
@@ -35895,6 +36039,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           resolve();
         };
         const onError = () => {
+          if (settled) return;
           settle();
           const error = videoEl.error;
           reject(new Error(error?.message || "Failed to load HLS source"));
@@ -35902,6 +36047,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const timeout_ms = mergedConfig.loadTimeoutMs ?? 3e4;
         if (timeout_ms > 0) {
           watchdog = setTimeout(() => {
+            if (settled || session !== loadSession) return;
             settle();
             reject(new Error("Video took too long to load (network timeout)"));
           }, timeout_ms);
@@ -35913,10 +36059,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     };
     const loadWithHlsJs = async (src) => {
-      await loadHlsJs();
+      const session = loadSession;
+      await loader.loadHlsJs();
+      if (session !== loadSession) {
+        throw new Error("HLS load cancelled");
+      }
       const videoEl = getOrCreateVideo();
       isNative = false;
-      hls = createHlsInstance(buildHlsConfig());
+      hls = loader.createHlsInstance(buildHlsConfig());
       if (api) {
         cleanupVideoEvents = setupVideoEventHandlers(videoEl, api);
       }
@@ -35933,10 +36083,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             watchdog = null;
           }
         };
+        const abort = (reason) => {
+          if (resolved) return;
+          resolved = true;
+          clearWatchdog();
+          reject(reason);
+        };
+        abortPendingLoad = abort;
+        const releaseAbort = () => {
+          if (abortPendingLoad === abort) {
+            abortPendingLoad = null;
+          }
+        };
         cleanupHlsEvents = setupHlsEventHandlers(hls, api, {
           onManifestParsed: () => {
+            if (session !== loadSession) return;
             if (!resolved) {
               resolved = true;
+              releaseAbort();
               clearWatchdog();
               hasPlayedContent = true;
               api?.setState("source", { src, type: "application/x-mpegURL" });
@@ -35947,14 +36111,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           onLevelSwitched: () => {
           },
           onError: (error) => {
+            if (session !== loadSession) return;
             const terminal = handleHlsError(error);
             if (terminal && !resolved) {
               resolved = true;
+              releaseAbort();
               clearWatchdog();
               reject(new Error(error.details));
             }
           },
           onFragLoaded: () => {
+            if (session !== loadSession) return;
             if (networkRetryCount > 0 || mediaRetryCount > 0) {
               api?.logger.debug("Playback recovered, resetting retry budgets");
               networkRetryCount = 0;
@@ -35966,17 +36133,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const timeout_ms = mergedConfig.loadTimeoutMs ?? 3e4;
         if (timeout_ms > 0) {
           watchdog = setTimeout(() => {
-            if (resolved) return;
+            if (resolved || session !== loadSession) return;
             resolved = true;
+            releaseAbort();
             api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src });
-            if (retryTimeout) {
-              clearTimeout(retryTimeout);
-              retryTimeout = null;
-            }
-            cleanupHlsEvents?.();
-            cleanupHlsEvents = null;
-            hls?.destroy();
-            hls = null;
+            teardownPipeline();
             reject(new Error("Video took too long to load (network timeout)"));
           }, timeout_ms);
         }
@@ -36023,6 +36184,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const attemptReconnect = async () => {
       if (!api || !currentSrc) return;
+      const session = ++loadSession;
       reconnectAttempts++;
       const saved_src = currentSrc;
       const was_live = api.getState("live");
@@ -36030,27 +36192,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const resume_position = reconnectResumePosition;
       api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: saved_src });
       try {
-        cleanupHlsEvents?.();
-        cleanupHlsEvents = null;
-        cleanupVideoEvents?.();
-        cleanupVideoEvents = null;
-        if (retryTimeout) {
-          clearTimeout(retryTimeout);
-          retryTimeout = null;
-        }
-        hls?.destroy();
-        hls = null;
+        teardownPipeline(new Error("HLS load cancelled: reconnecting"));
         networkRetryCount = 0;
         mediaRetryCount = 0;
         errorCount = 0;
         errorWindowStart = 0;
         currentSrc = saved_src;
         api.setState("playbackState", "loading");
-        if (was_native && supportsNativeHLS()) {
+        if (was_native && loader.supportsNativeHLS()) {
           await loadNative(saved_src);
         } else {
           await loadWithHlsJs(saved_src);
         }
+        if (session !== loadSession) return;
         if (!was_live && video && resume_position > 0) {
           video.currentTime = resume_position;
         }
@@ -36064,18 +36218,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         } catch {
         }
       } catch {
+        if (session !== loadSession) return;
         api?.logger.warn(`Auto-reconnect attempt ${reconnectAttempts} failed`);
         scheduleReconnectAttempt();
       }
     };
     const plugin = {
       id: "hls-provider",
-      name: "HLS Provider",
+      name: variant.name,
       version: "1.0.0",
       type: "provider",
-      description: "HLS playback provider using hls.js",
+      description: variant.description,
       canPlay(src) {
-        if (!isHLSSupported()) return false;
+        if (!loader.isHLSSupported()) return false;
         const url = src.toLowerCase();
         const urlWithoutQuery = url.split("?")[0].split("#")[0];
         if (urlWithoutQuery.endsWith(".m3u8")) return true;
@@ -36085,7 +36240,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       async init(pluginApi) {
         api = pluginApi;
-        api.logger.info("HLS plugin initialized");
+        api.logger.info(`HLS plugin${variant.logSuffix} initialized`);
         const unsubPlay = api.on("playback:play", async () => {
           if (!video) return;
           try {
@@ -36173,13 +36328,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       },
       async destroy() {
-        api?.logger.info("HLS plugin destroying");
+        api?.logger.info(`HLS plugin${variant.logSuffix} destroying`);
+        loadSession++;
         cancelReconnect();
         if (onlineListener && typeof window !== "undefined") {
           window.removeEventListener("online", onlineListener);
           onlineListener = null;
         }
-        cleanup();
+        cleanup(new Error("HLS load cancelled: player destroyed"));
         if (video?.parentNode) {
           video.parentNode.removeChild(video);
         }
@@ -36188,25 +36344,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       async loadSource(src) {
         if (!api) throw new Error("Plugin not initialized");
-        api.logger.info("Loading HLS source", { src });
+        api.logger.info(`Loading HLS source${variant.logSuffix}`, { src });
+        const session = ++loadSession;
         cancelReconnect();
         hasPlayedContent = false;
-        cleanup();
+        cleanup(new Error("HLS load cancelled: superseded by a new load"));
         currentSrc = src;
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
-        if (api.getState("airplayActive") && supportsNativeHLS()) {
+        if (api.getState("airplayActive") && loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS (AirPlay active)");
           await loadNative(src);
-        } else if (isHlsJsSupported()) {
-          api.logger.info("Using hls.js for HLS playback");
+        } else if (loader.isHlsJsSupported()) {
+          api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
           await loadWithHlsJs(src);
-        } else if (supportsNativeHLS()) {
+        } else if (loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS playback (hls.js not supported)");
           await loadNative(src);
         } else {
           throw new Error("HLS playback not supported in this browser");
         }
+        if (session !== loadSession) return;
         if (video) {
           const muted = api.getState("muted");
           const volume = api.getState("volume");
@@ -36258,7 +36416,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api?.logger.debug("Already using native HLS");
           return;
         }
-        if (!supportsNativeHLS()) {
+        if (!loader.supportsNativeHLS()) {
           api?.logger.warn("Native HLS not supported in this browser");
           return;
         }
@@ -36270,8 +36428,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const wasPlaying = api?.getState("playing") || false;
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
-        cleanup();
+        const session = ++loadSession;
+        cleanup(new Error("HLS load cancelled: switching to native HLS"));
         await loadNative(savedSrc);
+        if (session !== loadSession) return;
         if (video && currentTime > 0) {
           video.currentTime = currentTime;
         }
@@ -36293,7 +36453,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api?.logger.debug("Already using hls.js");
           return;
         }
-        if (!isHlsJsSupported()) {
+        if (!loader.isHlsJsSupported()) {
           api?.logger.warn("hls.js not supported in this browser");
           return;
         }
@@ -36305,8 +36465,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const wasPlaying = api?.getState("playing") || false;
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
-        cleanup();
+        const session = ++loadSession;
+        cleanup(new Error("HLS load cancelled: switching to hls.js"));
         await loadWithHlsJs(savedSrc);
+        if (session !== loadSession) return;
         if (video && currentTime > 0) {
           video.currentTime = currentTime;
         }
@@ -36321,6 +36483,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
     return plugin;
+  }
+
+  // packages/plugins/hls/src/index.ts
+  function createHLSPlugin(config) {
+    return createHLSPluginWith(
+      hls_loader_exports,
+      {
+        name: "HLS Provider",
+        description: "HLS playback provider using hls.js",
+        logSuffix: "",
+        engineLabel: "hls.js"
+      },
+      config
+    );
   }
 
   // packages/plugins/native/src/index.ts
@@ -36503,6 +36679,30 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           timestamp: Date.now()
         });
       });
+      on("enterpictureinpicture", () => {
+        api?.setState("pip", true);
+        api?.logger.debug("PiP: entered (standard)");
+      });
+      on("leavepictureinpicture", () => {
+        api?.setState("pip", false);
+        api?.logger.debug("PiP: exited (standard)");
+        if (!videoEl.paused || api?.getState("playing")) {
+          videoEl.play().catch(() => {
+          });
+        }
+      });
+      const webkitVideo = videoEl;
+      if ("webkitPresentationMode" in videoEl) {
+        on("webkitpresentationmodechanged", () => {
+          const mode = webkitVideo.webkitPresentationMode;
+          api?.setState("pip", mode === "picture-in-picture");
+          api?.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
+          if (mode === "inline" && videoEl.paused) {
+            videoEl.play().catch(() => {
+            });
+          }
+        });
+      }
       return () => {
         handlers.forEach(([event, handler]) => {
           videoEl.removeEventListener(event, handler);
@@ -38437,25 +38637,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PipButton = class {
     constructor(api) {
       this.clickHandler = () => {
-        this.toggle();
+        void this.toggle().catch(() => {
+        });
       };
       this.api = api;
-      const video = document.createElement("video");
-      this.supported = "pictureInPictureEnabled" in document || "webkitSetPresentationMode" in video;
+      const probe2 = document.createElement("video");
+      this.supported = "pictureInPictureEnabled" in document || "webkitSetPresentationMode" in probe2;
       this.el = createButton("sp-pip", "Picture-in-Picture", icons.pip);
       this.el.addEventListener("click", this.clickHandler);
       if (!this.supported) {
         this.el.style.display = "none";
+      } else {
+        this.el.disabled = true;
+        this.el.setAttribute("aria-disabled", "true");
       }
     }
     render() {
       return this.el;
     }
+    /** Whether the media element is ready to enter PiP (metadata loaded). */
+    isMediaReady() {
+      const video = getVideo(this.api.container);
+      return !!video && video.readyState >= HTMLMediaElement.HAVE_METADATA;
+    }
     update() {
       if (!this.supported) return;
-      const pip = this.api.getState("pip");
-      this.el.setAttribute("aria-label", pip ? "Exit Picture-in-Picture" : "Picture-in-Picture");
-      this.el.classList.toggle("sp-pip--active", !!pip);
+      const pip = !!this.api.getState("pip");
+      const enabled = pip || this.isMediaReady();
+      this.el.disabled = !enabled;
+      setAttr(this.el, "aria-disabled", String(!enabled));
+      setHTML(this.el, pip ? icons.exitPip : icons.pip);
+      setAttr(this.el, "aria-label", pip ? "Exit Picture-in-Picture" : "Picture-in-Picture");
+      this.el.classList.toggle("sp-pip--active", pip);
     }
     async toggle() {
       const video = getVideo(this.api.container);
@@ -38463,8 +38676,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         this.api.logger.warn("PiP: video element not found");
         return;
       }
+      const isInPip = document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
+      if (!isInPip && video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        this.api.logger.debug("PiP: ignored, media not ready", {
+          readyState: video.readyState
+        });
+        return;
+      }
       try {
-        const isInPip = document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
         if (isInPip) {
           if (document.pictureInPictureElement) {
             await document.exitPictureInPicture();
@@ -38481,7 +38700,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.api.logger.debug("PiP: entered");
         }
       } catch (e) {
-        this.api.logger.warn("PiP: failed", { error: e.message });
+        const message = e instanceof Error ? e.message : String(e);
+        this.api.logger.warn("PiP: failed", { error: message });
       }
     }
     destroy() {
@@ -38564,6 +38784,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return "Unable to load video. Please try again.";
         case "PLAYBACK_FAILED":
           return "Playback stopped unexpectedly. Please try again.";
+        case "MEDIA_APPEND_ERROR":
+          return "Video playback was interrupted. Please try again.";
+        case "MEDIA_BUFFER_FULL":
+          return "Your device is low on video memory. Close other apps or tabs and try again.";
+        case "PLAYLIST_INVALID":
+          return "The stream is temporarily unavailable. Please try again.";
       }
     }
     const msg = error.message?.toLowerCase() || "";
@@ -39365,7 +39591,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         case " ":
         case "k":
           e.preventDefault();
-          video.paused ? video.play() : video.pause();
+          if (video.paused) {
+            video.play().catch(() => {
+            });
+          } else {
+            video.pause();
+          }
           break;
         case "m":
           e.preventDefault();
@@ -39374,9 +39605,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         case "f":
           e.preventDefault();
           if (document.fullscreenElement) {
-            document.exitFullscreen();
+            document.exitFullscreen().catch(() => {
+            });
           } else {
-            api.container.requestFullscreen?.();
+            api.container.requestFullscreen?.().catch(() => {
+            });
           }
           break;
         case "ArrowLeft":
