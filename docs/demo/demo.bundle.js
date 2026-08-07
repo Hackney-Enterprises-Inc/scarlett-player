@@ -41832,7 +41832,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.1.1" : "dev";
+  var VERSION = true ? "1.2.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
