@@ -771,6 +771,7 @@
 <span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
 <span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
 <span class="keyword">import</span> { createWatermarkPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/watermark'</span>;
+<span class="keyword">import</span> { createSharePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/share'</span>;
 
 <span class="comment">// Create the player</span>
 <span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
@@ -781,7 +782,10 @@
     <span class="function">createNativePlugin</span>(),
     <span class="function">uiPlugin</span>({
       <span class="property">hideDelay</span>: <span class="number">3000</span>,
-      <span class="property">theme</span>: { <span class="property">accentColor</span>: <span class="string">'#e50914'</span> }
+      <span class="property">theme</span>: { <span class="property">accentColor</span>: <span class="string">'#e50914'</span> },
+      <span class="comment">// 'share' is not in the default layout, so ask for it</span>
+      <span class="property">controls</span>: [<span class="string">'play'</span>, <span class="string">'volume'</span>, <span class="string">'time'</span>, <span class="string">'spacer'</span>,
+                 <span class="string">'settings'</span>, <span class="string">'share'</span>, <span class="string">'fullscreen'</span>],
     }),
     <span class="function">airplayPlugin</span>(),
     <span class="function">chromecastPlugin</span>(),
@@ -792,6 +796,8 @@
       <span class="property">imageHeight</span>: <span class="number">64</span>,
       <span class="property">padding</span>: <span class="number">10</span>,
     }),
+    <span class="comment">// Native share sheet on mobile, copy link elsewhere</span>
+    <span class="function">createSharePlugin</span>(),
   ],
 });
 
@@ -961,7 +967,7 @@ playlist.<span class="function">add</span>([
     <div class="console-line">Console output will appear here...</div>
   </div>
 
-  <script src="demo.bundle.js?v=1.3.0"></script>
+  <script src="demo.bundle.js?v=1.4.0"></script>
   <script>
     // Display version from bundle
     if (window.SCARLETT_VERSION) {
