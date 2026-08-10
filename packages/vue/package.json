@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/vue",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Vue 3 component wrapper for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",

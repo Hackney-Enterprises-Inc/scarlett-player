@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/analytics",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Analytics Plugin for Scarlett Player - QoE metrics and engagement tracking",
   "type": "module",
   "main": "dist/index.cjs",
