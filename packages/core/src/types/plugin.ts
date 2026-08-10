@@ -72,7 +72,7 @@ export interface IPluginAPI {
    * Core only knows its own keys, and getState/setState throw for anything
    * unregistered. Call this in `init()` for each key the plugin introduces.
    *
-   * Idempotent — re-defining an existing key keeps its current value, so
+   * Idempotent - re-defining an existing key keeps its current value, so
    * re-running setup after a source change will not reset live state.
    *
    * Add the key to `StateStore` by declaration merging, and namespace it with

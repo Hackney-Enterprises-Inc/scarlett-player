@@ -47,7 +47,7 @@ interface HlsPluginLike {
  *
  * This is the emitted value of `Hls.Events.SUBTITLE_TRACKS_UPDATED`, not the
  * enum key. Subscribing with the string 'SUBTITLE_TRACKS_UPDATED' silently
- * matches nothing — the bug this constant exists to prevent.
+ * matches nothing - the bug this constant exists to prevent.
  */
 const HLS_SUBTITLE_TRACKS_UPDATED = 'hlsSubtitleTracksUpdated';
 
@@ -105,7 +105,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   /**
    * Remove the <track> elements we added, and reset track state.
    *
-   * Tracks the browser owns (native HLS renditions) are not ours to remove —
+   * Tracks the browser owns (native HLS renditions) are not ours to remove -
    * they go away with the source change, and the TextTrackList listener picks
    * up their replacements.
    */
@@ -216,7 +216,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   /**
    * Auto-select a track matching the default language, at most once per media.
    *
-   * A track that is already showing counts as the selection for this media —
+   * A track that is already showing counts as the selection for this media -
    * whether the browser restored it or the viewer picked it from Safari's own
    * subtitle menu, neither of which routes through selectTrack. Standing down
    * keeps a later re-sync from replacing that pick with defaultLanguage.
@@ -261,7 +261,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
 
     const list = videoEl.textTracks;
     // TextTrackList is an EventTarget in every browser we support, but not in
-    // every test environment — degrade to the one-shot sync rather than throwing.
+    // every test environment - degrade to the one-shot sync rather than throwing.
     if (typeof list?.addEventListener !== 'function') return;
 
     observedTextTracks = list;
@@ -288,7 +288,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   /**
    * Mirror the hls.js subtitle renditions onto <track> elements.
    *
-   * Safe to call repeatedly — previously derived tracks are replaced, not
+   * Safe to call repeatedly - previously derived tracks are replaced, not
    * appended to.
    */
   const extractHlsSubtitles = (): void => {
@@ -353,7 +353,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     const hlsInstance = hlsPlugin.getHlsInstance();
 
     if (!hlsInstance) {
-      // The provider hasn't built its instance yet. Retry exactly once — a
+      // The provider hasn't built its instance yet. Retry exactly once - a
       // still-missing instance after that means this source isn't running
       // through hls.js, and polling would never resolve it. Guarded by a flag
       // rather than by hlsRetryTimer being null, so the retry cannot re-arm
@@ -423,7 +423,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
         // two is missed.
         observeTextTracks();
 
-        // Pick up whatever already exists — our own <track> elements, and the
+        // Pick up whatever already exists - our own <track> elements, and the
         // renditions the browser parsed itself on the native HLS path, which
         // never emit an addtrack event we could have waited for.
         syncTracksToState();

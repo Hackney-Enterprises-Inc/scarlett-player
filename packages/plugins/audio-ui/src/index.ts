@@ -716,7 +716,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         const wrapper = titleEl.parentElement;
         if (wrapper && titleEl.scrollWidth > wrapper.clientWidth) {
           // Duplicate text for seamless scroll
-          titleEl.textContent = `${title}     •     ${title}     •     `;
+          titleEl.textContent = `${title}     -     ${title}     -     `;
           titleEl.classList.add('scrolling');
         } else {
           titleEl.classList.remove('scrolling');

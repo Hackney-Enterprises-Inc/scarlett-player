@@ -123,7 +123,7 @@ export function getBestLevelForBandwidth(
  * @returns Estimated bandwidth in bits per second
  */
 export function getInitialBandwidthEstimate(overrideBps?: number): number {
-  const HLS_DEFAULT_ESTIMATE = 500_000; // 500kbps — hls.js default
+  const HLS_DEFAULT_ESTIMATE = 500_000; // 500kbps - hls.js default
 
   if (overrideBps !== undefined && overrideBps > 0) {
     return overrideBps;

@@ -3,7 +3,7 @@
  *
  * Mobile first: the base rules describe the bottom sheet, which is the layout
  * phones get, and a single min-width query promotes it to a popover on larger
- * screens. Sizes are in px to stay independent of the host page's font size —
+ * screens. Sizes are in px to stay independent of the host page's font size -
  * the player is frequently embedded in someone else's CSS.
  */
 
@@ -38,7 +38,7 @@ export const styles = `
 }
 .sp-share-sheet--open { transform: translateY(0); }
 
-/* Grab handle — the affordance that says "this drags/dismisses" on a phone. */
+/* Grab handle - the affordance that says "this drags/dismisses" on a phone. */
 .sp-share-grip {
   width: 36px;
   height: 4px;

@@ -11,21 +11,21 @@ export interface WatermarkConfig {
   text?: string;
   /** Image URL to display instead of text */
   imageUrl?: string;
-  /** Position on the player — default: 'bottom-right' */
+  /** Position on the player - default: 'bottom-right' */
   position?: WatermarkPosition;
-  /** Opacity 0-1 — default: 0.5 */
+  /** Opacity 0-1 - default: 0.5 */
   opacity?: number;
-  /** Font size in px for text watermarks — default: 14 */
+  /** Font size in px for text watermarks - default: 14 */
   fontSize?: number;
-  /** Image height in px — default: 40. Only applies when imageUrl is set. */
+  /** Image height in px - default: 40. Only applies when imageUrl is set. */
   imageHeight?: number;
   /** Padding from edges in px. Default: 10px for top/side, 40px for bottom to clear controls. When set, applies to all positions. */
   padding?: number;
-  /** Whether to periodically move the watermark to a random position — default: false */
+  /** Whether to periodically move the watermark to a random position - default: false */
   dynamic?: boolean;
-  /** Interval in ms for dynamic repositioning — default: 10000 */
+  /** Interval in ms for dynamic repositioning - default: 10000 */
   dynamicInterval?: number;
-  /** Delay in ms before showing watermark after play — default: 0 */
+  /** Delay in ms before showing watermark after play - default: 0 */
   showDelay?: number;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;

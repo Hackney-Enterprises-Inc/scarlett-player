@@ -39,7 +39,7 @@ export interface SharePluginConfig {
    * The canonical page URL to share.
    *
    * Defaults to `window.location.href`, which is correct on an ordinary watch
-   * page. Override it when the player is not the page — most importantly inside
+   * page. Override it when the player is not the page - most importantly inside
    * an iframe embed, where `window.location.href` is the embed itself and
    * cross-origin rules prevent reading the parent.
    *

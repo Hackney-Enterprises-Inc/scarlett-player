@@ -351,7 +351,7 @@ When `data-keyboard` is enabled (default):
 - `Space` / `K` - Play/Pause
 - `M` - Mute/Unmute
 - `F` - Fullscreen
-- `←` / `→` - Seek -5s / +5s
+- `<-` / `->` - Seek -5s / +5s
 - `↑` / `↓` - Volume +10% / -10%
 
 ## Examples

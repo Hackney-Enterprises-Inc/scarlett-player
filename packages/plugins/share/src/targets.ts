@@ -36,7 +36,7 @@ export const icons: Record<string, string> = {
 const encode = encodeURIComponent;
 
 /**
- * Targets available by id. `native` and `copy` carry no `href` — the plugin
+ * Targets available by id. `native` and `copy` carry no `href` - the plugin
  * intercepts them.
  */
 export const BUILTIN_TARGETS: Record<string, ShareTarget> = {

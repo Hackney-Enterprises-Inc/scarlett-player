@@ -155,7 +155,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       case 'spacer':
         return new Spacer();
       default: {
-        // Not a built-in — fall through to whatever a plugin registered.
+        // Not a built-in - fall through to whatever a plugin registered.
         const factory = getControlFactory(slot);
         if (factory) {
           try {
@@ -175,7 +175,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   /**
    * Fill the control bar from the active layout.
    *
-   * The progress bar is deliberately excluded — it is rendered separately,
+   * The progress bar is deliberately excluded - it is rendered separately,
    * above the control bar.
    */
   const populateControlBar = (): void => {

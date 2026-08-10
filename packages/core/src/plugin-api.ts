@@ -121,7 +121,7 @@ export class PluginAPI implements IPluginAPI {
   /**
    * Register a state key this plugin owns, before first use.
    *
-   * Idempotent — re-defining an existing key keeps its current value.
+   * Idempotent - re-defining an existing key keeps its current value.
    * See {@link IPluginAPI.defineState}.
    *
    * @param key - State property key

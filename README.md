@@ -4,25 +4,25 @@
 
 **[Live Demo](https://scarlettplayer.com/demo/)** | **[Documentation](https://scarlettplayer.com/)**
 
-> **Built for [The Stream Platform](https://thestreamplatform.com)** — the official player powering live streaming, VOD, and PPV for combat sports events.
+> **Built for [The Stream Platform](https://thestreamplatform.com)** - the official player powering live streaming, VOD, and PPV for combat sports events.
 
 ## Features
 
-- **Plugin Architecture** — Modular core + plugins. Only bundle what you need.
-- **HLS Playback** — Native Safari HLS + hls.js fallback with quality selection and live DVR
+- **Plugin Architecture** - Modular core + plugins. Only bundle what you need.
+- **HLS Playback** - Native Safari HLS + hls.js fallback with quality selection and live DVR
 - **Self-Healing Playback** - Auto-reconnect with backoff, load watchdog, playlist refresh validation, structured error codes, and a retry UI; a playback fault recovers silently or offers Try Again, never a dead end
-- **Native Media** — Video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
-- **Adaptive Bitrate** — ABR with manual quality override
-- **Live Streaming** — Live indicator, DVR seeking, seek-to-live, latency tracking
-- **AirPlay & Chromecast** — Built-in casting with session management
-- **Playlists** — Queue management, shuffle, repeat modes, auto-advance
-- **Analytics** — QoE metrics, engagement tracking, beacon transport
-- **Audio Player** — Compact audio UI with artwork, progress, and media session integration
-- **Modern UI** — Video and audio controls with keyboard shortcuts and theming
-- **Vue 3 Integration** — Component wrapper and composable with reactive state
-- **CDN Embed** — Drop-in script tag, no bundler required
-- **TypeScript** — Fully typed API across all packages
-- **1,300+ Tests** — Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **Native Media** - Video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
+- **Adaptive Bitrate** - ABR with manual quality override
+- **Live Streaming** - Live indicator, DVR seeking, seek-to-live, latency tracking
+- **AirPlay & Chromecast** - Built-in casting with session management
+- **Playlists** - Queue management, shuffle, repeat modes, auto-advance
+- **Analytics** - QoE metrics, engagement tracking, beacon transport
+- **Audio Player** - Compact audio UI with artwork, progress, and media session integration
+- **Modern UI** - Video and audio controls with keyboard shortcuts and theming
+- **Vue 3 Integration** - Component wrapper and composable with reactive state
+- **CDN Embed** - Drop-in script tag, no bundler required
+- **TypeScript** - Fully typed API across all packages
+- **1,300+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -151,7 +151,7 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
 </script>
 ```
 
-[See full Vue 3 docs →](./packages/vue/README.md)
+[See full Vue 3 docs ->](./packages/vue/README.md)
 
 ## CDN Embed (No Bundler)
 
@@ -182,20 +182,21 @@ Lighter builds available: `embed.video.js` (video only) and `embed.audio.js` (au
 
 | Package | Description |
 |---------|-------------|
-| `@scarlett-player/core` | Core engine — reactive state, event bus, plugin system, error handling |
-| `@scarlett-player/hls` | HLS provider — hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
-| `@scarlett-player/native` | Native provider — video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
-| `@scarlett-player/ui` | Video UI — play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
-| `@scarlett-player/audio-ui` | Audio UI — compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
-| `@scarlett-player/airplay` | AirPlay casting — Safari AirPlay with auto-detect |
-| `@scarlett-player/chromecast` | Chromecast — Google Cast SDK, session management, remote control |
-| `@scarlett-player/analytics` | Analytics — startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport |
-| `@scarlett-player/playlist` | Playlist — queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
-| `@scarlett-player/media-session` | Media Session — lock screen controls, media keys, album art, seek bar |
-| `@scarlett-player/captions` | Captions — WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
-| `@scarlett-player/watermark` | Watermark — anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning |
-| `@scarlett-player/vue` | Vue 3 — `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
-| `@scarlett-player/embed` | CDN embed — auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
+| `@scarlett-player/core` | Core engine - reactive state, event bus, plugin system, error handling |
+| `@scarlett-player/hls` | HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
+| `@scarlett-player/native` | Native provider - video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
+| `@scarlett-player/ui` | Video UI - play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
+| `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
+| `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
+| `@scarlett-player/chromecast` | Chromecast - Google Cast SDK, session management, remote control |
+| `@scarlett-player/analytics` | Analytics - startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport |
+| `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
+| `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
+| `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
+| `@scarlett-player/watermark` | Watermark - anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning |
+| `@scarlett-player/share` | Share - native share sheet on mobile, copy link, social targets, embed codes, playback timestamps |
+| `@scarlett-player/vue` | Vue 3 - `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
+| `@scarlett-player/embed` | CDN embed - auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
 
 ## Keyboard Shortcuts
 
@@ -232,7 +233,7 @@ UI packages.
 import { registerControl } from '@scarlett-player/ui';
 import type { IPluginAPI, Plugin } from '@scarlett-player/core';
 
-// 1. Your own events — PlayerEventMap is open for declaration merging
+// 1. Your own events - PlayerEventMap is open for declaration merging
 declare module '@scarlett-player/core' {
   interface PlayerEventMap {
     'example:started': { at: number };
@@ -260,7 +261,7 @@ export function createExamplePlugin(): Plugin {
 }
 ```
 
-The host decides where the control appears — registering alone does not place a
+The host decides where the control appears - registering alone does not place a
 button anywhere:
 
 ```typescript
@@ -299,7 +300,7 @@ node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture on
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning — all 14 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 14 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -311,7 +312,7 @@ pnpm release          # Build + publish to npm
 
 ```
 packages/
-  core/             # Core engine — state, events, plugins, error handling
+  core/             # Core engine - state, events, plugins, error handling
   plugins/
     hls/            # HLS provider (hls.js + native Safari)
     native/         # Native media (video + audio formats)
@@ -358,15 +359,15 @@ scripts/            # Browser verification harness + HLS fixture generator
 - [x] Closed captions (WebVTT)
 - [x] Anti-piracy watermark overlay
 - [x] Self-healing error recovery (auto-reconnect, load watchdog, playlist validation, PiP readiness gate)
-- [ ] Mobile gesture controls (double-tap seek, swipe) — Sprint 1
-- [ ] DRM support — Sprint 2
-- [ ] Low-latency HLS (LL-HLS) — Sprint 2
-- [ ] Internationalization (i18n) — Sprint 2
-- [ ] React component wrapper — Sprint 3
-- [ ] Web Component wrapper — Sprint 3
+- [ ] Mobile gesture controls (double-tap seek, swipe) - Sprint 1
+- [ ] DRM support - Sprint 2
+- [ ] Low-latency HLS (LL-HLS) - Sprint 2
+- [ ] Internationalization (i18n) - Sprint 2
+- [ ] React component wrapper - Sprint 3
+- [ ] Web Component wrapper - Sprint 3
 
 ## License
 
-MIT License — see [LICENSE](./LICENSE).
+MIT License - see [LICENSE](./LICENSE).
 
 Inspired by [Vidstack Player](https://github.com/vidstack/player) (Copyright 2023 Rahim Alwer, MIT License).

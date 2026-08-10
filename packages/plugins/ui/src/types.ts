@@ -30,7 +30,7 @@ export type BuiltinControlSlot =
  * {@link registerControl}.
  *
  * `string & {}` keeps editor autocomplete listing the built-ins while still
- * accepting custom ids — a plain `| string` would collapse the union and lose
+ * accepting custom ids - a plain `| string` would collapse the union and lose
  * the suggestions.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types
