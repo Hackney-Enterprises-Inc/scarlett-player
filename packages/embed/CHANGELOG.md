@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0
+
+### Patch Changes
+
+- Updated dependencies [[`61230aa`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/61230aaca8bc8dcbbeb48d662a4f53f8d2c2a46c)]:
+  - @scarlett-player/core@1.4.0
+  - @scarlett-player/ui@1.4.0
+  - @scarlett-player/analytics@1.4.0
+  - @scarlett-player/audio-ui@1.4.0
+  - @scarlett-player/captions@1.4.0
+  - @scarlett-player/hls@1.4.0
+  - @scarlett-player/media-session@1.4.0
+  - @scarlett-player/playlist@1.4.0
+  - @scarlett-player/watermark@1.4.0
+
 ## 1.3.0
 
 ### Patch Changes
