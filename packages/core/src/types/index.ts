@@ -18,6 +18,7 @@ export type {
 // State Types
 export type {
   StateStore,
+  CoreStateStore,
   StateKey,
   StateValue,
   StateUpdate,

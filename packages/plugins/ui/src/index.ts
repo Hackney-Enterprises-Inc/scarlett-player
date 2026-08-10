@@ -34,15 +34,24 @@ import {
   ErrorOverlay,
   BandwidthIndicator,
 } from './controls';
+import { getControlFactory, onControlRegistered } from './control-registry';
 
 export type {
   IUIPlugin,
   ControlSlot,
+  BuiltinControlSlot,
+  ControlFactory,
   LayoutConfig,
   ThemeConfig,
   UIPluginConfig,
   Control,
 } from './types';
+export {
+  registerControl,
+  unregisterControl,
+  getControlFactory,
+  resetControlRegistry,
+} from './control-registry';
 export { icons } from './icons';
 export { styles } from './styles';
 export { formatTime, formatLiveTime } from './utils';
@@ -97,6 +106,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let controls: Control[] = [];
   let hideTimeout: ReturnType<typeof setTimeout> | null = null;
   let stateUnsubscribe: (() => void) | null = null;
+  let controlRegistryUnsubscribe: (() => void) | null = null;
   let errorUnsubscribe: (() => void) | null = null;
   let reconnectingUnsubscribe: (() => void) | null = null;
   let recoveredUnsubscribe: (() => void) | null = null;
@@ -144,9 +154,62 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         return new FullscreenButton(api);
       case 'spacer':
         return new Spacer();
-      default:
+      default: {
+        // Not a built-in — fall through to whatever a plugin registered.
+        const factory = getControlFactory(slot);
+        if (factory) {
+          try {
+            return factory(api);
+          } catch (error) {
+            api.logger.error(`Control factory for "${slot}" threw`, { error });
+            return null;
+          }
+        }
+
+        api.logger.warn(`Unknown control slot: ${slot}`);
         return null;
+      }
     }
+  };
+
+  /**
+   * Fill the control bar from the active layout.
+   *
+   * The progress bar is deliberately excluded — it is rendered separately,
+   * above the control bar.
+   */
+  const populateControlBar = (): void => {
+    if (!controlBar) {
+      return;
+    }
+
+    for (const slot of layout) {
+      const control = createControl(slot);
+      if (control) {
+        controls.push(control);
+        controlBar.appendChild(control.render());
+      }
+    }
+  };
+
+  /**
+   * Tear down and rebuild the control bar in place.
+   *
+   * Used when a control in this layout registers after init. Rebuilding the
+   * whole bar rather than splicing one control in keeps the rendered order
+   * matching the configured layout.
+   */
+  const rebuildControlBar = (): void => {
+    if (!controlBar) {
+      return;
+    }
+
+    controls.forEach((c) => c.destroy());
+    controls = [];
+    controlBar.replaceChildren();
+
+    populateControlBar();
+    updateControls();
   };
 
   /**
@@ -418,15 +481,20 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       controlBar.setAttribute('aria-label', 'Video controls');
 
       // Create controls (excluding progress bar which is separate)
-      for (const slot of layout) {
-        const control = createControl(slot);
-        if (control) {
-          controls.push(control);
-          controlBar.appendChild(control.render());
-        }
-      }
+      populateControlBar();
 
       container.appendChild(controlBar);
+
+      // Plugin init order is not guaranteed, so a control this layout asks for
+      // may register after the bar was already built. Rebuild when that happens.
+      controlRegistryUnsubscribe = onControlRegistered((id) => {
+        if (!layout.includes(id)) {
+          return;
+        }
+
+        api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
+        rebuildControlBar();
+      });
 
       // Set up interaction handlers
       container.addEventListener('mousemove', handleInteraction);
@@ -497,6 +565,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       }
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('fullscreenchange', scheduleUpdate);
+
+      controlRegistryUnsubscribe?.();
+      controlRegistryUnsubscribe = null;
 
       // Destroy controls
       controls.forEach((c) => c.destroy());

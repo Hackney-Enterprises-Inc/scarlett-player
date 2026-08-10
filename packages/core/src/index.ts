@@ -51,6 +51,7 @@ export type {
   IPluginAPI,
   // State Types
   StateStore,
+  CoreStateStore,
   StateKey,
   StateValue,
   StateUpdate,

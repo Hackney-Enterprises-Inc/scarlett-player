@@ -223,6 +223,53 @@ uiPlugin({
 });
 ```
 
+## Writing a Plugin
+
+Plugins add events, state, and control-bar controls without editing the core or
+UI packages.
+
+```typescript
+import { registerControl } from '@scarlett-player/ui';
+import type { IPluginAPI, Plugin } from '@scarlett-player/core';
+
+// 1. Your own events — PlayerEventMap is open for declaration merging
+declare module '@scarlett-player/core' {
+  interface PlayerEventMap {
+    'example:started': { at: number };
+  }
+  interface StateStore {
+    exampleActive: boolean;
+  }
+}
+
+// 2. Your own control
+registerControl('example', (api) => new ExampleButton(api));
+
+export function createExamplePlugin(): Plugin {
+  return {
+    id: 'example',
+    name: 'Example',
+    version: '1.0.0',
+    type: 'feature',
+    init(api: IPluginAPI) {
+      api.defineState('exampleActive', false);  // state needs registering
+      api.emit('example:started', { at: 0 });
+    },
+    destroy() {},
+  };
+}
+```
+
+The host decides where the control appears — registering alone does not place a
+button anywhere:
+
+```typescript
+uiPlugin({ controls: ['play', 'volume', 'time', 'spacer', 'example', 'fullscreen'] })
+```
+
+Namespace your events and state keys with the plugin id. Order does not matter:
+a control registered after the control bar was built triggers a rebuild.
+
 ## Development
 
 ```bash

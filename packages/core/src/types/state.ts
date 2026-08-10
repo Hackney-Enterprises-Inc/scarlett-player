@@ -154,10 +154,14 @@ export interface SeekableRange {
 }
 
 /**
- * Complete player state store.
- * In StateManager, each property will be wrapped in a Signal<T>.
+ * The state the core player owns.
+ *
+ * Kept separate from {@link StateStore} so `DEFAULT_STATE` can stay exhaustive
+ * over exactly these keys. If defaults were typed against the open store, any
+ * plugin augmenting it would break core's own compilation with a confusing
+ * "missing properties" error.
  */
-export interface StateStore {
+export interface CoreStateStore {
   // === Core Playback State ===
   /** Current playback state */
   playbackState: PlaybackState;
@@ -315,6 +319,24 @@ export interface StateStore {
   /** Whether player is in focus */
   focused: boolean;
 }
+
+/**
+ * Complete player state store.
+ * In StateManager, each property will be wrapped in a Signal<T>.
+ *
+ * Open for extension: a plugin adds the state it owns by declaration merging,
+ * then registers it at runtime with `api.defineState()`. Namespace added keys
+ * with the plugin's name.
+ *
+ * ```ts
+ * declare module '@scarlett-player/core' {
+ *   interface StateStore {
+ *     highlightSelection: { start: number; end: number } | null;
+ *   }
+ * }
+ * ```
+ */
+export interface StateStore extends CoreStateStore {}
 
 /**
  * Type-safe state keys.
