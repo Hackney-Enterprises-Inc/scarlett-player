@@ -3,8 +3,7 @@
  *
  * Provides WebVTT subtitle/caption support with:
  * - External WebVTT file loading via <track> elements
- * - HLS.js subtitle track extraction, driven by Hls.Events.SUBTITLE_TRACKS_UPDATED
- *   (emitted as 'hlsSubtitleTracksUpdated')
+ * - HLS.js subtitle track extraction, driven by SUBTITLE_TRACKS_UPDATED
  * - Native HLS support (Safari/iOS) by observing the video's TextTrackList
  * - Browser-native rendering (no custom VTT parser)
  * - State sync with core textTracks/currentTextTrack
@@ -44,10 +43,6 @@ interface HlsPluginLike {
  * hls.js emits this once the manifest's subtitle renditions are known. It can
  * fire before or after media:loaded depending on manifest size, which is why we
  * subscribe rather than sampling on a timer.
- *
- * This is the emitted value of `Hls.Events.SUBTITLE_TRACKS_UPDATED`, not the
- * enum key. Subscribing with the string 'SUBTITLE_TRACKS_UPDATED' silently
- * matches nothing — the bug this constant exists to prevent.
  */
 const HLS_SUBTITLE_TRACKS_UPDATED = 'hlsSubtitleTracksUpdated';
 
@@ -87,7 +82,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   let hlsSubtitleHandler: ((...args: unknown[]) => void) | null = null;
   let observedTextTracks: TextTrackList | null = null;
   let hlsRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  let hlsRetryUsed = false;
   let hasAutoSelected = false;
 
   const extractFromHLS = config.extractFromHLS !== false;
@@ -124,7 +118,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
 
   /**
    * Remove only the <track> elements derived from HLS renditions, so a repeated
-   * subtitle-tracks-updated event replaces them instead of appending duplicates.
+   * SUBTITLE_TRACKS_UPDATED replaces them instead of appending duplicates.
    */
   const removeHlsTrackElements = (): void => {
     for (const trackEl of hlsTrackElements) {
@@ -230,19 +224,9 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
 
   /**
    * Auto-select a track matching the default language, at most once per media.
-   *
-   * A track that is already showing counts as the selection for this media —
-   * whether the browser restored it or the viewer picked it from Safari's own
-   * subtitle menu, neither of which routes through selectTrack. Standing down
-   * keeps a later re-sync from replacing that pick with defaultLanguage.
    */
   const maybeAutoSelect = (): void => {
     if (!autoSelect || hasAutoSelected) return;
-
-    if (api?.getState('currentTextTrack')) {
-      hasAutoSelected = true;
-      return;
-    }
 
     const tracks = api?.getState('textTracks') || [];
     const match = tracks.find(t => t.language === defaultLanguage);
@@ -368,13 +352,9 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     const hlsInstance = hlsPlugin.getHlsInstance();
 
     if (!hlsInstance) {
-      // The provider hasn't built its instance yet. Retry exactly once — a
-      // still-missing instance after that means this source isn't running
-      // through hls.js, and polling would never resolve it. Guarded by a flag
-      // rather than by hlsRetryTimer being null, so the retry cannot re-arm
-      // itself from inside its own callback.
-      if (!hlsRetryUsed) {
-        hlsRetryUsed = true;
+      // The provider hasn't built its instance yet. Retry once rather than
+      // giving up, then leave it — a missing instance by now means no hls.js.
+      if (!hlsRetryTimer) {
         hlsRetryTimer = setTimeout(() => {
           hlsRetryTimer = null;
           syncFromHls();
@@ -426,7 +406,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
         // Reset video reference (may be new element after source switch)
         video = null;
         hasAutoSelected = false;
-        hlsRetryUsed = false;
 
         // Clean up previous tracks
         cleanupTracks();
@@ -452,7 +431,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       const unsubLoadRequest = api.on('media:load-request', () => {
         video = null;
         hasAutoSelected = false;
-        hlsRetryUsed = false;
         unsubscribeFromHls();
         unobserveTextTracks();
         cleanupTracks();

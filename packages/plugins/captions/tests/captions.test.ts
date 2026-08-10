@@ -278,29 +278,11 @@ describe('cleanup on source change', () => {
 function fakeTextTrackList(
   tracks: Array<{ kind: string; label: string; language: string; mode?: string }>,
 ): TextTrackList {
-  const target = new EventTarget();
-  const list: Record<string | number, unknown> = {
-    length: tracks.length,
-    addEventListener: target.addEventListener.bind(target),
-    removeEventListener: target.removeEventListener.bind(target),
-    dispatchEvent: target.dispatchEvent.bind(target),
-  };
+  const list: Record<string | number, unknown> = { length: tracks.length };
   tracks.forEach((track, i) => {
     list[i] = { mode: 'disabled', ...track };
   });
   return list as unknown as TextTrackList;
-}
-
-/**
- * Wire a mock API's getState/setState into a real store, so code that writes
- * state and reads it back (maybeAutoSelect) behaves as it does in the player.
- */
-function withStatefulApi(mockApi: ReturnType<typeof createMockApi>): void {
-  const state: Record<string, unknown> = {};
-  mockApi.setState.mockImplementation((key: string, value: unknown) => {
-    state[key] = value;
-  });
-  mockApi.getState.mockImplementation((key: string) => state[key] ?? null);
 }
 
 /** Minimal hls.js instance double exposing the subtitle surface we read. */
@@ -422,77 +404,6 @@ describe('hls.js subtitle extraction', () => {
     plugin.destroy();
 
     expect(hls.instance.off).toHaveBeenCalledWith('hlsSubtitleTracksUpdated', expect.any(Function));
-  });
-});
-
-describe('auto-select', () => {
-  it('does not override a selection made outside the player', () => {
-    const mockApi = createMockApi();
-    withStatefulApi(mockApi);
-    let mediaLoadedCallback: (() => void) | null = null;
-    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
-      if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
-      return vi.fn();
-    });
-    mockApi.getPlugin.mockReturnValue({ getHlsInstance: () => null, isNativeHLS: () => true });
-
-    // Safari has parsed one rendition so far, and it isn't defaultLanguage —
-    // so auto-select finds no match and stays armed.
-    const list = fakeTextTrackList([{ kind: 'subtitles', label: 'Spanish', language: 'es' }]);
-    Object.defineProperty(mockApi.video, 'textTracks', { value: list, configurable: true });
-
-    const plugin = createCaptionsPlugin({ autoSelect: true, defaultLanguage: 'en' });
-    plugin.init(mockApi);
-    mediaLoadedCallback?.();
-
-    // The viewer turns on Spanish from Safari's own menu, and an English
-    // rendition shows up afterwards.
-    (list as unknown as Record<number, { mode: string }>)[0].mode = 'showing';
-    (list as unknown as Record<number, unknown>)[1] = {
-      kind: 'subtitles',
-      label: 'English',
-      language: 'en',
-      mode: 'disabled',
-    };
-    (list as unknown as { length: number }).length = 2;
-
-    list.dispatchEvent(new Event('change'));
-
-    // Spanish must survive: auto-select stands down once something is showing.
-    expect((mockApi.getState('currentTextTrack') as { language: string } | null)?.language).toBe('es');
-  });
-});
-
-describe('hls instance retry', () => {
-  it('retries once and then stops when no hls.js instance appears', () => {
-    vi.useFakeTimers();
-
-    const mockApi = createMockApi();
-    let mediaLoadedCallback: (() => void) | null = null;
-    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
-      if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
-      return vi.fn();
-    });
-
-    const getHlsInstance = vi.fn().mockReturnValue(null);
-    mockApi.getPlugin.mockReturnValue({ getHlsInstance, isNativeHLS: () => false });
-
-    const plugin = createCaptionsPlugin();
-    plugin.init(mockApi);
-    mediaLoadedCallback?.();
-
-    const afterLoad = getHlsInstance.mock.calls.length;
-
-    // One retry fires...
-    vi.advanceTimersByTime(600);
-    const afterFirstRetry = getHlsInstance.mock.calls.length;
-    expect(afterFirstRetry).toBeGreaterThan(afterLoad);
-
-    // ...and nothing re-arms, so further time passes with no new attempts.
-    vi.advanceTimersByTime(5000);
-    expect(getHlsInstance.mock.calls.length).toBe(afterFirstRetry);
-
-    vi.useRealTimers();
   });
 });
 

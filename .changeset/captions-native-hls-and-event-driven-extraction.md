@@ -8,4 +8,4 @@ Subtitle renditions are picked up from hls.js via its `hlsSubtitleTracksUpdated`
 
 On the native HLS path (Safari and iOS), extraction previously returned early and nothing synced the track list, leaving `textTracks` empty and the captions button hidden even though the browser had parsed the renditions itself. The plugin now observes the video's `TextTrackList` and syncs once on load, so browser-created tracks reach player state and become selectable. Selection made outside the player — Safari's own subtitle menu — is reflected back into state too.
 
-Auto-select is now applied at most once per media item, and stands down entirely when a track is already showing — so a selection made outside the player, such as from Safari's own subtitle menu, is never replaced with the default language.
+Auto-select is now applied at most once per media item, so a re-sync can't override an explicit choice with the default language.
