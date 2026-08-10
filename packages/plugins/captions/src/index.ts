@@ -83,7 +83,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   let api: IPluginAPI | null = null;
   let video: HTMLVideoElement | null = null;
   let addedTrackElements: HTMLTrackElement[] = [];
-  let hlsTrackElements: HTMLTrackElement[] = [];
   let hlsSubtitleHandler: ((...args: unknown[]) => void) | null = null;
   let observedTextTracks: TextTrackList | null = null;
   let hlsRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,7 +114,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       trackEl.parentNode?.removeChild(trackEl);
     }
     addedTrackElements = [];
-    hlsTrackElements = [];
 
     // Reset state
     api?.setState('textTracks', []);
@@ -123,24 +121,14 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   };
 
   /**
-   * Remove only the <track> elements derived from HLS renditions, so a repeated
-   * subtitle-tracks-updated event replaces them instead of appending duplicates.
-   */
-  const removeHlsTrackElements = (): void => {
-    for (const trackEl of hlsTrackElements) {
-      trackEl.parentNode?.removeChild(trackEl);
-      addedTrackElements = addedTrackElements.filter(el => el !== trackEl);
-    }
-    hlsTrackElements = [];
-  };
-
-  /**
    * Add a <track> element to the video.
    *
+   * Only ever used for externally configured sources, which are real `.vtt` URLs. HLS renditions
+   * are NOT added this way - hls.js creates and drives those itself (see extractHlsSubtitles).
+   *
    * @param source - Caption source to attach
-   * @param origin - Where the source came from; 'hls' tracks can be replaced independently
    */
-  const addTrackElement = (source: CaptionSource, origin: 'config' | 'hls' = 'config'): HTMLTrackElement => {
+  const addTrackElement = (source: CaptionSource): HTMLTrackElement => {
     const videoEl = getVideo();
     if (!videoEl) throw new Error('No video element');
 
@@ -153,9 +141,6 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
 
     videoEl.appendChild(trackEl);
     addedTrackElements.push(trackEl);
-    if (origin === 'hls') {
-      hlsTrackElements.push(trackEl);
-    }
 
     // Ensure the track starts disabled
     if (trackEl.track) {
@@ -315,24 +300,24 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     const hlsInstance = hlsPlugin.getHlsInstance();
     if (!hlsInstance?.subtitleTracks?.length) return;
 
-    api.logger.debug('Extracting HLS subtitle tracks', {
+    api.logger.debug('Syncing HLS subtitle tracks', {
       count: hlsInstance.subtitleTracks.length,
     });
 
-    removeHlsTrackElements();
-
-    for (const hlsTrack of hlsInstance.subtitleTracks) {
-      addTrackElement(
-        {
-          language: hlsTrack.lang || 'unknown',
-          label: hlsTrack.name || `Subtitle ${hlsTrack.id}`,
-          src: hlsTrack.url,
-          kind: 'subtitles',
-        },
-        'hls',
-      );
-    }
-
+    // We do NOT create track elements for these. hls.js owns its subtitle renditions: with
+    // renderTextTracksNatively (its default) it has already created a TextTrack per rendition and
+    // fetches and parses the VTT segments itself, so they are in videoEl.textTracks before we get
+    // here and syncTracksToState() below picks them up.
+    //
+    // Appending a <track> per rendition duplicated every entry in the picker, and our copy was dead
+    // on arrival: hlsTrack.url is the rendition PLAYLIST (subs/en.m3u8), which a <track> element
+    // cannot parse as WebVTT, so it produced zero cues. Measured in production 2026-08-10 on a
+    // premium HLS asset:
+    //
+    //   0 'English' 'disabled' undefined   <- ours
+    //   1 'English' 'showing'  110         <- hls.js's
+    //
+    // The viewer saw two identical "English" options, one of which did nothing.
     syncTracksToState();
     maybeAutoSelect();
   };
@@ -397,7 +382,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     if (!config.sources?.length) return;
 
     for (const source of config.sources) {
-      addTrackElement(source, 'config');
+      addTrackElement(source);
     }
   };
 
