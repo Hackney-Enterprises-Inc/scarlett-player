@@ -48,3 +48,11 @@ Thumbs.db
 
 # Generated test fixtures (recreate with: node scripts/hls-fixture.mjs)
 scripts/fixtures/
+
+# Demo source maps (recreate with: node demo/build.cjs)
+# The bundles themselves stay tracked - docs/demo/ is what Forge serves at
+# scarlettplayer.com, and release.yml commits a rebuild on every push to main.
+# The maps are 3MB debug artifacts nothing serves, so tracking them only ever
+# produced merge conflicts against that bot commit.
+demo/demo.bundle.js.map
+docs/demo/demo.bundle.js.map
