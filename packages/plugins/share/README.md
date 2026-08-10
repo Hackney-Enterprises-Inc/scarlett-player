@@ -47,7 +47,7 @@ createSharePlugin({
 This is the case the override exists for. Inside `iframe.html`, `window.location.href` is the *player* page, and cross-origin rules prevent reading the parent - so the plugin cannot work out the real page on its own. Pass it in:
 
 ```html
-<iframe src="https://cdn.example.com/iframe.html?src=...&shareUrl=https%3A%2F%2Fexample.com%2Fwatch%2Fabc"></iframe>
+<iframe src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=...&shareUrl=https%3A%2F%2Fexample.com%2Fwatch%2Fabc"></iframe>
 ```
 
 The `embed` target generates snippets with `shareUrl` already set.

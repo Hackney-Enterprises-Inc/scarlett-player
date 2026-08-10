@@ -54,10 +54,10 @@
 - [#30](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/30) [`42b224b`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/42b224b65270277e28097af5d31f69a3c24ab471) Thanks [@alexhackney](https://github.com/alexhackney)! - Stability, accessibility, and test coverage improvements
 
   **Bug Fixes:**
-  - Fix memory leak in effect system — unsubscribe now properly removes effects from all signal subscriber sets
-  - Fix analytics avgBitrate calculation — was dividing by total watch time (including paused), now uses actual playback time span
-  - Fix race condition in load() — concurrent load calls no longer cause undefined behavior; stale loads are discarded
-  - Add stall detection to native provider — handles `stalled`, `suspend`, and `abort` media events
+  - Fix memory leak in effect system - unsubscribe now properly removes effects from all signal subscriber sets
+  - Fix analytics avgBitrate calculation - was dividing by total watch time (including paused), now uses actual playback time span
+  - Fix race condition in load() - concurrent load calls no longer cause undefined behavior; stale loads are discarded
+  - Add stall detection to native provider - handles `stalled`, `suspend`, and `abort` media events
 
   **Accessibility (WCAG):**
   - Add keyboard navigation to SettingsMenu (Arrow Up/Down, Enter/Space, Escape, focus trap)

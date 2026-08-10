@@ -157,14 +157,14 @@ describe('bandwidth state from FRAG_LOADED', () => {
     mockHls.bandwidthEstimate = 3_000_000;
     const handler = mockHls.handlers['hlsFragLoaded'];
 
-    // First call — should update
+    // First call - should update
     handler('hlsFragLoaded', {});
     expect(mockApi.setState).toHaveBeenCalledWith('bandwidth', 3_000_000);
 
     // Reset to track subsequent calls
     (mockApi.setState as any).mockClear();
 
-    // Call again immediately — should be throttled
+    // Call again immediately - should be throttled
     mockHls.bandwidthEstimate = 4_000_000;
     handler('hlsFragLoaded', {});
     expect(mockApi.setState).not.toHaveBeenCalledWith('bandwidth', expect.any(Number));
@@ -172,7 +172,7 @@ describe('bandwidth state from FRAG_LOADED', () => {
     // Advance 2 seconds
     vi.advanceTimersByTime(2000);
 
-    // Call again — should update now
+    // Call again - should update now
     mockHls.bandwidthEstimate = 4_500_000;
     handler('hlsFragLoaded', {});
     expect(mockApi.setState).toHaveBeenCalledWith('bandwidth', 4_500_000);
@@ -201,7 +201,7 @@ describe('capLevelToPlayerSize config', () => {
   it('should be included in HLSPluginConfig type', async () => {
     // Type-level test: verify the config accepts capLevelToPlayerSize
     const { createHLSPlugin } = await import('../src/index');
-    // Should not throw — config is accepted
+    // Should not throw - config is accepted
     const plugin = createHLSPlugin({ capLevelToPlayerSize: false });
     expect(plugin.id).toBe('hls-provider');
   });

@@ -879,7 +879,7 @@ describe('auto-advance', () => {
     // Without calling play(), initialIndex should already be 0
     expect(plugin.getCurrentTrack()?.title).toBe('Track 1');
 
-    // Simulate playback ended — should advance to Track 2, not replay Track 1
+    // Simulate playback ended - should advance to Track 2, not replay Track 1
     endedCallback?.();
     expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
   });

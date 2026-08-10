@@ -6,11 +6,11 @@
 
 - [#62](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/62) [`044114c`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/044114ca29c675c4dea643882b966a27bb1b6afa) Thanks [@alexhackney](https://github.com/alexhackney)! - New package: `@scarlett-player/share`.
 
-  A share control for the player — the OS share sheet on mobile, copy link, social targets, embed codes, and playback timestamps. Zero configuration shares the current page URL with the position appended; the host adds `'share'` to its control layout to place the button.
+  A share control for the player - the OS share sheet on mobile, copy link, social targets, embed codes, and playback timestamps. Zero configuration shares the current page URL with the position appended; the host adds `'share'` to its control layout to place the button.
 
   **Mobile is the primary path.** Where `navigator.share` exists and no custom target list is configured, tapping the button opens the native sheet directly rather than putting an in-player menu in front of it. When the in-player sheet is used it is a bottom sheet within thumb reach, with a grab handle and `env(safe-area-inset-bottom)` honoured, promoting to a popover at 640px and up. Targets are 72px tall with press rather than hover states, the manual-copy fallback uses 16px text so iOS Safari does not zoom the viewport, and `prefers-reduced-motion` is respected. The sheet renders inside the player container so it survives fullscreen, traps focus, closes on Escape, and restores focus to the button.
 
-  **What gets shared is the page, never the media `src`.** Playback URLs are frequently signed, so sharing one would leak a credential and produce a link that expires. There is no configuration or code path that falls back to `src`, and a test asserts it. The URL defaults to `window.location.href` and is overridable — which matters most inside `iframe.html`, where `window.location.href` is the player page and cross-origin rules block reading the parent. `@scarlett-player/embed` now accepts a `shareUrl` parameter for exactly that, and the `embed` target generates snippets with it already set.
+  **What gets shared is the page, never the media `src`.** Playback URLs are frequently signed, so sharing one would leak a credential and produce a link that expires. There is no configuration or code path that falls back to `src`, and a test asserts it. The URL defaults to `window.location.href` and is overridable - which matters most inside `iframe.html`, where `window.location.href` is the player page and cross-origin rules block reading the parent. `@scarlett-player/embed` now accepts a `shareUrl` parameter for exactly that, and the `embed` target generates snippets with it already set.
 
   Timestamps are applied through the URL API, so an existing query string or fragment survives and re-sharing replaces the previous timestamp instead of appending a second. Live media never gets one, since an offset into a sliding DVR window is meaningless to the recipient. A dismissed native sheet rejects with `AbortError` and is treated as a choice rather than an error, and the clipboard falls back through `execCommand` to showing the link for manual copying.
 
@@ -158,8 +158,8 @@
   - Core player listens for `media:load-request` and routes load to local player (skips when Chromecast is active)
 
   **Playlist:**
-  - New `autoLoad` config option (default: `true`) — automatically emits `media:load-request` on track change, eliminating the need for manual `player.load()` wiring
-  - New `advanceDelay` config option — milliseconds to wait before auto-advancing to next track
+  - New `autoLoad` config option (default: `true`) - automatically emits `media:load-request` on track change, eliminating the need for manual `player.load()` wiring
+  - New `advanceDelay` config option - milliseconds to wait before auto-advancing to next track
   - Removed all `as any` casts from event emissions (events now typed in core)
 
   **Chromecast:**
@@ -215,22 +215,22 @@
 
   **Bug Fixes:**
   - Fix MIME type detection for URLs with query params/fragments (e.g., `video.m3u8?token=abc`)
-  - Fix spinner stuck on screen — `playing` event handler now clears `waiting` and `buffering` states
-  - Fix `setPlaybackRate()` accepting invalid values — now clamped to 0.0625–16 range
-  - Fix `setQuality()` accepting out-of-bounds indices — now validates against available quality levels
-  - Fix analytics memory leak — cap `errors` array at 100 and `bitrateHistory` at 500 entries for long sessions
+  - Fix spinner stuck on screen - `playing` event handler now clears `waiting` and `buffering` states
+  - Fix `setPlaybackRate()` accepting invalid values - now clamped to 0.0625-16 range
+  - Fix `setQuality()` accepting out-of-bounds indices - now validates against available quality levels
+  - Fix analytics memory leak - cap `errors` array at 100 and `bitrateHistory` at 500 entries for long sessions
   - Fix HLS error test expecting `logger.warn` for fatal errors (should be `logger.error`)
   - Fix demo page crash when `getState` called before player initialization
 
   **Live DVR:**
-  - Wire up `seekableRange`, `liveEdge`, and `liveLatency` state in HLS plugin — existing UI controls (LiveIndicator, ProgressBar DVR, TimeDisplay, SkipButton) now receive live stream data
+  - Wire up `seekableRange`, `liveEdge`, and `liveLatency` state in HLS plugin - existing UI controls (LiveIndicator, ProgressBar DVR, TimeDisplay, SkipButton) now receive live stream data
 
   **Dependencies:**
   - Remove unused `hls.js` dependency from `@scarlett-player/core`
   - Align `hls.js` versions: embed and HLS plugin dev dep updated to `^1.6.0`, peer dep to `^1.5.0`
 
   **Docs:**
-  - Update README roadmap — mark captions and mobile gestures as planned (Sprint 1), add Sprint 2/3 items
+  - Update README roadmap - mark captions and mobile gestures as planned (Sprint 1), add Sprint 2/3 items
   - Update CHANGELOG with entries for versions 0.3.0 through 0.5.2
   - Update package version table to 0.5.2
 
