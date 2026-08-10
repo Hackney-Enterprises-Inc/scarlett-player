@@ -60,7 +60,7 @@ describe('PlayerEventMap extension', () => {
     const handler = vi.fn();
 
     // Cast stands in for a plugin whose augmentation is not visible here.
-    // Emitting an unknown name must be inert, never a throw — that runtime
+    // Emitting an unknown name must be inert, never a throw - that runtime
     // openness is what makes declaration merging sufficient on its own.
     bus.on('plugin:not-in-the-map' as never, handler);
     expect(() => bus.emit('plugin:not-in-the-map' as never, undefined as never)).not.toThrow();

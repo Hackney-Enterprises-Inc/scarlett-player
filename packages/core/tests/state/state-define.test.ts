@@ -1,5 +1,5 @@
 /**
- * StateManager.define() — runtime registration of plugin-owned state keys.
+ * StateManager.define() - runtime registration of plugin-owned state keys.
  *
  * Core cannot know every plugin's state keys, and get() throws for anything
  * unregistered. define() is how a plugin opts a key in.
@@ -54,7 +54,7 @@ describe('StateManager.define', () => {
     expect(changes[0]?.value).toBe(3);
   });
 
-  it('is idempotent — re-defining keeps the live value', () => {
+  it('is idempotent - re-defining keeps the live value', () => {
     state.define('testPluginValue', 1);
     state.set('testPluginValue', 42);
 
@@ -73,7 +73,7 @@ describe('StateManager.define', () => {
     state.define('testPluginValue', 0);
     state.set('testPluginValue', 1);
 
-    // One notification, not two — re-defining must not stack another
+    // One notification, not two - re-defining must not stack another
     // signal subscription onto the same key.
     expect(subscriber).toHaveBeenCalledTimes(1);
   });

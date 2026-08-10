@@ -7,10 +7,10 @@ This project uses [Changesets](https://github.com/changesets/changesets) for ver
 ## [0.5.2] - 2025-10-15
 
 ### Fixed
-- Fix memory leak in effect system — unsubscribe now properly removes effects from all signal subscriber sets
-- Fix analytics avgBitrate calculation — was dividing by total watch time (including paused), now uses actual playback time span
-- Fix race condition in load() — concurrent load calls no longer cause undefined behavior; stale loads are discarded
-- Add stall detection to native provider — handles `stalled`, `suspend`, and `abort` media events
+- Fix memory leak in effect system - unsubscribe now properly removes effects from all signal subscriber sets
+- Fix analytics avgBitrate calculation - was dividing by total watch time (including paused), now uses actual playback time span
+- Fix race condition in load() - concurrent load calls no longer cause undefined behavior; stale loads are discarded
+- Add stall detection to native provider - handles `stalled`, `suspend`, and `abort` media events
 
 ### Added
 - **Accessibility (WCAG):**
@@ -19,7 +19,7 @@ This project uses [Changesets](https://github.com/changesets/changesets) for ver
   - Descriptive ARIA labels to LiveIndicator (not just color-dependent)
   - aria-valuetext to VolumeControl and default ARIA values to ProgressBar
   - Comprehensive ARIA labels to all Audio UI interactive elements
-- **Test Coverage:** 105 new tests for UI controls — total: 1,214 tests
+- **Test Coverage:** 105 new tests for UI controls - total: 1,214 tests
 
 ## [0.5.1] - 2025-10-10
 
@@ -58,7 +58,7 @@ This project uses [Changesets](https://github.com/changesets/changesets) for ver
 ## [0.3.0] - 2025-08-01
 
 ### Added
-- **@scarlett-player/analytics** — QoE metrics and engagement tracking plugin
+- **@scarlett-player/analytics** - QoE metrics and engagement tracking plugin
   - Viewer session tracking (startup time, rebuffer ratio, error rate)
   - Engagement metrics (watch time, pause/seek counts)
   - Quality tracking (bitrate history, quality changes)
@@ -182,22 +182,16 @@ This project uses [Changesets](https://github.com/changesets/changesets) for ver
 
 ## Package Versions
 
-All packages follow fixed versioning - they share the same version number:
+All packages follow fixed versioning - they share the same version number, so any
+one of them tells you the release. This used to be a hand-written table and it sat
+three minor versions and three packages out of date, so it is a pointer now:
 
-| Package | Current Version |
-|---------|-----------------|
-| @scarlett-player/core | 0.5.3 |
-| @scarlett-player/hls | 0.5.3 |
-| @scarlett-player/native | 0.5.3 |
-| @scarlett-player/ui | 0.5.3 |
-| @scarlett-player/audio-ui | 0.5.3 |
-| @scarlett-player/airplay | 0.5.3 |
-| @scarlett-player/chromecast | 0.5.3 |
-| @scarlett-player/analytics | 0.5.3 |
-| @scarlett-player/playlist | 0.5.3 |
-| @scarlett-player/media-session | 0.5.3 |
-| @scarlett-player/vue | 0.5.3 |
-| @scarlett-player/embed | 0.5.3 |
+```bash
+npm view @scarlett-player/core version
+```
+
+Per-package history lives in each package's own `CHANGELOG.md`, written by Changesets
+on release.
 
 ---
 

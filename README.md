@@ -17,12 +17,15 @@
 - **AirPlay & Chromecast** - Built-in casting with session management
 - **Playlists** - Queue management, shuffle, repeat modes, auto-advance
 - **Analytics** - QoE metrics, engagement tracking, beacon transport
+- **Sharing** - Native share sheet on mobile, copy link, social targets, embed codes, timestamped links
+- **Captions** - WebVTT subtitles and closed captions, HLS subtitle extraction, auto-select by language
+- **Watermark** - Anti-piracy text or image overlay with dynamic repositioning
 - **Audio Player** - Compact audio UI with artwork, progress, and media session integration
 - **Modern UI** - Video and audio controls with keyboard shortcuts and theming
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,300+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **1,450+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -43,6 +46,7 @@ npm install @scarlett-player/media-session # Lock screen & media key controls
 npm install @scarlett-player/audio-ui      # Compact audio player UI
 npm install @scarlett-player/captions      # Closed captions (WebVTT)
 npm install @scarlett-player/watermark     # Anti-piracy watermark overlay
+npm install @scarlett-player/share         # Share sheet, copy link, social targets, embed codes
 
 # Vue 3 wrapper
 npm install @scarlett-player/vue
@@ -157,7 +161,9 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
 
 ```html
 <!-- Full build (video + audio + HLS + analytics + playlist) -->
-<script src="https://cdn.example.com/scarlett-player/embed.js"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
+
+<!-- Or pin a version: .../scarlett-player/v1.5.0/embed.umd.cjs -->
 
 <!-- Video player via data attributes -->
 <div data-scarlett-player
@@ -176,7 +182,11 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
 </div>
 ```
 
-Lighter builds available: `embed.video.js` (video only) and `embed.audio.js` (audio only).
+Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.umd.cjs`
+(audio only). ESM equivalents ship alongside them as `embed.js`, `embed.video.js` and
+`embed.audio.js`.
+
+[See every supported data attribute ->](./packages/embed/README.md)
 
 ## Packages
 
@@ -276,7 +286,7 @@ a control registered after the control bar was built triggers a rebuild.
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all 1,300+ tests
+pnpm test             # Run all 1,450+ tests
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
@@ -300,7 +310,7 @@ node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture on
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 14 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 15 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -325,6 +335,7 @@ packages/
     media-session/  # Lock screen & media keys
     captions/       # WebVTT closed captions
     watermark/      # Anti-piracy watermark overlay
+    share/          # Share sheet, copy link, social targets, embed codes
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
@@ -358,6 +369,7 @@ scripts/            # Browser verification harness + HLS fixture generator
 - [x] Touch/mobile support (basic)
 - [x] Closed captions (WebVTT)
 - [x] Anti-piracy watermark overlay
+- [x] Sharing (native share sheet, copy link, social targets, embed codes)
 - [x] Self-healing error recovery (auto-reconnect, load watchdog, playlist validation, PiP readiness gate)
 - [ ] Mobile gesture controls (double-tap seek, swipe) - Sprint 1
 - [ ] DRM support - Sprint 2

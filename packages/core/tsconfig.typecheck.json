@@ -14,6 +14,6 @@
     "tests/events/event-map-extension.test.ts",
     "tests/state/state-define.test.ts"
   ],
-  "//exclude": "Must be restated. `exclude` is inherited from the extended config, where it lists \"tests\" — and exclude filters include, so without this the tests silently stay out of the program and every type guarantee in them passes vacuously.",
+  "//exclude": "Must be restated. `exclude` is inherited from the extended config, where it lists \"tests\" - and exclude filters include, so without this the tests silently stay out of the program and every type guarantee in them passes vacuously.",
   "exclude": ["node_modules", "dist"]
 }

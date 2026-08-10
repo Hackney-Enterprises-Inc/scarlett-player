@@ -11,7 +11,7 @@ import { applyTimestamp, resolveBaseUrl } from '../src/url';
 import { resolveTargets } from '../src/targets';
 import { ShareButton } from '../src/ShareButton';
 
-/** Let queued promise callbacks run — target handlers are async. */
+/** Let queued promise callbacks run - target handlers are async. */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 const SIGNED_SRC = 'https://cdn.example.com/master.m3u8?token=SECRET-DO-NOT-SHARE';
@@ -94,7 +94,7 @@ describe('URL resolution', () => {
   });
 
   it('never shares the media src', async () => {
-    // The security case. No url configured, a signed src in state — the shared
+    // The security case. No url configured, a signed src in state - the shared
     // URL must come from the page, never from the stream.
     const api = createMockApi({ src: SIGNED_SRC, currentTime: 30 });
     const plugin = createSharePlugin();

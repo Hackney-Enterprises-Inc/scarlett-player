@@ -384,7 +384,7 @@ describe('hls.js subtitle extraction', () => {
   it('adds NO <track> for hls.js renditions', () => {
     // hls.js owns its subtitle renditions: with renderTextTracksNatively (its default) it has
     // already created a TextTrack per rendition and fetches the VTT segments itself. Adding our
-    // own showed the viewer two identical "English" options, and ours was the dead one — its src
+    // own showed the viewer two identical "English" options, and ours was the dead one - its src
     // is the rendition PLAYLIST (subs/en.m3u8), which a <track> cannot parse as WebVTT, so it
     // produced zero cues. Measured in production 2026-08-10.
     const plugin = createCaptionsPlugin();
@@ -467,7 +467,7 @@ describe('auto-select', () => {
     });
     mockApi.getPlugin.mockReturnValue({ getHlsInstance: () => null, isNativeHLS: () => true });
 
-    // Safari has parsed one rendition so far, and it isn't defaultLanguage —
+    // Safari has parsed one rendition so far, and it isn't defaultLanguage -
     // so auto-select finds no match and stays armed.
     const list = fakeTextTrackList([{ kind: 'subtitles', label: 'Spanish', language: 'es' }]);
     Object.defineProperty(mockApi.video, 'textTracks', { value: list, configurable: true });

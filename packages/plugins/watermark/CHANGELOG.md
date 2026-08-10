@@ -41,8 +41,8 @@
   - Core player listens for `media:load-request` and routes load to local player (skips when Chromecast is active)
 
   **Playlist:**
-  - New `autoLoad` config option (default: `true`) — automatically emits `media:load-request` on track change, eliminating the need for manual `player.load()` wiring
-  - New `advanceDelay` config option — milliseconds to wait before auto-advancing to next track
+  - New `autoLoad` config option (default: `true`) - automatically emits `media:load-request` on track change, eliminating the need for manual `player.load()` wiring
+  - New `advanceDelay` config option - milliseconds to wait before auto-advancing to next track
   - Removed all `as any` casts from event emissions (events now typed in core)
 
   **Chromecast:**

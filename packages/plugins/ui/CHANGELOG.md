@@ -8,13 +8,13 @@
 
 - [#60](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/60) [`61230aa`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/61230aaca8bc8dcbbeb48d662a4f53f8d2c2a46c) Thanks [@alexhackney](https://github.com/alexhackney)! - Plugins can now extend the player without editing core.
 
-  Adding a control-bar button previously meant editing `@scarlett-player/ui`, and owning state meant editing `@scarlett-player/core` — `ControlSlot` was a closed union consumed by a `switch`, and `StateManager` threw for any key not in `DEFAULT_STATE`. Captions only looked like a self-contained package because core had already reserved its state keys, its event, and its control slot in advance. That does not scale, and it left third-party plugins with no route in at all.
+  Adding a control-bar button previously meant editing `@scarlett-player/ui`, and owning state meant editing `@scarlett-player/core` - `ControlSlot` was a closed union consumed by a `switch`, and `StateManager` threw for any key not in `DEFAULT_STATE`. Captions only looked like a self-contained package because core had already reserved its state keys, its event, and its control slot in advance. That does not scale, and it left third-party plugins with no route in at all.
 
-  **Controls.** `registerControl(id, factory)` in `@scarlett-player/ui` registers a control under any id, and `ControlSlot` becomes `BuiltinControlSlot | (string & {})` so custom ids type-check while editors still autocomplete the built-ins. Registering never places a button on its own — a host opts in by listing the id in `uiPlugin({ controls: [...] })`. Because plugin init order is not guaranteed, a control registered after the control bar was built triggers a rebuild rather than being silently dropped, and a factory that throws is contained instead of taking the whole bar down.
+  **Controls.** `registerControl(id, factory)` in `@scarlett-player/ui` registers a control under any id, and `ControlSlot` becomes `BuiltinControlSlot | (string & {})` so custom ids type-check while editors still autocomplete the built-ins. Registering never places a button on its own - a host opts in by listing the id in `uiPlugin({ controls: [...] })`. Because plugin init order is not guaranteed, a control registered after the control bar was built triggers a rebuild rather than being silently dropped, and a factory that throws is contained instead of taking the whole bar down.
 
   **State.** `api.defineState(key, initialValue)` registers plugin-owned state at runtime. It is idempotent, so a plugin re-running setup after a source change cannot reset state that is already live, and `reset()`/`resetKey()` now restore plugin keys to their defined initial value instead of writing `undefined`. State keys are split into `CoreStateStore` (what core owns, and what its defaults must cover exhaustively) and the open `StateStore`, so a plugin augmenting the latter can no longer break core's own compilation with a confusing missing-properties error.
 
-  **Events** needed no change: `PlayerEventMap` is an interface and the event bus never validated names, so declaration merging already worked. This is now pinned by tests, and `@scarlett-player/core` type-checks the files carrying those guarantees — previously vitest transpiled them without type-checking, so a type-level contract could rot unnoticed.
+  **Events** needed no change: `PlayerEventMap` is an interface and the event bus never validated names, so declaration merging already worked. This is now pinned by tests, and `@scarlett-player/core` type-checks the files carrying those guarantees - previously vitest transpiled them without type-checking, so a type-level contract could rot unnoticed.
 
   See `.claude/docs/plugin-authoring.md` for the conventions, including namespacing events and state keys with the plugin id.
 
@@ -50,7 +50,7 @@
 
   `update()` ran on every state change (`timeupdate` and `progress` alone fire several times a second) and unconditionally reassigned `innerHTML`, rebuilding each control's icon even when the markup was identical. When that happened between a user's `mousedown` and `mouseup`, the node that received the `mousedown` no longer existed and the browser never dispatched the `click`, so the press did nothing.
 
-  Control rendering is now idempotent — `innerHTML` and attributes are only written when the value actually changes — and state-driven renders are coalesced to one per animation frame instead of one per state key. In a browser harness clicking play on a freshly loaded HLS stream, dropped first clicks went from 12/12 to 0/12, and play-button DOM mutations over a 40-click run dropped from 644 to 160.
+  Control rendering is now idempotent - `innerHTML` and attributes are only written when the value actually changes - and state-driven renders are coalesced to one per animation frame instead of one per state key. In a browser harness clicking play on a freshly loaded HLS stream, dropped first clicks went from 12/12 to 0/12, and play-button DOM mutations over a 40-click run dropped from 644 to 160.
 
 ## 1.0.3
 
@@ -94,10 +94,10 @@
 - [#30](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/30) [`42b224b`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/42b224b65270277e28097af5d31f69a3c24ab471) Thanks [@alexhackney](https://github.com/alexhackney)! - Stability, accessibility, and test coverage improvements
 
   **Bug Fixes:**
-  - Fix memory leak in effect system — unsubscribe now properly removes effects from all signal subscriber sets
-  - Fix analytics avgBitrate calculation — was dividing by total watch time (including paused), now uses actual playback time span
-  - Fix race condition in load() — concurrent load calls no longer cause undefined behavior; stale loads are discarded
-  - Add stall detection to native provider — handles `stalled`, `suspend`, and `abort` media events
+  - Fix memory leak in effect system - unsubscribe now properly removes effects from all signal subscriber sets
+  - Fix analytics avgBitrate calculation - was dividing by total watch time (including paused), now uses actual playback time span
+  - Fix race condition in load() - concurrent load calls no longer cause undefined behavior; stale loads are discarded
+  - Add stall detection to native provider - handles `stalled`, `suspend`, and `abort` media events
 
   **Accessibility (WCAG):**
   - Add keyboard navigation to SettingsMenu (Arrow Up/Down, Enter/Space, Escape, focus trap)
