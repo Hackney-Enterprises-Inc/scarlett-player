@@ -107,6 +107,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-loop` | boolean | `false` | Loop playback |
 | `data-playback-rate` | number | `1.0` | Playback speed |
 | `data-start-time` | number | `0` | Start position (seconds) |
+| `data-share-url` | string | - | Canonical page URL for the share plugin. Set this on iframe embeds, or sharing links to the player page instead of yours |
 | `data-class` | string | - | Custom CSS class(es) |
 
 #### Audio-specific Attributes

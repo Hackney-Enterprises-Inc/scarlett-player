@@ -381,26 +381,57 @@ describe('hls.js subtitle extraction', () => {
     expect(hls.instance.on).toHaveBeenCalledWith('hlsSubtitleTracksUpdated', expect.any(Function));
   });
 
-  it('adds a <track> per subtitle rendition', () => {
+  it('adds NO <track> for hls.js renditions', () => {
+    // hls.js owns its subtitle renditions: with renderTextTracksNatively (its default) it has
+    // already created a TextTrack per rendition and fetches the VTT segments itself. Adding our
+    // own showed the viewer two identical "English" options, and ours was the dead one — its src
+    // is the rendition PLAYLIST (subs/en.m3u8), which a <track> cannot parse as WebVTT, so it
+    // produced zero cues. Measured in production 2026-08-10.
     const plugin = createCaptionsPlugin();
     plugin.init(mockApi);
     mediaLoadedCallback?.();
 
-    expect(mockApi.video.querySelectorAll('track').length).toBe(2);
+    expect(mockApi.video.querySelectorAll('track').length).toBe(0);
   });
 
-  it('replaces rather than duplicates when the event fires again', () => {
+  it('never appends an m3u8 to a track element', () => {
+    // The specific defect, asserted directly: a <track> can only parse WebVTT. If a rendition URL
+    // ever reaches addTrackElement again, this fails regardless of how the counting changes.
     const plugin = createCaptionsPlugin();
     plugin.init(mockApi);
     mediaLoadedCallback?.();
 
     hls.fire('hlsSubtitleTracksUpdated');
-    hls.fire('hlsSubtitleTracksUpdated');
 
-    expect(mockApi.video.querySelectorAll('track').length).toBe(2);
+    const sources = [...mockApi.video.querySelectorAll('track')].map(el => el.getAttribute('src'));
+
+    expect(sources.some(src => src?.endsWith('.m3u8'))).toBe(false);
   });
 
-  it('keeps configured sources when HLS renditions are replaced', () => {
+  it('reports hls.js renditions through state, not through track elements', () => {
+    // The tracks hls.js created are in the TextTrackList before we run, so syncTracksToState()
+    // is the whole job.
+    Object.defineProperty(mockApi.video, 'textTracks', {
+      value: fakeTextTrackList([
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es' },
+      ]),
+      configurable: true,
+    });
+
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    const lastTextTracks = mockApi.setState.mock.calls
+      .filter((call: unknown[]) => call[0] === 'textTracks')
+      .pop();
+
+    expect((lastTextTracks?.[1] as unknown[]).length).toBe(2);
+    expect(mockApi.video.querySelectorAll('track').length).toBe(0);
+  });
+
+  it('keeps configured sources when the rendition event fires again', () => {
     const plugin = createCaptionsPlugin({
       sources: [{ language: 'fr', label: 'French', src: '/subs/fr.vtt' }],
     });
@@ -409,8 +440,8 @@ describe('hls.js subtitle extraction', () => {
 
     hls.fire('hlsSubtitleTracksUpdated');
 
-    // 1 configured + 2 renditions, with the configured one surviving.
-    expect(mockApi.video.querySelectorAll('track').length).toBe(3);
+    // The configured source is a real .vtt and stays ours to manage. Renditions add nothing.
+    expect(mockApi.video.querySelectorAll('track').length).toBe(1);
     expect(mockApi.video.querySelector('track[srclang="fr"]')).not.toBeNull();
   });
 
