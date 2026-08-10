@@ -9,6 +9,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSharePlugin } from '../src/index';
 import { applyTimestamp, resolveBaseUrl } from '../src/url';
 import { resolveTargets } from '../src/targets';
+import { ShareButton } from '../src/ShareButton';
+
+/** Let queued promise callbacks run — target handlers are async. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 const SIGNED_SRC = 'https://cdn.example.com/master.m3u8?token=SECRET-DO-NOT-SHARE';
 
@@ -343,6 +347,62 @@ describe('embed target', () => {
   });
 });
 
+describe('ShareButton control', () => {
+  let api: ReturnType<typeof createMockApi>;
+
+  beforeEach(() => {
+    api = createMockApi();
+  });
+
+  afterEach(() => {
+    api.container.remove();
+  });
+
+  it('renders a button with an accessible name', () => {
+    const button = new ShareButton(api as never, vi.fn());
+    const el = button.render();
+
+    expect(el.tagName).toBe('BUTTON');
+    expect(el.getAttribute('aria-label')).toBe('Share');
+    // Announces that activating it opens a dialog, not navigates away.
+    expect(el.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(el.querySelector('svg')).not.toBeNull();
+  });
+
+  it('invokes the activate callback when clicked', () => {
+    const onActivate = vi.fn();
+    const button = new ShareButton(api as never, onActivate);
+
+    button.render().dispatchEvent(new MouseEvent('click'));
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays visible regardless of playback state', () => {
+    const button = new ShareButton(api as never, vi.fn());
+    const el = button.render();
+
+    // Unlike captions or quality, sharing a page URL is valid before playback
+    // has even started, so update() must never hide it.
+    button.update();
+
+    expect(el.style.display).toBe('');
+  });
+
+  it('detaches its handler on destroy', () => {
+    const onActivate = vi.fn();
+    const button = new ShareButton(api as never, onActivate);
+    const el = button.render();
+    api.container.appendChild(el);
+
+    button.destroy();
+    el.dispatchEvent(new MouseEvent('click'));
+
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(api.container.contains(el)).toBe(false);
+  });
+});
+
 describe('sheet behaviour', () => {
   let api: ReturnType<typeof createMockApi>;
 
@@ -396,6 +456,43 @@ describe('sheet behaviour', () => {
     for (const button of buttons) {
       expect(button.getAttribute('aria-label')).toBeTruthy();
     }
+  });
+
+  it('keeps Tab inside the sheet', async () => {
+    const plugin = createSharePlugin({ url: 'https://tsp.test/w', targets: ['copy', 'x', 'email'] });
+    plugin.init(api as never);
+    await plugin.share();
+
+    const buttons = api.container.querySelectorAll<HTMLElement>('.sp-share-target');
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+
+    // Tab off the end wraps to the start rather than escaping to the page behind.
+    last?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(first);
+
+    // And Shift+Tab off the start wraps to the end.
+    first?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('offers the link for manual copying when the clipboard is blocked', async () => {
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+
+    const plugin = createSharePlugin({ url: 'https://tsp.test/w', targets: ['copy'] });
+    plugin.init(api as never);
+    await plugin.share();
+
+    api.container.querySelector<HTMLElement>('.sp-share-target')?.dispatchEvent(new MouseEvent('click'));
+    await flush();
+
+    // Last resort: show the URL selected, so it can still be copied by hand.
+    const input = api.container.querySelector<HTMLInputElement>('.sp-share-fallback input');
+    expect(input).not.toBeNull();
+    expect(input?.value).toBe('https://tsp.test/w');
+    expect(input?.readOnly).toBe(true);
   });
 
   it('cleans up its DOM on destroy', async () => {
