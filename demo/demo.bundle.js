@@ -3248,7 +3248,7 @@ ${newDetails.m3u8}`);
         }
         return names;
       };
-      EventEmitter2.prototype.listeners = function listeners(event) {
+      EventEmitter2.prototype.listeners = function listeners2(event) {
         var evt = prefix ? prefix + event : event, handlers = this._events[evt];
         if (!handlers) return [];
         if (handlers.fn) return [handlers.fn];
@@ -3258,57 +3258,57 @@ ${newDetails.m3u8}`);
         return ee;
       };
       EventEmitter2.prototype.listenerCount = function listenerCount(event) {
-        var evt = prefix ? prefix + event : event, listeners = this._events[evt];
-        if (!listeners) return 0;
-        if (listeners.fn) return 1;
-        return listeners.length;
+        var evt = prefix ? prefix + event : event, listeners2 = this._events[evt];
+        if (!listeners2) return 0;
+        if (listeners2.fn) return 1;
+        return listeners2.length;
       };
       EventEmitter2.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
         var evt = prefix ? prefix + event : event;
         if (!this._events[evt]) return false;
-        var listeners = this._events[evt], len = arguments.length, args, i;
-        if (listeners.fn) {
-          if (listeners.once) this.removeListener(event, listeners.fn, void 0, true);
+        var listeners2 = this._events[evt], len = arguments.length, args, i;
+        if (listeners2.fn) {
+          if (listeners2.once) this.removeListener(event, listeners2.fn, void 0, true);
           switch (len) {
             case 1:
-              return listeners.fn.call(listeners.context), true;
+              return listeners2.fn.call(listeners2.context), true;
             case 2:
-              return listeners.fn.call(listeners.context, a1), true;
+              return listeners2.fn.call(listeners2.context, a1), true;
             case 3:
-              return listeners.fn.call(listeners.context, a1, a2), true;
+              return listeners2.fn.call(listeners2.context, a1, a2), true;
             case 4:
-              return listeners.fn.call(listeners.context, a1, a2, a3), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3), true;
             case 5:
-              return listeners.fn.call(listeners.context, a1, a2, a3, a4), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3, a4), true;
             case 6:
-              return listeners.fn.call(listeners.context, a1, a2, a3, a4, a5), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3, a4, a5), true;
           }
           for (i = 1, args = new Array(len - 1); i < len; i++) {
             args[i - 1] = arguments[i];
           }
-          listeners.fn.apply(listeners.context, args);
+          listeners2.fn.apply(listeners2.context, args);
         } else {
-          var length = listeners.length, j;
+          var length = listeners2.length, j;
           for (i = 0; i < length; i++) {
-            if (listeners[i].once) this.removeListener(event, listeners[i].fn, void 0, true);
+            if (listeners2[i].once) this.removeListener(event, listeners2[i].fn, void 0, true);
             switch (len) {
               case 1:
-                listeners[i].fn.call(listeners[i].context);
+                listeners2[i].fn.call(listeners2[i].context);
                 break;
               case 2:
-                listeners[i].fn.call(listeners[i].context, a1);
+                listeners2[i].fn.call(listeners2[i].context, a1);
                 break;
               case 3:
-                listeners[i].fn.call(listeners[i].context, a1, a2);
+                listeners2[i].fn.call(listeners2[i].context, a1, a2);
                 break;
               case 4:
-                listeners[i].fn.call(listeners[i].context, a1, a2, a3);
+                listeners2[i].fn.call(listeners2[i].context, a1, a2, a3);
                 break;
               default:
                 if (!args) for (j = 1, args = new Array(len - 1); j < len; j++) {
                   args[j - 1] = arguments[j];
                 }
-                listeners[i].fn.apply(listeners[i].context, args);
+                listeners2[i].fn.apply(listeners2[i].context, args);
             }
           }
         }
@@ -3327,15 +3327,15 @@ ${newDetails.m3u8}`);
           clearEvent(this, evt);
           return this;
         }
-        var listeners = this._events[evt];
-        if (listeners.fn) {
-          if (listeners.fn === fn && (!once || listeners.once) && (!context || listeners.context === context)) {
+        var listeners2 = this._events[evt];
+        if (listeners2.fn) {
+          if (listeners2.fn === fn && (!once || listeners2.once) && (!context || listeners2.context === context)) {
             clearEvent(this, evt);
           }
         } else {
-          for (var i = 0, events = [], length = listeners.length; i < length; i++) {
-            if (listeners[i].fn !== fn || once && !listeners[i].once || context && listeners[i].context !== context) {
-              events.push(listeners[i]);
+          for (var i = 0, events = [], length = listeners2.length; i < length; i++) {
+            if (listeners2[i].fn !== fn || once && !listeners2[i].once || context && listeners2[i].context !== context) {
+              events.push(listeners2[i]);
             }
           }
           if (events.length) this._events[evt] = events.length === 1 ? events[0] : events;
@@ -33184,6 +33184,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.signals = /* @__PURE__ */ new Map();
       /** Global state change subscribers */
       this.changeSubscribers = /* @__PURE__ */ new Set();
+      /** Initial values for keys registered via define(), for reset support */
+      this.definedDefaults = /* @__PURE__ */ new Map();
       this.initializeSignals(initialState);
     }
     /**
@@ -33193,13 +33195,51 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     initializeSignals(overrides) {
       const initialState = { ...DEFAULT_STATE, ...overrides };
       for (const [key, value] of Object.entries(initialState)) {
-        const stateKey = key;
-        const stateSignal = signal(value);
-        stateSignal.subscribe(() => {
-          this.notifyChangeSubscribers(stateKey);
-        });
-        this.signals.set(stateKey, stateSignal);
+        this.createSignal(key, value);
       }
+    }
+    /**
+     * Create and register a signal, wired to the global change subscribers.
+     *
+     * Shared by initializeSignals() and define() so a plugin-defined key behaves
+     * exactly like a built-in one and the two paths cannot drift apart.
+     *
+     * @private
+     */
+    createSignal(key, value) {
+      const stateSignal = signal(value);
+      stateSignal.subscribe(() => {
+        this.notifyChangeSubscribers(key);
+      });
+      this.signals.set(key, stateSignal);
+    }
+    /**
+     * Register a state key at runtime, for state a plugin owns.
+     *
+     * Core cannot know every plugin's keys, and {@link get} deliberately throws
+     * for unregistered ones — that throw is a useful typo-catcher and is worth
+     * keeping — so a plugin declares its keys before first use.
+     *
+     * Idempotent by design: re-defining an existing key leaves the current value
+     * untouched. Plugins commonly re-run setup after a source change, and that
+     * must not reset state that is already live.
+     *
+     * Namespace plugin keys with the plugin's own name to avoid collisions.
+     *
+     * @param key - State property key
+     * @param initialValue - Value used only when the key is new
+     *
+     * @example
+     * ```ts
+     * state.define('highlightSelection', null);
+     * ```
+     */
+    define(key, initialValue) {
+      if (this.signals.has(key)) {
+        return;
+      }
+      this.definedDefaults.set(key, initialValue);
+      this.createSignal(key, initialValue);
     }
     /**
      * Get the signal for a state property.
@@ -33343,7 +33383,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * ```
      */
     reset() {
-      this.update(DEFAULT_STATE);
+      this.update({
+        ...DEFAULT_STATE,
+        ...Object.fromEntries(this.definedDefaults)
+      });
     }
     /**
      * Reset a specific state property to its default value.
@@ -33356,7 +33399,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * ```
      */
     resetKey(key) {
-      const defaultValue = DEFAULT_STATE[key];
+      const defaultValue = key in DEFAULT_STATE ? DEFAULT_STATE[key] : this.definedDefaults.get(key);
       this.set(key, defaultValue);
     }
     /**
@@ -34245,6 +34288,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     setState(key, value) {
       this.stateManager.set(key, value);
+    }
+    /**
+     * Register a state key this plugin owns, before first use.
+     *
+     * Idempotent — re-defining an existing key keeps its current value.
+     * See {@link IPluginAPI.defineState}.
+     *
+     * @param key - State property key
+     * @param initialValue - Value used only when the key is new
+     */
+    defineState(key, initialValue) {
+      this.stateManager.define(key, initialValue);
     }
     /**
      * Subscribe to an event.
@@ -39450,6 +39505,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   };
 
+  // packages/plugins/ui/src/control-registry.ts
+  var registry = /* @__PURE__ */ new Map();
+  var listeners = /* @__PURE__ */ new Set();
+  function getControlFactory(id) {
+    return registry.get(id) ?? null;
+  }
+  function onControlRegistered(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+
   // packages/plugins/ui/src/index.ts
   var DEFAULT_LAYOUT = [
     "play",
@@ -39479,6 +39547,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let controls = [];
     let hideTimeout = null;
     let stateUnsubscribe = null;
+    let controlRegistryUnsubscribe = null;
     let errorUnsubscribe = null;
     let reconnectingUnsubscribe = null;
     let recoveredUnsubscribe = null;
@@ -39520,9 +39589,42 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return new FullscreenButton(api);
         case "spacer":
           return new Spacer();
-        default:
+        default: {
+          const factory = getControlFactory(slot);
+          if (factory) {
+            try {
+              return factory(api);
+            } catch (error) {
+              api.logger.error(`Control factory for "${slot}" threw`, { error });
+              return null;
+            }
+          }
+          api.logger.warn(`Unknown control slot: ${slot}`);
           return null;
+        }
       }
+    };
+    const populateControlBar = () => {
+      if (!controlBar) {
+        return;
+      }
+      for (const slot of layout) {
+        const control = createControl(slot);
+        if (control) {
+          controls.push(control);
+          controlBar.appendChild(control.render());
+        }
+      }
+    };
+    const rebuildControlBar = () => {
+      if (!controlBar) {
+        return;
+      }
+      controls.forEach((c) => c.destroy());
+      controls = [];
+      controlBar.replaceChildren();
+      populateControlBar();
+      updateControls();
     };
     const updateControls = () => {
       controls.forEach((c) => c.update());
@@ -39696,14 +39798,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         controlBar.className = isPlaying ? "sp-controls sp-controls--hidden" : "sp-controls sp-controls--visible";
         controlBar.setAttribute("role", "toolbar");
         controlBar.setAttribute("aria-label", "Video controls");
-        for (const slot of layout) {
-          const control = createControl(slot);
-          if (control) {
-            controls.push(control);
-            controlBar.appendChild(control.render());
-          }
-        }
+        populateControlBar();
         container.appendChild(controlBar);
+        controlRegistryUnsubscribe = onControlRegistered((id) => {
+          if (!layout.includes(id)) {
+            return;
+          }
+          api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
+          rebuildControlBar();
+        });
         container.addEventListener("mousemove", handleInteraction);
         container.addEventListener("mouseenter", handleInteraction);
         container.addEventListener("mouseleave", handleMouseLeave);
@@ -39749,6 +39852,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         document.removeEventListener("keydown", handleKeyDown);
         document.removeEventListener("fullscreenchange", scheduleUpdate);
+        controlRegistryUnsubscribe?.();
+        controlRegistryUnsubscribe = null;
         controls.forEach((c) => c.destroy());
         controls = [];
         progressBar?.destroy();
@@ -41832,7 +41937,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.3.0" : "dev";
+  var VERSION = true ? "1.5.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
