@@ -3248,7 +3248,7 @@ ${newDetails.m3u8}`);
         }
         return names;
       };
-      EventEmitter2.prototype.listeners = function listeners3(event) {
+      EventEmitter2.prototype.listeners = function listeners2(event) {
         var evt = prefix ? prefix + event : event, handlers = this._events[evt];
         if (!handlers) return [];
         if (handlers.fn) return [handlers.fn];
@@ -3258,57 +3258,57 @@ ${newDetails.m3u8}`);
         return ee;
       };
       EventEmitter2.prototype.listenerCount = function listenerCount(event) {
-        var evt = prefix ? prefix + event : event, listeners3 = this._events[evt];
-        if (!listeners3) return 0;
-        if (listeners3.fn) return 1;
-        return listeners3.length;
+        var evt = prefix ? prefix + event : event, listeners2 = this._events[evt];
+        if (!listeners2) return 0;
+        if (listeners2.fn) return 1;
+        return listeners2.length;
       };
       EventEmitter2.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
         var evt = prefix ? prefix + event : event;
         if (!this._events[evt]) return false;
-        var listeners3 = this._events[evt], len = arguments.length, args, i;
-        if (listeners3.fn) {
-          if (listeners3.once) this.removeListener(event, listeners3.fn, void 0, true);
+        var listeners2 = this._events[evt], len = arguments.length, args, i;
+        if (listeners2.fn) {
+          if (listeners2.once) this.removeListener(event, listeners2.fn, void 0, true);
           switch (len) {
             case 1:
-              return listeners3.fn.call(listeners3.context), true;
+              return listeners2.fn.call(listeners2.context), true;
             case 2:
-              return listeners3.fn.call(listeners3.context, a1), true;
+              return listeners2.fn.call(listeners2.context, a1), true;
             case 3:
-              return listeners3.fn.call(listeners3.context, a1, a2), true;
+              return listeners2.fn.call(listeners2.context, a1, a2), true;
             case 4:
-              return listeners3.fn.call(listeners3.context, a1, a2, a3), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3), true;
             case 5:
-              return listeners3.fn.call(listeners3.context, a1, a2, a3, a4), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3, a4), true;
             case 6:
-              return listeners3.fn.call(listeners3.context, a1, a2, a3, a4, a5), true;
+              return listeners2.fn.call(listeners2.context, a1, a2, a3, a4, a5), true;
           }
           for (i = 1, args = new Array(len - 1); i < len; i++) {
             args[i - 1] = arguments[i];
           }
-          listeners3.fn.apply(listeners3.context, args);
+          listeners2.fn.apply(listeners2.context, args);
         } else {
-          var length = listeners3.length, j;
+          var length = listeners2.length, j;
           for (i = 0; i < length; i++) {
-            if (listeners3[i].once) this.removeListener(event, listeners3[i].fn, void 0, true);
+            if (listeners2[i].once) this.removeListener(event, listeners2[i].fn, void 0, true);
             switch (len) {
               case 1:
-                listeners3[i].fn.call(listeners3[i].context);
+                listeners2[i].fn.call(listeners2[i].context);
                 break;
               case 2:
-                listeners3[i].fn.call(listeners3[i].context, a1);
+                listeners2[i].fn.call(listeners2[i].context, a1);
                 break;
               case 3:
-                listeners3[i].fn.call(listeners3[i].context, a1, a2);
+                listeners2[i].fn.call(listeners2[i].context, a1, a2);
                 break;
               case 4:
-                listeners3[i].fn.call(listeners3[i].context, a1, a2, a3);
+                listeners2[i].fn.call(listeners2[i].context, a1, a2, a3);
                 break;
               default:
                 if (!args) for (j = 1, args = new Array(len - 1); j < len; j++) {
                   args[j - 1] = arguments[j];
                 }
-                listeners3[i].fn.apply(listeners3[i].context, args);
+                listeners2[i].fn.apply(listeners2[i].context, args);
             }
           }
         }
@@ -3327,15 +3327,15 @@ ${newDetails.m3u8}`);
           clearEvent(this, evt);
           return this;
         }
-        var listeners3 = this._events[evt];
-        if (listeners3.fn) {
-          if (listeners3.fn === fn && (!once || listeners3.once) && (!context || listeners3.context === context)) {
+        var listeners2 = this._events[evt];
+        if (listeners2.fn) {
+          if (listeners2.fn === fn && (!once || listeners2.once) && (!context || listeners2.context === context)) {
             clearEvent(this, evt);
           }
         } else {
-          for (var i = 0, events = [], length = listeners3.length; i < length; i++) {
-            if (listeners3[i].fn !== fn || once && !listeners3[i].once || context && listeners3[i].context !== context) {
-              events.push(listeners3[i]);
+          for (var i = 0, events = [], length = listeners2.length; i < length; i++) {
+            if (listeners2[i].fn !== fn || once && !listeners2[i].once || context && listeners2[i].context !== context) {
+              events.push(listeners2[i]);
             }
           }
           if (events.length) this._events[evt] = events.length === 1 ? events[0] : events;
@@ -5198,10 +5198,10 @@ ${newDetails.m3u8}`);
       cue.id = generateCueId(cue.startTime, cue.endTime, cue.text);
       const region = regionElements[cueElement.getAttribute("region")];
       const style = styleElements[cueElement.getAttribute("style")];
-      const styles4 = getTtmlStyles(region, style, styleElements);
+      const styles3 = getTtmlStyles(region, style, styleElements);
       const {
         textAlign
-      } = styles4;
+      } = styles3;
       if (textAlign) {
         const lineAlign = textAlignToLineAlign[textAlign];
         if (lineAlign) {
@@ -5209,7 +5209,7 @@ ${newDetails.m3u8}`);
         }
         cue.align = textAlign;
       }
-      _extends(cue, styles4);
+      _extends(cue, styles3);
       return cue;
     }).filter((cue) => cue !== null);
   }
@@ -5264,12 +5264,12 @@ ${newDetails.m3u8}`);
     if (regionStyleName && styleElements.hasOwnProperty(regionStyleName)) {
       regionStyle = styleElements[regionStyleName];
     }
-    return styleAttributes.reduce((styles4, name) => {
+    return styleAttributes.reduce((styles3, name) => {
       const value = getAttributeNS(style, ttsNs, name) || getAttributeNS(region, ttsNs, name) || getAttributeNS(regionStyle, ttsNs, name);
       if (value) {
-        styles4[name] = value;
+        styles3[name] = value;
       }
-      return styles4;
+      return styles3;
     }, {});
   }
   function getAttributeNS(element, ns, name) {
@@ -25800,12 +25800,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.background = "black";
           this.flash = false;
         }
-        setStyles(styles4) {
+        setStyles(styles3) {
           const attribs = ["foreground", "underline", "italics", "background", "flash"];
           for (let i = 0; i < attribs.length; i++) {
             const style = attribs[i];
-            if (styles4.hasOwnProperty(style)) {
-              this[style] = styles4[style];
+            if (styles3.hasOwnProperty(style)) {
+              this[style] = styles3[style];
             }
           }
         }
@@ -25964,8 +25964,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             return chars.join("");
           }
         }
-        setPenStyles(styles4) {
-          this.currPenState.setStyles(styles4);
+        setPenStyles(styles3) {
+          this.currPenState.setStyles(styles3);
           const currChar = this.chars[this.pos];
           currChar.setPenState(this.currPenState);
         }
@@ -26028,9 +26028,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const row = this.rows[this.currRow];
           row.insertChar(char);
         }
-        setPen(styles4) {
+        setPen(styles3) {
           const row = this.rows[this.currRow];
-          row.setPenStyles(styles4);
+          row.setPenStyles(styles3);
         }
         moveCursor(relPos) {
           const row = this.rows[this.currRow];
@@ -26071,14 +26071,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             row.setCursor(pacData.indent);
             pacData.color = row.chars[prevPos].penState.foreground;
           }
-          const styles4 = {
+          const styles3 = {
             foreground: pacData.color,
             underline: pacData.underline,
             italics: pacData.italics,
             background: "black",
             flash: false
           };
-          this.setPen(styles4);
+          this.setPen(styles3);
         }
         /**
          * Set background/extra foreground, but first do back_space, and then insert space (backwards compatibility).
@@ -26291,20 +26291,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.writeScreen.moveCursor(nrCols);
         }
         ccMIDROW(secondByte) {
-          const styles4 = {
+          const styles3 = {
             flash: false
           };
-          styles4.underline = secondByte % 2 === 1;
-          styles4.italics = secondByte >= 46;
-          if (!styles4.italics) {
+          styles3.underline = secondByte % 2 === 1;
+          styles3.italics = secondByte >= 46;
+          if (!styles3.italics) {
             const colorIndex = Math.floor(secondByte / 2) - 16;
             const colors = ["white", "green", "blue", "cyan", "red", "yellow", "magenta"];
-            styles4.foreground = colors[colorIndex];
+            styles3.foreground = colors[colorIndex];
           } else {
-            styles4.foreground = "white";
+            styles3.foreground = "white";
           }
-          this.logger.log(2, "MIDROW: " + stringify(styles4));
-          this.writeScreen.setPen(styles4);
+          this.logger.log(2, "MIDROW: " + stringify(styles3));
+          this.writeScreen.setPen(styles3);
         }
         outputDataUpdate(dispatch = false) {
           const time = this.logger.time;
@@ -33012,531 +33012,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
-  // packages/plugins/ui/dist/index.js
-  var dist_exports = {};
-  __export(dist_exports, {
-    default: () => index_default,
-    formatLiveTime: () => formatLiveTime2,
-    formatTime: () => formatTime3,
-    getControlFactory: () => getControlFactory2,
-    icons: () => icons3,
-    registerControl: () => registerControl2,
-    resetControlRegistry: () => resetControlRegistry2,
-    styles: () => styles3,
-    uiPlugin: () => uiPlugin2,
-    unregisterControl: () => unregisterControl2
-  });
-  function createElement2(tag, attrs, children) {
-    const el = document.createElement(tag);
-    if (attrs) {
-      for (const [key, value] of Object.entries(attrs)) {
-        if (key === "className") {
-          el.className = value;
-        } else {
-          el.setAttribute(key, value);
-        }
-      }
-    }
-    if (children) {
-      for (const child of children) {
-        if (typeof child === "string") {
-          el.appendChild(document.createTextNode(child));
-        } else {
-          el.appendChild(child);
-        }
-      }
-    }
-    return el;
-  }
-  function createButton2(className, label, icon) {
-    const btn = createElement2("button", {
-      className: `sp-control ${className}`,
-      "aria-label": label,
-      type: "button"
-    });
-    setHTML2(btn, icon);
-    return btn;
-  }
-  function getVideo2(container) {
-    return container.querySelector("video");
-  }
-  function setHTML2(el, html) {
-    if (lastHTML2.get(el) === html) return false;
-    el.innerHTML = html;
-    lastHTML2.set(el, html);
-    return true;
-  }
-  function setAttr2(el, name, value) {
-    if (el.getAttribute(name) === value) return false;
-    el.setAttribute(name, value);
-    return true;
-  }
-  function formatTime3(seconds) {
-    if (!isFinite(seconds) || isNaN(seconds)) {
-      return "0:00";
-    }
-    const absSeconds = Math.abs(seconds);
-    const h = Math.floor(absSeconds / 3600);
-    const m = Math.floor(absSeconds % 3600 / 60);
-    const s = Math.floor(absSeconds % 60);
-    const sign = seconds < 0 ? "-" : "";
-    if (h > 0) {
-      return `${sign}${h}:${pad2(m)}:${pad2(s)}`;
-    }
-    return `${sign}${m}:${pad2(s)}`;
-  }
-  function pad2(n) {
-    return n < 10 ? `0${n}` : `${n}`;
-  }
-  function formatLiveTime2(behindLive) {
-    if (behindLive <= 0) {
-      return "LIVE";
-    }
-    return `-${formatTime3(behindLive)}`;
-  }
-  function isChromecastSupported2() {
-    if (typeof navigator === "undefined") return false;
-    const ua = navigator.userAgent;
-    return /Chrome/.test(ua) && !/Edge|Edg/.test(ua);
-  }
-  function isAirPlaySupported3() {
-    if (typeof HTMLVideoElement === "undefined") return false;
-    return typeof HTMLVideoElement.prototype.webkitShowPlaybackTargetPicker === "function";
-  }
-  function getUserMessage2(error) {
-    if (!error) return "Something went wrong.";
-    const code = error.code;
-    if (code) {
-      switch (code) {
-        case "MEDIA_NETWORK_ERROR":
-          return "Having trouble connecting. Check your internet and try again.";
-        case "MEDIA_DECODE_ERROR":
-          return "This video can't be played right now.";
-        case "SOURCE_LOAD_FAILED":
-        case "SOURCE_NOT_SUPPORTED":
-        case "PROVIDER_NOT_FOUND":
-          return "Unable to load video. Please try again.";
-        case "PLAYBACK_FAILED":
-          return "Playback stopped unexpectedly. Please try again.";
-        case "MEDIA_APPEND_ERROR":
-          return "Video playback was interrupted. Please try again.";
-        case "MEDIA_BUFFER_FULL":
-          return "Your device is low on video memory. Close other apps or tabs and try again.";
-        case "PLAYLIST_INVALID":
-          return "The stream is temporarily unavailable. Please try again.";
-      }
-    }
-    const msg = error.message?.toLowerCase() || "";
-    if (msg.includes("network") || msg.includes("timeout") || msg.includes("fetch") || msg.includes("connection")) {
-      return "Having trouble connecting. Check your internet and try again.";
-    }
-    if (msg.includes("manifest")) {
-      return "Unable to load video. Please try again.";
-    }
-    if (msg.includes("decode") || msg.includes("media") || msg.includes("format") || msg.includes("codec")) {
-      return "This video can't be played right now.";
-    }
-    if (msg.includes("not found") || msg.includes("404") || msg.includes("source") || msg.includes("not supported")) {
-      return "Video not found.";
-    }
-    return "Something went wrong.";
-  }
-  function registerControl2(id, factory) {
-    registry2.set(id, factory);
-    for (const listener of listeners2) {
-      listener(id);
-    }
-  }
-  function unregisterControl2(id) {
-    return registry2.delete(id);
-  }
-  function getControlFactory2(id) {
-    return registry2.get(id) ?? null;
-  }
-  function onControlRegistered2(listener) {
-    listeners2.add(listener);
-    return () => {
-      listeners2.delete(listener);
-    };
-  }
-  function resetControlRegistry2() {
-    registry2.clear();
-    listeners2.clear();
-  }
-  function uiPlugin2(config = {}) {
-    let api;
-    let controlBar = null;
-    let gradient = null;
-    let progressBar = null;
-    let bufferingIndicator = null;
-    let errorOverlay = null;
-    let styleEl = null;
-    let controls = [];
-    let hideTimeout = null;
-    let stateUnsubscribe = null;
-    let controlRegistryUnsubscribe = null;
-    let errorUnsubscribe = null;
-    let reconnectingUnsubscribe = null;
-    let recoveredUnsubscribe = null;
-    let controlsVisible = true;
-    let rafHandle = null;
-    const layout = config.controls || DEFAULT_LAYOUT2;
-    const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY2;
-    const createControl = (slot) => {
-      switch (slot) {
-        case "play":
-          return new PlayButton2(api);
-        case "skip-backward":
-          return new SkipButton2(api, "backward");
-        case "skip-forward":
-          return new SkipButton2(api, "forward");
-        case "volume":
-          return new VolumeControl2(api);
-        case "progress":
-          return null;
-        case "time":
-          return new TimeDisplay2(api);
-        case "live-indicator":
-          return new LiveIndicator2(api);
-        case "bandwidth-indicator":
-          return new BandwidthIndicator2(api);
-        case "quality":
-          return new QualityMenu2(api);
-        case "settings":
-          return new SettingsMenu2(api);
-        case "captions":
-          return new CaptionsButton2(api);
-        case "chromecast":
-          return new CastButton2(api, "chromecast");
-        case "airplay":
-          return new CastButton2(api, "airplay");
-        case "pip":
-          return new PipButton2(api);
-        case "fullscreen":
-          return new FullscreenButton2(api);
-        case "spacer":
-          return new Spacer2();
-        default: {
-          const factory = getControlFactory2(slot);
-          if (factory) {
-            try {
-              return factory(api);
-            } catch (error) {
-              api.logger.error(`Control factory for "${slot}" threw`, { error });
-              return null;
-            }
-          }
-          api.logger.warn(`Unknown control slot: ${slot}`);
-          return null;
-        }
-      }
-    };
-    const populateControlBar = () => {
-      if (!controlBar) {
-        return;
-      }
-      for (const slot of layout) {
-        const control = createControl(slot);
-        if (control) {
-          controls.push(control);
-          controlBar.appendChild(control.render());
-        }
-      }
-    };
-    const rebuildControlBar = () => {
-      if (!controlBar) {
-        return;
-      }
-      controls.forEach((c) => c.destroy());
-      controls = [];
-      controlBar.replaceChildren();
-      populateControlBar();
-      updateControls();
-    };
-    const updateControls = () => {
-      controls.forEach((c) => c.update());
-      progressBar?.update();
-      const waiting = api?.getState("waiting");
-      const seeking = api?.getState("seeking");
-      const playbackState = api?.getState("playbackState");
-      const isLoading = playbackState === "loading";
-      const showSpinner = waiting || seeking && !api?.getState("paused") || isLoading;
-      bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
-      errorOverlay?.update();
-    };
-    const scheduleUpdate = () => {
-      if (rafHandle !== null) return;
-      rafHandle = requestAnimationFrame(() => {
-        rafHandle = null;
-        updateControls();
-      });
-    };
-    const showControls = () => {
-      if (controlsVisible) {
-        resetHideTimer();
-        return;
-      }
-      controlsVisible = true;
-      controlBar?.classList.add("sp-controls--visible");
-      controlBar?.classList.remove("sp-controls--hidden");
-      gradient?.classList.add("sp-gradient--visible");
-      progressBar?.show();
-      api?.setState("controlsVisible", true);
-      resetHideTimer();
-    };
-    const hideControls = () => {
-      const paused = api?.getState("paused");
-      if (paused) return;
-      controlsVisible = false;
-      controlBar?.classList.remove("sp-controls--visible");
-      controlBar?.classList.add("sp-controls--hidden");
-      gradient?.classList.remove("sp-gradient--visible");
-      progressBar?.hide();
-      api?.setState("controlsVisible", false);
-    };
-    const resetHideTimer = () => {
-      if (hideTimeout) {
-        clearTimeout(hideTimeout);
-      }
-      hideTimeout = setTimeout(hideControls, hideDelay);
-    };
-    const handleInteraction = () => {
-      showControls();
-    };
-    const handleMouseLeave = () => {
-      hideControls();
-    };
-    const handleKeyDown = (e) => {
-      if (!api.container.contains(document.activeElement)) return;
-      const activeEl = document.activeElement;
-      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
-        return;
-      }
-      const video = api.container.querySelector("video");
-      if (!video) return;
-      const live = api.getState("live");
-      const seekableRange = api.getState("seekableRange");
-      switch (e.key) {
-        case " ":
-        case "k":
-          e.preventDefault();
-          if (video.paused) {
-            video.play().catch(() => {
-            });
-          } else {
-            video.pause();
-          }
-          break;
-        case "m":
-          e.preventDefault();
-          video.muted = !video.muted;
-          break;
-        case "f":
-          e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {
-            });
-          } else {
-            api.container.requestFullscreen?.().catch(() => {
-            });
-          }
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          if (live && seekableRange) {
-            video.currentTime = Math.max(seekableRange.start, video.currentTime - 5);
-          } else {
-            video.currentTime = Math.max(0, video.currentTime - 5);
-          }
-          showControls();
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          if (live && seekableRange) {
-            video.currentTime = Math.min(seekableRange.end, video.currentTime + 5);
-          } else {
-            video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
-          }
-          showControls();
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          video.volume = Math.min(1, video.volume + 0.1);
-          showControls();
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          video.volume = Math.max(0, video.volume - 0.1);
-          showControls();
-          break;
-      }
-    };
-    return {
-      id: "ui-controls",
-      name: "UI Controls",
-      type: "ui",
-      version: "1.0.0",
-      async init(pluginApi) {
-        api = pluginApi;
-        styleEl = document.createElement("style");
-        styleEl.textContent = styles3;
-        document.head.appendChild(styleEl);
-        if (config.theme) {
-          this.setTheme(config.theme);
-        }
-        const container = api.container;
-        if (!container) {
-          api.logger.error("UI plugin: container not found");
-          return;
-        }
-        const containerStyle = getComputedStyle(container);
-        if (containerStyle.position === "static") {
-          container.style.position = "relative";
-        }
-        const isPlaying = api.getState("playing");
-        gradient = document.createElement("div");
-        gradient.className = isPlaying ? "sp-gradient" : "sp-gradient sp-gradient--visible";
-        container.appendChild(gradient);
-        bufferingIndicator = document.createElement("div");
-        bufferingIndicator.className = "sp-buffering";
-        bufferingIndicator.innerHTML = icons3.spinner;
-        bufferingIndicator.setAttribute("aria-hidden", "true");
-        container.appendChild(bufferingIndicator);
-        errorOverlay = new ErrorOverlay2(api);
-        container.appendChild(errorOverlay.render());
-        errorUnsubscribe = api.on("error", (payload) => {
-          if (payload?.fatal) {
-            const error = api.getState("error") || payload;
-            errorOverlay?.show(error);
-          }
-        });
-        reconnectingUnsubscribe = api.on("error:reconnecting", () => {
-          errorOverlay?.showReconnecting();
-        });
-        recoveredUnsubscribe = api.on("error:recovered", () => {
-          errorOverlay?.hide();
-        });
-        progressBar = new ProgressBar2(api);
-        container.appendChild(progressBar.render());
-        if (!isPlaying) {
-          progressBar.show();
-        }
-        controlBar = document.createElement("div");
-        controlBar.className = isPlaying ? "sp-controls sp-controls--hidden" : "sp-controls sp-controls--visible";
-        controlBar.setAttribute("role", "toolbar");
-        controlBar.setAttribute("aria-label", "Video controls");
-        populateControlBar();
-        container.appendChild(controlBar);
-        controlRegistryUnsubscribe = onControlRegistered2((id) => {
-          if (!layout.includes(id)) {
-            return;
-          }
-          api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
-          rebuildControlBar();
-        });
-        container.addEventListener("mousemove", handleInteraction);
-        container.addEventListener("mouseenter", handleInteraction);
-        container.addEventListener("mouseleave", handleMouseLeave);
-        container.addEventListener("touchstart", handleInteraction, { passive: true });
-        container.addEventListener("click", handleInteraction);
-        document.addEventListener("keydown", handleKeyDown);
-        stateUnsubscribe = api.subscribeToState(scheduleUpdate);
-        document.addEventListener("fullscreenchange", scheduleUpdate);
-        updateControls();
-        if (!container.hasAttribute("tabindex")) {
-          container.setAttribute("tabindex", "0");
-        }
-        controlsVisible = !isPlaying;
-        api.setState("controlsVisible", controlsVisible);
-        if (isPlaying) {
-          resetHideTimer();
-        }
-        api.logger.debug("UI controls plugin initialized");
-      },
-      async destroy() {
-        if (hideTimeout) {
-          clearTimeout(hideTimeout);
-          hideTimeout = null;
-        }
-        if (rafHandle !== null) {
-          cancelAnimationFrame(rafHandle);
-          rafHandle = null;
-        }
-        stateUnsubscribe?.();
-        stateUnsubscribe = null;
-        errorUnsubscribe?.();
-        errorUnsubscribe = null;
-        reconnectingUnsubscribe?.();
-        reconnectingUnsubscribe = null;
-        recoveredUnsubscribe?.();
-        recoveredUnsubscribe = null;
-        if (api?.container) {
-          api.container.removeEventListener("mousemove", handleInteraction);
-          api.container.removeEventListener("mouseenter", handleInteraction);
-          api.container.removeEventListener("mouseleave", handleMouseLeave);
-          api.container.removeEventListener("touchstart", handleInteraction);
-          api.container.removeEventListener("click", handleInteraction);
-        }
-        document.removeEventListener("keydown", handleKeyDown);
-        document.removeEventListener("fullscreenchange", scheduleUpdate);
-        controlRegistryUnsubscribe?.();
-        controlRegistryUnsubscribe = null;
-        controls.forEach((c) => c.destroy());
-        controls = [];
-        progressBar?.destroy();
-        progressBar = null;
-        errorOverlay?.destroy();
-        errorOverlay = null;
-        controlBar?.remove();
-        controlBar = null;
-        gradient?.remove();
-        gradient = null;
-        bufferingIndicator?.remove();
-        bufferingIndicator = null;
-        styleEl?.remove();
-        styleEl = null;
-        api?.logger.debug("UI controls plugin destroyed");
-      },
-      // Public API
-      show() {
-        showControls();
-      },
-      hide() {
-        controlsVisible = false;
-        controlBar?.classList.remove("sp-controls--visible");
-        controlBar?.classList.add("sp-controls--hidden");
-        gradient?.classList.remove("sp-gradient--visible");
-        progressBar?.hide();
-        api?.setState("controlsVisible", false);
-      },
-      setTheme(theme) {
-        const root = api?.container || document.documentElement;
-        if (theme.primaryColor) {
-          root.style.setProperty("--sp-color", theme.primaryColor);
-        }
-        if (theme.accentColor) {
-          root.style.setProperty("--sp-accent", theme.accentColor);
-        }
-        if (theme.backgroundColor) {
-          root.style.setProperty("--sp-bg", theme.backgroundColor);
-        }
-        if (theme.controlBarHeight) {
-          root.style.setProperty("--sp-control-height", `${theme.controlBarHeight}px`);
-        }
-        if (theme.iconSize) {
-          root.style.setProperty("--sp-icon-size", `${theme.iconSize}px`);
-        }
-      },
-      getControlBar() {
-        return controlBar;
-      }
-    };
-  }
-  var styles3, icons3, lastHTML2, PlayButton2, ThumbnailPreview2, ProgressBar2, TimeDisplay2, VolumeControl2, LiveIndicator2, QualityMenu2, CastButton2, PipButton2, FullscreenButton2, Spacer2, ErrorOverlay2, SPEED_OPTIONS2, SettingsMenu2, DEFAULT_SKIP_SECONDS2, SkipButton2, CaptionsButton2, ICON_SVG2, BandwidthIndicator2, registry2, listeners2, DEFAULT_LAYOUT2, DEFAULT_HIDE_DELAY2, index_default;
-  var init_dist = __esm({
-    "packages/plugins/ui/dist/index.js"() {
+  // packages/plugins/ui/src/styles.ts
+  var styles;
+  var init_styles = __esm({
+    "packages/plugins/ui/src/styles.ts"() {
       "use strict";
-      styles3 = `
+      styles = `
 /* ============================================
    Container & Base
    ============================================ */
@@ -34376,7 +33857,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   --sp-icon-size: 24px;
 }
 `;
-      icons3 = {
+    }
+  });
+
+  // packages/plugins/ui/src/icons.ts
+  var icons;
+  var init_icons = __esm({
+    "packages/plugins/ui/src/icons.ts"() {
+      "use strict";
+      icons = {
         play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
         pause: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`,
         replay: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`,
@@ -34403,14 +33892,116 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         replay10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><path d="M10.9 16V11.73l-.72.36-.48-.86 1.48-.73h.85V16h-1.13zm2.77-2.14c0-.66.13-1.2.38-1.6.26-.41.66-.62 1.2-.62.55 0 .95.21 1.21.62.25.4.38.94.38 1.6 0 .67-.13 1.2-.38 1.61-.26.41-.66.61-1.21.61-.54 0-.94-.2-1.2-.61-.25-.41-.38-.94-.38-1.61zm1.12 0c0 .45.05.79.15 1.03.1.23.26.35.48.35s.38-.12.49-.35c.1-.24.15-.58.15-1.03s-.05-.78-.15-1.02c-.11-.23-.27-.35-.49-.35s-.38.12-.48.35c-.1.24-.15.57-.15 1.02z"/></svg>`,
         error: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`
       };
-      lastHTML2 = /* @__PURE__ */ new WeakMap();
-      PlayButton2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/utils/dom.ts
+  function createElement(tag, attrs, children) {
+    const el = document.createElement(tag);
+    if (attrs) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (key === "className") {
+          el.className = value;
+        } else {
+          el.setAttribute(key, value);
+        }
+      }
+    }
+    if (children) {
+      for (const child of children) {
+        if (typeof child === "string") {
+          el.appendChild(document.createTextNode(child));
+        } else {
+          el.appendChild(child);
+        }
+      }
+    }
+    return el;
+  }
+  function createButton(className, label, icon) {
+    const btn = createElement("button", {
+      className: `sp-control ${className}`,
+      "aria-label": label,
+      type: "button"
+    });
+    setHTML(btn, icon);
+    return btn;
+  }
+  function getVideo(container) {
+    return container.querySelector("video");
+  }
+  function setHTML(el, html) {
+    if (lastHTML.get(el) === html) return false;
+    el.innerHTML = html;
+    lastHTML.set(el, html);
+    return true;
+  }
+  function setAttr(el, name, value) {
+    if (el.getAttribute(name) === value) return false;
+    el.setAttribute(name, value);
+    return true;
+  }
+  var lastHTML;
+  var init_dom = __esm({
+    "packages/plugins/ui/src/utils/dom.ts"() {
+      "use strict";
+      lastHTML = /* @__PURE__ */ new WeakMap();
+    }
+  });
+
+  // packages/plugins/ui/src/utils/format.ts
+  function formatTime(seconds) {
+    if (!isFinite(seconds) || isNaN(seconds)) {
+      return "0:00";
+    }
+    const absSeconds = Math.abs(seconds);
+    const h = Math.floor(absSeconds / 3600);
+    const m = Math.floor(absSeconds % 3600 / 60);
+    const s = Math.floor(absSeconds % 60);
+    const sign = seconds < 0 ? "-" : "";
+    if (h > 0) {
+      return `${sign}${h}:${pad(m)}:${pad(s)}`;
+    }
+    return `${sign}${m}:${pad(s)}`;
+  }
+  function pad(n) {
+    return n < 10 ? `0${n}` : `${n}`;
+  }
+  function formatLiveTime(behindLive) {
+    if (behindLive <= 0) {
+      return "LIVE";
+    }
+    return `-${formatTime(behindLive)}`;
+  }
+  var init_format = __esm({
+    "packages/plugins/ui/src/utils/format.ts"() {
+      "use strict";
+    }
+  });
+
+  // packages/plugins/ui/src/utils/index.ts
+  var init_utils = __esm({
+    "packages/plugins/ui/src/utils/index.ts"() {
+      "use strict";
+      init_dom();
+      init_format();
+    }
+  });
+
+  // packages/plugins/ui/src/controls/PlayButton.ts
+  var PlayButton;
+  var init_PlayButton = __esm({
+    "packages/plugins/ui/src/controls/PlayButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      PlayButton = class {
         constructor(api) {
           this.clickHandler = () => {
             this.toggle();
           };
           this.api = api;
-          this.el = createButton2("sp-play", "Play", icons3.play);
+          this.el = createButton("sp-play", "Play", icons.play);
           this.el.addEventListener("click", this.clickHandler);
         }
         render() {
@@ -34422,20 +34013,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           let icon;
           let label;
           if (ended) {
-            icon = icons3.replay;
+            icon = icons.replay;
             label = "Replay";
           } else if (playing) {
-            icon = icons3.pause;
+            icon = icons.pause;
             label = "Pause";
           } else {
-            icon = icons3.play;
+            icon = icons.play;
             label = "Play";
           }
-          setHTML2(this.el, icon);
-          setAttr2(this.el, "aria-label", label);
+          setHTML(this.el, icon);
+          setAttr(this.el, "aria-label", label);
         }
         toggle() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           const ended = this.api.getState("ended");
           if (ended) {
@@ -34454,12 +34045,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      ThumbnailPreview2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/ThumbnailPreview.ts
+  var ThumbnailPreview;
+  var init_ThumbnailPreview = __esm({
+    "packages/plugins/ui/src/controls/ThumbnailPreview.ts"() {
+      "use strict";
+      init_utils();
+      ThumbnailPreview = class {
         constructor() {
           this.config = null;
           this.loaded = false;
-          this.el = createElement2("div", { className: "sp-thumbnail-preview" });
-          this.img = createElement2("div", { className: "sp-thumbnail-preview__img" });
+          this.el = createElement("div", { className: "sp-thumbnail-preview" });
+          this.img = createElement("div", { className: "sp-thumbnail-preview__img" });
           this.el.appendChild(this.img);
         }
         getElement() {
@@ -34516,15 +34116,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      ProgressBar2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/ProgressBar.ts
+  var ProgressBar;
+  var init_ProgressBar = __esm({
+    "packages/plugins/ui/src/controls/ProgressBar.ts"() {
+      "use strict";
+      init_utils();
+      init_ThumbnailPreview();
+      ProgressBar = class {
         constructor(api) {
           this.isDragging = false;
           this.lastSeekTime = 0;
           this.seekThrottleMs = 100;
+          // Throttle seeks to max 10/sec
           this.wasPlayingBeforeDrag = false;
           this.onMouseDown = (e) => {
             e.preventDefault();
-            const video = getVideo2(this.api.container);
+            const video = getVideo(this.api.container);
             this.wasPlayingBeforeDrag = video ? !video.paused : false;
             this.isDragging = true;
             this.el.classList.add("sp-progress--dragging");
@@ -34543,7 +34154,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.isDragging = false;
               this.el.classList.remove("sp-progress--dragging");
               if (this.wasPlayingBeforeDrag) {
-                const video = getVideo2(this.api.container);
+                const video = getVideo(this.api.container);
                 if (video && video.paused) {
                   const resumePlayback = () => {
                     video.removeEventListener("seeked", resumePlayback);
@@ -34557,7 +34168,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           };
           this.onTouchStart = (e) => {
             e.preventDefault();
-            const video = getVideo2(this.api.container);
+            const video = getVideo(this.api.container);
             this.wasPlayingBeforeDrag = video ? !video.paused : false;
             this.isDragging = true;
             this.el.classList.add("sp-progress--dragging");
@@ -34580,7 +34191,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.isDragging = false;
               this.el.classList.remove("sp-progress--dragging");
               if (this.wasPlayingBeforeDrag) {
-                const video = getVideo2(this.api.container);
+                const video = getVideo(this.api.container);
                 if (video && video.paused) {
                   const resumePlayback = () => {
                     video.removeEventListener("seeked", resumePlayback);
@@ -34604,7 +34215,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.onKeyDown = (e) => {
-            const video = getVideo2(this.api.container);
+            const video = getVideo(this.api.container);
             if (!video) return;
             const step = 5;
             const live = this.api.getState("live");
@@ -34651,15 +34262,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.api = api;
-          this.wrapper = createElement2("div", { className: "sp-progress-wrapper" });
-          this.el = createElement2("div", { className: "sp-progress" });
-          const track = createElement2("div", { className: "sp-progress__track" });
-          this.buffered = createElement2("div", { className: "sp-progress__buffered" });
-          this.filled = createElement2("div", { className: "sp-progress__filled" });
-          this.handle = createElement2("div", { className: "sp-progress__handle" });
-          this.tooltip = createElement2("div", { className: "sp-progress__tooltip" });
+          this.wrapper = createElement("div", { className: "sp-progress-wrapper" });
+          this.el = createElement("div", { className: "sp-progress" });
+          const track = createElement("div", { className: "sp-progress__track" });
+          this.buffered = createElement("div", { className: "sp-progress__buffered" });
+          this.filled = createElement("div", { className: "sp-progress__filled" });
+          this.handle = createElement("div", { className: "sp-progress__handle" });
+          this.tooltip = createElement("div", { className: "sp-progress__tooltip" });
           this.tooltip.textContent = "0:00";
-          this.thumbnailPreview = new ThumbnailPreview2();
+          this.thumbnailPreview = new ThumbnailPreview();
           track.appendChild(this.buffered);
           track.appendChild(this.filled);
           track.appendChild(this.handle);
@@ -34740,7 +34351,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
             this.el.setAttribute("aria-valuemax", String(Math.floor(duration)));
             this.el.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
-            this.el.setAttribute("aria-valuetext", formatTime3(currentTime));
+            this.el.setAttribute("aria-valuetext", formatTime(currentTime));
           }
         }
         getTimeFromPosition(clientX) {
@@ -34763,9 +34374,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const seekableRange = this.api.getState("seekableRange");
           if (live && seekableRange) {
             const behindLive = seekableRange.end - time;
-            this.tooltip.textContent = formatLiveTime2(behindLive);
+            this.tooltip.textContent = formatLiveTime(behindLive);
           } else {
-            this.tooltip.textContent = formatTime3(time);
+            this.tooltip.textContent = formatTime(time);
           }
           this.tooltip.style.left = `${percent * 100}%`;
           if (this.thumbnailPreview.isConfigured()) {
@@ -34779,7 +34390,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.handle.style.left = `${percent * 100}%`;
         }
         seek(clientX, force = false) {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           const now2 = Date.now();
           if (!force && this.isDragging && now2 - this.lastSeekTime < this.seekThrottleMs) {
@@ -34803,10 +34414,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.wrapper.remove();
         }
       };
-      TimeDisplay2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/TimeDisplay.ts
+  var TimeDisplay;
+  var init_TimeDisplay = __esm({
+    "packages/plugins/ui/src/controls/TimeDisplay.ts"() {
+      "use strict";
+      init_utils();
+      TimeDisplay = class {
         constructor(api) {
           this.api = api;
-          this.el = createElement2("div", { className: "sp-time" });
+          this.el = createElement("div", { className: "sp-time" });
           this.el.setAttribute("aria-live", "off");
         }
         render() {
@@ -34820,19 +34440,29 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             const seekableRange = this.api.getState("seekableRange");
             if (seekableRange) {
               const behindLive = seekableRange.end - currentTime;
-              this.el.textContent = formatLiveTime2(behindLive);
+              this.el.textContent = formatLiveTime(behindLive);
             } else {
-              this.el.textContent = formatLiveTime2(0);
+              this.el.textContent = formatLiveTime(0);
             }
           } else {
-            this.el.textContent = `${formatTime3(currentTime)} / ${formatTime3(duration)}`;
+            this.el.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
           }
         }
         destroy() {
           this.el.remove();
         }
       };
-      VolumeControl2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/VolumeControl.ts
+  var VolumeControl;
+  var init_VolumeControl = __esm({
+    "packages/plugins/ui/src/controls/VolumeControl.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      VolumeControl = class {
         constructor(api) {
           this.isDragging = false;
           this.onMouseDown = (e) => {
@@ -34863,7 +34493,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.isDragging = false;
           };
           this.onKeyDown = (e) => {
-            const video = getVideo2(this.api.container);
+            const video = getVideo(this.api.container);
             if (!video) return;
             const step = 0.1;
             switch (e.key) {
@@ -34880,22 +34510,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.api = api;
-          this.el = createElement2("div", { className: "sp-volume" });
-          this.btn = createElement2("button", {
+          this.el = createElement("div", { className: "sp-volume" });
+          this.btn = createElement("button", {
             className: "sp-control sp-volume__btn",
             "aria-label": "Mute",
             type: "button"
           });
-          this.btn.innerHTML = icons3.volumeHigh;
+          this.btn.innerHTML = icons.volumeHigh;
           this.btn.onclick = () => this.toggleMute();
-          const sliderWrap = createElement2("div", { className: "sp-volume__slider-wrap" });
-          this.slider = createElement2("div", { className: "sp-volume__slider" });
+          const sliderWrap = createElement("div", { className: "sp-volume__slider-wrap" });
+          this.slider = createElement("div", { className: "sp-volume__slider" });
           this.slider.setAttribute("role", "slider");
           this.slider.setAttribute("aria-label", "Volume");
           this.slider.setAttribute("aria-valuemin", "0");
           this.slider.setAttribute("aria-valuemax", "100");
           this.slider.setAttribute("tabindex", "0");
-          this.level = createElement2("div", { className: "sp-volume__level" });
+          this.level = createElement("div", { className: "sp-volume__level" });
           this.slider.appendChild(this.level);
           sliderWrap.appendChild(this.slider);
           this.el.appendChild(this.btn);
@@ -34918,33 +34548,33 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           let icon;
           let label;
           if (muted || volume === 0) {
-            icon = icons3.volumeMute;
+            icon = icons.volumeMute;
             label = "Unmute";
           } else if (volume < 0.5) {
-            icon = icons3.volumeLow;
+            icon = icons.volumeLow;
             label = "Mute";
           } else {
-            icon = icons3.volumeHigh;
+            icon = icons.volumeHigh;
             label = "Mute";
           }
-          setHTML2(this.btn, icon);
-          setAttr2(this.btn, "aria-label", label);
+          setHTML(this.btn, icon);
+          setAttr(this.btn, "aria-label", label);
           const displayVolume = muted ? 0 : volume;
           const width = `${displayVolume * 100}%`;
           if (this.level.style.width !== width) {
             this.level.style.width = width;
           }
           const volumePercent = Math.round(displayVolume * 100);
-          setAttr2(this.slider, "aria-valuenow", String(volumePercent));
-          setAttr2(this.slider, "aria-valuetext", `${volumePercent}%`);
+          setAttr(this.slider, "aria-valuenow", String(volumePercent));
+          setAttr(this.slider, "aria-valuetext", `${volumePercent}%`);
         }
         toggleMute() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           video.muted = !video.muted;
         }
         setVolume(percent) {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           const vol = Math.max(0, Math.min(1, percent));
           video.volume = vol;
@@ -34968,7 +34598,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      LiveIndicator2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/LiveIndicator.ts
+  var LiveIndicator;
+  var init_LiveIndicator = __esm({
+    "packages/plugins/ui/src/controls/LiveIndicator.ts"() {
+      "use strict";
+      init_utils();
+      LiveIndicator = class {
         constructor(api) {
           this.handleClick = () => {
             this.seekToLive();
@@ -34980,8 +34619,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.api = api;
-          this.el = createElement2("div", { className: "sp-live" });
-          this.dot = createElement2("div", { className: "sp-live__dot" });
+          this.el = createElement("div", { className: "sp-live" });
+          this.dot = createElement("div", { className: "sp-live__dot" });
           this.label = document.createElement("span");
           this.label.textContent = "LIVE";
           this.el.appendChild(this.dot);
@@ -35012,7 +34651,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         seekToLive() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           const seekableRange = this.api.getState("seekableRange");
           if (seekableRange) {
@@ -35025,21 +34664,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      QualityMenu2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/QualityMenu.ts
+  var QualityMenu;
+  var init_QualityMenu = __esm({
+    "packages/plugins/ui/src/controls/QualityMenu.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      QualityMenu = class {
         constructor(api) {
           this.isOpen = false;
           this.lastQualitiesJson = "";
           this.api = api;
-          this.el = createElement2("div", { className: "sp-quality" });
-          this.btn = createButton2("sp-quality__btn", "Quality", icons3.settings);
-          this.btnLabel = createElement2("span", { className: "sp-quality__label" });
+          this.el = createElement("div", { className: "sp-quality" });
+          this.btn = createButton("sp-quality__btn", "Quality", icons.settings);
+          this.btnLabel = createElement("span", { className: "sp-quality__label" });
           this.btnLabel.textContent = "Auto";
           this.btn.appendChild(this.btnLabel);
           this.btn.addEventListener("click", (e) => {
             e.stopPropagation();
             this.toggle();
           });
-          this.menu = createElement2("div", { className: "sp-quality-menu" });
+          this.menu = createElement("div", { className: "sp-quality-menu" });
           this.menu.setAttribute("role", "menu");
           this.menu.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -35089,12 +34738,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
         }
         createMenuItem(label, qualityId) {
-          const item = createElement2("div", {
+          const item = createElement("div", {
             className: "sp-quality-menu__item"
           });
           item.setAttribute("role", "menuitem");
           item.setAttribute("data-quality-id", qualityId);
-          const labelSpan = createElement2("span", { className: "sp-quality-menu__label" });
+          const labelSpan = createElement("span", { className: "sp-quality-menu__label" });
           labelSpan.textContent = label;
           item.appendChild(labelSpan);
           item.addEventListener("click", (e) => {
@@ -35129,14 +34778,33 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      CastButton2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/CastButton.ts
+  function isChromecastSupported() {
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent;
+    return /Chrome/.test(ua) && !/Edge|Edg/.test(ua);
+  }
+  function isAirPlaySupported() {
+    if (typeof HTMLVideoElement === "undefined") return false;
+    return typeof HTMLVideoElement.prototype.webkitShowPlaybackTargetPicker === "function";
+  }
+  var CastButton;
+  var init_CastButton = __esm({
+    "packages/plugins/ui/src/controls/CastButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      CastButton = class {
         constructor(api, type) {
           this.api = api;
           this.type = type;
-          this.supported = type === "chromecast" ? isChromecastSupported2() : isAirPlaySupported3();
-          const icon = type === "chromecast" ? icons3.chromecast : icons3.airplay;
+          this.supported = type === "chromecast" ? isChromecastSupported() : isAirPlaySupported();
+          const icon = type === "chromecast" ? icons.chromecast : icons.airplay;
           const label = type === "chromecast" ? "Cast" : "AirPlay";
-          this.el = createButton2(`sp-cast sp-cast--${type}`, label, icon);
+          this.el = createButton(`sp-cast sp-cast--${type}`, label, icon);
           this.el.addEventListener("click", () => this.handleClick());
           if (!this.supported) {
             this.el.style.display = "none";
@@ -35158,11 +34826,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.el.classList.toggle("sp-cast--active", !!active);
             this.el.classList.toggle("sp-cast--unavailable", !available && !active);
             if (active) {
-              setHTML2(this.el, icons3.chromecastConnected);
-              setAttr2(this.el, "aria-label", "Stop casting");
+              setHTML(this.el, icons.chromecastConnected);
+              setAttr(this.el, "aria-label", "Stop casting");
             } else {
-              setHTML2(this.el, icons3.chromecast);
-              setAttr2(this.el, "aria-label", available ? "Cast" : "No Cast devices found");
+              setHTML(this.el, icons.chromecast);
+              setAttr(this.el, "aria-label", available ? "Cast" : "No Cast devices found");
             }
           } else {
             const active = this.api.getState("airplayActive");
@@ -35170,7 +34838,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.el.disabled = false;
             this.el.classList.toggle("sp-cast--active", !!active);
             this.el.classList.remove("sp-cast--unavailable");
-            setAttr2(this.el, "aria-label", active ? "Stop AirPlay" : "AirPlay");
+            setAttr(this.el, "aria-label", active ? "Stop AirPlay" : "AirPlay");
           }
         }
         handleClick() {
@@ -35195,7 +34863,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (airplayPlugin2) {
             await airplayPlugin2.showPicker();
           } else {
-            const video = getVideo2(this.api.container);
+            const video = getVideo(this.api.container);
             video?.webkitShowPlaybackTargetPicker?.();
           }
         }
@@ -35203,7 +34871,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      PipButton2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/PipButton.ts
+  var PipButton;
+  var init_PipButton = __esm({
+    "packages/plugins/ui/src/controls/PipButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      PipButton = class {
         constructor(api) {
           this.clickHandler = () => {
             void this.toggle().catch(() => {
@@ -35212,7 +34890,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.api = api;
           const probe2 = document.createElement("video");
           this.supported = "pictureInPictureEnabled" in document || "webkitSetPresentationMode" in probe2;
-          this.el = createButton2("sp-pip", "Picture-in-Picture", icons3.pip);
+          this.el = createButton("sp-pip", "Picture-in-Picture", icons.pip);
           this.el.addEventListener("click", this.clickHandler);
           if (!this.supported) {
             this.el.style.display = "none";
@@ -35226,7 +34904,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         /** Whether the media element is ready to enter PiP (metadata loaded). */
         isMediaReady() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           return !!video && video.readyState >= HTMLMediaElement.HAVE_METADATA;
         }
         update() {
@@ -35234,13 +34912,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const pip = !!this.api.getState("pip");
           const enabled = pip || this.isMediaReady();
           this.el.disabled = !enabled;
-          setAttr2(this.el, "aria-disabled", String(!enabled));
-          setHTML2(this.el, pip ? icons3.exitPip : icons3.pip);
-          setAttr2(this.el, "aria-label", pip ? "Exit Picture-in-Picture" : "Picture-in-Picture");
+          setAttr(this.el, "aria-disabled", String(!enabled));
+          setHTML(this.el, pip ? icons.exitPip : icons.pip);
+          setAttr(this.el, "aria-label", pip ? "Exit Picture-in-Picture" : "Picture-in-Picture");
           this.el.classList.toggle("sp-pip--active", pip);
         }
         async toggle() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) {
             this.api.logger.warn("PiP: video element not found");
             return;
@@ -35278,13 +34956,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      FullscreenButton2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/FullscreenButton.ts
+  var FullscreenButton;
+  var init_FullscreenButton = __esm({
+    "packages/plugins/ui/src/controls/FullscreenButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      FullscreenButton = class {
         constructor(api) {
           this.clickHandler = () => {
             this.toggle();
           };
           this.api = api;
-          this.el = createButton2("sp-fullscreen", "Fullscreen", icons3.fullscreen);
+          this.el = createButton("sp-fullscreen", "Fullscreen", icons.fullscreen);
           this.el.addEventListener("click", this.clickHandler);
         }
         render() {
@@ -35293,16 +34981,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         update() {
           const fullscreen = this.api.getState("fullscreen");
           if (fullscreen) {
-            setHTML2(this.el, icons3.exitFullscreen);
-            setAttr2(this.el, "aria-label", "Exit fullscreen");
+            setHTML(this.el, icons.exitFullscreen);
+            setAttr(this.el, "aria-label", "Exit fullscreen");
           } else {
-            setHTML2(this.el, icons3.fullscreen);
-            setAttr2(this.el, "aria-label", "Fullscreen");
+            setHTML(this.el, icons.fullscreen);
+            setAttr(this.el, "aria-label", "Fullscreen");
           }
         }
         async toggle() {
           const container = this.api.container;
-          const video = getVideo2(container);
+          const video = getVideo(container);
           try {
             if (document.fullscreenElement) {
               await document.exitFullscreen();
@@ -35319,9 +35007,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      Spacer2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/Spacer.ts
+  var Spacer;
+  var init_Spacer = __esm({
+    "packages/plugins/ui/src/controls/Spacer.ts"() {
+      "use strict";
+      init_utils();
+      Spacer = class {
         constructor() {
-          this.el = createElement2("div", { className: "sp-spacer" });
+          this.el = createElement("div", { className: "sp-spacer" });
         }
         render() {
           return this.el;
@@ -35332,7 +35029,54 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      ErrorOverlay2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/ErrorOverlay.ts
+  function getUserMessage(error) {
+    if (!error) return "Something went wrong.";
+    const code = error.code;
+    if (code) {
+      switch (code) {
+        case "MEDIA_NETWORK_ERROR":
+          return "Having trouble connecting. Check your internet and try again.";
+        case "MEDIA_DECODE_ERROR":
+          return "This video can't be played right now.";
+        case "SOURCE_LOAD_FAILED":
+        case "SOURCE_NOT_SUPPORTED":
+        case "PROVIDER_NOT_FOUND":
+          return "Unable to load video. Please try again.";
+        case "PLAYBACK_FAILED":
+          return "Playback stopped unexpectedly. Please try again.";
+        case "MEDIA_APPEND_ERROR":
+          return "Video playback was interrupted. Please try again.";
+        case "MEDIA_BUFFER_FULL":
+          return "Your device is low on video memory. Close other apps or tabs and try again.";
+        case "PLAYLIST_INVALID":
+          return "The stream is temporarily unavailable. Please try again.";
+      }
+    }
+    const msg = error.message?.toLowerCase() || "";
+    if (msg.includes("network") || msg.includes("timeout") || msg.includes("fetch") || msg.includes("connection")) {
+      return "Having trouble connecting. Check your internet and try again.";
+    }
+    if (msg.includes("manifest")) {
+      return "Unable to load video. Please try again.";
+    }
+    if (msg.includes("decode") || msg.includes("media") || msg.includes("format") || msg.includes("codec")) {
+      return "This video can't be played right now.";
+    }
+    if (msg.includes("not found") || msg.includes("404") || msg.includes("source") || msg.includes("not supported")) {
+      return "Video not found.";
+    }
+    return "Something went wrong.";
+  }
+  var ErrorOverlay;
+  var init_ErrorOverlay = __esm({
+    "packages/plugins/ui/src/controls/ErrorOverlay.ts"() {
+      "use strict";
+      init_icons();
+      ErrorOverlay = class {
         constructor(api) {
           this.visible = false;
           this.lastSource = null;
@@ -35362,7 +35106,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           content.className = "sp-error-overlay__content";
           const iconEl = document.createElement("div");
           iconEl.className = "sp-error-overlay__icon";
-          iconEl.innerHTML = icons3.error;
+          iconEl.innerHTML = icons.error;
           const messageEl = document.createElement("p");
           messageEl.className = "sp-error-overlay__message";
           messageEl.textContent = "Something went wrong.";
@@ -35393,7 +35137,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         /** Show the error overlay with the given error */
         show(error) {
-          const message = getUserMessage2(error);
+          const message = getUserMessage(error);
           const messageEl = this.el.querySelector(".sp-error-overlay__message");
           if (messageEl) {
             messageEl.textContent = message;
@@ -35453,7 +35197,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      SPEED_OPTIONS2 = [
+    }
+  });
+
+  // packages/plugins/ui/src/controls/SettingsMenu.ts
+  var SPEED_OPTIONS, SettingsMenu;
+  var init_SettingsMenu = __esm({
+    "packages/plugins/ui/src/controls/SettingsMenu.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      SPEED_OPTIONS = [
         { label: "0.5x", value: 0.5 },
         { label: "0.75x", value: 0.75 },
         { label: "Normal", value: 1 },
@@ -35461,21 +35215,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         { label: "1.5x", value: 1.5 },
         { label: "2x", value: 2 }
       ];
-      SettingsMenu2 = class {
+      SettingsMenu = class {
         constructor(api) {
           this.isOpen = false;
           this.currentPanel = "main";
           this.lastQualitiesJson = "";
           this.api = api;
-          this.el = createElement2("div", { className: "sp-settings" });
-          this.btn = createButton2("sp-settings__btn", "Settings", icons3.settings);
+          this.el = createElement("div", { className: "sp-settings" });
+          this.btn = createButton("sp-settings__btn", "Settings", icons.settings);
           this.btn.setAttribute("aria-haspopup", "true");
           this.btn.setAttribute("aria-expanded", "false");
           this.btn.addEventListener("click", (e) => {
             e.stopPropagation();
             this.toggle();
           });
-          this.panel = createElement2("div", { className: "sp-settings-panel" });
+          this.panel = createElement("div", { className: "sp-settings-panel" });
           this.panel.setAttribute("role", "menu");
           this.panel.addEventListener("click", (e) => e.stopPropagation());
           this.el.appendChild(this.btn);
@@ -35604,16 +35358,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.panel.appendChild(speedRow);
         }
         createMainRow(label, value, onClick2) {
-          const row = createElement2("div", { className: "sp-settings-panel__row" });
+          const row = createElement("div", { className: "sp-settings-panel__row" });
           row.setAttribute("role", "menuitem");
           row.setAttribute("tabindex", "0");
           row.setAttribute("aria-haspopup", "true");
-          const labelEl = createElement2("span", { className: "sp-settings-panel__label" });
+          const labelEl = createElement("span", { className: "sp-settings-panel__label" });
           labelEl.textContent = label;
-          const rightSide = createElement2("span", { className: "sp-settings-panel__value" });
+          const rightSide = createElement("span", { className: "sp-settings-panel__value" });
           rightSide.textContent = value;
-          const arrow = createElement2("span", { className: "sp-settings-panel__arrow" });
-          arrow.innerHTML = icons3.chevronDown;
+          const arrow = createElement("span", { className: "sp-settings-panel__arrow" });
+          arrow.innerHTML = icons.chevronDown;
           rightSide.appendChild(arrow);
           row.appendChild(labelEl);
           row.appendChild(rightSide);
@@ -35662,7 +35416,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const header = this.createSubHeader("Speed");
           this.panel.appendChild(header);
           const currentRate = this.api.getState("playbackRate") ?? 1;
-          for (const opt of SPEED_OPTIONS2) {
+          for (const opt of SPEED_OPTIONS) {
             const isActive = Math.abs(currentRate - opt.value) < 0.01;
             const item = this.createMenuItem(opt.label, String(opt.value), isActive);
             item.addEventListener("click", (e) => {
@@ -35709,12 +35463,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
         }
         createSubHeader(title) {
-          const header = createElement2("div", { className: "sp-settings-panel__header" });
+          const header = createElement("div", { className: "sp-settings-panel__header" });
           header.setAttribute("role", "menuitem");
           header.setAttribute("tabindex", "0");
-          const backArrow = createElement2("span", { className: "sp-settings-panel__back" });
-          backArrow.innerHTML = icons3.chevronUp;
-          const label = createElement2("span", { className: "sp-settings-panel__header-label" });
+          const backArrow = createElement("span", { className: "sp-settings-panel__back" });
+          backArrow.innerHTML = icons.chevronUp;
+          const label = createElement("span", { className: "sp-settings-panel__header-label" });
           label.textContent = title;
           header.appendChild(backArrow);
           header.appendChild(label);
@@ -35731,16 +35485,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return header;
         }
         createMenuItem(label, dataId, isActive) {
-          const item = createElement2("div", {
+          const item = createElement("div", {
             className: `sp-settings-panel__item${isActive ? " sp-settings-panel__item--active" : ""}`
           });
           item.setAttribute("role", "menuitem");
           item.setAttribute("tabindex", "0");
           item.setAttribute("data-id", dataId);
-          const labelEl = createElement2("span");
+          const labelEl = createElement("span");
           labelEl.textContent = label;
-          const check = createElement2("span", { className: "sp-settings-panel__check" });
-          check.innerHTML = icons3.checkmark;
+          const check = createElement("span", { className: "sp-settings-panel__check" });
+          check.innerHTML = icons.checkmark;
           item.appendChild(labelEl);
           item.appendChild(check);
           item.addEventListener("keydown", (e) => {
@@ -35825,18 +35579,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      DEFAULT_SKIP_SECONDS2 = 10;
-      SkipButton2 = class {
-        constructor(api, direction, seconds = DEFAULT_SKIP_SECONDS2) {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/SkipButton.ts
+  var DEFAULT_SKIP_SECONDS, SkipButton;
+  var init_SkipButton = __esm({
+    "packages/plugins/ui/src/controls/SkipButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      DEFAULT_SKIP_SECONDS = 10;
+      SkipButton = class {
+        constructor(api, direction, seconds = DEFAULT_SKIP_SECONDS) {
           this.clickHandler = () => {
             this.skip();
           };
           this.api = api;
           this.direction = direction;
           this.seconds = seconds;
-          const icon = direction === "backward" ? icons3.replay10 : icons3.forward10;
+          const icon = direction === "backward" ? icons.replay10 : icons.forward10;
           const label = direction === "backward" ? `Rewind ${seconds} seconds` : `Forward ${seconds} seconds`;
-          this.el = createButton2(
+          this.el = createButton(
             `sp-skip sp-skip--${direction}`,
             label,
             icon
@@ -35865,7 +35629,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.style.display = "";
         }
         skip() {
-          const video = getVideo2(this.api.container);
+          const video = getVideo(this.api.container);
           if (!video) return;
           const live = this.api.getState("live");
           const seekableRange = this.api.getState("seekableRange");
@@ -35890,13 +35654,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      CaptionsButton2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/CaptionsButton.ts
+  var CaptionsButton;
+  var init_CaptionsButton = __esm({
+    "packages/plugins/ui/src/controls/CaptionsButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      CaptionsButton = class {
         constructor(api) {
           this.clickHandler = () => {
             this.toggle();
           };
           this.api = api;
-          this.el = createButton2("sp-captions", "Captions", icons3.captionsOff);
+          this.el = createButton("sp-captions", "Captions", icons.captionsOff);
           this.el.addEventListener("click", this.clickHandler);
         }
         render() {
@@ -35911,12 +35685,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           this.el.style.display = "";
           if (currentTrack) {
-            setHTML2(this.el, icons3.captions);
-            setAttr2(this.el, "aria-label", `Captions: ${currentTrack.label}`);
+            setHTML(this.el, icons.captions);
+            setAttr(this.el, "aria-label", `Captions: ${currentTrack.label}`);
             this.el.classList.add("sp-captions--active");
           } else {
-            setHTML2(this.el, icons3.captionsOff);
-            setAttr2(this.el, "aria-label", "Captions");
+            setHTML(this.el, icons.captionsOff);
+            setAttr(this.el, "aria-label", "Captions");
             this.el.classList.remove("sp-captions--active");
           }
         }
@@ -35935,12 +35709,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      ICON_SVG2 = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2"/></svg>`;
-      BandwidthIndicator2 = class {
+    }
+  });
+
+  // packages/plugins/ui/src/controls/BandwidthIndicator.ts
+  var ICON_SVG, BandwidthIndicator;
+  var init_BandwidthIndicator = __esm({
+    "packages/plugins/ui/src/controls/BandwidthIndicator.ts"() {
+      "use strict";
+      init_utils();
+      ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2"/></svg>`;
+      BandwidthIndicator = class {
         constructor(api) {
           this.api = api;
-          this.el = createElement2("div", { className: "sp-bandwidth-indicator" });
-          this.el.innerHTML = ICON_SVG2;
+          this.el = createElement("div", { className: "sp-bandwidth-indicator" });
+          this.el.innerHTML = ICON_SVG;
           this.el.setAttribute("aria-label", "Bandwidth is limiting video quality");
           this.el.setAttribute("title", "Bandwidth is limiting video quality");
           this.el.style.display = "none";
@@ -35966,9 +35749,460 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.remove();
         }
       };
-      registry2 = /* @__PURE__ */ new Map();
-      listeners2 = /* @__PURE__ */ new Set();
-      DEFAULT_LAYOUT2 = [
+    }
+  });
+
+  // packages/plugins/ui/src/controls/index.ts
+  var init_controls = __esm({
+    "packages/plugins/ui/src/controls/index.ts"() {
+      "use strict";
+      init_PlayButton();
+      init_ProgressBar();
+      init_TimeDisplay();
+      init_VolumeControl();
+      init_LiveIndicator();
+      init_QualityMenu();
+      init_CastButton();
+      init_PipButton();
+      init_FullscreenButton();
+      init_Spacer();
+      init_ErrorOverlay();
+      init_SettingsMenu();
+      init_SkipButton();
+      init_CaptionsButton();
+      init_ThumbnailPreview();
+      init_BandwidthIndicator();
+    }
+  });
+
+  // packages/plugins/ui/src/control-registry.ts
+  function registerControl(id, factory) {
+    registry.set(id, factory);
+    for (const listener of listeners) {
+      listener(id);
+    }
+  }
+  function unregisterControl(id) {
+    return registry.delete(id);
+  }
+  function getControlFactory(id) {
+    return registry.get(id) ?? null;
+  }
+  function onControlRegistered(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+  function resetControlRegistry() {
+    registry.clear();
+    listeners.clear();
+  }
+  var registry, listeners;
+  var init_control_registry = __esm({
+    "packages/plugins/ui/src/control-registry.ts"() {
+      "use strict";
+      registry = /* @__PURE__ */ new Map();
+      listeners = /* @__PURE__ */ new Set();
+    }
+  });
+
+  // packages/plugins/ui/src/index.ts
+  var src_exports = {};
+  __export(src_exports, {
+    default: () => src_default,
+    formatLiveTime: () => formatLiveTime,
+    formatTime: () => formatTime,
+    getControlFactory: () => getControlFactory,
+    icons: () => icons,
+    registerControl: () => registerControl,
+    resetControlRegistry: () => resetControlRegistry,
+    styles: () => styles,
+    uiPlugin: () => uiPlugin,
+    unregisterControl: () => unregisterControl
+  });
+  function uiPlugin(config = {}) {
+    let api;
+    let controlBar = null;
+    let gradient = null;
+    let progressBar = null;
+    let bufferingIndicator = null;
+    let errorOverlay = null;
+    let styleEl = null;
+    let controls = [];
+    let hideTimeout = null;
+    let stateUnsubscribe = null;
+    let controlRegistryUnsubscribe = null;
+    let errorUnsubscribe = null;
+    let reconnectingUnsubscribe = null;
+    let recoveredUnsubscribe = null;
+    let controlsVisible = true;
+    let rafHandle = null;
+    const layout = config.controls || DEFAULT_LAYOUT;
+    const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
+    const createControl = (slot) => {
+      switch (slot) {
+        case "play":
+          return new PlayButton(api);
+        case "skip-backward":
+          return new SkipButton(api, "backward");
+        case "skip-forward":
+          return new SkipButton(api, "forward");
+        case "volume":
+          return new VolumeControl(api);
+        case "progress":
+          return null;
+        case "time":
+          return new TimeDisplay(api);
+        case "live-indicator":
+          return new LiveIndicator(api);
+        case "bandwidth-indicator":
+          return new BandwidthIndicator(api);
+        case "quality":
+          return new QualityMenu(api);
+        case "settings":
+          return new SettingsMenu(api);
+        case "captions":
+          return new CaptionsButton(api);
+        case "chromecast":
+          return new CastButton(api, "chromecast");
+        case "airplay":
+          return new CastButton(api, "airplay");
+        case "pip":
+          return new PipButton(api);
+        case "fullscreen":
+          return new FullscreenButton(api);
+        case "spacer":
+          return new Spacer();
+        default: {
+          const factory = getControlFactory(slot);
+          if (factory) {
+            try {
+              return factory(api);
+            } catch (error) {
+              api.logger.error(`Control factory for "${slot}" threw`, { error });
+              return null;
+            }
+          }
+          api.logger.warn(`Unknown control slot: ${slot}`);
+          return null;
+        }
+      }
+    };
+    const populateControlBar = () => {
+      if (!controlBar) {
+        return;
+      }
+      for (const slot of layout) {
+        const control = createControl(slot);
+        if (control) {
+          controls.push(control);
+          controlBar.appendChild(control.render());
+        }
+      }
+    };
+    const rebuildControlBar = () => {
+      if (!controlBar) {
+        return;
+      }
+      controls.forEach((c) => c.destroy());
+      controls = [];
+      controlBar.replaceChildren();
+      populateControlBar();
+      updateControls();
+    };
+    const updateControls = () => {
+      controls.forEach((c) => c.update());
+      progressBar?.update();
+      const waiting = api?.getState("waiting");
+      const seeking = api?.getState("seeking");
+      const playbackState = api?.getState("playbackState");
+      const isLoading = playbackState === "loading";
+      const showSpinner = waiting || seeking && !api?.getState("paused") || isLoading;
+      bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
+      errorOverlay?.update();
+    };
+    const scheduleUpdate = () => {
+      if (rafHandle !== null) return;
+      rafHandle = requestAnimationFrame(() => {
+        rafHandle = null;
+        updateControls();
+      });
+    };
+    const showControls = () => {
+      if (controlsVisible) {
+        resetHideTimer();
+        return;
+      }
+      controlsVisible = true;
+      controlBar?.classList.add("sp-controls--visible");
+      controlBar?.classList.remove("sp-controls--hidden");
+      gradient?.classList.add("sp-gradient--visible");
+      progressBar?.show();
+      api?.setState("controlsVisible", true);
+      resetHideTimer();
+    };
+    const hideControls = () => {
+      const paused = api?.getState("paused");
+      if (paused) return;
+      controlsVisible = false;
+      controlBar?.classList.remove("sp-controls--visible");
+      controlBar?.classList.add("sp-controls--hidden");
+      gradient?.classList.remove("sp-gradient--visible");
+      progressBar?.hide();
+      api?.setState("controlsVisible", false);
+    };
+    const resetHideTimer = () => {
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+      }
+      hideTimeout = setTimeout(hideControls, hideDelay);
+    };
+    const handleInteraction = () => {
+      showControls();
+    };
+    const handleMouseLeave = () => {
+      hideControls();
+    };
+    const handleKeyDown = (e) => {
+      if (!api.container.contains(document.activeElement)) return;
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
+        return;
+      }
+      const video = api.container.querySelector("video");
+      if (!video) return;
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
+      switch (e.key) {
+        case " ":
+        case "k":
+          e.preventDefault();
+          if (video.paused) {
+            video.play().catch(() => {
+            });
+          } else {
+            video.pause();
+          }
+          break;
+        case "m":
+          e.preventDefault();
+          video.muted = !video.muted;
+          break;
+        case "f":
+          e.preventDefault();
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {
+            });
+          } else {
+            api.container.requestFullscreen?.().catch(() => {
+            });
+          }
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          if (live && seekableRange) {
+            video.currentTime = Math.max(seekableRange.start, video.currentTime - 5);
+          } else {
+            video.currentTime = Math.max(0, video.currentTime - 5);
+          }
+          showControls();
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          if (live && seekableRange) {
+            video.currentTime = Math.min(seekableRange.end, video.currentTime + 5);
+          } else {
+            video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+          }
+          showControls();
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          video.volume = Math.min(1, video.volume + 0.1);
+          showControls();
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          video.volume = Math.max(0, video.volume - 0.1);
+          showControls();
+          break;
+      }
+    };
+    return {
+      id: "ui-controls",
+      name: "UI Controls",
+      type: "ui",
+      version: "1.0.0",
+      async init(pluginApi) {
+        api = pluginApi;
+        styleEl = document.createElement("style");
+        styleEl.textContent = styles;
+        document.head.appendChild(styleEl);
+        if (config.theme) {
+          this.setTheme(config.theme);
+        }
+        const container = api.container;
+        if (!container) {
+          api.logger.error("UI plugin: container not found");
+          return;
+        }
+        const containerStyle = getComputedStyle(container);
+        if (containerStyle.position === "static") {
+          container.style.position = "relative";
+        }
+        const isPlaying = api.getState("playing");
+        gradient = document.createElement("div");
+        gradient.className = isPlaying ? "sp-gradient" : "sp-gradient sp-gradient--visible";
+        container.appendChild(gradient);
+        bufferingIndicator = document.createElement("div");
+        bufferingIndicator.className = "sp-buffering";
+        bufferingIndicator.innerHTML = icons.spinner;
+        bufferingIndicator.setAttribute("aria-hidden", "true");
+        container.appendChild(bufferingIndicator);
+        errorOverlay = new ErrorOverlay(api);
+        container.appendChild(errorOverlay.render());
+        errorUnsubscribe = api.on("error", (payload) => {
+          if (payload?.fatal) {
+            const error = api.getState("error") || payload;
+            errorOverlay?.show(error);
+          }
+        });
+        reconnectingUnsubscribe = api.on("error:reconnecting", () => {
+          errorOverlay?.showReconnecting();
+        });
+        recoveredUnsubscribe = api.on("error:recovered", () => {
+          errorOverlay?.hide();
+        });
+        progressBar = new ProgressBar(api);
+        container.appendChild(progressBar.render());
+        if (!isPlaying) {
+          progressBar.show();
+        }
+        controlBar = document.createElement("div");
+        controlBar.className = isPlaying ? "sp-controls sp-controls--hidden" : "sp-controls sp-controls--visible";
+        controlBar.setAttribute("role", "toolbar");
+        controlBar.setAttribute("aria-label", "Video controls");
+        populateControlBar();
+        container.appendChild(controlBar);
+        controlRegistryUnsubscribe = onControlRegistered((id) => {
+          if (!layout.includes(id)) {
+            return;
+          }
+          api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
+          rebuildControlBar();
+        });
+        container.addEventListener("mousemove", handleInteraction);
+        container.addEventListener("mouseenter", handleInteraction);
+        container.addEventListener("mouseleave", handleMouseLeave);
+        container.addEventListener("touchstart", handleInteraction, { passive: true });
+        container.addEventListener("click", handleInteraction);
+        document.addEventListener("keydown", handleKeyDown);
+        stateUnsubscribe = api.subscribeToState(scheduleUpdate);
+        document.addEventListener("fullscreenchange", scheduleUpdate);
+        updateControls();
+        if (!container.hasAttribute("tabindex")) {
+          container.setAttribute("tabindex", "0");
+        }
+        controlsVisible = !isPlaying;
+        api.setState("controlsVisible", controlsVisible);
+        if (isPlaying) {
+          resetHideTimer();
+        }
+        api.logger.debug("UI controls plugin initialized");
+      },
+      async destroy() {
+        if (hideTimeout) {
+          clearTimeout(hideTimeout);
+          hideTimeout = null;
+        }
+        if (rafHandle !== null) {
+          cancelAnimationFrame(rafHandle);
+          rafHandle = null;
+        }
+        stateUnsubscribe?.();
+        stateUnsubscribe = null;
+        errorUnsubscribe?.();
+        errorUnsubscribe = null;
+        reconnectingUnsubscribe?.();
+        reconnectingUnsubscribe = null;
+        recoveredUnsubscribe?.();
+        recoveredUnsubscribe = null;
+        if (api?.container) {
+          api.container.removeEventListener("mousemove", handleInteraction);
+          api.container.removeEventListener("mouseenter", handleInteraction);
+          api.container.removeEventListener("mouseleave", handleMouseLeave);
+          api.container.removeEventListener("touchstart", handleInteraction);
+          api.container.removeEventListener("click", handleInteraction);
+        }
+        document.removeEventListener("keydown", handleKeyDown);
+        document.removeEventListener("fullscreenchange", scheduleUpdate);
+        controlRegistryUnsubscribe?.();
+        controlRegistryUnsubscribe = null;
+        controls.forEach((c) => c.destroy());
+        controls = [];
+        progressBar?.destroy();
+        progressBar = null;
+        errorOverlay?.destroy();
+        errorOverlay = null;
+        controlBar?.remove();
+        controlBar = null;
+        gradient?.remove();
+        gradient = null;
+        bufferingIndicator?.remove();
+        bufferingIndicator = null;
+        styleEl?.remove();
+        styleEl = null;
+        api?.logger.debug("UI controls plugin destroyed");
+      },
+      // Public API
+      show() {
+        showControls();
+      },
+      hide() {
+        controlsVisible = false;
+        controlBar?.classList.remove("sp-controls--visible");
+        controlBar?.classList.add("sp-controls--hidden");
+        gradient?.classList.remove("sp-gradient--visible");
+        progressBar?.hide();
+        api?.setState("controlsVisible", false);
+      },
+      setTheme(theme) {
+        const root = api?.container || document.documentElement;
+        if (theme.primaryColor) {
+          root.style.setProperty("--sp-color", theme.primaryColor);
+        }
+        if (theme.accentColor) {
+          root.style.setProperty("--sp-accent", theme.accentColor);
+        }
+        if (theme.backgroundColor) {
+          root.style.setProperty("--sp-bg", theme.backgroundColor);
+        }
+        if (theme.controlBarHeight) {
+          root.style.setProperty("--sp-control-height", `${theme.controlBarHeight}px`);
+        }
+        if (theme.iconSize) {
+          root.style.setProperty("--sp-icon-size", `${theme.iconSize}px`);
+        }
+      },
+      getControlBar() {
+        return controlBar;
+      }
+    };
+  }
+  var DEFAULT_LAYOUT, DEFAULT_HIDE_DELAY, src_default;
+  var init_src = __esm({
+    "packages/plugins/ui/src/index.ts"() {
+      "use strict";
+      init_styles();
+      init_icons();
+      init_controls();
+      init_control_registry();
+      init_control_registry();
+      init_icons();
+      init_styles();
+      init_utils();
+      DEFAULT_LAYOUT = [
         "play",
         "skip-backward",
         "skip-forward",
@@ -35984,8 +36218,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "pip",
         "fullscreen"
       ];
-      DEFAULT_HIDE_DELAY2 = 3e3;
-      index_default = uiPlugin2;
+      DEFAULT_HIDE_DELAY = 3e3;
+      src_default = uiPlugin;
     }
   });
 
@@ -36194,8 +36428,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * Register a state key at runtime, for state a plugin owns.
      *
      * Core cannot know every plugin's keys, and {@link get} deliberately throws
-     * for unregistered ones — that throw is a useful typo-catcher and is worth
-     * keeping — so a plugin declares its keys before first use.
+     * for unregistered ones - that throw is a useful typo-catcher and is worth
+     * keeping - so a plugin declares its keys before first use.
      *
      * Idempotent by design: re-defining an existing key leaves the current value
      * untouched. Plugins commonly re-run setup after a source change, and that
@@ -37269,7 +37503,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     /**
      * Register a state key this plugin owns, before first use.
      *
-     * Idempotent — re-defining an existing key keeps its current value.
+     * Idempotent - re-defining an existing key keeps its current value.
      * See {@link IPluginAPI.defineState}.
      *
      * @param key - State property key
@@ -38371,24 +38605,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     loadingPromise = null;
   }
 
-  // packages/core/dist/index.js
-  var ErrorCode2 = /* @__PURE__ */ ((ErrorCode22) => {
-    ErrorCode22["SOURCE_NOT_SUPPORTED"] = "SOURCE_NOT_SUPPORTED";
-    ErrorCode22["SOURCE_LOAD_FAILED"] = "SOURCE_LOAD_FAILED";
-    ErrorCode22["PROVIDER_NOT_FOUND"] = "PROVIDER_NOT_FOUND";
-    ErrorCode22["PROVIDER_SETUP_FAILED"] = "PROVIDER_SETUP_FAILED";
-    ErrorCode22["PLUGIN_SETUP_FAILED"] = "PLUGIN_SETUP_FAILED";
-    ErrorCode22["PLUGIN_NOT_FOUND"] = "PLUGIN_NOT_FOUND";
-    ErrorCode22["PLAYBACK_FAILED"] = "PLAYBACK_FAILED";
-    ErrorCode22["MEDIA_DECODE_ERROR"] = "MEDIA_DECODE_ERROR";
-    ErrorCode22["MEDIA_NETWORK_ERROR"] = "MEDIA_NETWORK_ERROR";
-    ErrorCode22["MEDIA_APPEND_ERROR"] = "MEDIA_APPEND_ERROR";
-    ErrorCode22["MEDIA_BUFFER_FULL"] = "MEDIA_BUFFER_FULL";
-    ErrorCode22["PLAYLIST_INVALID"] = "PLAYLIST_INVALID";
-    ErrorCode22["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
-    return ErrorCode22;
-  })(ErrorCode2 || {});
-
   // packages/plugins/hls/src/quality.ts
   function formatLevel(level) {
     if (level.name) {
@@ -38909,22 +39125,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     ];
     const mapFatalErrorCode = (error) => {
       if (error.response?.text === PLAYLIST_INVALID_TEXT) {
-        return ErrorCode2.PLAYLIST_INVALID;
+        return "PLAYLIST_INVALID" /* PLAYLIST_INVALID */;
       }
       if (error.details === "bufferFullError") {
-        return ErrorCode2.MEDIA_BUFFER_FULL;
+        return "MEDIA_BUFFER_FULL" /* MEDIA_BUFFER_FULL */;
       }
       if (APPEND_ERROR_DETAILS.includes(error.details)) {
-        return ErrorCode2.MEDIA_APPEND_ERROR;
+        return "MEDIA_APPEND_ERROR" /* MEDIA_APPEND_ERROR */;
       }
       switch (error.type) {
         case "network":
-          return ErrorCode2.MEDIA_NETWORK_ERROR;
+          return "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */;
         case "media":
         case "mux":
-          return ErrorCode2.MEDIA_DECODE_ERROR;
+          return "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */;
         default:
-          return ErrorCode2.PLAYBACK_FAILED;
+          return "PLAYBACK_FAILED" /* PLAYBACK_FAILED */;
       }
     };
     const emitFatalError = (error, retriesExhausted) => {
@@ -39705,7 +39921,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         api?.logger.error("Video error", { code: error?.code, message });
         api?.emit("error", {
-          code: ErrorCode2.PLAYBACK_FAILED,
+          code: "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
           message,
           fatal: true,
           timestamp: Date.now()
@@ -39896,2992 +40112,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
-  // packages/plugins/ui/src/styles.ts
-  var styles = `
-/* ============================================
-   Container & Base
-   ============================================ */
-.sp-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: #000;
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.sp-container video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: contain;
-}
-
-.sp-container:focus {
-  outline: none;
-}
-
-/* ============================================
-   Gradient Overlay
-   ============================================ */
-.sp-gradient {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 160px;
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.8) 0%,
-    rgba(0, 0, 0, 0.4) 50%,
-    transparent 100%
-  );
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-  z-index: 5;
-}
-
-.sp-gradient--visible {
-  opacity: 1;
-}
-
-/* ============================================
-   Controls Container
-   ============================================ */
-.sp-controls {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 12px 12px;
-  gap: 4px;
-  opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.25s ease, transform 0.25s ease;
-  z-index: 10;
-}
-
-.sp-controls--visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.sp-controls--hidden {
-  opacity: 0;
-  transform: translateY(4px);
-  pointer-events: none;
-}
-
-/* ============================================
-   Progress Bar (Above Controls)
-   ============================================ */
-.sp-progress-wrapper {
-  position: absolute;
-  bottom: 48px;
-  left: 12px;
-  right: 12px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-
-.sp-progress-wrapper--visible {
-  opacity: 1;
-}
-
-.sp-progress {
-  position: relative;
-  width: 100%;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 1.5px;
-  transition: height 0.15s ease;
-}
-
-@media (hover: hover) {
-  .sp-progress-wrapper:hover .sp-progress {
-    height: 5px;
-  }
-}
-
-.sp-progress--dragging {
-  height: 5px;
-}
-
-.sp-progress__track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: inherit;
-  overflow: hidden;
-}
-
-.sp-progress__buffered {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: inherit;
-  transition: width 0.1s linear;
-}
-
-.sp-progress__filled {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: var(--sp-accent, #e50914);
-  border-radius: inherit;
-}
-
-.sp-progress__handle {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  background: var(--sp-accent, #e50914);
-  border-radius: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  transition: transform 0.15s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-@media (hover: hover) {
-  .sp-progress-wrapper:hover .sp-progress__handle {
-    transform: translate(-50%, -50%) scale(1);
-  }
-}
-
-.sp-progress--dragging .sp-progress__handle {
-  transform: translate(-50%, -50%) scale(1);
-}
-
-/* Thumbnail Preview */
-.sp-thumbnail-preview {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
-  pointer-events: none;
-  display: none;
-  z-index: 21;
-  border-radius: 4px;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  border: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.sp-thumbnail-preview__img {
-  background-repeat: no-repeat;
-}
-
-/* Progress Tooltip */
-.sp-progress__tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  padding: 6px 10px;
-  background: rgba(20, 20, 20, 0.95);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  border-radius: 4px;
-  white-space: nowrap;
-  transform: translateX(-50%);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-@media (hover: hover) {
-  .sp-progress-wrapper:hover .sp-progress__tooltip {
-    opacity: 1;
-  }
-}
-
-/* ============================================
-   Control Buttons
-   ============================================ */
-.sp-control {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
-  flex-shrink: 0;
-  min-width: 44px;
-  min-height: 44px;
-}
-
-@media (hover: hover) {
-  .sp-control:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
-  }
-}
-
-.sp-control:active {
-  transform: scale(0.92);
-}
-
-.sp-control:focus-visible {
-  outline: 2px solid var(--sp-accent, #e50914);
-  outline-offset: 2px;
-}
-
-.sp-control:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.sp-control:disabled:hover {
-  background: none;
-}
-
-.sp-control svg {
-  width: 24px;
-  height: 24px;
-  fill: currentColor;
-  display: block;
-}
-
-.sp-control--small svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* ============================================
-   Spacer
-   ============================================ */
-.sp-spacer {
-  flex: 1;
-  min-width: 0;
-}
-
-/* ============================================
-   Time Display
-   ============================================ */
-.sp-time {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.9);
-  white-space: nowrap;
-  padding: 0 4px;
-  letter-spacing: 0.02em;
-}
-
-/* ============================================
-   Volume Control
-   ============================================ */
-.sp-volume {
-  display: flex;
-  align-items: center;
-  position: relative;
-}
-
-.sp-volume__slider-wrap {
-  width: 0;
-  overflow: hidden;
-  transition: width 0.2s ease;
-}
-
-@media (hover: hover) {
-  .sp-volume:hover .sp-volume__slider-wrap {
-    width: 64px;
-  }
-}
-
-.sp-volume:focus-within .sp-volume__slider-wrap {
-  width: 64px;
-}
-
-.sp-volume__slider {
-  width: 64px;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 1.5px;
-  cursor: pointer;
-  position: relative;
-  margin: 0 8px 0 4px;
-}
-
-.sp-volume__level {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: #fff;
-  border-radius: inherit;
-  transition: width 0.1s ease;
-}
-
-/* ============================================
-   Live Indicator
-   ============================================ */
-.sp-live {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--sp-accent, #e50914);
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 4px;
-  transition: background 0.15s ease, opacity 0.15s ease;
-}
-
-@media (hover: hover) {
-  .sp-live:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-}
-
-.sp-live__dot {
-  width: 8px;
-  height: 8px;
-  background: currentColor;
-  border-radius: 50%;
-  animation: sp-pulse 2s ease-in-out infinite;
-}
-
-.sp-live--behind {
-  opacity: 0.6;
-}
-
-.sp-live--behind .sp-live__dot {
-  animation: none;
-}
-
-.sp-live--behind span {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* Progress bar live mode: accent color for filled bar */
-.sp-progress--live .sp-progress__filled {
-  background: var(--sp-accent, #e50914);
-}
-
-@keyframes sp-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* ============================================
-   Quality / Settings Menu
-   ============================================ */
-.sp-quality {
-  position: relative;
-}
-
-.sp-quality__btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.sp-quality__label {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.9;
-}
-
-.sp-quality-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
-  background: rgba(20, 20, 20, 0.95);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-radius: 8px;
-  padding: 8px 0;
-  min-width: 150px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(8px);
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 20;
-}
-
-.sp-quality-menu--open {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-.sp-quality-menu__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
-}
-
-.sp-quality-menu__item:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
-.sp-quality-menu__item--active {
-  color: var(--sp-accent, #e50914);
-}
-
-.sp-quality-menu__check {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-  margin-left: 8px;
-  opacity: 0;
-}
-
-.sp-quality-menu__item--active .sp-quality-menu__check {
-  opacity: 1;
-}
-
-/* ============================================
-   Settings Menu (Gear Icon)
-   ============================================ */
-.sp-settings {
-  position: relative;
-}
-
-.sp-settings__btn {
-  display: flex;
-  align-items: center;
-}
-
-.sp-settings-panel {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
-  background: rgba(20, 20, 20, 0.95);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-radius: 8px;
-  min-width: 200px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(8px);
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 20;
-  overflow: hidden;
-}
-
-.sp-settings-panel--open {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-/* Main menu rows */
-.sp-settings-panel--main {
-  padding: 4px 0;
-}
-
-.sp-settings-panel__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  transition: background 0.1s ease;
-}
-
-.sp-settings-panel__row:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.sp-settings-panel__label {
-  font-weight: 500;
-}
-
-.sp-settings-panel__value {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 12px;
-}
-
-.sp-settings-panel__arrow {
-  display: flex;
-  align-items: center;
-  transform: rotate(-90deg);
-}
-
-.sp-settings-panel__arrow svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
-/* Sub-menu panels */
-.sp-settings-panel--sub {
-  padding: 0;
-}
-
-.sp-settings-panel__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  transition: background 0.1s ease;
-}
-
-.sp-settings-panel__header:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.sp-settings-panel__back {
-  display: flex;
-  align-items: center;
-  transform: rotate(-90deg);
-}
-
-.sp-settings-panel__back svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
-.sp-settings-panel__header-label {
-  flex: 1;
-}
-
-.sp-settings-panel__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
-}
-
-.sp-settings-panel__item:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
-.sp-settings-panel__item--active {
-  color: var(--sp-accent, #e50914);
-}
-
-.sp-settings-panel__check {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-  margin-left: 8px;
-  opacity: 0;
-}
-
-.sp-settings-panel__check svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
-.sp-settings-panel__item--active .sp-settings-panel__check {
-  opacity: 1;
-}
-
-/* ============================================
-   Captions Button
-   ============================================ */
-.sp-captions--active {
-  color: var(--sp-accent, #e50914);
-}
-
-/* ============================================
-   Cast Button States
-   ============================================ */
-.sp-cast--active {
-  color: var(--sp-accent, #e50914);
-}
-
-.sp-cast--unavailable {
-  opacity: 0.4;
-}
-
-/* ============================================
-   Error Overlay
-   ============================================ */
-.sp-error-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 25;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.25s ease, visibility 0.25s;
-}
-
-.sp-error-overlay--visible {
-  opacity: 1;
-  visibility: visible;
-}
-
-.sp-error-overlay__content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 24px;
-  max-width: 360px;
-}
-
-.sp-error-overlay__icon {
-  color: rgba(255, 255, 255, 0.7);
-  margin-bottom: 16px;
-}
-
-.sp-error-overlay__icon svg {
-  width: 48px;
-  height: 48px;
-  fill: currentColor;
-}
-
-/* Reconnecting: pulse the icon so the overlay reads as active work,
-   not a dead-end error */
-.sp-error-overlay--reconnecting .sp-error-overlay__icon {
-  animation: sp-reconnect-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes sp-reconnect-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
-.sp-error-overlay__message {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 15px;
-  line-height: 1.5;
-  margin: 0 0 24px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.sp-error-overlay__actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.sp-error-overlay__retry {
-  background: var(--sp-accent, #e50914);
-  color: #fff;
-  border: none;
-  padding: 12px 24px;
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 6px;
-  cursor: pointer;
-  min-width: 120px;
-  min-height: 44px;
-  transition: background 0.15s ease, transform 0.15s ease;
-  font-family: inherit;
-}
-
-.sp-error-overlay__retry:hover {
-  filter: brightness(1.1);
-}
-
-.sp-error-overlay__retry:active {
-  transform: scale(0.96);
-}
-
-.sp-error-overlay__retry:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
-.sp-error-overlay__dismiss {
-  background: none;
-  color: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 12px 24px;
-  font-size: 14px;
-  font-weight: 500;
-  border-radius: 6px;
-  cursor: pointer;
-  min-width: 100px;
-  min-height: 44px;
-  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  font-family: inherit;
-}
-
-.sp-error-overlay__dismiss:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.sp-error-overlay__dismiss:active {
-  transform: scale(0.96);
-}
-
-.sp-error-overlay__dismiss:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
-/* ============================================
-   Buffering Indicator
-   ============================================ */
-.sp-buffering {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 15;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.sp-buffering--visible {
-  opacity: 1;
-}
-
-.sp-buffering svg {
-  width: 48px;
-  height: 48px;
-  fill: rgba(255, 255, 255, 0.9);
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-@keyframes sp-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.sp-spin {
-  animation: sp-spin 0.8s linear infinite;
-}
-
-/* ============================================
-   Reduced Motion
-   ============================================ */
-@media (prefers-reduced-motion: reduce) {
-  .sp-gradient,
-  .sp-controls,
-  .sp-progress-wrapper,
-  .sp-progress,
-  .sp-progress__handle,
-  .sp-progress__tooltip,
-  .sp-control,
-  .sp-volume__slider-wrap,
-  .sp-quality-menu,
-  .sp-settings-panel,
-  .sp-settings-panel__row,
-  .sp-settings-panel__item,
-  .sp-settings-panel__header,
-  .sp-buffering,
-  .sp-error-overlay,
-  .sp-error-overlay__retry,
-  .sp-error-overlay__dismiss {
-    transition: none;
-  }
-
-  .sp-live__dot,
-  .sp-spin {
-    animation: none;
-  }
-}
-
-/* ============================================
-   CSS Custom Properties (Theming)
-   ============================================ */
-:root {
-  --sp-accent: #e50914;
-  --sp-color: #fff;
-  --sp-bg: rgba(0, 0, 0, 0.8);
-  --sp-control-height: 48px;
-  --sp-icon-size: 24px;
-}
-`;
-
-  // packages/plugins/ui/src/icons.ts
-  var icons = {
-    play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
-    pause: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`,
-    replay: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`,
-    volumeHigh: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
-    volumeLow: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`,
-    volumeMute: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
-    fullscreen: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`,
-    exitFullscreen: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>`,
-    pip: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>`,
-    exitPip: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 9h6v2H9z"/></svg>`,
-    settings: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>`,
-    chromecast: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
-    chromecastConnected: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm18-7H5v1.63c3.96 1.28 7.09 4.41 8.37 8.37H19V7zM1 10v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
-    airplay: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
-    captions: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></svg>`,
-    captionsOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.5 5.5v13h-15v-13h15zM19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z"/></svg>`,
-    checkmark: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`,
-    chevronUp: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg>`,
-    chevronDown: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>`,
-    spinner: `<svg viewBox="0 0 24 24" fill="currentColor" class="sp-spin"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>`,
-    skipForward: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>`,
-    skipBack: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>`,
-    forward10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z"/><path d="M10.9 16V11.73l-.72.36-.48-.86 1.48-.73h.85V16h-1.13zm2.77-2.14c0-.66.13-1.2.38-1.6.26-.41.66-.62 1.2-.62.55 0 .95.21 1.21.62.25.4.38.94.38 1.6 0 .67-.13 1.2-.38 1.61-.26.41-.66.61-1.21.61-.54 0-.94-.2-1.2-.61-.25-.41-.38-.94-.38-1.61zm1.12 0c0 .45.05.79.15 1.03.1.23.26.35.48.35s.38-.12.49-.35c.1-.24.15-.58.15-1.03s-.05-.78-.15-1.02c-.11-.23-.27-.35-.49-.35s-.38.12-.48.35c-.1.24-.15.57-.15 1.02z"/></svg>`,
-    replay10: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><path d="M10.9 16V11.73l-.72.36-.48-.86 1.48-.73h.85V16h-1.13zm2.77-2.14c0-.66.13-1.2.38-1.6.26-.41.66-.62 1.2-.62.55 0 .95.21 1.21.62.25.4.38.94.38 1.6 0 .67-.13 1.2-.38 1.61-.26.41-.66.61-1.21.61-.54 0-.94-.2-1.2-.61-.25-.41-.38-.94-.38-1.61zm1.12 0c0 .45.05.79.15 1.03.1.23.26.35.48.35s.38-.12.49-.35c.1-.24.15-.58.15-1.03s-.05-.78-.15-1.02c-.11-.23-.27-.35-.49-.35s-.38.12-.48.35c-.1.24-.15.57-.15 1.02z"/></svg>`,
-    error: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`
-  };
-
-  // packages/plugins/ui/src/utils/dom.ts
-  function createElement(tag, attrs, children) {
-    const el = document.createElement(tag);
-    if (attrs) {
-      for (const [key, value] of Object.entries(attrs)) {
-        if (key === "className") {
-          el.className = value;
-        } else {
-          el.setAttribute(key, value);
-        }
-      }
-    }
-    if (children) {
-      for (const child of children) {
-        if (typeof child === "string") {
-          el.appendChild(document.createTextNode(child));
-        } else {
-          el.appendChild(child);
-        }
-      }
-    }
-    return el;
-  }
-  function createButton(className, label, icon) {
-    const btn = createElement("button", {
-      className: `sp-control ${className}`,
-      "aria-label": label,
-      type: "button"
-    });
-    setHTML(btn, icon);
-    return btn;
-  }
-  function getVideo(container) {
-    return container.querySelector("video");
-  }
-  var lastHTML = /* @__PURE__ */ new WeakMap();
-  function setHTML(el, html) {
-    if (lastHTML.get(el) === html) return false;
-    el.innerHTML = html;
-    lastHTML.set(el, html);
-    return true;
-  }
-  function setAttr(el, name, value) {
-    if (el.getAttribute(name) === value) return false;
-    el.setAttribute(name, value);
-    return true;
-  }
-
-  // packages/plugins/ui/src/utils/format.ts
-  function formatTime(seconds) {
-    if (!isFinite(seconds) || isNaN(seconds)) {
-      return "0:00";
-    }
-    const absSeconds = Math.abs(seconds);
-    const h = Math.floor(absSeconds / 3600);
-    const m = Math.floor(absSeconds % 3600 / 60);
-    const s = Math.floor(absSeconds % 60);
-    const sign = seconds < 0 ? "-" : "";
-    if (h > 0) {
-      return `${sign}${h}:${pad(m)}:${pad(s)}`;
-    }
-    return `${sign}${m}:${pad(s)}`;
-  }
-  function pad(n) {
-    return n < 10 ? `0${n}` : `${n}`;
-  }
-  function formatLiveTime(behindLive) {
-    if (behindLive <= 0) {
-      return "LIVE";
-    }
-    return `-${formatTime(behindLive)}`;
-  }
-
-  // packages/plugins/ui/src/controls/PlayButton.ts
-  var PlayButton = class {
-    constructor(api) {
-      this.clickHandler = () => {
-        this.toggle();
-      };
-      this.api = api;
-      this.el = createButton("sp-play", "Play", icons.play);
-      this.el.addEventListener("click", this.clickHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const playing = this.api.getState("playing");
-      const ended = this.api.getState("ended");
-      let icon;
-      let label;
-      if (ended) {
-        icon = icons.replay;
-        label = "Replay";
-      } else if (playing) {
-        icon = icons.pause;
-        label = "Pause";
-      } else {
-        icon = icons.play;
-        label = "Play";
-      }
-      setHTML(this.el, icon);
-      setAttr(this.el, "aria-label", label);
-    }
-    toggle() {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      const ended = this.api.getState("ended");
-      if (ended) {
-        video.currentTime = 0;
-        video.play().catch(() => {
-        });
-      } else if (!video.paused) {
-        video.pause();
-      } else {
-        video.play().catch(() => {
-        });
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.clickHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/ThumbnailPreview.ts
-  var ThumbnailPreview = class {
-    constructor() {
-      this.config = null;
-      this.loaded = false;
-      this.el = createElement("div", { className: "sp-thumbnail-preview" });
-      this.img = createElement("div", { className: "sp-thumbnail-preview__img" });
-      this.el.appendChild(this.img);
-    }
-    getElement() {
-      return this.el;
-    }
-    setConfig(config) {
-      this.config = config;
-      this.loaded = false;
-      if (config) {
-        this.img.style.width = `${config.width}px`;
-        this.img.style.height = `${config.height}px`;
-        this.el.style.width = `${config.width}px`;
-        this.el.style.height = `${config.height}px`;
-        const preload = new Image();
-        preload.onload = () => {
-          this.loaded = true;
-        };
-        preload.onerror = () => {
-          this.config = null;
-          this.loaded = false;
-        };
-        preload.src = config.src;
-      }
-    }
-    /**
-     * Update the thumbnail to show the frame at the given time.
-     * @param time Time in seconds
-     * @param percent Position as 0-1 fraction (for horizontal positioning)
-     */
-    show(time, percent) {
-      if (!this.config || !this.loaded) {
-        this.el.style.display = "none";
-        return;
-      }
-      const { src, width, height, columns, interval } = this.config;
-      const index = Math.floor(time / interval);
-      const col = index % columns;
-      const row = Math.floor(index / columns);
-      this.img.style.backgroundImage = `url(${src})`;
-      this.img.style.backgroundPosition = `-${col * width}px -${row * height}px`;
-      this.img.style.backgroundSize = `${columns * width}px auto`;
-      this.img.style.width = `${width}px`;
-      this.img.style.height = `${height}px`;
-      this.el.style.left = `${percent * 100}%`;
-      this.el.style.display = "";
-    }
-    hide() {
-      this.el.style.display = "none";
-    }
-    isConfigured() {
-      return this.config !== null;
-    }
-    destroy() {
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/ProgressBar.ts
-  var ProgressBar = class {
-    constructor(api) {
-      this.isDragging = false;
-      this.lastSeekTime = 0;
-      this.seekThrottleMs = 100;
-      // Throttle seeks to max 10/sec
-      this.wasPlayingBeforeDrag = false;
-      this.onMouseDown = (e) => {
-        e.preventDefault();
-        const video = getVideo(this.api.container);
-        this.wasPlayingBeforeDrag = video ? !video.paused : false;
-        this.isDragging = true;
-        this.el.classList.add("sp-progress--dragging");
-        this.lastSeekTime = 0;
-        this.seek(e.clientX, true);
-      };
-      this.onDocMouseMove = (e) => {
-        if (this.isDragging) {
-          this.seek(e.clientX);
-          this.updateVisualPosition(e.clientX);
-        }
-      };
-      this.onMouseUp = (e) => {
-        if (this.isDragging) {
-          this.seek(e.clientX, true);
-          this.isDragging = false;
-          this.el.classList.remove("sp-progress--dragging");
-          if (this.wasPlayingBeforeDrag) {
-            const video = getVideo(this.api.container);
-            if (video && video.paused) {
-              const resumePlayback = () => {
-                video.removeEventListener("seeked", resumePlayback);
-                video.play().catch(() => {
-                });
-              };
-              video.addEventListener("seeked", resumePlayback);
-            }
-          }
-        }
-      };
-      this.onTouchStart = (e) => {
-        e.preventDefault();
-        const video = getVideo(this.api.container);
-        this.wasPlayingBeforeDrag = video ? !video.paused : false;
-        this.isDragging = true;
-        this.el.classList.add("sp-progress--dragging");
-        this.lastSeekTime = 0;
-        this.seek(e.touches[0].clientX, true);
-      };
-      this.onDocTouchMove = (e) => {
-        if (this.isDragging) {
-          e.preventDefault();
-          this.seek(e.touches[0].clientX);
-          this.updateVisualPosition(e.touches[0].clientX);
-        }
-      };
-      this.onTouchEnd = (e) => {
-        if (this.isDragging) {
-          const clientX = e.changedTouches?.[0]?.clientX;
-          if (clientX !== void 0) {
-            this.seek(clientX, true);
-          }
-          this.isDragging = false;
-          this.el.classList.remove("sp-progress--dragging");
-          if (this.wasPlayingBeforeDrag) {
-            const video = getVideo(this.api.container);
-            if (video && video.paused) {
-              const resumePlayback = () => {
-                video.removeEventListener("seeked", resumePlayback);
-                video.play().catch(() => {
-                });
-              };
-              video.addEventListener("seeked", resumePlayback);
-            }
-          }
-          this.tooltip.style.opacity = "0";
-          this.thumbnailPreview.hide();
-        }
-      };
-      this.onMouseMove = (e) => {
-        this.updateTooltip(e.clientX);
-      };
-      this.onMouseLeave = () => {
-        if (!this.isDragging) {
-          this.tooltip.style.opacity = "0";
-          this.thumbnailPreview.hide();
-        }
-      };
-      this.onKeyDown = (e) => {
-        const video = getVideo(this.api.container);
-        if (!video) return;
-        const step = 5;
-        const live = this.api.getState("live");
-        const seekableRange = this.api.getState("seekableRange");
-        if (live && seekableRange) {
-          switch (e.key) {
-            case "ArrowLeft":
-              e.preventDefault();
-              video.currentTime = Math.max(seekableRange.start, video.currentTime - step);
-              break;
-            case "ArrowRight":
-              e.preventDefault();
-              video.currentTime = Math.min(seekableRange.end, video.currentTime + step);
-              break;
-            case "Home":
-              e.preventDefault();
-              video.currentTime = seekableRange.start;
-              break;
-            case "End":
-              e.preventDefault();
-              video.currentTime = seekableRange.end;
-              break;
-          }
-        } else {
-          const duration = this.api.getState("duration") || 0;
-          switch (e.key) {
-            case "ArrowLeft":
-              e.preventDefault();
-              video.currentTime = Math.max(0, video.currentTime - step);
-              break;
-            case "ArrowRight":
-              e.preventDefault();
-              video.currentTime = Math.min(duration, video.currentTime + step);
-              break;
-            case "Home":
-              e.preventDefault();
-              video.currentTime = 0;
-              break;
-            case "End":
-              e.preventDefault();
-              video.currentTime = duration;
-              break;
-          }
-        }
-      };
-      this.api = api;
-      this.wrapper = createElement("div", { className: "sp-progress-wrapper" });
-      this.el = createElement("div", { className: "sp-progress" });
-      const track = createElement("div", { className: "sp-progress__track" });
-      this.buffered = createElement("div", { className: "sp-progress__buffered" });
-      this.filled = createElement("div", { className: "sp-progress__filled" });
-      this.handle = createElement("div", { className: "sp-progress__handle" });
-      this.tooltip = createElement("div", { className: "sp-progress__tooltip" });
-      this.tooltip.textContent = "0:00";
-      this.thumbnailPreview = new ThumbnailPreview();
-      track.appendChild(this.buffered);
-      track.appendChild(this.filled);
-      track.appendChild(this.handle);
-      this.el.appendChild(track);
-      this.el.appendChild(this.thumbnailPreview.getElement());
-      this.el.appendChild(this.tooltip);
-      this.wrapper.appendChild(this.el);
-      this.el.setAttribute("role", "slider");
-      this.el.setAttribute("aria-label", "Seek");
-      this.el.setAttribute("aria-valuemin", "0");
-      this.el.setAttribute("aria-valuemax", "0");
-      this.el.setAttribute("aria-valuenow", "0");
-      this.el.setAttribute("aria-valuetext", "0:00");
-      this.el.setAttribute("tabindex", "0");
-      this.wrapper.addEventListener("mousedown", this.onMouseDown);
-      this.wrapper.addEventListener("mousemove", this.onMouseMove);
-      this.wrapper.addEventListener("mouseleave", this.onMouseLeave);
-      this.wrapper.addEventListener("touchstart", this.onTouchStart, { passive: false });
-      this.el.addEventListener("keydown", this.onKeyDown);
-      document.addEventListener("mousemove", this.onDocMouseMove);
-      document.addEventListener("mouseup", this.onMouseUp);
-      document.addEventListener("touchmove", this.onDocTouchMove, { passive: false });
-      document.addEventListener("touchend", this.onTouchEnd);
-      document.addEventListener("touchcancel", this.onTouchEnd);
-    }
-    render() {
-      return this.wrapper;
-    }
-    /** Show the progress bar */
-    show() {
-      this.wrapper.classList.add("sp-progress-wrapper--visible");
-    }
-    /** Hide the progress bar */
-    hide() {
-      this.wrapper.classList.remove("sp-progress-wrapper--visible");
-    }
-    /** Set thumbnail sprite configuration */
-    setThumbnails(config) {
-      this.thumbnailPreview.setConfig(config);
-    }
-    update() {
-      const currentTime = this.api.getState("currentTime") || 0;
-      const duration = this.api.getState("duration") || 0;
-      const bufferedRanges = this.api.getState("buffered");
-      const live = this.api.getState("live");
-      const seekableRange = this.api.getState("seekableRange");
-      const thumbnails = this.api.getState("thumbnails");
-      if (thumbnails && !this.thumbnailPreview.isConfigured()) {
-        this.thumbnailPreview.setConfig(thumbnails);
-      }
-      this.el.classList.toggle("sp-progress--live", !!live);
-      if (live && seekableRange) {
-        const rangeLength = seekableRange.end - seekableRange.start;
-        if (rangeLength > 0) {
-          const progress = (currentTime - seekableRange.start) / rangeLength * 100;
-          this.filled.style.width = `${Math.max(0, Math.min(100, progress))}%`;
-          this.handle.style.left = `${Math.max(0, Math.min(100, progress))}%`;
-        }
-        if (bufferedRanges && bufferedRanges.length > 0) {
-          const rangeLength2 = seekableRange.end - seekableRange.start;
-          if (rangeLength2 > 0) {
-            const bufferedEnd = bufferedRanges.end(bufferedRanges.length - 1);
-            const bufferedPercent = (bufferedEnd - seekableRange.start) / rangeLength2 * 100;
-            this.buffered.style.width = `${Math.max(0, Math.min(100, bufferedPercent))}%`;
-          }
-        }
-        this.el.setAttribute("aria-valuemax", String(Math.floor(seekableRange.end)));
-        this.el.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
-        this.el.setAttribute("aria-valuetext", `${Math.floor(seekableRange.end - currentTime)} seconds behind live`);
-      } else if (duration > 0) {
-        const progress = currentTime / duration * 100;
-        this.filled.style.width = `${progress}%`;
-        this.handle.style.left = `${progress}%`;
-        if (bufferedRanges && bufferedRanges.length > 0) {
-          const bufferedEnd = bufferedRanges.end(bufferedRanges.length - 1);
-          const bufferedPercent = bufferedEnd / duration * 100;
-          this.buffered.style.width = `${bufferedPercent}%`;
-        }
-        this.el.setAttribute("aria-valuemax", String(Math.floor(duration)));
-        this.el.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
-        this.el.setAttribute("aria-valuetext", formatTime(currentTime));
-      }
-    }
-    getTimeFromPosition(clientX) {
-      const rect = this.el.getBoundingClientRect();
-      const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      const live = this.api.getState("live");
-      const seekableRange = this.api.getState("seekableRange");
-      if (live && seekableRange) {
-        const rangeLength = seekableRange.end - seekableRange.start;
-        return seekableRange.start + percent * rangeLength;
-      }
-      const duration = this.api.getState("duration") || 0;
-      return percent * duration;
-    }
-    updateTooltip(clientX) {
-      const rect = this.el.getBoundingClientRect();
-      const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      const time = this.getTimeFromPosition(clientX);
-      const live = this.api.getState("live");
-      const seekableRange = this.api.getState("seekableRange");
-      if (live && seekableRange) {
-        const behindLive = seekableRange.end - time;
-        this.tooltip.textContent = formatLiveTime(behindLive);
-      } else {
-        this.tooltip.textContent = formatTime(time);
-      }
-      this.tooltip.style.left = `${percent * 100}%`;
-      if (this.thumbnailPreview.isConfigured()) {
-        this.thumbnailPreview.show(time, percent);
-      }
-    }
-    updateVisualPosition(clientX) {
-      const rect = this.el.getBoundingClientRect();
-      const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      this.filled.style.width = `${percent * 100}%`;
-      this.handle.style.left = `${percent * 100}%`;
-    }
-    seek(clientX, force = false) {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      const now2 = Date.now();
-      if (!force && this.isDragging && now2 - this.lastSeekTime < this.seekThrottleMs) {
-        return;
-      }
-      this.lastSeekTime = now2;
-      const time = this.getTimeFromPosition(clientX);
-      video.currentTime = time;
-    }
-    destroy() {
-      this.wrapper.removeEventListener("mousedown", this.onMouseDown);
-      this.wrapper.removeEventListener("mousemove", this.onMouseMove);
-      this.wrapper.removeEventListener("mouseleave", this.onMouseLeave);
-      this.wrapper.removeEventListener("touchstart", this.onTouchStart);
-      document.removeEventListener("mousemove", this.onDocMouseMove);
-      document.removeEventListener("mouseup", this.onMouseUp);
-      document.removeEventListener("touchmove", this.onDocTouchMove);
-      document.removeEventListener("touchend", this.onTouchEnd);
-      document.removeEventListener("touchcancel", this.onTouchEnd);
-      this.thumbnailPreview.destroy();
-      this.wrapper.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/TimeDisplay.ts
-  var TimeDisplay = class {
-    constructor(api) {
-      this.api = api;
-      this.el = createElement("div", { className: "sp-time" });
-      this.el.setAttribute("aria-live", "off");
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const live = this.api.getState("live");
-      const currentTime = this.api.getState("currentTime") || 0;
-      const duration = this.api.getState("duration") || 0;
-      if (live) {
-        const seekableRange = this.api.getState("seekableRange");
-        if (seekableRange) {
-          const behindLive = seekableRange.end - currentTime;
-          this.el.textContent = formatLiveTime(behindLive);
-        } else {
-          this.el.textContent = formatLiveTime(0);
-        }
-      } else {
-        this.el.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
-      }
-    }
-    destroy() {
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/VolumeControl.ts
-  var VolumeControl = class {
-    constructor(api) {
-      this.isDragging = false;
-      this.onMouseDown = (e) => {
-        e.preventDefault();
-        this.isDragging = true;
-        this.setVolume(this.getVolumeFromPosition(e.clientX));
-      };
-      this.onDocMouseMove = (e) => {
-        if (this.isDragging) {
-          this.setVolume(this.getVolumeFromPosition(e.clientX));
-        }
-      };
-      this.onMouseUp = () => {
-        this.isDragging = false;
-      };
-      this.onTouchStart = (e) => {
-        e.preventDefault();
-        this.isDragging = true;
-        this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
-      };
-      this.onDocTouchMove = (e) => {
-        if (this.isDragging) {
-          e.preventDefault();
-          this.setVolume(this.getVolumeFromPosition(e.touches[0].clientX));
-        }
-      };
-      this.onTouchEnd = () => {
-        this.isDragging = false;
-      };
-      this.onKeyDown = (e) => {
-        const video = getVideo(this.api.container);
-        if (!video) return;
-        const step = 0.1;
-        switch (e.key) {
-          case "ArrowUp":
-          case "ArrowRight":
-            e.preventDefault();
-            this.setVolume(video.volume + step);
-            break;
-          case "ArrowDown":
-          case "ArrowLeft":
-            e.preventDefault();
-            this.setVolume(video.volume - step);
-            break;
-        }
-      };
-      this.api = api;
-      this.el = createElement("div", { className: "sp-volume" });
-      this.btn = createElement("button", {
-        className: "sp-control sp-volume__btn",
-        "aria-label": "Mute",
-        type: "button"
-      });
-      this.btn.innerHTML = icons.volumeHigh;
-      this.btn.onclick = () => this.toggleMute();
-      const sliderWrap = createElement("div", { className: "sp-volume__slider-wrap" });
-      this.slider = createElement("div", { className: "sp-volume__slider" });
-      this.slider.setAttribute("role", "slider");
-      this.slider.setAttribute("aria-label", "Volume");
-      this.slider.setAttribute("aria-valuemin", "0");
-      this.slider.setAttribute("aria-valuemax", "100");
-      this.slider.setAttribute("tabindex", "0");
-      this.level = createElement("div", { className: "sp-volume__level" });
-      this.slider.appendChild(this.level);
-      sliderWrap.appendChild(this.slider);
-      this.el.appendChild(this.btn);
-      this.el.appendChild(sliderWrap);
-      this.slider.addEventListener("mousedown", this.onMouseDown);
-      this.slider.addEventListener("touchstart", this.onTouchStart, { passive: false });
-      this.slider.addEventListener("keydown", this.onKeyDown);
-      document.addEventListener("mousemove", this.onDocMouseMove);
-      document.addEventListener("mouseup", this.onMouseUp);
-      document.addEventListener("touchmove", this.onDocTouchMove, { passive: false });
-      document.addEventListener("touchend", this.onTouchEnd);
-      document.addEventListener("touchcancel", this.onTouchEnd);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const volume = this.api.getState("volume") ?? 1;
-      const muted = this.api.getState("muted") ?? false;
-      let icon;
-      let label;
-      if (muted || volume === 0) {
-        icon = icons.volumeMute;
-        label = "Unmute";
-      } else if (volume < 0.5) {
-        icon = icons.volumeLow;
-        label = "Mute";
-      } else {
-        icon = icons.volumeHigh;
-        label = "Mute";
-      }
-      setHTML(this.btn, icon);
-      setAttr(this.btn, "aria-label", label);
-      const displayVolume = muted ? 0 : volume;
-      const width = `${displayVolume * 100}%`;
-      if (this.level.style.width !== width) {
-        this.level.style.width = width;
-      }
-      const volumePercent = Math.round(displayVolume * 100);
-      setAttr(this.slider, "aria-valuenow", String(volumePercent));
-      setAttr(this.slider, "aria-valuetext", `${volumePercent}%`);
-    }
-    toggleMute() {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      video.muted = !video.muted;
-    }
-    setVolume(percent) {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      const vol = Math.max(0, Math.min(1, percent));
-      video.volume = vol;
-      if (vol > 0 && video.muted) {
-        video.muted = false;
-      }
-    }
-    getVolumeFromPosition(clientX) {
-      const rect = this.slider.getBoundingClientRect();
-      return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    }
-    destroy() {
-      this.slider.removeEventListener("mousedown", this.onMouseDown);
-      this.slider.removeEventListener("touchstart", this.onTouchStart);
-      this.slider.removeEventListener("keydown", this.onKeyDown);
-      document.removeEventListener("mousemove", this.onDocMouseMove);
-      document.removeEventListener("mouseup", this.onMouseUp);
-      document.removeEventListener("touchmove", this.onDocTouchMove);
-      document.removeEventListener("touchend", this.onTouchEnd);
-      document.removeEventListener("touchcancel", this.onTouchEnd);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/LiveIndicator.ts
-  var LiveIndicator = class {
-    constructor(api) {
-      this.handleClick = () => {
-        this.seekToLive();
-      };
-      this.handleKeyDown = (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          this.seekToLive();
-        }
-      };
-      this.api = api;
-      this.el = createElement("div", { className: "sp-live" });
-      this.dot = createElement("div", { className: "sp-live__dot" });
-      this.label = document.createElement("span");
-      this.label.textContent = "LIVE";
-      this.el.appendChild(this.dot);
-      this.el.appendChild(this.label);
-      this.el.setAttribute("role", "button");
-      this.el.setAttribute("aria-label", "Live broadcast - currently at live edge");
-      this.el.setAttribute("tabindex", "0");
-      this.el.addEventListener("click", this.handleClick);
-      this.el.addEventListener("keydown", this.handleKeyDown);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const live = this.api.getState("live");
-      const liveEdge = this.api.getState("liveEdge");
-      this.el.style.display = live ? "" : "none";
-      if (liveEdge) {
-        this.el.classList.remove("sp-live--behind");
-        this.label.textContent = "LIVE";
-        this.dot.setAttribute("aria-hidden", "true");
-        this.el.setAttribute("aria-label", "Live broadcast - currently at live edge");
-      } else {
-        this.el.classList.add("sp-live--behind");
-        this.label.textContent = "GO LIVE";
-        this.dot.setAttribute("aria-hidden", "true");
-        this.el.setAttribute("aria-label", "Live broadcast - behind live edge, click to seek to live");
-      }
-    }
-    seekToLive() {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      const seekableRange = this.api.getState("seekableRange");
-      if (seekableRange) {
-        video.currentTime = seekableRange.end;
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.handleClick);
-      this.el.removeEventListener("keydown", this.handleKeyDown);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/QualityMenu.ts
-  var QualityMenu = class {
-    constructor(api) {
-      this.isOpen = false;
-      this.lastQualitiesJson = "";
-      this.api = api;
-      this.el = createElement("div", { className: "sp-quality" });
-      this.btn = createButton("sp-quality__btn", "Quality", icons.settings);
-      this.btnLabel = createElement("span", { className: "sp-quality__label" });
-      this.btnLabel.textContent = "Auto";
-      this.btn.appendChild(this.btnLabel);
-      this.btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.toggle();
-      });
-      this.menu = createElement("div", { className: "sp-quality-menu" });
-      this.menu.setAttribute("role", "menu");
-      this.menu.addEventListener("click", (e) => {
-        e.stopPropagation();
-      });
-      this.el.appendChild(this.btn);
-      this.el.appendChild(this.menu);
-      this.closeHandler = (e) => {
-        if (!this.el.contains(e.target)) {
-          this.close();
-        }
-      };
-      document.addEventListener("click", this.closeHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const qualities = this.api.getState("qualities") || [];
-      const currentQuality = this.api.getState("currentQuality");
-      this.el.style.display = qualities.length > 0 ? "" : "none";
-      this.btnLabel.textContent = currentQuality?.label || "Auto";
-      const qualitiesJson = JSON.stringify(qualities.map((q) => q.id));
-      const currentId = currentQuality?.id || "auto";
-      if (qualitiesJson !== this.lastQualitiesJson) {
-        this.lastQualitiesJson = qualitiesJson;
-        this.rebuildMenu(qualities);
-      }
-      this.updateActiveStates(currentId);
-    }
-    rebuildMenu(qualities) {
-      this.menu.innerHTML = "";
-      const autoItem = this.createMenuItem("Auto", "auto");
-      this.menu.appendChild(autoItem);
-      const sorted = [...qualities].sort((a, b) => b.height - a.height);
-      for (const q of sorted) {
-        if (q.id === "auto") continue;
-        const item = this.createMenuItem(q.label, q.id);
-        this.menu.appendChild(item);
-      }
-    }
-    updateActiveStates(activeId) {
-      const items = this.menu.querySelectorAll(".sp-quality-menu__item");
-      items.forEach((item) => {
-        const id = item.getAttribute("data-quality-id");
-        const isActive = id === activeId;
-        item.classList.toggle("sp-quality-menu__item--active", isActive);
-      });
-    }
-    createMenuItem(label, qualityId) {
-      const item = createElement("div", {
-        className: "sp-quality-menu__item"
-      });
-      item.setAttribute("role", "menuitem");
-      item.setAttribute("data-quality-id", qualityId);
-      const labelSpan = createElement("span", { className: "sp-quality-menu__label" });
-      labelSpan.textContent = label;
-      item.appendChild(labelSpan);
-      item.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.selectQuality(qualityId);
-      });
-      return item;
-    }
-    selectQuality(qualityId) {
-      this.api.emit("quality:select", {
-        quality: qualityId,
-        auto: qualityId === "auto"
-      });
-      this.close();
-    }
-    toggle() {
-      this.isOpen ? this.close() : this.open();
-    }
-    open() {
-      this.isOpen = true;
-      this.menu.classList.add("sp-quality-menu--open");
-      this.btn.setAttribute("aria-expanded", "true");
-    }
-    close() {
-      this.isOpen = false;
-      this.menu.classList.remove("sp-quality-menu--open");
-      this.btn.setAttribute("aria-expanded", "false");
-    }
-    destroy() {
-      document.removeEventListener("click", this.closeHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/CastButton.ts
-  function isChromecastSupported() {
-    if (typeof navigator === "undefined") return false;
-    const ua = navigator.userAgent;
-    return /Chrome/.test(ua) && !/Edge|Edg/.test(ua);
-  }
-  function isAirPlaySupported() {
-    if (typeof HTMLVideoElement === "undefined") return false;
-    return typeof HTMLVideoElement.prototype.webkitShowPlaybackTargetPicker === "function";
-  }
-  var CastButton = class {
-    constructor(api, type) {
-      this.api = api;
-      this.type = type;
-      this.supported = type === "chromecast" ? isChromecastSupported() : isAirPlaySupported();
-      const icon = type === "chromecast" ? icons.chromecast : icons.airplay;
-      const label = type === "chromecast" ? "Cast" : "AirPlay";
-      this.el = createButton(`sp-cast sp-cast--${type}`, label, icon);
-      this.el.addEventListener("click", () => this.handleClick());
-      if (!this.supported) {
-        this.el.style.display = "none";
-      }
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      if (!this.supported) {
-        this.el.style.display = "none";
-        return;
-      }
-      if (this.type === "chromecast") {
-        const available = this.api.getState("chromecastAvailable");
-        const active = this.api.getState("chromecastActive");
-        this.el.style.display = "";
-        this.el.disabled = !available && !active;
-        this.el.classList.toggle("sp-cast--active", !!active);
-        this.el.classList.toggle("sp-cast--unavailable", !available && !active);
-        if (active) {
-          setHTML(this.el, icons.chromecastConnected);
-          setAttr(this.el, "aria-label", "Stop casting");
-        } else {
-          setHTML(this.el, icons.chromecast);
-          setAttr(this.el, "aria-label", available ? "Cast" : "No Cast devices found");
-        }
-      } else {
-        const active = this.api.getState("airplayActive");
-        this.el.style.display = "";
-        this.el.disabled = false;
-        this.el.classList.toggle("sp-cast--active", !!active);
-        this.el.classList.remove("sp-cast--unavailable");
-        setAttr(this.el, "aria-label", active ? "Stop AirPlay" : "AirPlay");
-      }
-    }
-    handleClick() {
-      if (this.type === "chromecast") {
-        this.handleChromecast();
-      } else {
-        this.handleAirPlay();
-      }
-    }
-    handleChromecast() {
-      const chromecast = this.api.getPlugin("chromecast");
-      if (!chromecast) return;
-      if (chromecast.isConnected()) {
-        chromecast.endSession();
-      } else {
-        chromecast.requestSession().catch(() => {
-        });
-      }
-    }
-    async handleAirPlay() {
-      const airplayPlugin2 = this.api.getPlugin("airplay");
-      if (airplayPlugin2) {
-        await airplayPlugin2.showPicker();
-      } else {
-        const video = getVideo(this.api.container);
-        video?.webkitShowPlaybackTargetPicker?.();
-      }
-    }
-    destroy() {
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/PipButton.ts
-  var PipButton = class {
-    constructor(api) {
-      this.clickHandler = () => {
-        void this.toggle().catch(() => {
-        });
-      };
-      this.api = api;
-      const probe2 = document.createElement("video");
-      this.supported = "pictureInPictureEnabled" in document || "webkitSetPresentationMode" in probe2;
-      this.el = createButton("sp-pip", "Picture-in-Picture", icons.pip);
-      this.el.addEventListener("click", this.clickHandler);
-      if (!this.supported) {
-        this.el.style.display = "none";
-      } else {
-        this.el.disabled = true;
-        this.el.setAttribute("aria-disabled", "true");
-      }
-    }
-    render() {
-      return this.el;
-    }
-    /** Whether the media element is ready to enter PiP (metadata loaded). */
-    isMediaReady() {
-      const video = getVideo(this.api.container);
-      return !!video && video.readyState >= HTMLMediaElement.HAVE_METADATA;
-    }
-    update() {
-      if (!this.supported) return;
-      const pip = !!this.api.getState("pip");
-      const enabled = pip || this.isMediaReady();
-      this.el.disabled = !enabled;
-      setAttr(this.el, "aria-disabled", String(!enabled));
-      setHTML(this.el, pip ? icons.exitPip : icons.pip);
-      setAttr(this.el, "aria-label", pip ? "Exit Picture-in-Picture" : "Picture-in-Picture");
-      this.el.classList.toggle("sp-pip--active", pip);
-    }
-    async toggle() {
-      const video = getVideo(this.api.container);
-      if (!video) {
-        this.api.logger.warn("PiP: video element not found");
-        return;
-      }
-      const isInPip = document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
-      if (!isInPip && video.readyState < HTMLMediaElement.HAVE_METADATA) {
-        this.api.logger.debug("PiP: ignored, media not ready", {
-          readyState: video.readyState
-        });
-        return;
-      }
-      try {
-        if (isInPip) {
-          if (document.pictureInPictureElement) {
-            await document.exitPictureInPicture();
-          } else if (video.webkitSetPresentationMode) {
-            video.webkitSetPresentationMode("inline");
-          }
-          this.api.logger.debug("PiP: exited");
-        } else {
-          if (video.requestPictureInPicture) {
-            await video.requestPictureInPicture();
-          } else if (video.webkitSetPresentationMode) {
-            video.webkitSetPresentationMode("picture-in-picture");
-          }
-          this.api.logger.debug("PiP: entered");
-        }
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        this.api.logger.warn("PiP: failed", { error: message });
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.clickHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/FullscreenButton.ts
-  var FullscreenButton = class {
-    constructor(api) {
-      this.clickHandler = () => {
-        this.toggle();
-      };
-      this.api = api;
-      this.el = createButton("sp-fullscreen", "Fullscreen", icons.fullscreen);
-      this.el.addEventListener("click", this.clickHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const fullscreen = this.api.getState("fullscreen");
-      if (fullscreen) {
-        setHTML(this.el, icons.exitFullscreen);
-        setAttr(this.el, "aria-label", "Exit fullscreen");
-      } else {
-        setHTML(this.el, icons.fullscreen);
-        setAttr(this.el, "aria-label", "Fullscreen");
-      }
-    }
-    async toggle() {
-      const container = this.api.container;
-      const video = getVideo(container);
-      try {
-        if (document.fullscreenElement) {
-          await document.exitFullscreen();
-        } else if (container.requestFullscreen) {
-          await container.requestFullscreen();
-        } else if (video?.webkitEnterFullscreen) {
-          video.webkitEnterFullscreen();
-        }
-      } catch {
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.clickHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/Spacer.ts
-  var Spacer = class {
-    constructor() {
-      this.el = createElement("div", { className: "sp-spacer" });
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-    }
-    destroy() {
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/ErrorOverlay.ts
-  function getUserMessage(error) {
-    if (!error) return "Something went wrong.";
-    const code = error.code;
-    if (code) {
-      switch (code) {
-        case "MEDIA_NETWORK_ERROR":
-          return "Having trouble connecting. Check your internet and try again.";
-        case "MEDIA_DECODE_ERROR":
-          return "This video can't be played right now.";
-        case "SOURCE_LOAD_FAILED":
-        case "SOURCE_NOT_SUPPORTED":
-        case "PROVIDER_NOT_FOUND":
-          return "Unable to load video. Please try again.";
-        case "PLAYBACK_FAILED":
-          return "Playback stopped unexpectedly. Please try again.";
-        case "MEDIA_APPEND_ERROR":
-          return "Video playback was interrupted. Please try again.";
-        case "MEDIA_BUFFER_FULL":
-          return "Your device is low on video memory. Close other apps or tabs and try again.";
-        case "PLAYLIST_INVALID":
-          return "The stream is temporarily unavailable. Please try again.";
-      }
-    }
-    const msg = error.message?.toLowerCase() || "";
-    if (msg.includes("network") || msg.includes("timeout") || msg.includes("fetch") || msg.includes("connection")) {
-      return "Having trouble connecting. Check your internet and try again.";
-    }
-    if (msg.includes("manifest")) {
-      return "Unable to load video. Please try again.";
-    }
-    if (msg.includes("decode") || msg.includes("media") || msg.includes("format") || msg.includes("codec")) {
-      return "This video can't be played right now.";
-    }
-    if (msg.includes("not found") || msg.includes("404") || msg.includes("source") || msg.includes("not supported")) {
-      return "Video not found.";
-    }
-    return "Something went wrong.";
-  }
-  var ErrorOverlay = class {
-    constructor(api) {
-      this.visible = false;
-      this.lastSource = null;
-      this.handleRetry = () => {
-        if (this.retryBtn.disabled) return;
-        this.retryBtn.disabled = true;
-        this.hide();
-        const source = this.api.getState("source");
-        const src = source?.src || this.lastSource;
-        if (src) {
-          this.api.emit("error:retry", { src });
-        }
-        setTimeout(() => {
-          this.retryBtn.disabled = false;
-        }, 1e3);
-      };
-      this.handleDismiss = () => {
-        this.hide();
-        this.api.emit("error:dismiss", void 0);
-      };
-      this.api = api;
-      const overlay = document.createElement("div");
-      overlay.className = "sp-error-overlay";
-      overlay.setAttribute("role", "alert");
-      overlay.setAttribute("aria-live", "assertive");
-      const content = document.createElement("div");
-      content.className = "sp-error-overlay__content";
-      const iconEl = document.createElement("div");
-      iconEl.className = "sp-error-overlay__icon";
-      iconEl.innerHTML = icons.error;
-      const messageEl = document.createElement("p");
-      messageEl.className = "sp-error-overlay__message";
-      messageEl.textContent = "Something went wrong.";
-      const actions = document.createElement("div");
-      actions.className = "sp-error-overlay__actions";
-      this.retryBtn = document.createElement("button");
-      this.retryBtn.className = "sp-error-overlay__retry";
-      this.retryBtn.setAttribute("type", "button");
-      this.retryBtn.setAttribute("aria-label", "Try again");
-      this.retryBtn.textContent = "Try Again";
-      this.retryBtn.addEventListener("click", this.handleRetry);
-      this.dismissBtn = document.createElement("button");
-      this.dismissBtn.className = "sp-error-overlay__dismiss";
-      this.dismissBtn.setAttribute("type", "button");
-      this.dismissBtn.setAttribute("aria-label", "Go back");
-      this.dismissBtn.textContent = "Go Back";
-      this.dismissBtn.addEventListener("click", this.handleDismiss);
-      actions.appendChild(this.retryBtn);
-      actions.appendChild(this.dismissBtn);
-      content.appendChild(iconEl);
-      content.appendChild(messageEl);
-      content.appendChild(actions);
-      overlay.appendChild(content);
-      this.el = overlay;
-    }
-    render() {
-      return this.el;
-    }
-    /** Show the error overlay with the given error */
-    show(error) {
-      const message = getUserMessage(error);
-      const messageEl = this.el.querySelector(".sp-error-overlay__message");
-      if (messageEl) {
-        messageEl.textContent = message;
-      }
-      const source = this.api.getState("source");
-      if (source?.src) {
-        this.lastSource = source.src;
-      }
-      this.visible = true;
-      this.retryBtn.disabled = false;
-      this.el.classList.remove("sp-error-overlay--reconnecting");
-      this.el.classList.add("sp-error-overlay--visible");
-    }
-    /**
-     * Show the reconnecting state.
-     *
-     * Displayed while the provider auto-reconnects after a fatal error, so the
-     * viewer sees the player working on the problem instead of a dead-end
-     * error. Try Again stays available for viewers who want to force an
-     * immediate attempt.
-     */
-    showReconnecting() {
-      const messageEl = this.el.querySelector(".sp-error-overlay__message");
-      if (messageEl) {
-        messageEl.textContent = "Connection lost. Reconnecting...";
-      }
-      const source = this.api.getState("source");
-      if (source?.src) {
-        this.lastSource = source.src;
-      }
-      this.visible = true;
-      this.retryBtn.disabled = false;
-      this.el.classList.add("sp-error-overlay--reconnecting");
-      this.el.classList.add("sp-error-overlay--visible");
-    }
-    /** Hide the error overlay */
-    hide() {
-      this.visible = false;
-      this.el.classList.remove("sp-error-overlay--visible");
-      this.el.classList.remove("sp-error-overlay--reconnecting");
-    }
-    isVisible() {
-      return this.visible;
-    }
-    update() {
-      const playbackState = this.api.getState("playbackState");
-      if (this.visible && playbackState !== "error" && playbackState !== "loading") {
-        const playing = this.api.getState("playing");
-        if (playing) {
-          this.hide();
-        }
-      }
-    }
-    destroy() {
-      this.retryBtn.removeEventListener("click", this.handleRetry);
-      this.dismissBtn.removeEventListener("click", this.handleDismiss);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/SettingsMenu.ts
-  var SPEED_OPTIONS = [
-    { label: "0.5x", value: 0.5 },
-    { label: "0.75x", value: 0.75 },
-    { label: "Normal", value: 1 },
-    { label: "1.25x", value: 1.25 },
-    { label: "1.5x", value: 1.5 },
-    { label: "2x", value: 2 }
-  ];
-  var SettingsMenu = class {
-    constructor(api) {
-      this.isOpen = false;
-      this.currentPanel = "main";
-      this.lastQualitiesJson = "";
-      this.api = api;
-      this.el = createElement("div", { className: "sp-settings" });
-      this.btn = createButton("sp-settings__btn", "Settings", icons.settings);
-      this.btn.setAttribute("aria-haspopup", "true");
-      this.btn.setAttribute("aria-expanded", "false");
-      this.btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.toggle();
-      });
-      this.panel = createElement("div", { className: "sp-settings-panel" });
-      this.panel.setAttribute("role", "menu");
-      this.panel.addEventListener("click", (e) => e.stopPropagation());
-      this.el.appendChild(this.btn);
-      this.el.appendChild(this.panel);
-      this.closeHandler = (e) => {
-        if (!this.el.contains(e.target)) {
-          this.close();
-        }
-      };
-      document.addEventListener("click", this.closeHandler);
-      this.keyHandler = (e) => {
-        if (!this.isOpen) return;
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();
-          if (this.currentPanel !== "main") {
-            this.showPanel("main");
-          } else {
-            this.close();
-            this.btn.focus();
-          }
-          return;
-        }
-        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-          e.preventDefault();
-          e.stopPropagation();
-          this.navigateItems(e.key === "ArrowDown" ? 1 : -1);
-          return;
-        }
-        if (e.key === "Tab") {
-          e.preventDefault();
-          e.stopPropagation();
-          this.navigateItems(e.shiftKey ? -1 : 1);
-        }
-      };
-      document.addEventListener("keydown", this.keyHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const qualities = this.api.getState("qualities") || [];
-      const qualitiesJson = JSON.stringify(qualities.map((q) => q.id));
-      if (qualitiesJson !== this.lastQualitiesJson) {
-        this.lastQualitiesJson = qualitiesJson;
-        if (this.isOpen && this.currentPanel === "quality") {
-          this.renderQualityPanel();
-        }
-      }
-      if (this.isOpen) {
-        if (this.currentPanel === "quality") {
-          this.updateQualityActiveStates();
-        } else if (this.currentPanel === "speed") {
-          this.updateSpeedActiveStates();
-        } else if (this.currentPanel === "captions") {
-          this.updateCaptionsActiveStates();
-        }
-      }
-    }
-    toggle() {
-      this.isOpen ? this.close() : this.open();
-    }
-    open() {
-      this.isOpen = true;
-      this.currentPanel = "main";
-      this.renderMainPanel();
-      this.panel.classList.add("sp-settings-panel--open");
-      this.btn.setAttribute("aria-expanded", "true");
-      this.focusFirstItem();
-    }
-    close() {
-      this.isOpen = false;
-      this.currentPanel = "main";
-      this.panel.classList.remove("sp-settings-panel--open");
-      this.btn.setAttribute("aria-expanded", "false");
-    }
-    showPanel(panel) {
-      this.currentPanel = panel;
-      switch (panel) {
-        case "main":
-          this.renderMainPanel();
-          break;
-        case "quality":
-          this.renderQualityPanel();
-          break;
-        case "speed":
-          this.renderSpeedPanel();
-          break;
-        case "captions":
-          this.renderCaptionsPanel();
-          break;
-      }
-      this.focusFirstItem();
-    }
-    renderMainPanel() {
-      this.panel.innerHTML = "";
-      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--main";
-      const qualities = this.api.getState("qualities") || [];
-      const currentQuality = this.api.getState("currentQuality");
-      const playbackRate = this.api.getState("playbackRate") ?? 1;
-      if (qualities.length > 0) {
-        const qualityRow = this.createMainRow(
-          "Quality",
-          currentQuality?.label || "Auto",
-          () => this.showPanel("quality")
-        );
-        this.panel.appendChild(qualityRow);
-      }
-      const textTracks = this.api.getState("textTracks") || [];
-      if (textTracks.length > 0) {
-        const currentTextTrack = this.api.getState("currentTextTrack");
-        const captionsLabel = currentTextTrack ? currentTextTrack.label : "Off";
-        const captionsRow = this.createMainRow(
-          "Captions",
-          captionsLabel,
-          () => this.showPanel("captions")
-        );
-        this.panel.appendChild(captionsRow);
-      }
-      const speedLabel = playbackRate === 1 ? "Normal" : `${playbackRate}x`;
-      const speedRow = this.createMainRow(
-        "Speed",
-        speedLabel,
-        () => this.showPanel("speed")
-      );
-      this.panel.appendChild(speedRow);
-    }
-    createMainRow(label, value, onClick2) {
-      const row = createElement("div", { className: "sp-settings-panel__row" });
-      row.setAttribute("role", "menuitem");
-      row.setAttribute("tabindex", "0");
-      row.setAttribute("aria-haspopup", "true");
-      const labelEl = createElement("span", { className: "sp-settings-panel__label" });
-      labelEl.textContent = label;
-      const rightSide = createElement("span", { className: "sp-settings-panel__value" });
-      rightSide.textContent = value;
-      const arrow = createElement("span", { className: "sp-settings-panel__arrow" });
-      arrow.innerHTML = icons.chevronDown;
-      rightSide.appendChild(arrow);
-      row.appendChild(labelEl);
-      row.appendChild(rightSide);
-      row.addEventListener("click", (e) => {
-        e.preventDefault();
-        onClick2();
-      });
-      row.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick2();
-        }
-      });
-      return row;
-    }
-    renderQualityPanel() {
-      this.panel.innerHTML = "";
-      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
-      const header = this.createSubHeader("Quality");
-      this.panel.appendChild(header);
-      const qualities = this.api.getState("qualities") || [];
-      const currentQuality = this.api.getState("currentQuality");
-      const activeId = currentQuality?.id || "auto";
-      const autoItem = this.createMenuItem("Auto", "auto", activeId === "auto");
-      autoItem.addEventListener("click", (e) => {
-        e.preventDefault();
-        this.selectQuality("auto");
-      });
-      this.panel.appendChild(autoItem);
-      const sorted = [...qualities].sort(
-        (a, b) => b.height - a.height
-      );
-      for (const q of sorted) {
-        if (q.id === "auto") continue;
-        const item = this.createMenuItem(q.label, q.id, q.id === activeId);
-        item.addEventListener("click", (e) => {
-          e.preventDefault();
-          this.selectQuality(q.id);
-        });
-        this.panel.appendChild(item);
-      }
-    }
-    renderSpeedPanel() {
-      this.panel.innerHTML = "";
-      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
-      const header = this.createSubHeader("Speed");
-      this.panel.appendChild(header);
-      const currentRate = this.api.getState("playbackRate") ?? 1;
-      for (const opt of SPEED_OPTIONS) {
-        const isActive = Math.abs(currentRate - opt.value) < 0.01;
-        const item = this.createMenuItem(opt.label, String(opt.value), isActive);
-        item.addEventListener("click", (e) => {
-          e.preventDefault();
-          this.selectSpeed(opt.value);
-        });
-        this.panel.appendChild(item);
-      }
-    }
-    renderCaptionsPanel() {
-      this.panel.innerHTML = "";
-      this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
-      const header = this.createSubHeader("Captions");
-      this.panel.appendChild(header);
-      const textTracks = this.api.getState("textTracks") || [];
-      const currentTextTrack = this.api.getState("currentTextTrack");
-      const activeId = currentTextTrack?.id || "off";
-      const offItem = this.createMenuItem("Off", "off", activeId === "off");
-      offItem.addEventListener("click", (e) => {
-        e.preventDefault();
-        this.selectCaption(null);
-      });
-      this.panel.appendChild(offItem);
-      for (const track of textTracks) {
-        const item = this.createMenuItem(track.label, track.id, track.id === activeId);
-        item.addEventListener("click", (e) => {
-          e.preventDefault();
-          this.selectCaption(track.id);
-        });
-        this.panel.appendChild(item);
-      }
-    }
-    selectCaption(trackId) {
-      this.api.emit("track:text", { trackId });
-      this.close();
-    }
-    updateCaptionsActiveStates() {
-      const currentTextTrack = this.api.getState("currentTextTrack");
-      const activeId = currentTextTrack?.id || "off";
-      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
-      items.forEach((item) => {
-        const id = item.getAttribute("data-id");
-        item.classList.toggle("sp-settings-panel__item--active", id === activeId);
-      });
-    }
-    createSubHeader(title) {
-      const header = createElement("div", { className: "sp-settings-panel__header" });
-      header.setAttribute("role", "menuitem");
-      header.setAttribute("tabindex", "0");
-      const backArrow = createElement("span", { className: "sp-settings-panel__back" });
-      backArrow.innerHTML = icons.chevronUp;
-      const label = createElement("span", { className: "sp-settings-panel__header-label" });
-      label.textContent = title;
-      header.appendChild(backArrow);
-      header.appendChild(label);
-      header.addEventListener("click", (e) => {
-        e.preventDefault();
-        this.showPanel("main");
-      });
-      header.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          this.showPanel("main");
-        }
-      });
-      return header;
-    }
-    createMenuItem(label, dataId, isActive) {
-      const item = createElement("div", {
-        className: `sp-settings-panel__item${isActive ? " sp-settings-panel__item--active" : ""}`
-      });
-      item.setAttribute("role", "menuitem");
-      item.setAttribute("tabindex", "0");
-      item.setAttribute("data-id", dataId);
-      const labelEl = createElement("span");
-      labelEl.textContent = label;
-      const check = createElement("span", { className: "sp-settings-panel__check" });
-      check.innerHTML = icons.checkmark;
-      item.appendChild(labelEl);
-      item.appendChild(check);
-      item.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          item.click();
-        }
-      });
-      return item;
-    }
-    selectQuality(qualityId) {
-      this.api.emit("quality:select", {
-        quality: qualityId,
-        auto: qualityId === "auto"
-      });
-      this.close();
-    }
-    selectSpeed(rate) {
-      this.api.emit("playback:ratechange", { rate });
-      const video = this.api.container.querySelector("video");
-      if (video) {
-        video.playbackRate = rate;
-      }
-      this.close();
-    }
-    updateQualityActiveStates() {
-      const currentQuality = this.api.getState("currentQuality");
-      const activeId = currentQuality?.id || "auto";
-      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
-      items.forEach((item) => {
-        const id = item.getAttribute("data-id");
-        item.classList.toggle("sp-settings-panel__item--active", id === activeId);
-      });
-    }
-    updateSpeedActiveStates() {
-      const currentRate = this.api.getState("playbackRate") ?? 1;
-      const items = this.panel.querySelectorAll(".sp-settings-panel__item");
-      items.forEach((item) => {
-        const id = item.getAttribute("data-id");
-        const value = parseFloat(id || "1");
-        item.classList.toggle(
-          "sp-settings-panel__item--active",
-          Math.abs(currentRate - value) < 0.01
-        );
-      });
-    }
-    getFocusableItems() {
-      return Array.from(
-        this.panel.querySelectorAll('[role="menuitem"]')
-      );
-    }
-    focusFirstItem() {
-      requestAnimationFrame(() => {
-        const items = this.getFocusableItems();
-        if (items.length > 0) {
-          items[0].focus();
-        }
-      });
-    }
-    navigateItems(direction) {
-      const items = this.getFocusableItems();
-      if (items.length === 0) return;
-      const active = document.activeElement;
-      const currentIndex = items.indexOf(active);
-      let nextIndex;
-      if (currentIndex === -1) {
-        nextIndex = direction === 1 ? 0 : items.length - 1;
-      } else {
-        nextIndex = (currentIndex + direction + items.length) % items.length;
-      }
-      items[nextIndex].focus();
-    }
-    getPanel() {
-      return this.currentPanel;
-    }
-    isMenuOpen() {
-      return this.isOpen;
-    }
-    destroy() {
-      document.removeEventListener("click", this.closeHandler);
-      document.removeEventListener("keydown", this.keyHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/SkipButton.ts
-  var DEFAULT_SKIP_SECONDS = 10;
-  var SkipButton = class {
-    constructor(api, direction, seconds = DEFAULT_SKIP_SECONDS) {
-      this.clickHandler = () => {
-        this.skip();
-      };
-      this.api = api;
-      this.direction = direction;
-      this.seconds = seconds;
-      const icon = direction === "backward" ? icons.replay10 : icons.forward10;
-      const label = direction === "backward" ? `Rewind ${seconds} seconds` : `Forward ${seconds} seconds`;
-      this.el = createButton(
-        `sp-skip sp-skip--${direction}`,
-        label,
-        icon
-      );
-      this.el.addEventListener("click", this.clickHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const live = this.api.getState("live");
-      const duration = this.api.getState("duration") ?? 0;
-      const seekableRange = this.api.getState("seekableRange");
-      if (live && !seekableRange) {
-        this.el.style.display = "none";
-        return;
-      }
-      if (live && seekableRange) {
-        this.el.style.display = "";
-        return;
-      }
-      if (duration === 0) {
-        this.el.style.display = "none";
-        return;
-      }
-      this.el.style.display = "";
-    }
-    skip() {
-      const video = getVideo(this.api.container);
-      if (!video) return;
-      const live = this.api.getState("live");
-      const seekableRange = this.api.getState("seekableRange");
-      if (live && seekableRange) {
-        if (this.direction === "backward") {
-          video.currentTime = Math.max(seekableRange.start, video.currentTime - this.seconds);
-        } else {
-          video.currentTime = Math.min(seekableRange.end, video.currentTime + this.seconds);
-        }
-        return;
-      }
-      const duration = video.duration || 0;
-      if (!duration || !isFinite(duration)) return;
-      if (this.direction === "backward") {
-        video.currentTime = Math.max(0, video.currentTime - this.seconds);
-      } else {
-        video.currentTime = Math.min(duration, video.currentTime + this.seconds);
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.clickHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/CaptionsButton.ts
-  var CaptionsButton = class {
-    constructor(api) {
-      this.clickHandler = () => {
-        this.toggle();
-      };
-      this.api = api;
-      this.el = createButton("sp-captions", "Captions", icons.captionsOff);
-      this.el.addEventListener("click", this.clickHandler);
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const textTracks = this.api.getState("textTracks") || [];
-      const currentTrack = this.api.getState("currentTextTrack");
-      if (textTracks.length === 0) {
-        this.el.style.display = "none";
-        return;
-      }
-      this.el.style.display = "";
-      if (currentTrack) {
-        setHTML(this.el, icons.captions);
-        setAttr(this.el, "aria-label", `Captions: ${currentTrack.label}`);
-        this.el.classList.add("sp-captions--active");
-      } else {
-        setHTML(this.el, icons.captionsOff);
-        setAttr(this.el, "aria-label", "Captions");
-        this.el.classList.remove("sp-captions--active");
-      }
-    }
-    toggle() {
-      const textTracks = this.api.getState("textTracks") || [];
-      const currentTrack = this.api.getState("currentTextTrack");
-      if (textTracks.length === 0) return;
-      if (currentTrack) {
-        this.api.emit("track:text", { trackId: null });
-      } else {
-        this.api.emit("track:text", { trackId: textTracks[0].id });
-      }
-    }
-    destroy() {
-      this.el.removeEventListener("click", this.clickHandler);
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/controls/BandwidthIndicator.ts
-  var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2"/></svg>`;
-  var BandwidthIndicator = class {
-    constructor(api) {
-      this.api = api;
-      this.el = createElement("div", { className: "sp-bandwidth-indicator" });
-      this.el.innerHTML = ICON_SVG;
-      this.el.setAttribute("aria-label", "Bandwidth is limiting video quality");
-      this.el.setAttribute("title", "Bandwidth is limiting video quality");
-      this.el.style.display = "none";
-    }
-    render() {
-      return this.el;
-    }
-    update() {
-      const bandwidth = this.api.getState("bandwidth");
-      const qualities = this.api.getState("qualities");
-      if (!bandwidth || !qualities || qualities.length === 0) {
-        this.el.style.display = "none";
-        return;
-      }
-      const highestBitrate = Math.max(...qualities.map((q) => q.bitrate));
-      if (highestBitrate > 0 && bandwidth < highestBitrate) {
-        this.el.style.display = "";
-      } else {
-        this.el.style.display = "none";
-      }
-    }
-    destroy() {
-      this.el.remove();
-    }
-  };
-
-  // packages/plugins/ui/src/control-registry.ts
-  var registry = /* @__PURE__ */ new Map();
-  var listeners = /* @__PURE__ */ new Set();
-  function getControlFactory(id) {
-    return registry.get(id) ?? null;
-  }
-  function onControlRegistered(listener) {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  }
-
-  // packages/plugins/ui/src/index.ts
-  var DEFAULT_LAYOUT = [
-    "play",
-    "skip-backward",
-    "skip-forward",
-    "volume",
-    "time",
-    "live-indicator",
-    "bandwidth-indicator",
-    "spacer",
-    "settings",
-    "captions",
-    "chromecast",
-    "airplay",
-    "pip",
-    "fullscreen"
-  ];
-  var DEFAULT_HIDE_DELAY = 3e3;
-  function uiPlugin(config = {}) {
-    let api;
-    let controlBar = null;
-    let gradient = null;
-    let progressBar = null;
-    let bufferingIndicator = null;
-    let errorOverlay = null;
-    let styleEl = null;
-    let controls = [];
-    let hideTimeout = null;
-    let stateUnsubscribe = null;
-    let controlRegistryUnsubscribe = null;
-    let errorUnsubscribe = null;
-    let reconnectingUnsubscribe = null;
-    let recoveredUnsubscribe = null;
-    let controlsVisible = true;
-    let rafHandle = null;
-    const layout = config.controls || DEFAULT_LAYOUT;
-    const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
-    const createControl = (slot) => {
-      switch (slot) {
-        case "play":
-          return new PlayButton(api);
-        case "skip-backward":
-          return new SkipButton(api, "backward");
-        case "skip-forward":
-          return new SkipButton(api, "forward");
-        case "volume":
-          return new VolumeControl(api);
-        case "progress":
-          return null;
-        case "time":
-          return new TimeDisplay(api);
-        case "live-indicator":
-          return new LiveIndicator(api);
-        case "bandwidth-indicator":
-          return new BandwidthIndicator(api);
-        case "quality":
-          return new QualityMenu(api);
-        case "settings":
-          return new SettingsMenu(api);
-        case "captions":
-          return new CaptionsButton(api);
-        case "chromecast":
-          return new CastButton(api, "chromecast");
-        case "airplay":
-          return new CastButton(api, "airplay");
-        case "pip":
-          return new PipButton(api);
-        case "fullscreen":
-          return new FullscreenButton(api);
-        case "spacer":
-          return new Spacer();
-        default: {
-          const factory = getControlFactory(slot);
-          if (factory) {
-            try {
-              return factory(api);
-            } catch (error) {
-              api.logger.error(`Control factory for "${slot}" threw`, { error });
-              return null;
-            }
-          }
-          api.logger.warn(`Unknown control slot: ${slot}`);
-          return null;
-        }
-      }
-    };
-    const populateControlBar = () => {
-      if (!controlBar) {
-        return;
-      }
-      for (const slot of layout) {
-        const control = createControl(slot);
-        if (control) {
-          controls.push(control);
-          controlBar.appendChild(control.render());
-        }
-      }
-    };
-    const rebuildControlBar = () => {
-      if (!controlBar) {
-        return;
-      }
-      controls.forEach((c) => c.destroy());
-      controls = [];
-      controlBar.replaceChildren();
-      populateControlBar();
-      updateControls();
-    };
-    const updateControls = () => {
-      controls.forEach((c) => c.update());
-      progressBar?.update();
-      const waiting = api?.getState("waiting");
-      const seeking = api?.getState("seeking");
-      const playbackState = api?.getState("playbackState");
-      const isLoading = playbackState === "loading";
-      const showSpinner = waiting || seeking && !api?.getState("paused") || isLoading;
-      bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
-      errorOverlay?.update();
-    };
-    const scheduleUpdate = () => {
-      if (rafHandle !== null) return;
-      rafHandle = requestAnimationFrame(() => {
-        rafHandle = null;
-        updateControls();
-      });
-    };
-    const showControls = () => {
-      if (controlsVisible) {
-        resetHideTimer();
-        return;
-      }
-      controlsVisible = true;
-      controlBar?.classList.add("sp-controls--visible");
-      controlBar?.classList.remove("sp-controls--hidden");
-      gradient?.classList.add("sp-gradient--visible");
-      progressBar?.show();
-      api?.setState("controlsVisible", true);
-      resetHideTimer();
-    };
-    const hideControls = () => {
-      const paused = api?.getState("paused");
-      if (paused) return;
-      controlsVisible = false;
-      controlBar?.classList.remove("sp-controls--visible");
-      controlBar?.classList.add("sp-controls--hidden");
-      gradient?.classList.remove("sp-gradient--visible");
-      progressBar?.hide();
-      api?.setState("controlsVisible", false);
-    };
-    const resetHideTimer = () => {
-      if (hideTimeout) {
-        clearTimeout(hideTimeout);
-      }
-      hideTimeout = setTimeout(hideControls, hideDelay);
-    };
-    const handleInteraction = () => {
-      showControls();
-    };
-    const handleMouseLeave = () => {
-      hideControls();
-    };
-    const handleKeyDown = (e) => {
-      if (!api.container.contains(document.activeElement)) return;
-      const activeEl = document.activeElement;
-      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
-        return;
-      }
-      const video = api.container.querySelector("video");
-      if (!video) return;
-      const live = api.getState("live");
-      const seekableRange = api.getState("seekableRange");
-      switch (e.key) {
-        case " ":
-        case "k":
-          e.preventDefault();
-          if (video.paused) {
-            video.play().catch(() => {
-            });
-          } else {
-            video.pause();
-          }
-          break;
-        case "m":
-          e.preventDefault();
-          video.muted = !video.muted;
-          break;
-        case "f":
-          e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {
-            });
-          } else {
-            api.container.requestFullscreen?.().catch(() => {
-            });
-          }
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          if (live && seekableRange) {
-            video.currentTime = Math.max(seekableRange.start, video.currentTime - 5);
-          } else {
-            video.currentTime = Math.max(0, video.currentTime - 5);
-          }
-          showControls();
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          if (live && seekableRange) {
-            video.currentTime = Math.min(seekableRange.end, video.currentTime + 5);
-          } else {
-            video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
-          }
-          showControls();
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          video.volume = Math.min(1, video.volume + 0.1);
-          showControls();
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          video.volume = Math.max(0, video.volume - 0.1);
-          showControls();
-          break;
-      }
-    };
-    return {
-      id: "ui-controls",
-      name: "UI Controls",
-      type: "ui",
-      version: "1.0.0",
-      async init(pluginApi) {
-        api = pluginApi;
-        styleEl = document.createElement("style");
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
-        if (config.theme) {
-          this.setTheme(config.theme);
-        }
-        const container = api.container;
-        if (!container) {
-          api.logger.error("UI plugin: container not found");
-          return;
-        }
-        const containerStyle = getComputedStyle(container);
-        if (containerStyle.position === "static") {
-          container.style.position = "relative";
-        }
-        const isPlaying = api.getState("playing");
-        gradient = document.createElement("div");
-        gradient.className = isPlaying ? "sp-gradient" : "sp-gradient sp-gradient--visible";
-        container.appendChild(gradient);
-        bufferingIndicator = document.createElement("div");
-        bufferingIndicator.className = "sp-buffering";
-        bufferingIndicator.innerHTML = icons.spinner;
-        bufferingIndicator.setAttribute("aria-hidden", "true");
-        container.appendChild(bufferingIndicator);
-        errorOverlay = new ErrorOverlay(api);
-        container.appendChild(errorOverlay.render());
-        errorUnsubscribe = api.on("error", (payload) => {
-          if (payload?.fatal) {
-            const error = api.getState("error") || payload;
-            errorOverlay?.show(error);
-          }
-        });
-        reconnectingUnsubscribe = api.on("error:reconnecting", () => {
-          errorOverlay?.showReconnecting();
-        });
-        recoveredUnsubscribe = api.on("error:recovered", () => {
-          errorOverlay?.hide();
-        });
-        progressBar = new ProgressBar(api);
-        container.appendChild(progressBar.render());
-        if (!isPlaying) {
-          progressBar.show();
-        }
-        controlBar = document.createElement("div");
-        controlBar.className = isPlaying ? "sp-controls sp-controls--hidden" : "sp-controls sp-controls--visible";
-        controlBar.setAttribute("role", "toolbar");
-        controlBar.setAttribute("aria-label", "Video controls");
-        populateControlBar();
-        container.appendChild(controlBar);
-        controlRegistryUnsubscribe = onControlRegistered((id) => {
-          if (!layout.includes(id)) {
-            return;
-          }
-          api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
-          rebuildControlBar();
-        });
-        container.addEventListener("mousemove", handleInteraction);
-        container.addEventListener("mouseenter", handleInteraction);
-        container.addEventListener("mouseleave", handleMouseLeave);
-        container.addEventListener("touchstart", handleInteraction, { passive: true });
-        container.addEventListener("click", handleInteraction);
-        document.addEventListener("keydown", handleKeyDown);
-        stateUnsubscribe = api.subscribeToState(scheduleUpdate);
-        document.addEventListener("fullscreenchange", scheduleUpdate);
-        updateControls();
-        if (!container.hasAttribute("tabindex")) {
-          container.setAttribute("tabindex", "0");
-        }
-        controlsVisible = !isPlaying;
-        api.setState("controlsVisible", controlsVisible);
-        if (isPlaying) {
-          resetHideTimer();
-        }
-        api.logger.debug("UI controls plugin initialized");
-      },
-      async destroy() {
-        if (hideTimeout) {
-          clearTimeout(hideTimeout);
-          hideTimeout = null;
-        }
-        if (rafHandle !== null) {
-          cancelAnimationFrame(rafHandle);
-          rafHandle = null;
-        }
-        stateUnsubscribe?.();
-        stateUnsubscribe = null;
-        errorUnsubscribe?.();
-        errorUnsubscribe = null;
-        reconnectingUnsubscribe?.();
-        reconnectingUnsubscribe = null;
-        recoveredUnsubscribe?.();
-        recoveredUnsubscribe = null;
-        if (api?.container) {
-          api.container.removeEventListener("mousemove", handleInteraction);
-          api.container.removeEventListener("mouseenter", handleInteraction);
-          api.container.removeEventListener("mouseleave", handleMouseLeave);
-          api.container.removeEventListener("touchstart", handleInteraction);
-          api.container.removeEventListener("click", handleInteraction);
-        }
-        document.removeEventListener("keydown", handleKeyDown);
-        document.removeEventListener("fullscreenchange", scheduleUpdate);
-        controlRegistryUnsubscribe?.();
-        controlRegistryUnsubscribe = null;
-        controls.forEach((c) => c.destroy());
-        controls = [];
-        progressBar?.destroy();
-        progressBar = null;
-        errorOverlay?.destroy();
-        errorOverlay = null;
-        controlBar?.remove();
-        controlBar = null;
-        gradient?.remove();
-        gradient = null;
-        bufferingIndicator?.remove();
-        bufferingIndicator = null;
-        styleEl?.remove();
-        styleEl = null;
-        api?.logger.debug("UI controls plugin destroyed");
-      },
-      // Public API
-      show() {
-        showControls();
-      },
-      hide() {
-        controlsVisible = false;
-        controlBar?.classList.remove("sp-controls--visible");
-        controlBar?.classList.add("sp-controls--hidden");
-        gradient?.classList.remove("sp-gradient--visible");
-        progressBar?.hide();
-        api?.setState("controlsVisible", false);
-      },
-      setTheme(theme) {
-        const root = api?.container || document.documentElement;
-        if (theme.primaryColor) {
-          root.style.setProperty("--sp-color", theme.primaryColor);
-        }
-        if (theme.accentColor) {
-          root.style.setProperty("--sp-accent", theme.accentColor);
-        }
-        if (theme.backgroundColor) {
-          root.style.setProperty("--sp-bg", theme.backgroundColor);
-        }
-        if (theme.controlBarHeight) {
-          root.style.setProperty("--sp-control-height", `${theme.controlBarHeight}px`);
-        }
-        if (theme.iconSize) {
-          root.style.setProperty("--sp-icon-size", `${theme.iconSize}px`);
-        }
-      },
-      getControlBar() {
-        return controlBar;
-      }
-    };
-  }
+  // demo/demo.ts
+  init_src();
 
   // packages/plugins/airplay/src/index.ts
   function isAirPlaySupported2() {
@@ -44558,7 +41790,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (layout === "mini") {
           const wrapper = titleEl.parentElement;
           if (wrapper && titleEl.scrollWidth > wrapper.clientWidth) {
-            titleEl.textContent = `${title}     \u2022     ${title}     \u2022     `;
+            titleEl.textContent = `${title}     -     ${title}     -     `;
             titleEl.classList.add("scrolling");
           } else {
             titleEl.classList.remove("scrolling");
@@ -44743,7 +41975,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const dynamicInterval = config.dynamicInterval ?? 1e4;
     const showDelay = config.showDelay ?? 0;
     let positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
-    const createElement3 = () => {
+    const createElement2 = () => {
       const el = document.createElement("div");
       el.className = "sp-watermark sp-watermark--hidden";
       el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
@@ -44773,8 +42005,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles4 = positionStyles[position];
-      styles4.split(";").filter(Boolean).forEach((rule) => {
+      const styles3 = positionStyles[position];
+      styles3.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
         const prop = rule.slice(0, colonIdx).trim();
@@ -44833,7 +42065,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init(pluginApi) {
         api = pluginApi;
         api.logger.debug("Watermark plugin initialized");
-        element = createElement3();
+        element = createElement2();
         api.container.appendChild(element);
         const unsubPlay = api.on("playback:play", () => {
           if (showDelay > 0) {
@@ -45341,7 +42573,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 .sp-share-sheet--open { transform: translateY(0); }
 
-/* Grab handle \u2014 the affordance that says "this drags/dismisses" on a phone. */
+/* Grab handle - the affordance that says "this drags/dismisses" on a phone. */
 .sp-share-grip {
   width: 36px;
   height: 4px;
@@ -45619,8 +42851,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("share:closed", void 0);
           }
         });
-        void Promise.resolve().then(() => (init_dist(), dist_exports)).then(({ registerControl: registerControl3 }) => {
-          registerControl3("share", (controlApi) => new ShareButton(controlApi, () => void activate()));
+        void Promise.resolve().then(() => (init_src(), src_exports)).then(({ registerControl: registerControl2 }) => {
+          registerControl2("share", (controlApi) => new ShareButton(controlApi, () => void activate()));
         }).catch(() => {
           api?.logger.debug("@scarlett-player/ui not present, share control not registered");
         });
@@ -45687,7 +42919,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           theme: {
             accentColor: "#e50914"
           },
-          // Spelled out because 'share' is not in the default layout — the share
+          // Spelled out because 'share' is not in the default layout - the share
           // plugin registers the control, but a layout has to ask for it. This is
           // the default order with 'share' inserted before the cast buttons.
           controls: [
@@ -45721,7 +42953,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         //
         // The embed target points at the published iframe helper, the same path
         // the release workflow uploads to (CDN + /latest/) and the embed README
-        // documents — not anything under /packages, which the site does not serve.
+        // documents - not anything under /packages, which the site does not serve.
         createSharePlugin({
           embedBaseUrl: "https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html"
         })

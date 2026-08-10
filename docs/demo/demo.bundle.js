@@ -36428,8 +36428,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * Register a state key at runtime, for state a plugin owns.
      *
      * Core cannot know every plugin's keys, and {@link get} deliberately throws
-     * for unregistered ones — that throw is a useful typo-catcher and is worth
-     * keeping — so a plugin declares its keys before first use.
+     * for unregistered ones - that throw is a useful typo-catcher and is worth
+     * keeping - so a plugin declares its keys before first use.
      *
      * Idempotent by design: re-defining an existing key leaves the current value
      * untouched. Plugins commonly re-run setup after a source change, and that
@@ -37503,7 +37503,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     /**
      * Register a state key this plugin owns, before first use.
      *
-     * Idempotent — re-defining an existing key keeps its current value.
+     * Idempotent - re-defining an existing key keeps its current value.
      * See {@link IPluginAPI.defineState}.
      *
      * @param key - State property key
@@ -41790,7 +41790,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (layout === "mini") {
           const wrapper = titleEl.parentElement;
           if (wrapper && titleEl.scrollWidth > wrapper.clientWidth) {
-            titleEl.textContent = `${title}     \u2022     ${title}     \u2022     `;
+            titleEl.textContent = `${title}     -     ${title}     -     `;
             titleEl.classList.add("scrolling");
           } else {
             titleEl.classList.remove("scrolling");
@@ -42573,7 +42573,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 .sp-share-sheet--open { transform: translateY(0); }
 
-/* Grab handle \u2014 the affordance that says "this drags/dismisses" on a phone. */
+/* Grab handle - the affordance that says "this drags/dismisses" on a phone. */
 .sp-share-grip {
   width: 36px;
   height: 4px;
@@ -42919,7 +42919,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           theme: {
             accentColor: "#e50914"
           },
-          // Spelled out because 'share' is not in the default layout — the share
+          // Spelled out because 'share' is not in the default layout - the share
           // plugin registers the control, but a layout has to ask for it. This is
           // the default order with 'share' inserted before the cast buttons.
           controls: [
@@ -42953,7 +42953,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         //
         // The embed target points at the published iframe helper, the same path
         // the release workflow uploads to (CDN + /latest/) and the embed README
-        // documents — not anything under /packages, which the site does not serve.
+        // documents - not anything under /packages, which the site does not serve.
         createSharePlugin({
           embedBaseUrl: "https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html"
         })
