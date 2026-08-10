@@ -101,7 +101,7 @@ const lastHTML = new WeakMap<Element, string>();
  * `innerHTML` tears out and rebuilds the child nodes even when the markup is
  * identical. If that happens between a user's `mousedown` and `mouseup`, the
  * node that received the `mousedown` no longer exists and the browser never
- * dispatches a `click` — the control silently ignores the press.
+ * dispatches a `click` - the control silently ignores the press.
  *
  * @param el - Element to update
  * @param html - Desired markup

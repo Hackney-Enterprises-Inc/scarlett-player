@@ -30,7 +30,7 @@ That is the whole setup. With no configuration the plugin shares the current pag
 
 ## Which URL gets shared
 
-**The page URL — never the media `src`.**
+**The page URL - never the media `src`.**
 
 Playback URLs are frequently signed or tokenised. Sharing one would leak a credential and hand the recipient a link that expires, so there is no configuration and no code path that causes it. The URL comes from `config.url`, defaulting to `window.location.href`.
 
@@ -44,7 +44,7 @@ createSharePlugin({
 
 ### Inside an iframe embed
 
-This is the case the override exists for. Inside `iframe.html`, `window.location.href` is the *player* page, and cross-origin rules prevent reading the parent — so the plugin cannot work out the real page on its own. Pass it in:
+This is the case the override exists for. Inside `iframe.html`, `window.location.href` is the *player* page, and cross-origin rules prevent reading the parent - so the plugin cannot work out the real page on its own. Pass it in:
 
 ```html
 <iframe src="https://cdn.example.com/iframe.html?src=...&shareUrl=https%3A%2F%2Fexample.com%2Fwatch%2Fabc"></iframe>
@@ -72,14 +72,14 @@ Mobile is the primary path, not an adaptation of the desktop one.
 | `timestampParam` | `string` | `'t'` | Query parameter name |
 | `roundTimestamp` | `boolean` | `true` | Round to whole seconds |
 | `targets` | `Array<string \| ShareTarget>` | `['native', 'copy', 'embed']` | Targets, in order |
-| `embedBaseUrl` | `string` | – | Enables the `embed` target |
-| `embedSnippet` | `(ctx) => string` | – | Override the generated snippet |
-| `onShare` | `(targetId, url) => void` | – | Analytics hook |
-| `onError` | `(error) => void` | – | Never fires for a dismissed native sheet |
+| `embedBaseUrl` | `string` | - | Enables the `embed` target |
+| `embedSnippet` | `(ctx) => string` | - | Override the generated snippet |
+| `onShare` | `(targetId, url) => void` | - | Analytics hook |
+| `onError` | `(error) => void` | - | Never fires for a dismissed native sheet |
 
 Built-in targets: `native`, `copy`, `embed`, `x`, `facebook`, `linkedin`, `whatsapp`, `telegram`, `reddit`, `email`.
 
-Targets that cannot work are removed rather than shown broken — `native` without `navigator.share`, `embed` without `embedBaseUrl`.
+Targets that cannot work are removed rather than shown broken - `native` without `navigator.share`, `embed` without `embedBaseUrl`.
 
 ### Custom targets
 
@@ -91,7 +91,7 @@ createSharePlugin({
     {
       id: 'signal',
       label: 'Signal',
-      icon: '<svg viewBox="0 0 24 24">…</svg>',
+      icon: '<svg viewBox="0 0 24 24">...</svg>',
       href: (ctx) => `https://signal.me/#p/${encodeURIComponent(ctx.url)}`,
     },
   ],
@@ -102,7 +102,7 @@ createSharePlugin({
 
 The position is applied with the URL API, so an existing query string or fragment survives and re-sharing replaces the previous timestamp rather than appending a second one.
 
-Live streams never get one — an offset into a sliding DVR window means nothing to whoever opens the link.
+Live streams never get one - an offset into a sliding DVR window means nothing to whoever opens the link.
 
 ## Imperative API
 
@@ -125,7 +125,7 @@ share.close();
 
 ## Without the UI package
 
-`@scarlett-player/ui` is an optional peer. The control registers only if it is present, and everything else — including the sheet and the imperative API — works without it.
+`@scarlett-player/ui` is an optional peer. The control registers only if it is present, and everything else - including the sheet and the imperative API - works without it.
 
 ## License
 

@@ -312,7 +312,7 @@ export function chromecastPlugin(): IChromecastPlugin {
       api.setState('chromecastAvailable', false);
       api.setState('chromecastActive', false);
 
-      // Listen for media:load-request — when Chromecast is active, load on Cast device
+      // Listen for media:load-request - when Chromecast is active, load on Cast device
       const unsubLoadRequest = api.on('media:load-request', async ({ src }) => {
         if (!api.getState('chromecastActive')) return;
         await loadMediaOnCast(src, 0);

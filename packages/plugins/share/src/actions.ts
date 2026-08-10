@@ -33,7 +33,7 @@ export async function nativeShare(context: ShareContext): Promise<boolean> {
  * Copy text to the clipboard.
  *
  * The async Clipboard API needs a secure context and is absent over plain HTTP
- * and in older WebViews — both common for embedded players — so a
+ * and in older WebViews - both common for embedded players - so a
  * `document.execCommand` path stays as a fallback.
  *
  * @returns true when the text reached the clipboard
@@ -44,7 +44,7 @@ export async function copyText(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Permission denied or insecure context — fall through.
+      // Permission denied or insecure context - fall through.
     }
   }
 

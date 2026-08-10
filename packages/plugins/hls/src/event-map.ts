@@ -362,7 +362,7 @@ export function setupVideoEventHandlers(
     api.setState('mediaType', video.videoWidth > 0 ? 'video' : 'audio');
   });
 
-  // Loaded data — re-check mediaType since videoWidth may not be available at loadedmetadata on mobile
+  // Loaded data - re-check mediaType since videoWidth may not be available at loadedmetadata on mobile
   addHandler('loadeddata', () => {
     if (video.videoWidth > 0) {
       api.setState('mediaType', 'video');

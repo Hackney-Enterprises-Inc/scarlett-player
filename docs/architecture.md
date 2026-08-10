@@ -672,7 +672,7 @@ class ProviderSelector {
 ## State Flow
 
 ```
-User Action → Player Method → Event Emitted
+User Action -> Player Method -> Event Emitted
                                     ↓
                         Plugin Intercept (optional)
                                     ↓

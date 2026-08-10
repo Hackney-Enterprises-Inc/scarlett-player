@@ -182,8 +182,8 @@ export class StateManager {
    * Register a state key at runtime, for state a plugin owns.
    *
    * Core cannot know every plugin's keys, and {@link get} deliberately throws
-   * for unregistered ones — that throw is a useful typo-catcher and is worth
-   * keeping — so a plugin declares its keys before first use.
+   * for unregistered ones - that throw is a useful typo-catcher and is worth
+   * keeping - so a plugin declares its keys before first use.
    *
    * Idempotent by design: re-defining an existing key leaves the current value
    * untouched. Plugins commonly re-run setup after a source change, and that
@@ -204,7 +204,7 @@ export class StateManager {
       return;
     }
 
-    // Remembered so reset() and resetKey() work on plugin state too — they read
+    // Remembered so reset() and resetKey() work on plugin state too - they read
     // DEFAULT_STATE, which by definition has no entry for a plugin's key.
     this.definedDefaults.set(key, initialValue);
     this.createSignal(key, initialValue);

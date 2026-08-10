@@ -2,7 +2,7 @@
  * Share Plugin for Scarlett Player
  *
  * Mobile first. On a phone the button opens the OS share sheet directly when
- * the browser supports it — that is the fastest, most familiar path and it
+ * the browser supports it - that is the fastest, most familiar path and it
  * carries every app the viewer already has. Everywhere else it opens an
  * in-player sheet: a bottom sheet on small screens, a popover on large ones.
  *
@@ -126,7 +126,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
         sheet?.showToast('Link copied');
         reportShared(target.id, context.url);
       } else {
-        // Clipboard blocked — show the URL so it can still be copied by hand.
+        // Clipboard blocked - show the URL so it can still be copied by hand.
         sheet?.showManualCopy(context.url);
       }
       return;
@@ -175,7 +175,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
    * What tapping the button does.
    *
    * On a phone offering the OS sheet, and with nothing custom configured,
-   * go straight there — an extra in-player menu in front of the native sheet
+   * go straight there - an extra in-player menu in front of the native sheet
    * is a step with no payoff. Otherwise open our own sheet.
    */
   const activate = async (): Promise<void> => {
@@ -230,7 +230,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
         },
       });
 
-      // Registering does not place the button anywhere — the host opts in by
+      // Registering does not place the button anywhere - the host opts in by
       // listing 'share' in its control layout. Done via a runtime import so a
       // headless host never needs @scarlett-player/ui installed.
       void import('@scarlett-player/ui')

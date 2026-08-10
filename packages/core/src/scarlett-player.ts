@@ -975,7 +975,7 @@ export class ScarlettPlayer {
     try {
       path = new URL(source).pathname;
     } catch {
-      // Not a valid URL — strip query/fragment manually
+      // Not a valid URL - strip query/fragment manually
       const noQuery = source.split('?')[0] ?? source;
       path = noQuery.split('#')[0] ?? noQuery;
     }

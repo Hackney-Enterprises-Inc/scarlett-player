@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         theme: {
           accentColor: '#e50914',
         },
-        // Spelled out because 'share' is not in the default layout — the share
+        // Spelled out because 'share' is not in the default layout - the share
         // plugin registers the control, but a layout has to ask for it. This is
         // the default order with 'share' inserted before the cast buttons.
         controls: [
@@ -81,7 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       //
       // The embed target points at the published iframe helper, the same path
       // the release workflow uploads to (CDN + /latest/) and the embed README
-      // documents — not anything under /packages, which the site does not serve.
+      // documents - not anything under /packages, which the site does not serve.
       createSharePlugin({
         embedBaseUrl: 'https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html',
       }),

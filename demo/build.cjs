@@ -55,6 +55,37 @@ async function build() {
       target: 'es2020',
       sourcemap: true,
       minify: false,
+      // demo.ts imports the packages by relative source path, but a plugin that
+      // reaches for a sibling by its published name - the share plugin does
+      // `import('@scarlett-player/ui')` to register its control - would resolve
+      // through node_modules to that package's dist build instead. That pulls a
+      // SECOND copy of the package into the bundle, and module-level state is
+      // not shared between the two: the share plugin registered its control on
+      // the dist copy's registry while the demo's control bar read the source
+      // copy's, so the button silently never rendered.
+      //
+      // Aliasing every scarlett package to its source entry keeps the bundle to
+      // one instance of each. Real consumers import by name everywhere and were
+      // never affected; this is a demo-build concern only.
+      alias: Object.fromEntries(
+        [
+          ['core', 'packages/core/src/index.ts'],
+          ['ui', 'packages/plugins/ui/src/index.ts'],
+          ['hls', 'packages/plugins/hls/src/index.ts'],
+          ['native', 'packages/plugins/native/src/index.ts'],
+          ['airplay', 'packages/plugins/airplay/src/index.ts'],
+          ['chromecast', 'packages/plugins/chromecast/src/index.ts'],
+          ['playlist', 'packages/plugins/playlist/src/index.ts'],
+          ['media-session', 'packages/plugins/media-session/src/index.ts'],
+          ['audio-ui', 'packages/plugins/audio-ui/src/index.ts'],
+          ['watermark', 'packages/plugins/watermark/src/index.ts'],
+          ['captions', 'packages/plugins/captions/src/index.ts'],
+          ['share', 'packages/plugins/share/src/index.ts'],
+        ].map(([name, rel]) => [
+          `@scarlett-player/${name}`,
+          path.join(__dirname, '..', rel),
+        ]),
+      ),
       define: {
         'process.env.NODE_ENV': '"development"',
         '__VERSION__': JSON.stringify(VERSION),

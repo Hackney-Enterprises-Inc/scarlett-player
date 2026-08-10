@@ -6,8 +6,8 @@
  * button no longer requires editing this package.
  *
  * The registry is module-level and therefore shared by every player instance on
- * the page. That matches how plugin packages register — once, at import time or
- * in `init()` — and the factory receives the per-instance `IPluginAPI`, so the
+ * the page. That matches how plugin packages register - once, at import time or
+ * in `init()` - and the factory receives the per-instance `IPluginAPI`, so the
  * controls themselves stay properly scoped to their player.
  */
 
@@ -22,7 +22,7 @@ const listeners = new Set<(id: string) => void>();
 /**
  * Register a control factory under a slot id.
  *
- * The id only takes effect for players whose layout lists it — registering
+ * The id only takes effect for players whose layout lists it - registering
  * alone never adds a button anywhere. Hosts opt controls in through
  * `uiPlugin({ controls: [...] })`.
  *
@@ -89,7 +89,7 @@ export function onControlRegistered(listener: (id: string) => void): () => void 
 /**
  * Clear all registrations and listeners.
  *
- * Test-support only — the registry is module-level, so without this a
+ * Test-support only - the registry is module-level, so without this a
  * registration in one test leaks into the next.
  *
  * @internal
