@@ -12,6 +12,7 @@ import { createPlaylistPlugin } from '../packages/plugins/playlist/src/index';
 import { createMediaSessionPlugin } from '../packages/plugins/media-session/src/index';
 import { createAudioUIPlugin } from '../packages/plugins/audio-ui/src/index';
 import { createWatermarkPlugin } from '../packages/plugins/watermark/src/index';
+import { createSharePlugin } from '../packages/plugins/share/src/index';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -46,6 +47,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         theme: {
           accentColor: '#e50914',
         },
+        // Spelled out because 'share' is not in the default layout — the share
+        // plugin registers the control, but a layout has to ask for it. This is
+        // the default order with 'share' inserted before the cast buttons.
+        controls: [
+          'play',
+          'skip-backward',
+          'skip-forward',
+          'volume',
+          'time',
+          'live-indicator',
+          'bandwidth-indicator',
+          'spacer',
+          'settings',
+          'captions',
+          'share',
+          'chromecast',
+          'airplay',
+          'pip',
+          'fullscreen',
+        ],
       }),
       airplayPlugin(),
       chromecastPlugin(),
@@ -54,6 +75,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         position: 'bottom-right',
         opacity: 0.5,
         imageHeight: 64,
+      }),
+      // Shares the demo page itself, with the playback position appended. On a
+      // phone this opens the OS share sheet directly.
+      //
+      // The embed target points at the published iframe helper, the same path
+      // the release workflow uploads to (CDN + /latest/) and the embed README
+      // documents — not anything under /packages, which the site does not serve.
+      createSharePlugin({
+        embedBaseUrl: 'https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html',
       }),
     ].filter(Boolean),
   });
