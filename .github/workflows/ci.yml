@@ -41,5 +41,17 @@ jobs:
       - name: Type check
         run: pnpm run typecheck
 
+      # NODE_OPTIONS works around a teardown crash, not a test failure. Node 24
+      # enables require(esm) by default; vitest 1.6 predates it, and the two race
+      # when vitest tears down its worker threads at the end of a run. A module
+      # load still in flight lands in Node's native CJS lexer, which calls
+      # ToLocalChecked() on a string V8 will not hand back for an isolate that is
+      # going away, and aborts the process (SIGABRT -> exit 134). Every test has
+      # already passed by then; the job dies during cleanup. Disabling
+      # require(esm) removes that code path entirely. Node cannot be pinned back
+      # instead - release.yml needs >= 22.14 for trusted publishing. Remove this
+      # once vitest is upgraded to 3.x, which supports Node 24.
       - name: Run tests
         run: pnpm run test
+        env:
+          NODE_OPTIONS: --no-experimental-require-module
