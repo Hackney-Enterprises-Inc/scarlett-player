@@ -67,6 +67,33 @@ export interface IPluginAPI {
   setState<K extends StateKey>(key: K, value: StateValue<K>): void;
 
   /**
+   * Register a state key this plugin owns, before first use.
+   *
+   * Core only knows its own keys, and getState/setState throw for anything
+   * unregistered. Call this in `init()` for each key the plugin introduces.
+   *
+   * Idempotent — re-defining an existing key keeps its current value, so
+   * re-running setup after a source change will not reset live state.
+   *
+   * Add the key to `StateStore` by declaration merging, and namespace it with
+   * the plugin's name so it cannot collide with another plugin's:
+   *
+   * ```ts
+   * declare module '@scarlett-player/core' {
+   *   interface StateStore {
+   *     highlightSelection: { start: number; end: number } | null;
+   *   }
+   * }
+   *
+   * api.defineState('highlightSelection', null);
+   * ```
+   *
+   * @param key - State property key
+   * @param initialValue - Value used only when the key is new
+   */
+  defineState<K extends StateKey>(key: K, initialValue: StateValue<K>): void;
+
+  /**
    * Subscribe to an event.
    * @param event - Event name
    * @param handler - Event handler

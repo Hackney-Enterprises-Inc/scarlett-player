@@ -5,9 +5,9 @@
 import type { Plugin, IPluginAPI } from '@scarlett-player/core';
 
 /**
- * Available control slot identifiers.
+ * Control slots this package implements itself.
  */
-export type ControlSlot =
+export type BuiltinControlSlot =
   | 'play'
   | 'skip-backward'
   | 'skip-forward'
@@ -24,6 +24,22 @@ export type ControlSlot =
   | 'fullscreen'
   | 'spacer'
   | 'bandwidth-indicator';
+
+/**
+ * A control slot: a built-in, or any id a plugin registered through
+ * {@link registerControl}.
+ *
+ * `string & {}` keeps editor autocomplete listing the built-ins while still
+ * accepting custom ids — a plain `| string` would collapse the union and lose
+ * the suggestions.
+ */
+// eslint-disable-next-line @typescript-eslint/ban-types
+export type ControlSlot = BuiltinControlSlot | (string & {});
+
+/**
+ * Builds a control instance. Receives the same plugin API the built-ins get.
+ */
+export type ControlFactory = (api: IPluginAPI) => Control;
 
 /**
  * Layout configuration for the control bar.

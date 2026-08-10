@@ -51,6 +51,11 @@ function createMockApi(): IPluginAPI {
     setState: vi.fn((key: string, value: unknown) => {
       state[key] = value;
     }),
+    defineState: vi.fn((key: string, value: unknown) => {
+      if (!(key in state)) {
+        state[key] = value;
+      }
+    }),
     on: vi.fn(() => vi.fn()),
     off: vi.fn(),
     emit: vi.fn(),

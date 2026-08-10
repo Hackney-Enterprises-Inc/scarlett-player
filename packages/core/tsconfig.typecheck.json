@@ -1,0 +1,19 @@
+{
+  "//": "Type-checks src plus the test files that exist to assert a TYPE contract rather than runtime behaviour. vitest transpiles without type-checking, and the build config excludes tests entirely, so without this the PlayerEventMap declaration-merging guarantee would pass vacuously. `pnpm build` still uses tsconfig.json.",
+  "//tests": "Only type-contract tests are listed. The wider suite does not type-check under strict yet (~37 pre-existing errors, mostly in scarlett-player.test.ts); add files here as they are cleaned up.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    "tests/events/event-map-extension.test.ts",
+    "tests/state/state-define.test.ts"
+  ],
+  "//exclude": "Must be restated. `exclude` is inherited from the extended config, where it lists \"tests\" — and exclude filters include, so without this the tests silently stay out of the program and every type guarantee in them passes vacuously.",
+  "exclude": ["node_modules", "dist"]
+}

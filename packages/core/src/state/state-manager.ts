@@ -12,14 +12,18 @@ import type {
   StateStore,
   StateKey,
   StateValue,
+  CoreStateStore,
   StateUpdate,
   StateChangeEvent,
 } from '../types/state';
 
 /**
- * Default initial values for all state properties.
+ * Default initial values for every core state property.
+ *
+ * Typed against CoreStateStore rather than the open StateStore so a plugin
+ * augmenting the latter cannot break this object's exhaustiveness check.
  */
-const DEFAULT_STATE: StateStore = {
+const DEFAULT_STATE: CoreStateStore = {
   // Core Playback State
   playbackState: 'idle',
   playing: false,
@@ -130,6 +134,9 @@ export class StateManager {
   /** Global state change subscribers */
   private changeSubscribers = new Set<(event: StateChangeEvent) => void>();
 
+  /** Initial values for keys registered via define(), for reset support */
+  private definedDefaults = new Map<StateKey, unknown>();
+
   /**
    * Create a new StateManager with default initial state.
    *
@@ -148,16 +155,59 @@ export class StateManager {
 
     // Create signals for all state properties
     for (const [key, value] of Object.entries(initialState)) {
-      const stateKey = key as StateKey;
-      const stateSignal = signal(value);
-
-      // Subscribe to each signal to emit global change events
-      stateSignal.subscribe(() => {
-        this.notifyChangeSubscribers(stateKey);
-      });
-
-      this.signals.set(stateKey, stateSignal);
+      this.createSignal(key as StateKey, value);
     }
+  }
+
+  /**
+   * Create and register a signal, wired to the global change subscribers.
+   *
+   * Shared by initializeSignals() and define() so a plugin-defined key behaves
+   * exactly like a built-in one and the two paths cannot drift apart.
+   *
+   * @private
+   */
+  private createSignal(key: StateKey, value: unknown): void {
+    const stateSignal = signal(value);
+
+    // Subscribe to each signal to emit global change events
+    stateSignal.subscribe(() => {
+      this.notifyChangeSubscribers(key);
+    });
+
+    this.signals.set(key, stateSignal);
+  }
+
+  /**
+   * Register a state key at runtime, for state a plugin owns.
+   *
+   * Core cannot know every plugin's keys, and {@link get} deliberately throws
+   * for unregistered ones — that throw is a useful typo-catcher and is worth
+   * keeping — so a plugin declares its keys before first use.
+   *
+   * Idempotent by design: re-defining an existing key leaves the current value
+   * untouched. Plugins commonly re-run setup after a source change, and that
+   * must not reset state that is already live.
+   *
+   * Namespace plugin keys with the plugin's own name to avoid collisions.
+   *
+   * @param key - State property key
+   * @param initialValue - Value used only when the key is new
+   *
+   * @example
+   * ```ts
+   * state.define('highlightSelection', null);
+   * ```
+   */
+  define<K extends StateKey>(key: K, initialValue: StateValue<K>): void {
+    if (this.signals.has(key)) {
+      return;
+    }
+
+    // Remembered so reset() and resetKey() work on plugin state too — they read
+    // DEFAULT_STATE, which by definition has no entry for a plugin's key.
+    this.definedDefaults.set(key, initialValue);
+    this.createSignal(key, initialValue);
   }
 
   /**
@@ -313,7 +363,10 @@ export class StateManager {
    * ```
    */
   reset(): void {
-    this.update(DEFAULT_STATE);
+    this.update({
+      ...DEFAULT_STATE,
+      ...Object.fromEntries(this.definedDefaults),
+    } as StateUpdate);
   }
 
   /**
@@ -327,7 +380,15 @@ export class StateManager {
    * ```
    */
   resetKey<K extends StateKey>(key: K): void {
-    const defaultValue = DEFAULT_STATE[key] as StateValue<K>;
+    // Plugin-defined keys have no entry in DEFAULT_STATE; their default is the
+    // initial value handed to define(). Without this fallback, resetting one
+    // would quietly write undefined.
+    const defaultValue = (
+      key in DEFAULT_STATE
+        ? (DEFAULT_STATE as unknown as Record<string, unknown>)[key as string]
+        : this.definedDefaults.get(key)
+    ) as StateValue<K>;
+
     this.set(key, defaultValue);
   }
 

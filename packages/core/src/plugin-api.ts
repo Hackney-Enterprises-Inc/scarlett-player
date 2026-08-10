@@ -119,6 +119,19 @@ export class PluginAPI implements IPluginAPI {
   }
 
   /**
+   * Register a state key this plugin owns, before first use.
+   *
+   * Idempotent — re-defining an existing key keeps its current value.
+   * See {@link IPluginAPI.defineState}.
+   *
+   * @param key - State property key
+   * @param initialValue - Value used only when the key is new
+   */
+  defineState<K extends StateKey>(key: K, initialValue: StateValue<K>): void {
+    this.stateManager.define(key, initialValue);
+  }
+
+  /**
    * Subscribe to an event.
    *
    * @param event - Event name
