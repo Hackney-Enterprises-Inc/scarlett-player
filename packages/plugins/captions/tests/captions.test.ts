@@ -271,6 +271,142 @@ describe('cleanup on source change', () => {
   });
 });
 
+/**
+ * Build a stand-in TextTrackList. jsdom's own list is not an EventTarget and
+ * cannot be populated, so tests that need tracks supply their own.
+ */
+function fakeTextTrackList(
+  tracks: Array<{ kind: string; label: string; language: string; mode?: string }>,
+): TextTrackList {
+  const list: Record<string | number, unknown> = { length: tracks.length };
+  tracks.forEach((track, i) => {
+    list[i] = { mode: 'disabled', ...track };
+  });
+  return list as unknown as TextTrackList;
+}
+
+/** Minimal hls.js instance double exposing the subtitle surface we read. */
+function fakeHlsPlugin(subtitleTracks: Array<{ id: number; name: string; lang: string; url: string }>) {
+  const handlers: Record<string, (...args: unknown[]) => void> = {};
+  const instance = {
+    subtitleTracks,
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      handlers[event] = handler;
+    }),
+    off: vi.fn(),
+  };
+  return {
+    plugin: { getHlsInstance: () => instance, isNativeHLS: () => false },
+    instance,
+    fire: (event: string) => handlers[event]?.(),
+  };
+}
+
+describe('native HLS (Safari/iOS)', () => {
+  it('syncs tracks the browser created, with no hls.js instance', () => {
+    const mockApi = createMockApi();
+    let mediaLoadedCallback: (() => void) | null = null;
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
+      return vi.fn();
+    });
+    mockApi.getPlugin.mockReturnValue({
+      getHlsInstance: () => null,
+      isNativeHLS: () => true,
+    });
+
+    // Safari parses the manifest itself and populates textTracks before load.
+    Object.defineProperty(mockApi.video, 'textTracks', {
+      value: fakeTextTrackList([
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es' },
+      ]),
+      configurable: true,
+    });
+
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    const lastTextTracks = mockApi.setState.mock.calls
+      .filter((call: unknown[]) => call[0] === 'textTracks')
+      .pop();
+
+    expect((lastTextTracks?.[1] as unknown[]).length).toBe(2);
+  });
+});
+
+describe('hls.js subtitle extraction', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let mediaLoadedCallback: (() => void) | null;
+  let hls: ReturnType<typeof fakeHlsPlugin>;
+
+  beforeEach(() => {
+    mediaLoadedCallback = null;
+    mockApi = createMockApi();
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
+      return vi.fn();
+    });
+    hls = fakeHlsPlugin([
+      { id: 0, name: 'English', lang: 'en', url: '/subs/en.m3u8' },
+      { id: 1, name: 'Spanish', lang: 'es', url: '/subs/es.m3u8' },
+    ]);
+    mockApi.getPlugin.mockReturnValue(hls.plugin);
+  });
+
+  it('subscribes to the event hls.js actually emits', () => {
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    expect(hls.instance.on).toHaveBeenCalledWith('hlsSubtitleTracksUpdated', expect.any(Function));
+  });
+
+  it('adds a <track> per subtitle rendition', () => {
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    expect(mockApi.video.querySelectorAll('track').length).toBe(2);
+  });
+
+  it('replaces rather than duplicates when the event fires again', () => {
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    hls.fire('hlsSubtitleTracksUpdated');
+    hls.fire('hlsSubtitleTracksUpdated');
+
+    expect(mockApi.video.querySelectorAll('track').length).toBe(2);
+  });
+
+  it('keeps configured sources when HLS renditions are replaced', () => {
+    const plugin = createCaptionsPlugin({
+      sources: [{ language: 'fr', label: 'French', src: '/subs/fr.vtt' }],
+    });
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    hls.fire('hlsSubtitleTracksUpdated');
+
+    // 1 configured + 2 renditions, with the configured one surviving.
+    expect(mockApi.video.querySelectorAll('track').length).toBe(3);
+    expect(mockApi.video.querySelector('track[srclang="fr"]')).not.toBeNull();
+  });
+
+  it('unsubscribes from hls.js on destroy', () => {
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    plugin.destroy();
+
+    expect(hls.instance.off).toHaveBeenCalledWith('hlsSubtitleTracksUpdated', expect.any(Function));
+  });
+});
+
 describe('destroy', () => {
   it('destroys without error', () => {
     const mockApi = createMockApi();
