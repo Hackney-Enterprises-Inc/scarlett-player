@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/chromecast",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Chromecast Plugin for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",

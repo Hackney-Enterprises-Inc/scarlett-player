@@ -1,5 +1,11 @@
 # @scarlett-player/core
 
+## 1.5.1
+
+### Patch Changes
+
+- [#68](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/68) [`8c2eca3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8c2eca3d3d53895fa99ae53efac802cf58be81d5) Thanks [@alexhackney](https://github.com/alexhackney)! - Document the share plugin across the README and package list, and drop the last em dashes from the shipped comments, changelogs and docs.
+
 ## 1.5.0
 
 ## 1.4.0
