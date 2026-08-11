@@ -34,7 +34,14 @@ import { ShareButton } from './ShareButton';
 import { styles } from './styles';
 
 export type { SharePluginConfig, ShareTarget, ShareContext } from './types';
+export type { ShareButtonOptions } from './ShareButton';
 export { BUILTIN_TARGETS, DEFAULT_TARGETS } from './targets';
+/**
+ * Icons the plugin ships, for hosts overriding `buttonIcon`.
+ *
+ * `share` is the default three-node glyph; `upload` is the iOS tray and arrow.
+ */
+export { icons as SHARE_ICONS } from './targets';
 
 declare module '@scarlett-player/core' {
   interface PlayerEventMap {
@@ -235,7 +242,14 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
       // headless host never needs @scarlett-player/ui installed.
       void import('@scarlett-player/ui')
         .then(({ registerControl }) => {
-          registerControl('share', (controlApi) => new ShareButton(controlApi, () => void activate()));
+          registerControl(
+            'share',
+            (controlApi) =>
+              new ShareButton(controlApi, () => void activate(), {
+                icon: config.buttonIcon,
+                label: config.buttonLabel,
+              }),
+          );
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, share control not registered');

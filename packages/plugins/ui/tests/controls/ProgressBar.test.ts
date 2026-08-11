@@ -570,4 +570,135 @@ describe('ProgressBar - Live DVR', () => {
     // (30-50)/(150-50) = -20%, clamped to 0%
     expect(filled.style.width).toBe('0%');
   });
+
+  describe('chapter markers', () => {
+    const CHAPTERS = [
+      { time: 0, label: 'Preshow' },
+      { time: 25, label: 'Fight 1' },
+      { time: 50, label: 'Fight 2' },
+    ];
+
+    /** Build a bar whose state also carries chapters. */
+    function withChapters(chapters: unknown, overrides: Record<string, unknown> = {}) {
+      const chapterApi = createMockApi({ chapters, ...overrides });
+      const bar = new ProgressBar(chapterApi);
+      bar.update();
+      return { api: chapterApi, bar };
+    }
+
+    it('renders one marker per chapter', () => {
+      const { bar } = withChapters(CHAPTERS);
+
+      // The chapter at 0 is deliberately skipped: a divider on the left edge is
+      // a smudge, not information.
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(2);
+      bar.destroy();
+    });
+
+    it('positions markers as a percentage of duration', () => {
+      const { bar } = withChapters(CHAPTERS);
+      const markers = bar.render().querySelectorAll('.sp-progress__marker');
+
+      expect((markers[0] as HTMLElement).style.left).toBe('25%');
+      expect((markers[1] as HTMLElement).style.left).toBe('50%');
+      bar.destroy();
+    });
+
+    it('renders nothing when there are no chapters', () => {
+      const { bar } = withChapters([]);
+
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(0);
+      bar.destroy();
+    });
+
+    it('survives chapters state being absent entirely', () => {
+      progressBar.update();
+
+      expect(progressBar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(0);
+    });
+
+    it('drops markers that fall outside the timeline', () => {
+      const { bar } = withChapters([
+        { time: 25, label: 'inside' },
+        { time: 500, label: 'past the end' },
+      ]);
+
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(1);
+      bar.destroy();
+    });
+
+    it('does not rebuild the marker layer on every update', () => {
+      const { bar } = withChapters(CHAPTERS);
+      const first = bar.render().querySelector('.sp-progress__marker');
+
+      bar.update();
+      bar.update();
+
+      expect(bar.render().querySelector('.sp-progress__marker')).toBe(first);
+      bar.destroy();
+    });
+
+    it('clears markers when the chapter list is emptied', () => {
+      const { api: chapterApi, bar } = withChapters(CHAPTERS);
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(2);
+
+      (chapterApi.getState as any).mockImplementation((key: string) => {
+        if (key === 'chapters') return [];
+        if (key === 'duration') return 100;
+        return null;
+      });
+      bar.update();
+
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(0);
+      bar.destroy();
+    });
+
+    it('places markers relative to the DVR window on live media', () => {
+      const { bar } = withChapters([{ time: 150, label: 'mid window' }], {
+        live: true,
+        seekableRange: { start: 100, end: 300 },
+      });
+
+      // (150-100)/(300-100) = 25%
+      expect((bar.render().querySelector('.sp-progress__marker') as HTMLElement).style.left).toBe(
+        '25%'
+      );
+      bar.destroy();
+    });
+
+    it('renders no markers on live media with no DVR window', () => {
+      const { bar } = withChapters(CHAPTERS, { live: true, seekableRange: null });
+
+      expect(bar.render().querySelectorAll('.sp-progress__marker')).toHaveLength(0);
+      bar.destroy();
+    });
+
+    it('names the chapter under the cursor in the tooltip', () => {
+      const { bar } = withChapters(CHAPTERS);
+      const wrapper = bar.render();
+      const el = wrapper.querySelector('.sp-progress') as HTMLElement;
+      el.getBoundingClientRect = () => ({ left: 0, width: 100 }) as DOMRect;
+
+      wrapper.dispatchEvent(new MouseEvent('mousemove', { clientX: 30, bubbles: true }));
+
+      const chapterLabel = wrapper.querySelector('.sp-progress__tooltip-chapter');
+      expect(chapterLabel?.textContent).toBe('Fight 1');
+      bar.destroy();
+    });
+
+    it('leaves the tooltip alone in a gap between sparse chapters', () => {
+      const { bar } = withChapters([
+        { time: 10, label: 'Fight 1', endTime: 20 },
+        { time: 80, label: 'Fight 2' },
+      ]);
+      const wrapper = bar.render();
+      const el = wrapper.querySelector('.sp-progress') as HTMLElement;
+      el.getBoundingClientRect = () => ({ left: 0, width: 100 }) as DOMRect;
+
+      wrapper.dispatchEvent(new MouseEvent('mousemove', { clientX: 50, bubbles: true }));
+
+      expect(wrapper.querySelector('.sp-progress__tooltip-chapter')).toBeNull();
+      bar.destroy();
+    });
+  });
 });

@@ -64,6 +64,30 @@ export interface SharePluginConfig {
    */
   targets?: Array<string | ShareTarget>;
 
+  /**
+   * Icon for the control-bar button, as an inline SVG string.
+   *
+   * The default is the three-node share glyph, which reads as "share" on every
+   * platform. The iOS-style tray-and-arrow is available as `SHARE_ICONS.upload`
+   * for hosts whose audience is iOS-heavy, where that glyph is the native one.
+   * Any SVG works; it inherits `currentColor` and the control bar's sizing.
+   *
+   * @example
+   * ```ts
+   * import { createSharePlugin, SHARE_ICONS } from '@scarlett-player/share';
+   *
+   * createSharePlugin({ buttonIcon: SHARE_ICONS.upload });
+   * ```
+   */
+  buttonIcon?: string;
+
+  /**
+   * Accessible label for the control-bar button.
+   *
+   * @defaultValue 'Share'
+   */
+  buttonLabel?: string;
+
   /** Base URL of the iframe embed page, enabling the `embed` target. */
   embedBaseUrl?: string;
   /** Override the generated embed snippet. */

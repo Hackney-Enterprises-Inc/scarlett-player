@@ -1,7 +1,7 @@
 {
-  "name": "@scarlett-player/playlist",
-  "version": "1.5.1",
-  "description": "Playlist Plugin for Scarlett Player - Queue management, shuffle, repeat, and gapless playback",
+  "name": "@scarlett-player/chapters",
+  "version": "1.5.0",
+  "description": "Chapters Plugin for Scarlett Player - chapter markers, chapter list and seek-to-chapter",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -26,29 +26,33 @@
     "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "test:coverage": "vitest --coverage"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.0.3",
+    "@scarlett-player/core": "^1.5.0",
     "@scarlett-player/ui": "^1.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@scarlett-player/ui": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.6.0",
+    "@scarlett-player/ui": "workspace:*",
+    "@vitest/coverage-v8": "^1.6.0",
     "jsdom": "^24.0.0",
-    "@scarlett-player/ui": "workspace:*"
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0"
   },
   "keywords": [
     "video",
-    "audio",
     "player",
-    "playlist",
-    "queue",
-    "shuffle",
-    "repeat",
-    "gapless",
+    "chapters",
+    "markers",
+    "seek",
+    "navigation",
     "scarlett"
   ],
   "author": "The Stream Platform",
@@ -56,15 +60,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
-    "directory": "packages/plugins/playlist"
+    "directory": "packages/plugins/chapters"
   },
   "bugs": {
     "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
   },
-  "homepage": "https://scarlettplayer.com",
-  "peerDependenciesMeta": {
-    "@scarlett-player/ui": {
-      "optional": true
-    }
-  }
+  "homepage": "https://scarlettplayer.com"
 }

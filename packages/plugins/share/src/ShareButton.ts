@@ -15,6 +15,14 @@ export interface ShareControl {
   destroy(): void;
 }
 
+/** Appearance overrides for {@link ShareButton}. */
+export interface ShareButtonOptions {
+  /** Inline SVG for the button. Defaults to the universal three-node glyph. */
+  icon?: string;
+  /** Accessible label. Defaults to 'Share'. */
+  label?: string;
+}
+
 export class ShareButton implements ShareControl {
   private el: HTMLButtonElement;
 
@@ -25,13 +33,17 @@ export class ShareButton implements ShareControl {
   constructor(
     _api: IPluginAPI,
     private onActivate: () => void,
+    options: ShareButtonOptions = {},
   ) {
+    const label = options.label ?? 'Share';
+
     this.el = document.createElement('button');
     this.el.type = 'button';
     this.el.className = 'sp-share sp-control';
-    this.el.setAttribute('aria-label', 'Share');
+    this.el.setAttribute('aria-label', label);
+    this.el.setAttribute('title', label);
     this.el.setAttribute('aria-haspopup', 'dialog');
-    this.el.innerHTML = icons.native ?? '';
+    this.el.innerHTML = options.icon ?? icons.share ?? '';
     this.el.addEventListener('click', this.clickHandler);
   }
 

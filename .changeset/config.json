@@ -21,7 +21,9 @@
       "@scarlett-player/audio-ui",
       "@scarlett-player/captions",
       "@scarlett-player/watermark",
-      "@scarlett-player/share"
+      "@scarlett-player/share",
+      "@scarlett-player/chapters",
+      "@scarlett-player/gestures"
     ]
   ],
   "linked": [],

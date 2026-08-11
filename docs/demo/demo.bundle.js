@@ -5198,10 +5198,10 @@ ${newDetails.m3u8}`);
       cue.id = generateCueId(cue.startTime, cue.endTime, cue.text);
       const region = regionElements[cueElement.getAttribute("region")];
       const style = styleElements[cueElement.getAttribute("style")];
-      const styles3 = getTtmlStyles(region, style, styleElements);
+      const styles4 = getTtmlStyles(region, style, styleElements);
       const {
         textAlign
-      } = styles3;
+      } = styles4;
       if (textAlign) {
         const lineAlign = textAlignToLineAlign[textAlign];
         if (lineAlign) {
@@ -5209,7 +5209,7 @@ ${newDetails.m3u8}`);
         }
         cue.align = textAlign;
       }
-      _extends(cue, styles3);
+      _extends(cue, styles4);
       return cue;
     }).filter((cue) => cue !== null);
   }
@@ -5264,12 +5264,12 @@ ${newDetails.m3u8}`);
     if (regionStyleName && styleElements.hasOwnProperty(regionStyleName)) {
       regionStyle = styleElements[regionStyleName];
     }
-    return styleAttributes.reduce((styles3, name) => {
+    return styleAttributes.reduce((styles4, name) => {
       const value = getAttributeNS(style, ttsNs, name) || getAttributeNS(region, ttsNs, name) || getAttributeNS(regionStyle, ttsNs, name);
       if (value) {
-        styles3[name] = value;
+        styles4[name] = value;
       }
-      return styles3;
+      return styles4;
     }, {});
   }
   function getAttributeNS(element, ns, name) {
@@ -25800,12 +25800,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.background = "black";
           this.flash = false;
         }
-        setStyles(styles3) {
+        setStyles(styles4) {
           const attribs = ["foreground", "underline", "italics", "background", "flash"];
           for (let i = 0; i < attribs.length; i++) {
             const style = attribs[i];
-            if (styles3.hasOwnProperty(style)) {
-              this[style] = styles3[style];
+            if (styles4.hasOwnProperty(style)) {
+              this[style] = styles4[style];
             }
           }
         }
@@ -25964,8 +25964,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             return chars.join("");
           }
         }
-        setPenStyles(styles3) {
-          this.currPenState.setStyles(styles3);
+        setPenStyles(styles4) {
+          this.currPenState.setStyles(styles4);
           const currChar = this.chars[this.pos];
           currChar.setPenState(this.currPenState);
         }
@@ -26028,9 +26028,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const row = this.rows[this.currRow];
           row.insertChar(char);
         }
-        setPen(styles3) {
+        setPen(styles4) {
           const row = this.rows[this.currRow];
-          row.setPenStyles(styles3);
+          row.setPenStyles(styles4);
         }
         moveCursor(relPos) {
           const row = this.rows[this.currRow];
@@ -26071,14 +26071,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             row.setCursor(pacData.indent);
             pacData.color = row.chars[prevPos].penState.foreground;
           }
-          const styles3 = {
+          const styles4 = {
             foreground: pacData.color,
             underline: pacData.underline,
             italics: pacData.italics,
             background: "black",
             flash: false
           };
-          this.setPen(styles3);
+          this.setPen(styles4);
         }
         /**
          * Set background/extra foreground, but first do back_space, and then insert space (backwards compatibility).
@@ -26291,20 +26291,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.writeScreen.moveCursor(nrCols);
         }
         ccMIDROW(secondByte) {
-          const styles3 = {
+          const styles4 = {
             flash: false
           };
-          styles3.underline = secondByte % 2 === 1;
-          styles3.italics = secondByte >= 46;
-          if (!styles3.italics) {
+          styles4.underline = secondByte % 2 === 1;
+          styles4.italics = secondByte >= 46;
+          if (!styles4.italics) {
             const colorIndex = Math.floor(secondByte / 2) - 16;
             const colors = ["white", "green", "blue", "cyan", "red", "yellow", "magenta"];
-            styles3.foreground = colors[colorIndex];
+            styles4.foreground = colors[colorIndex];
           } else {
-            styles3.foreground = "white";
+            styles4.foreground = "white";
           }
-          this.logger.log(2, "MIDROW: " + stringify(styles3));
-          this.writeScreen.setPen(styles3);
+          this.logger.log(2, "MIDROW: " + stringify(styles4));
+          this.writeScreen.setPen(styles4);
         }
         outputDataUpdate(dispatch = false) {
           const time = this.logger.time;
@@ -33164,6 +33164,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   border-radius: inherit;
 }
 
+/* Chapter markers */
+.sp-progress__markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sp-progress__marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
 .sp-progress__handle {
   position: absolute;
   top: 50%;
@@ -33221,6 +33240,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   opacity: 0;
   transition: opacity 0.15s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.sp-progress__tooltip-chapter {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 400;
+  font-variant-numeric: normal;
+  text-overflow: ellipsis;
 }
 
 @media (hover: hover) {
@@ -34133,6 +34162,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.seekThrottleMs = 100;
           // Throttle seeks to max 10/sec
           this.wasPlayingBeforeDrag = false;
+          /** Chapter list the marker layer was last built from, to avoid rebuilding every frame. */
+          this.renderedChapters = null;
+          /** Duration the marker layer was last built against, since positions are a percentage of it. */
+          this.renderedDuration = 0;
           this.onMouseDown = (e) => {
             e.preventDefault();
             const video = getVideo(this.api.container);
@@ -34267,12 +34300,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const track = createElement("div", { className: "sp-progress__track" });
           this.buffered = createElement("div", { className: "sp-progress__buffered" });
           this.filled = createElement("div", { className: "sp-progress__filled" });
+          this.markers = createElement("div", { className: "sp-progress__markers" });
           this.handle = createElement("div", { className: "sp-progress__handle" });
           this.tooltip = createElement("div", { className: "sp-progress__tooltip" });
           this.tooltip.textContent = "0:00";
           this.thumbnailPreview = new ThumbnailPreview();
           track.appendChild(this.buffered);
           track.appendChild(this.filled);
+          track.appendChild(this.markers);
           track.appendChild(this.handle);
           this.el.appendChild(track);
           this.el.appendChild(this.thumbnailPreview.getElement());
@@ -34322,6 +34357,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.thumbnailPreview.setConfig(thumbnails);
           }
           this.el.classList.toggle("sp-progress--live", !!live);
+          this.updateMarkers(duration, live, seekableRange);
           if (live && seekableRange) {
             const rangeLength = seekableRange.end - seekableRange.start;
             if (rangeLength > 0) {
@@ -34354,6 +34390,70 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.el.setAttribute("aria-valuetext", formatTime(currentTime));
           }
         }
+        /**
+         * Label of the chapter containing a point on the timeline.
+         *
+         * Mirrors the chapters plugin's own lookup: a start time belongs to its
+         * chapter, an end time belongs to the next one, and a point in a gap between
+         * sparse chapters belongs to neither.
+         *
+         * @param time - Position in seconds
+         * @returns The chapter label, or null when the point is outside every chapter
+         */
+        chapterLabelAt(time) {
+          const chapters = this.api.getState("chapters") ?? [];
+          for (let i = chapters.length - 1; i >= 0; i--) {
+            const chapter = chapters[i];
+            if (time < chapter.time) continue;
+            const next = chapters[i + 1];
+            const end = chapter.endTime ?? (next ? next.time : Infinity);
+            return time < end ? chapter.label : null;
+          }
+          return null;
+        }
+        /**
+         * Paint chapter dividers along the track.
+         *
+         * Reads the `chapters` state that core owns, so this works whether the list
+         * came from the chapters plugin or the host set it directly, and renders
+         * nothing at all when there are none.
+         *
+         * Rebuilds only when the list or the duration actually changed. `update()`
+         * runs on every time update, and rebuilding a dozen nodes 4 times a second
+         * would churn the DOM for no reason.
+         *
+         * @param duration - Media duration in seconds
+         * @param live - Whether the media is live
+         * @param seekableRange - DVR window, when the media is live
+         */
+        updateMarkers(duration, live, seekableRange) {
+          const chapters = this.api.getState("chapters") ?? [];
+          const range = live ? seekableRange ? seekableRange.end - seekableRange.start : 0 : duration;
+          if (chapters.length === 0 || range <= 0) {
+            if (this.renderedChapters !== null) {
+              this.markers.textContent = "";
+              this.renderedChapters = null;
+              this.renderedDuration = 0;
+            }
+            return;
+          }
+          if (chapters === this.renderedChapters && range === this.renderedDuration) {
+            return;
+          }
+          const origin = live && seekableRange ? seekableRange.start : 0;
+          this.markers.textContent = "";
+          for (const chapter of chapters) {
+            if (chapter.time <= origin) continue;
+            const percent = (chapter.time - origin) / range * 100;
+            if (percent <= 0 || percent >= 100) continue;
+            const marker = createElement("div", { className: "sp-progress__marker" });
+            marker.style.left = `${percent}%`;
+            marker.title = chapter.label;
+            this.markers.appendChild(marker);
+          }
+          this.renderedChapters = chapters;
+          this.renderedDuration = range;
+        }
         getTimeFromPosition(clientX) {
           const rect = this.el.getBoundingClientRect();
           const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -34377,6 +34477,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.tooltip.textContent = formatLiveTime(behindLive);
           } else {
             this.tooltip.textContent = formatTime(time);
+          }
+          const chapterLabel = this.chapterLabelAt(time);
+          if (chapterLabel) {
+            const label = createElement("span", { className: "sp-progress__tooltip-chapter" });
+            label.textContent = chapterLabel;
+            this.tooltip.appendChild(label);
           }
           this.tooltip.style.left = `${percent * 100}%`;
           if (this.thumbnailPreview.isConfigured()) {
@@ -35958,7 +36064,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       hideTimeout = setTimeout(hideControls, hideDelay);
     };
+    let last_pointer_type = null;
+    const handlePointerDown = (event) => {
+      last_pointer_type = event.pointerType;
+    };
     const handleInteraction = () => {
+      if (last_pointer_type === "touch") {
+        const gestures = api?.getPlugin("gestures");
+        if (gestures?.ownsTapInteraction()) return;
+      }
       showControls();
     };
     const handleMouseLeave = () => {
@@ -36092,6 +36206,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
           rebuildControlBar();
         });
+        container.addEventListener("pointerdown", handlePointerDown, { passive: true });
         container.addEventListener("mousemove", handleInteraction);
         container.addEventListener("mouseenter", handleInteraction);
         container.addEventListener("mouseleave", handleMouseLeave);
@@ -36129,6 +36244,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         recoveredUnsubscribe?.();
         recoveredUnsubscribe = null;
         if (api?.container) {
+          api.container.removeEventListener("pointerdown", handlePointerDown);
           api.container.removeEventListener("mousemove", handleInteraction);
           api.container.removeEventListener("mouseenter", handleInteraction);
           api.container.removeEventListener("mouseleave", handleMouseLeave);
@@ -40571,6 +40687,276 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/playlist/src/controls.ts
+  var PLAYLIST_ICONS = {
+    previous: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M6 6h2v12H6V6zm3.5 6L18 6v12l-8.5-6z"/></svg>',
+    next: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M16 6h2v12h-2V6zM6 6l8.5 6L6 18V6z"/></svg>',
+    list: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 6h11v2H3V6zm0 5h11v2H3v-2zm0 5h7v2H3v-2zm13-1.5V8l6 3.5-6 3.5z"/></svg>'
+  };
+  var PlaylistSkipButton = class {
+    constructor(plugin, direction) {
+      this.plugin = plugin;
+      this.direction = direction;
+      this.clickHandler = () => {
+        if (this.direction === "next") {
+          this.plugin.next();
+        } else {
+          this.plugin.previous();
+        }
+      };
+      const label = direction === "next" ? "Next item" : "Previous item";
+      this.el = document.createElement("button");
+      this.el.type = "button";
+      this.el.className = `sp-control sp-playlist-skip sp-playlist-skip--${direction}`;
+      this.el.setAttribute("aria-label", label);
+      this.el.setAttribute("title", label);
+      this.el.innerHTML = PLAYLIST_ICONS[direction];
+      this.el.addEventListener("click", this.clickHandler);
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const state = this.plugin.getState();
+      if (state.tracks.length <= 1) {
+        this.el.style.display = "none";
+        return;
+      }
+      this.el.style.display = "";
+      const enabled = this.direction === "next" ? state.hasNext : state.hasPrevious;
+      this.el.disabled = !enabled;
+    }
+    destroy() {
+      this.el.removeEventListener("click", this.clickHandler);
+      this.el.remove();
+    }
+  };
+  var PlaylistPanel = class {
+    constructor(plugin, options) {
+      this.plugin = plugin;
+      this.options = options;
+      this.open = false;
+      this.renderedIds = "";
+      this.toggleHandler = (event) => {
+        event.stopPropagation();
+        this.setOpen(!this.open);
+      };
+      this.documentClickHandler = () => {
+        if (this.open) this.setOpen(false);
+      };
+      this.keydownHandler = (event) => {
+        if (event.key === "Escape" && this.open) {
+          this.setOpen(false);
+          this.button.focus();
+        }
+      };
+      this.el = document.createElement("div");
+      this.el.className = "sp-playlist";
+      this.button = document.createElement("button");
+      this.button.type = "button";
+      this.button.className = "sp-control sp-playlist__button";
+      this.button.setAttribute("aria-label", "Playlist");
+      this.button.setAttribute("title", "Playlist");
+      this.button.setAttribute("aria-haspopup", "true");
+      this.button.setAttribute("aria-expanded", "false");
+      this.button.innerHTML = PLAYLIST_ICONS.list;
+      this.panel = document.createElement("div");
+      this.panel.className = "sp-playlist__panel";
+      this.panel.setAttribute("role", "menu");
+      this.panel.hidden = true;
+      this.el.appendChild(this.button);
+      this.el.appendChild(this.panel);
+      this.button.addEventListener("click", this.toggleHandler);
+      document.addEventListener("click", this.documentClickHandler);
+      document.addEventListener("keydown", this.keydownHandler);
+    }
+    render() {
+      return this.el;
+    }
+    update() {
+      const state = this.plugin.getState();
+      if (state.tracks.length <= 1) {
+        this.el.style.display = "none";
+        return;
+      }
+      this.el.style.display = "";
+      const signature = state.tracks.map((track) => track.id).join("|");
+      if (signature !== this.renderedIds) {
+        this.renderedIds = signature;
+        this.renderPanel(state.tracks, state.currentIndex);
+        return;
+      }
+      this.markActive(state.currentIndex);
+    }
+    destroy() {
+      this.button.removeEventListener("click", this.toggleHandler);
+      document.removeEventListener("click", this.documentClickHandler);
+      document.removeEventListener("keydown", this.keydownHandler);
+      this.el.remove();
+    }
+    setOpen(open) {
+      this.open = open;
+      this.panel.hidden = !open;
+      this.button.setAttribute("aria-expanded", String(open));
+      this.el.classList.toggle("sp-playlist--open", open);
+    }
+    markActive(currentIndex) {
+      const items = this.panel.querySelectorAll(".sp-playlist__item");
+      items.forEach((item, index) => {
+        item.classList.toggle("sp-playlist__item--active", index === currentIndex);
+        item.setAttribute("aria-current", index === currentIndex ? "true" : "false");
+      });
+    }
+    renderPanel(tracks, currentIndex) {
+      this.panel.textContent = "";
+      tracks.forEach((track, index) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "sp-playlist__item";
+        item.setAttribute("role", "menuitem");
+        item.setAttribute("aria-current", index === currentIndex ? "true" : "false");
+        if (index === currentIndex) {
+          item.classList.add("sp-playlist__item--active");
+        }
+        const position = document.createElement("span");
+        position.className = "sp-playlist__position";
+        position.textContent = String(index + 1);
+        const text = document.createElement("span");
+        text.className = "sp-playlist__text";
+        const title = document.createElement("span");
+        title.className = "sp-playlist__title";
+        title.textContent = track.title ?? `Item ${index + 1}`;
+        text.appendChild(title);
+        if (track.artist) {
+          const artist = document.createElement("span");
+          artist.className = "sp-playlist__artist";
+          artist.textContent = track.artist;
+          text.appendChild(artist);
+        }
+        item.appendChild(position);
+        item.appendChild(text);
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.options.onSelect(index);
+          this.setOpen(false);
+        });
+        this.panel.appendChild(item);
+      });
+    }
+  };
+
+  // packages/plugins/playlist/src/styles.ts
+  var STYLE_ID = "sp-playlist-styles";
+  var styles2 = `
+.sp-playlist-skip[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sp-playlist {
+  position: relative;
+  display: inline-flex;
+}
+
+.sp-playlist__button svg,
+.sp-playlist-skip svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sp-playlist__panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.sp-playlist__panel[hidden] {
+  display: none;
+}
+
+.sp-playlist__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-playlist__item:hover,
+.sp-playlist__item:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sp-playlist__item--active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sp-playlist__item--active .sp-playlist__title {
+  font-weight: 600;
+}
+
+.sp-playlist__position {
+  flex: 0 0 auto;
+  min-width: 18px;
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.sp-playlist__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sp-playlist__title {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.sp-playlist__artist {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+@media (max-width: 480px) {
+  .sp-playlist__panel {
+    min-width: 200px;
+    max-width: 76vw;
+  }
+}
+`;
+  function injectStyles() {
+    if (typeof document === "undefined" || document.getElementById(STYLE_ID)) {
+      return null;
+    }
+    const el = document.createElement("style");
+    el.id = STYLE_ID;
+    el.textContent = styles2;
+    document.head.appendChild(el);
+    return el;
+  }
+
   // packages/plugins/playlist/src/index.ts
   var DEFAULT_CONFIG2 = {
     autoAdvance: true,
@@ -40761,8 +41147,42 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("playlist:ended", void 0);
           }
         });
+        injectStyles();
+        void Promise.resolve().then(() => (init_src(), src_exports)).then(({ registerControl: registerControl2 }) => {
+          const self2 = plugin;
+          registerControl2(
+            "playlist-previous",
+            () => new PlaylistSkipButton(self2, "previous")
+          );
+          registerControl2("playlist-next", () => new PlaylistSkipButton(self2, "next"));
+          registerControl2(
+            "playlist",
+            () => new PlaylistPanel(self2, {
+              onSelect: (index) => self2.play(index)
+            })
+          );
+        }).catch(() => {
+          api?.logger.debug("@scarlett-player/ui not present, playlist controls not registered");
+        });
+        const onKeyDown = (event) => {
+          if (!api || !api.container.contains(document.activeElement)) return;
+          const activeEl = document.activeElement;
+          if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
+            return;
+          }
+          if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (event.key === "n" || event.key === "N") {
+            event.preventDefault();
+            plugin.next();
+          } else if (event.key === "p" || event.key === "P") {
+            event.preventDefault();
+            plugin.previous();
+          }
+        };
+        document.addEventListener("keydown", onKeyDown);
         api.onDestroy(() => {
           unsubEnded();
+          document.removeEventListener("keydown", onKeyDown);
           if (advanceTimeout) {
             clearTimeout(advanceTimeout);
             advanceTimeout = null;
@@ -42005,8 +42425,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles3 = positionStyles[position];
-      styles3.split(";").filter(Boolean).forEach((rule) => {
+      const styles4 = positionStyles[position];
+      styles4.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
         const prop = rule.slice(0, colonIdx).trim();
@@ -42186,6 +42606,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/share/src/targets.ts
   var icons2 = {
+    /**
+     * Three connected nodes. The one share glyph that reads the same everywhere:
+     * it is the Material/Android share icon, and it carries no platform baggage.
+     * The tray-and-arrow below is native on iOS but reads as "upload" or "export"
+     * to everyone else, which is why it is no longer the default.
+     */
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>',
+    /** iOS-style tray and arrow. Kept for hosts targeting an iOS-heavy audience. */
+    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
     native: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
     copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     embed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
@@ -42517,17 +42946,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/share/src/ShareButton.ts
   var ShareButton = class {
-    constructor(_api, onActivate) {
+    constructor(_api, onActivate, options = {}) {
       this.onActivate = onActivate;
       this.clickHandler = () => {
         this.onActivate();
       };
+      const label = options.label ?? "Share";
       this.el = document.createElement("button");
       this.el.type = "button";
       this.el.className = "sp-share sp-control";
-      this.el.setAttribute("aria-label", "Share");
+      this.el.setAttribute("aria-label", label);
+      this.el.setAttribute("title", label);
       this.el.setAttribute("aria-haspopup", "dialog");
-      this.el.innerHTML = icons2.native ?? "";
+      this.el.innerHTML = options.icon ?? icons2.share ?? "";
       this.el.addEventListener("click", this.clickHandler);
     }
     render() {
@@ -42542,7 +42973,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   };
 
   // packages/plugins/share/src/styles.ts
-  var styles2 = `
+  var styles3 = `
 .sp-share-backdrop {
   position: absolute;
   inset: 0;
@@ -42721,7 +43152,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 `;
 
   // packages/plugins/share/src/index.ts
-  var STYLE_ID = "sp-share-styles";
+  var STYLE_ID2 = "sp-share-styles";
   function createSharePlugin(config = {}) {
     let api = null;
     let sheet = null;
@@ -42833,10 +43264,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init(pluginApi) {
         api = pluginApi;
         api.logger.debug("Share plugin initialized");
-        if (!document.getElementById(STYLE_ID)) {
+        if (!document.getElementById(STYLE_ID2)) {
           styleEl = document.createElement("style");
-          styleEl.id = STYLE_ID;
-          styleEl.textContent = styles2;
+          styleEl.id = STYLE_ID2;
+          styleEl.textContent = styles3;
           document.head.appendChild(styleEl);
         }
         sheet = new ShareSheet(api, {
@@ -42852,7 +43283,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         });
         void Promise.resolve().then(() => (init_src(), src_exports)).then(({ registerControl: registerControl2 }) => {
-          registerControl2("share", (controlApi) => new ShareButton(controlApi, () => void activate()));
+          registerControl2(
+            "share",
+            (controlApi) => new ShareButton(controlApi, () => void activate(), {
+              icon: config.buttonIcon,
+              label: config.buttonLabel
+            })
+          );
         }).catch(() => {
           api?.logger.debug("@scarlett-player/ui not present, share control not registered");
         });

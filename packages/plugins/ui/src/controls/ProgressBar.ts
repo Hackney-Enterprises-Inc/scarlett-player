@@ -4,7 +4,7 @@
  * Seekable progress bar with buffered ranges and time tooltip.
  */
 
-import type { IPluginAPI, ThumbnailConfig } from '@scarlett-player/core';
+import type { Chapter, IPluginAPI, ThumbnailConfig } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { createElement, getVideo, formatTime, formatLiveTime } from '../utils';
 import { ThumbnailPreview } from './ThumbnailPreview';
@@ -17,11 +17,16 @@ export class ProgressBar implements Control {
   private buffered: HTMLDivElement;
   private handle: HTMLDivElement;
   private tooltip: HTMLDivElement;
+  private markers: HTMLDivElement;
   private thumbnailPreview: ThumbnailPreview;
   private isDragging = false;
   private lastSeekTime = 0;
   private seekThrottleMs = 100; // Throttle seeks to max 10/sec
   private wasPlayingBeforeDrag = false;
+  /** Chapter list the marker layer was last built from, to avoid rebuilding every frame. */
+  private renderedChapters: Chapter[] | null = null;
+  /** Duration the marker layer was last built against, since positions are a percentage of it. */
+  private renderedDuration = 0;
 
   constructor(api: IPluginAPI) {
     this.api = api;
@@ -34,6 +39,7 @@ export class ProgressBar implements Control {
     const track = createElement('div', { className: 'sp-progress__track' });
     this.buffered = createElement('div', { className: 'sp-progress__buffered' });
     this.filled = createElement('div', { className: 'sp-progress__filled' });
+    this.markers = createElement('div', { className: 'sp-progress__markers' });
     this.handle = createElement('div', { className: 'sp-progress__handle' });
     this.tooltip = createElement('div', { className: 'sp-progress__tooltip' });
     this.tooltip.textContent = '0:00';
@@ -41,8 +47,11 @@ export class ProgressBar implements Control {
     // Thumbnail preview
     this.thumbnailPreview = new ThumbnailPreview();
 
+    // Markers sit above the fill so a chapter divider stays visible over
+    // watched progress, and below the handle so they never hide the grab point.
     track.appendChild(this.buffered);
     track.appendChild(this.filled);
+    track.appendChild(this.markers);
     track.appendChild(this.handle);
     this.el.appendChild(track);
     this.el.appendChild(this.thumbnailPreview.getElement());
@@ -106,6 +115,8 @@ export class ProgressBar implements Control {
     // Toggle live mode class on progress bar
     this.el.classList.toggle('sp-progress--live', !!live);
 
+    this.updateMarkers(duration, live, seekableRange);
+
     if (live && seekableRange) {
       // Live DVR mode: progress is relative to seekable range
       const rangeLength = seekableRange.end - seekableRange.start;
@@ -148,6 +159,97 @@ export class ProgressBar implements Control {
     }
   }
 
+  /**
+   * Label of the chapter containing a point on the timeline.
+   *
+   * Mirrors the chapters plugin's own lookup: a start time belongs to its
+   * chapter, an end time belongs to the next one, and a point in a gap between
+   * sparse chapters belongs to neither.
+   *
+   * @param time - Position in seconds
+   * @returns The chapter label, or null when the point is outside every chapter
+   */
+  private chapterLabelAt(time: number): string | null {
+    const chapters = (this.api.getState('chapters') ?? []) as Chapter[];
+
+    for (let i = chapters.length - 1; i >= 0; i--) {
+      const chapter = chapters[i];
+      if (time < chapter.time) continue;
+
+      const next = chapters[i + 1];
+      const end = chapter.endTime ?? (next ? next.time : Infinity);
+
+      return time < end ? chapter.label : null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Paint chapter dividers along the track.
+   *
+   * Reads the `chapters` state that core owns, so this works whether the list
+   * came from the chapters plugin or the host set it directly, and renders
+   * nothing at all when there are none.
+   *
+   * Rebuilds only when the list or the duration actually changed. `update()`
+   * runs on every time update, and rebuilding a dozen nodes 4 times a second
+   * would churn the DOM for no reason.
+   *
+   * @param duration - Media duration in seconds
+   * @param live - Whether the media is live
+   * @param seekableRange - DVR window, when the media is live
+   */
+  private updateMarkers(
+    duration: number,
+    live: boolean | undefined,
+    seekableRange: { start: number; end: number } | null | undefined
+  ): void {
+    const chapters = (this.api.getState('chapters') ?? []) as Chapter[];
+
+    // Live without a DVR window has no stable timeline to place markers on:
+    // the same second sits at a different position on every refresh.
+    const range = live
+      ? seekableRange
+        ? seekableRange.end - seekableRange.start
+        : 0
+      : duration;
+
+    if (chapters.length === 0 || range <= 0) {
+      if (this.renderedChapters !== null) {
+        this.markers.textContent = '';
+        this.renderedChapters = null;
+        this.renderedDuration = 0;
+      }
+      return;
+    }
+
+    if (chapters === this.renderedChapters && range === this.renderedDuration) {
+      return;
+    }
+
+    const origin = live && seekableRange ? seekableRange.start : 0;
+
+    this.markers.textContent = '';
+
+    for (const chapter of chapters) {
+      // The first chapter almost always starts at 0, where a divider would just
+      // be a smudge against the left edge.
+      if (chapter.time <= origin) continue;
+
+      const percent = ((chapter.time - origin) / range) * 100;
+      if (percent <= 0 || percent >= 100) continue;
+
+      const marker = createElement('div', { className: 'sp-progress__marker' });
+      marker.style.left = `${percent}%`;
+      marker.title = chapter.label;
+      this.markers.appendChild(marker);
+    }
+
+    this.renderedChapters = chapters;
+    this.renderedDuration = range;
+  }
+
   private getTimeFromPosition(clientX: number): number {
     const rect = this.el.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -180,6 +282,16 @@ export class ProgressBar implements Control {
     } else {
       this.tooltip.textContent = formatTime(time);
     }
+
+    // Name the chapter under the cursor. On a three hour card "1:47:12" tells a
+    // viewer nothing; "Alvarez vs Reyes" is the reason they are scrubbing.
+    const chapterLabel = this.chapterLabelAt(time);
+    if (chapterLabel) {
+      const label = createElement('span', { className: 'sp-progress__tooltip-chapter' });
+      label.textContent = chapterLabel;
+      this.tooltip.appendChild(label);
+    }
+
     this.tooltip.style.left = `${percent * 100}%`;
 
     // Show thumbnail preview if configured

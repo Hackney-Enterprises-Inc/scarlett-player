@@ -378,6 +378,36 @@ describe('ShareButton control', () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
   });
 
+  it('defaults to the universal three-node share glyph', () => {
+    const button = new ShareButton(api as never, vi.fn());
+
+    // Three circles joined by two lines. The iOS tray-and-arrow reads as
+    // "upload" off iOS, so it is no longer what a viewer sees by default.
+    expect(button.render().querySelectorAll('circle')).toHaveLength(3);
+  });
+
+  it('accepts a host-supplied icon', () => {
+    const button = new ShareButton(api as never, vi.fn(), {
+      icon: '<svg><rect data-custom="1"/></svg>',
+    });
+
+    expect(button.render().querySelector('[data-custom]')).not.toBeNull();
+  });
+
+  it('accepts a host-supplied label, on both the accessible name and the tooltip', () => {
+    const button = new ShareButton(api as never, vi.fn(), { label: 'Send to a friend' });
+    const el = button.render();
+
+    expect(el.getAttribute('aria-label')).toBe('Send to a friend');
+    expect(el.getAttribute('title')).toBe('Send to a friend');
+  });
+
+  it('falls back to the default icon when the override is undefined', () => {
+    const button = new ShareButton(api as never, vi.fn(), { icon: undefined });
+
+    expect(button.render().querySelector('svg')).not.toBeNull();
+  });
+
   it('stays visible regardless of playback state', () => {
     const button = new ShareButton(api as never, vi.fn());
     const el = button.render();

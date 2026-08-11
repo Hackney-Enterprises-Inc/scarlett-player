@@ -55,6 +55,20 @@ export interface Chapter {
   /** Chapter label/title */
   label: string;
 
+  /**
+   * Optional end time in seconds, exclusive.
+   *
+   * Omit for "runs until the next chapter starts", which is the common case and
+   * what a WebVTT chapters track without gaps produces. Set it when chapters are
+   * sparse: an event VOD where fight 3 ends at 40:00 and fight 4 does not start
+   * until 47:30 has dead air between them that belongs to no chapter, and the
+   * progress bar must not paint it as part of fight 3.
+   */
+  endTime?: number;
+
+  /** Optional secondary line, shown under the label in the chapter list */
+  subtitle?: string;
+
   /** Optional thumbnail URL */
   thumbnail?: string;
 
