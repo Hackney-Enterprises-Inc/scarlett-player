@@ -10,6 +10,7 @@ import { createSharePlugin } from '../src/index';
 import { applyTimestamp, resolveBaseUrl } from '../src/url';
 import { resolveTargets } from '../src/targets';
 import { ShareButton } from '../src/ShareButton';
+import { sanitizeIcon } from '../src/sanitize';
 
 /** Let queued promise callbacks run - target handlers are async. */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -394,6 +395,27 @@ describe('ShareButton control', () => {
     expect(button.render().querySelector('[data-custom]')).not.toBeNull();
   });
 
+  it('strips an event handler from a host-supplied icon', () => {
+    const button = new ShareButton(api as never, vi.fn(), {
+      icon: '<svg onload="alert(1)"><path d="M0 0" onclick="alert(2)"/></svg>',
+    });
+    const el = button.render();
+
+    expect(el.querySelector('svg')?.getAttribute('onload')).toBeNull();
+    expect(el.querySelector('path')?.getAttribute('onclick')).toBeNull();
+  });
+
+  it('falls back to the default icon when the override contains no svg', () => {
+    const button = new ShareButton(api as never, vi.fn(), {
+      icon: '<img src=x onerror="alert(1)">',
+    });
+    const el = button.render();
+
+    expect(el.querySelector('img')).toBeNull();
+    // Three circles: the default glyph rendered instead of nothing.
+    expect(el.querySelectorAll('circle')).toHaveLength(3);
+  });
+
   it('accepts a host-supplied label, on both the accessible name and the tooltip', () => {
     const button = new ShareButton(api as never, vi.fn(), { label: 'Send to a friend' });
     const el = button.render();
@@ -534,5 +556,52 @@ describe('sheet behaviour', () => {
 
     expect(api.container.querySelector('.sp-share-sheet')).toBeNull();
     expect(document.getElementById('sp-share-styles')).toBeNull();
+  });
+});
+
+describe('sanitizeIcon', () => {
+  it('keeps ordinary drawing markup intact', () => {
+    const result = sanitizeIcon('<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>');
+
+    expect(result).toContain('<path');
+    expect(result).toContain('viewBox="0 0 24 24"');
+  });
+
+  it('drops a script element', () => {
+    const result = sanitizeIcon('<svg><script>alert(1)</script><circle r="4"/></svg>');
+
+    expect(result).not.toContain('script');
+    expect(result).toContain('<circle');
+  });
+
+  it('drops foreignObject, which can carry arbitrary HTML', () => {
+    const result = sanitizeIcon('<svg><foreignObject><iframe src="x"></iframe></foreignObject></svg>');
+
+    expect(result?.toLowerCase()).not.toContain('foreignobject');
+    expect(result?.toLowerCase()).not.toContain('iframe');
+  });
+
+  it('drops a javascript: link', () => {
+    const result = sanitizeIcon('<svg><use href="javascript:alert(1)"/></svg>');
+
+    expect(result).not.toContain('javascript:');
+  });
+
+  it('is not fooled by whitespace inside a script URL', () => {
+    const result = sanitizeIcon('<svg><use href="java\tscript:alert(1)"/></svg>');
+
+    expect(result?.replace(/\s+/g, '')).not.toContain('javascript:');
+  });
+
+  it('returns null for markup with no svg in it', () => {
+    expect(sanitizeIcon('<div>not an icon</div>')).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(sanitizeIcon('   ')).toBeNull();
+  });
+
+  it('finds the svg even when it is not the first node', () => {
+    expect(sanitizeIcon('<!-- comment --><svg><circle r="1"/></svg>')).toContain('<circle');
   });
 });

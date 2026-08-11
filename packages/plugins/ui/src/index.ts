@@ -304,8 +304,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
    * Input type, never the user agent: a touchscreen laptop must behave as a
    * mouse when a mouse is used and as touch when a finger is used, and it can
    * be both within one session.
+   *
+   * Bound to `pointermove` as well as `pointerdown`, and that matters on a
+   * hybrid device. Tracking only presses leaves the value stuck at 'touch' after
+   * a tap, so the next mouse hover would be read as touch and the controls would
+   * never come back. A real mouse move reports `pointerType: 'mouse'` and clears
+   * it; a legacy mouse event synthesised from a tap fires no pointer event at
+   * all, so it cannot flip this the wrong way.
    */
-  const handlePointerDown = (event: PointerEvent): void => {
+  const handlePointerActivity = (event: PointerEvent): void => {
     last_pointer_type = event.pointerType;
   };
 
@@ -521,7 +528,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       });
 
       // Set up interaction handlers
-      container.addEventListener('pointerdown', handlePointerDown, { passive: true });
+      container.addEventListener('pointerdown', handlePointerActivity, { passive: true });
+      container.addEventListener('pointermove', handlePointerActivity, { passive: true });
       container.addEventListener('mousemove', handleInteraction);
       container.addEventListener('mouseenter', handleInteraction);
       container.addEventListener('mouseleave', handleMouseLeave);
@@ -582,7 +590,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
       // Remove event listeners
       if (api?.container) {
-        api.container.removeEventListener('pointerdown', handlePointerDown);
+        api.container.removeEventListener('pointerdown', handlePointerActivity);
+        api.container.removeEventListener('pointermove', handlePointerActivity);
         api.container.removeEventListener('mousemove', handleInteraction);
         api.container.removeEventListener('mouseenter', handleInteraction);
         api.container.removeEventListener('mouseleave', handleMouseLeave);

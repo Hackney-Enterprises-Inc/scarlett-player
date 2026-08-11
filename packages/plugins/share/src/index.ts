@@ -42,6 +42,7 @@ export { BUILTIN_TARGETS, DEFAULT_TARGETS } from './targets';
  * `share` is the default three-node glyph; `upload` is the iOS tray and arrow.
  */
 export { icons as SHARE_ICONS } from './targets';
+export { sanitizeIcon } from './sanitize';
 
 declare module '@scarlett-player/core' {
   interface PlayerEventMap {
