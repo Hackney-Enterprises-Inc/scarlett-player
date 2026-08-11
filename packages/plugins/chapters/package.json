@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/chapters",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Chapters Plugin for Scarlett Player - chapter markers, chapter list and seek-to-chapter",
   "type": "module",
   "main": "dist/index.cjs",
