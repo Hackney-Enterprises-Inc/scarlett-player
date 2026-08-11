@@ -98,15 +98,80 @@ jobs:
       # Every package published here needs its own trusted publisher entry on
       # npmjs.com. A package without one fails with a 404, the same misleading
       # code npm uses for any unauthorised PUT.
+      # Published one package at a time on purpose, rather than `pnpm publish -r`.
+      # Recursive publish stops at the first rejection, so on 2026-08-11 a single
+      # unauthorised package (a new one, with no trusted publisher entry yet)
+      # aborted the run and left the other 15 unpublished at the previous
+      # version while the repo was already versioned past it. One package
+      # missing an entry must cost that package, not the whole release.
+      #
+      # pnpm, never npm, for the publish itself: pnpm rewrites `workspace:*`
+      # into real version ranges when it packs. `npm publish` ships those
+      # manifests verbatim, and every install of @scarlett-player/embed would
+      # then fail on an unresolvable dependency.
       - name: Publish to npm
         id: npm_publish
         if: steps.check_release.outputs.exists == 'false'
         continue-on-error: true
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           echo "Publishing via OIDC trusted publishing (pnpm $(pnpm --version), node $(node --version))"
-          pnpm publish -r --access public --no-git-checks
+
+          published=()
+          skipped=()
+          failed=()
+
+          # name<TAB>version for every publishable workspace package.
+          while IFS=$'\t' read -r name version; do
+            [ -z "$name" ] && continue
+
+            # Already on the registry: a re-run after a partial failure has to be
+            # able to finish the job rather than tripping over its own success.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "= ${name}@${version} already published, skipping"
+              skipped+=("${name}@${version}")
+              continue
+            fi
+
+            if pnpm publish --filter "${name}" --access public --no-git-checks; then
+              echo "+ ${name}@${version} published"
+              published+=("${name}@${version}")
+            else
+              echo "! ${name}@${version} FAILED (a 404 here means no trusted publisher entry yet)"
+              failed+=("${name}@${version}")
+            fi
+          done < <(pnpm list -r --depth -1 --json | node -e "
+            let raw = '';
+            process.stdin.on('data', (chunk) => { raw += chunk; });
+            process.stdin.on('end', () => {
+              for (const pkg of JSON.parse(raw)) {
+                if (!pkg.name || pkg.private) continue;
+                if (pkg.name === 'scarlett-player-workspace') continue;
+                process.stdout.write(pkg.name + '\t' + pkg.version + '\n');
+              }
+            });
+          ")
+
+          {
+            echo "## npm"
+            echo ""
+            echo "| Result | Count |"
+            echo "|--------|-------|"
+            echo "| published | ${#published[@]} |"
+            echo "| already published | ${#skipped[@]} |"
+            echo "| failed | ${#failed[@]} |"
+          } >> $GITHUB_STEP_SUMMARY
+
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo ""
+            echo "Failed to publish: ${failed[*]}"
+            echo "Add a trusted publisher entry (this repo + release.yml) for each on npmjs.com,"
+            echo "then re-run this job. Packages that already succeeded are skipped on the retry."
+            printf '\n**Failed:** `%s`\n' "${failed[*]}" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
           echo "Published to npm!"
 
       # Rebuild demo site with latest player and push to main (triggers Forge deploy).
