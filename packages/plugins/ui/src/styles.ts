@@ -152,6 +152,25 @@ export const styles = `
   border-radius: inherit;
 }
 
+/* Chapter markers */
+.sp-progress__markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sp-progress__marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
 .sp-progress__handle {
   position: absolute;
   top: 50%;
@@ -209,6 +228,16 @@ export const styles = `
   opacity: 0;
   transition: opacity 0.15s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.sp-progress__tooltip-chapter {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 400;
+  font-variant-numeric: normal;
+  text-overflow: ellipsis;
 }
 
 @media (hover: hover) {

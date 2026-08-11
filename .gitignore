@@ -56,3 +56,5 @@ scripts/fixtures/
 # produced merge conflicts against that bot commit.
 demo/demo.bundle.js.map
 docs/demo/demo.bundle.js.map
+demo/demo.bundle.js
+docs/demo/demo.bundle.js

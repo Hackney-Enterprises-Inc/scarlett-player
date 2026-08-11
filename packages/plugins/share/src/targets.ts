@@ -12,6 +12,17 @@ import type { ShareContext, ShareTarget } from './types';
  * Brand marks are simplified glyphs, not official logos.
  */
 export const icons: Record<string, string> = {
+  /**
+   * Three connected nodes. The one share glyph that reads the same everywhere:
+   * it is the Material/Android share icon, and it carries no platform baggage.
+   * The tray-and-arrow below is native on iOS but reads as "upload" or "export"
+   * to everyone else, which is why it is no longer the default.
+   */
+  share:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>',
+  /** iOS-style tray and arrow. Kept for hosts targeting an iOS-heavy audience. */
+  upload:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
   native:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
   copy:

@@ -177,6 +177,24 @@ export interface PlayerEventMap {
   /** User clicked/selected a chapter */
   'chapter:select': { chapter: Chapter };
 
+  // === Gesture Events ===
+  /**
+   * A touch gesture moved the playhead.
+   *
+   * Reported for analytics and debugging. The seek itself still rides the
+   * normal `playback:seeking` path, so nothing downstream needs to special-case
+   * gestures. `cumulative` is the running total for the current tap sequence,
+   * which is what the on-screen indicator shows.
+   */
+  'gesture:seek': {
+    direction: 'forward' | 'backward';
+    seconds: number;
+    cumulative: number;
+  };
+
+  /** A single touch tap landed on the gesture surface. */
+  'gesture:tap': { zone: 'left' | 'middle' | 'right' };
+
   // === Control Events ===
   /** Controls shown */
   'controls:show': void;

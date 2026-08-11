@@ -18,6 +18,8 @@
 - **Playlists** - Queue management, shuffle, repeat modes, auto-advance
 - **Analytics** - QoE metrics, engagement tracking, beacon transport
 - **Sharing** - Native share sheet on mobile, copy link, social targets, embed codes, timestamped links
+- **Chapters** - Markers on the progress bar, a chapter list, and seek to chapter
+- **Touch Gestures** - Double-tap left or right to seek, keep tapping to go further
 - **Captions** - WebVTT subtitles and closed captions, HLS subtitle extraction, auto-select by language
 - **Watermark** - Anti-piracy text or image overlay with dynamic repositioning
 - **Audio Player** - Compact audio UI with artwork, progress, and media session integration
@@ -25,7 +27,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,450+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **1,550+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -47,6 +49,8 @@ npm install @scarlett-player/audio-ui      # Compact audio player UI
 npm install @scarlett-player/captions      # Closed captions (WebVTT)
 npm install @scarlett-player/watermark     # Anti-piracy watermark overlay
 npm install @scarlett-player/share         # Share sheet, copy link, social targets, embed codes
+npm install @scarlett-player/chapters      # Chapter markers, chapter list, seek to chapter
+npm install @scarlett-player/gestures      # Double-tap to seek, tap to toggle controls (touch)
 
 # Vue 3 wrapper
 npm install @scarlett-player/vue
@@ -205,6 +209,8 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
 | `@scarlett-player/watermark` | Watermark - anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning |
 | `@scarlett-player/share` | Share - native share sheet on mobile, copy link, social targets, embed codes, playback timestamps |
+| `@scarlett-player/chapters` | Chapters - markers on the progress bar, chapter list, seek to chapter, WebVTT chapters track support |
+| `@scarlett-player/gestures` | Gestures - double-tap left/right to seek with accumulation, tap to toggle controls, touch only |
 | `@scarlett-player/vue` | Vue 3 - `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
 | `@scarlett-player/embed` | CDN embed - auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
 
@@ -286,7 +292,7 @@ a control registered after the control bar was built triggers a rebuild.
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all 1,450+ tests
+pnpm test             # Run all 1,550+ tests
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
@@ -310,7 +316,7 @@ node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture on
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 15 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 17 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -336,6 +342,8 @@ packages/
     captions/       # WebVTT closed captions
     watermark/      # Anti-piracy watermark overlay
     share/          # Share sheet, copy link, social targets, embed codes
+    chapters/       # Chapter markers, list and seek
+    gestures/       # Double-tap seek, tap to toggle controls
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
@@ -371,7 +379,9 @@ scripts/            # Browser verification harness + HLS fixture generator
 - [x] Anti-piracy watermark overlay
 - [x] Sharing (native share sheet, copy link, social targets, embed codes)
 - [x] Self-healing error recovery (auto-reconnect, load watchdog, playlist validation, PiP readiness gate)
-- [ ] Mobile gesture controls (double-tap seek, swipe) - Sprint 1
+- [x] Chapter markers (progress bar dividers, chapter list, seek to chapter)
+- [x] Mobile gesture controls (double-tap seek)
+- [ ] Mobile gesture controls (swipe for volume and brightness) - Sprint 2
 - [ ] DRM support - Sprint 2
 - [ ] Low-latency HLS (LL-HLS) - Sprint 2
 - [ ] Internationalization (i18n) - Sprint 2

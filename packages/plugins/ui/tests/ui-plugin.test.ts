@@ -290,4 +290,77 @@ describe('UI Plugin', () => {
       await plugin.destroy();
     });
   });
+
+  describe('gesture plugin coordination', () => {
+    /** Dispatch a pointer event carrying a pointerType, which jsdom does not model. */
+    function pointer(type: string, pointerType: string): Event {
+      const event = new MouseEvent(type, { bubbles: true });
+      Object.defineProperty(event, 'pointerType', { value: pointerType });
+
+      return event;
+    }
+
+    /** Report a gestures plugin that claims ownership of taps. */
+    function withGestures(): void {
+      (api.getPlugin as ReturnType<typeof vi.fn>).mockImplementation((name: string) =>
+        name === 'gestures' ? { ownsTapInteraction: () => true } : null
+      );
+    }
+
+    it('stands down on a touch tap when a gestures plugin owns it', async () => {
+      withGestures();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+      plugin.hide();
+
+      api.container.dispatchEvent(pointer('pointerdown', 'touch'));
+      api.container.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(api.container.querySelector('.sp-controls--visible')).toBeNull();
+
+      await plugin.destroy();
+    });
+
+    it('still shows controls on a mouse hover after an earlier touch tap', async () => {
+      withGestures();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+      plugin.hide();
+
+      // The hybrid-device case: a finger tap, then the viewer reaches for the
+      // mouse. Tracking only presses left the type stuck at 'touch' and the
+      // controls never came back.
+      api.container.dispatchEvent(pointer('pointerdown', 'touch'));
+      api.container.dispatchEvent(pointer('pointermove', 'mouse'));
+      api.container.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+
+      expect(api.container.querySelector('.sp-controls--visible')).not.toBeNull();
+
+      await plugin.destroy();
+    });
+
+    it('shows controls on touch when no gestures plugin is installed', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+      plugin.hide();
+
+      api.container.dispatchEvent(pointer('pointerdown', 'touch'));
+      api.container.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(api.container.querySelector('.sp-controls--visible')).not.toBeNull();
+
+      await plugin.destroy();
+    });
+
+    it('stops tracking pointer activity after destroy', async () => {
+      withGestures();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+      const container = api.container;
+
+      await plugin.destroy();
+
+      expect(() => container.dispatchEvent(pointer('pointermove', 'mouse'))).not.toThrow();
+    });
+  });
 });

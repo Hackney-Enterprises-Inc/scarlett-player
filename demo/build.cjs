@@ -81,6 +81,8 @@ async function build() {
           ['watermark', 'packages/plugins/watermark/src/index.ts'],
           ['captions', 'packages/plugins/captions/src/index.ts'],
           ['share', 'packages/plugins/share/src/index.ts'],
+          ['chapters', 'packages/plugins/chapters/src/index.ts'],
+          ['gestures', 'packages/plugins/gestures/src/index.ts'],
         ].map(([name, rel]) => [
           `@scarlett-player/${name}`,
           path.join(__dirname, '..', rel),

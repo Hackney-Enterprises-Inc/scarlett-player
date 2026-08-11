@@ -295,10 +295,41 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     hideTimeout = setTimeout(hideControls, hideDelay);
   };
 
+  /** Pointer type of the most recent interaction, so touch can be told from mouse. */
+  let last_pointer_type: string | null = null;
+
+  /**
+   * Record what kind of pointer is driving the current interaction.
+   *
+   * Input type, never the user agent: a touchscreen laptop must behave as a
+   * mouse when a mouse is used and as touch when a finger is used, and it can
+   * be both within one session.
+   *
+   * Bound to `pointermove` as well as `pointerdown`, and that matters on a
+   * hybrid device. Tracking only presses leaves the value stuck at 'touch' after
+   * a tap, so the next mouse hover would be read as touch and the controls would
+   * never come back. A real mouse move reports `pointerType: 'mouse'` and clears
+   * it; a legacy mouse event synthesised from a tap fires no pointer event at
+   * all, so it cannot flip this the wrong way.
+   */
+  const handlePointerActivity = (event: PointerEvent): void => {
+    last_pointer_type = event.pointerType;
+  };
+
   /**
    * Handle mouse/touch interaction.
+   *
+   * When a gestures plugin is installed it owns touch taps: tapping has to mean
+   * "toggle", and if both ran, every tap would show the controls here and the
+   * gesture plugin's hide would fight it. Mouse and hover behaviour is
+   * untouched, and with no gestures plugin registered this is exactly as before.
    */
   const handleInteraction = (): void => {
+    if (last_pointer_type === 'touch') {
+      const gestures = api?.getPlugin<{ ownsTapInteraction(): boolean }>('gestures');
+      if (gestures?.ownsTapInteraction()) return;
+    }
+
     showControls();
   };
 
@@ -497,6 +528,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       });
 
       // Set up interaction handlers
+      container.addEventListener('pointerdown', handlePointerActivity, { passive: true });
+      container.addEventListener('pointermove', handlePointerActivity, { passive: true });
       container.addEventListener('mousemove', handleInteraction);
       container.addEventListener('mouseenter', handleInteraction);
       container.addEventListener('mouseleave', handleMouseLeave);
@@ -557,6 +590,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
       // Remove event listeners
       if (api?.container) {
+        api.container.removeEventListener('pointerdown', handlePointerActivity);
+        api.container.removeEventListener('pointermove', handlePointerActivity);
         api.container.removeEventListener('mousemove', handleInteraction);
         api.container.removeEventListener('mouseenter', handleInteraction);
         api.container.removeEventListener('mouseleave', handleMouseLeave);

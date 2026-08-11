@@ -19,6 +19,9 @@ import type {
   IPlaylistPlugin,
 } from './types';
 
+import { PlaylistPanel, PlaylistSkipButton } from './controls';
+import { injectStyles } from './styles';
+
 // Re-export types
 export type {
   PlaylistPluginConfig,
@@ -27,6 +30,9 @@ export type {
   RepeatMode,
   IPlaylistPlugin,
 } from './types';
+
+export { PlaylistPanel, PlaylistSkipButton, PLAYLIST_ICONS } from './controls';
+export type { PlaylistControl, PlaylistPanelOptions } from './controls';
 
 /** Default configuration */
 const DEFAULT_CONFIG: PlaylistPluginConfig = {
@@ -349,8 +355,63 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       });
 
       // Register cleanup
+      injectStyles();
+
+      // Registering does not place anything - the host opts in by listing
+      // 'playlist-previous', 'playlist-next' or 'playlist' in its control
+      // layout. Runtime import so a headless host never needs the UI package.
+      void import('@scarlett-player/ui')
+        .then(({ registerControl }) => {
+          const self = plugin;
+
+          registerControl(
+            'playlist-previous',
+            () => new PlaylistSkipButton(self, 'previous') as never,
+          );
+          registerControl('playlist-next', () => new PlaylistSkipButton(self, 'next') as never);
+          registerControl(
+            'playlist',
+            () =>
+              new PlaylistPanel(self, {
+                onSelect: (index) => self.play(index),
+              }) as never,
+          );
+        })
+        .catch(() => {
+          api?.logger.debug('@scarlett-player/ui not present, playlist controls not registered');
+        });
+
+      const onKeyDown = (event: KeyboardEvent): void => {
+        if (!api || !api.container.contains(document.activeElement)) return;
+
+        // Never steal a keystroke from a field the viewer is typing in.
+        const activeEl = document.activeElement;
+        if (
+          activeEl instanceof HTMLInputElement ||
+          activeEl instanceof HTMLTextAreaElement ||
+          activeEl instanceof HTMLSelectElement ||
+          (activeEl as HTMLElement)?.isContentEditable
+        ) {
+          return;
+        }
+
+        // Modified keystrokes belong to the browser and the OS.
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+        if (event.key === 'n' || event.key === 'N') {
+          event.preventDefault();
+          plugin.next();
+        } else if (event.key === 'p' || event.key === 'P') {
+          event.preventDefault();
+          plugin.previous();
+        }
+      };
+
+      document.addEventListener('keydown', onKeyDown);
+
       api.onDestroy(() => {
         unsubEnded();
+        document.removeEventListener('keydown', onKeyDown);
         if (advanceTimeout) {
           clearTimeout(advanceTimeout);
           advanceTimeout = null;
