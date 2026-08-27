@@ -186,6 +186,27 @@ jobs:
         continue-on-error: true
         run: |
           node demo/build.cjs
+
+          # The bundle must be trackable, not merely present on disk. On
+          # 2026-08-11 both bundles were added to .gitignore to stop branch
+          # authors committing them; `git add demo/ docs/demo/` then skipped
+          # them without a word while the stamped index.html still committed,
+          # so scarlettplayer.com served a script tag pointing at a file that
+          # was no longer in the repo and the demo 404'd until someone noticed.
+          # Fail here instead: the step is continue-on-error, and "Publish
+          # results" reads steps.demo.outcome, so this reports rather than
+          # aborting the rest of the release.
+          for bundle in demo/demo.bundle.js docs/demo/demo.bundle.js; do
+            if [ ! -s "$bundle" ]; then
+              echo "::error::$bundle missing or empty after build"
+              exit 1
+            fi
+            if git check-ignore -q "$bundle"; then
+              echo "::error::$bundle is gitignored, so the deployed index.html would point at a file this commit cannot ship"
+              exit 1
+            fi
+          done
+
           if git diff --quiet demo/ docs/demo/; then
             echo "Demo bundle unchanged, skipping commit"
           else

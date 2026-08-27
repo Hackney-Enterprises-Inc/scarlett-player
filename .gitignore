@@ -54,7 +54,12 @@ scripts/fixtures/
 # scarlettplayer.com, and release.yml commits a rebuild on every push to main.
 # The maps are 3MB debug artifacts nothing serves, so tracking them only ever
 # produced merge conflicts against that bot commit.
+#
+# Do NOT add the bundles here. On 2026-08-11 they were ignored to stop branch
+# authors committing them, which also silenced release.yml's `git add demo/
+# docs/demo/`: the rebuild step still stamped ?v=<version> onto index.html and
+# committed that, so scarlettplayer.com shipped a script tag pointing at a
+# bundle no longer in the repo, and the demo 404'd for every visitor. Branch
+# hygiene is a review concern, see the Release / PR Checklist in CLAUDE.md.
 demo/demo.bundle.js.map
 docs/demo/demo.bundle.js.map
-demo/demo.bundle.js
-docs/demo/demo.bundle.js
