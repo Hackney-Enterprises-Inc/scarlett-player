@@ -125,17 +125,50 @@ export const createMockAPI = (): IPluginAPI => {
 
 /**
  * Install the jsdom media stubs the hls.js code path needs (MediaSource
- * feature detect, video element methods, non-Safari canPlayType).
+ * feature detect, video element methods, non-Safari canPlayType, and the
+ * MediaError constants jsdom does not implement).
  */
 export const installMediaStubs = (): void => {
   if (!(window as any).MediaSource) {
     (window as any).MediaSource = vi.fn();
+  }
+  // jsdom ships no MediaError interface; the native path reads its
+  // MEDIA_ERR_NETWORK constant to classify a media element failure
+  if (!(globalThis as any).MediaError) {
+    (globalThis as any).MediaError = {
+      MEDIA_ERR_ABORTED: 1,
+      MEDIA_ERR_NETWORK: 2,
+      MEDIA_ERR_DECODE: 3,
+      MEDIA_ERR_SRC_NOT_SUPPORTED: 4,
+    };
   }
   HTMLVideoElement.prototype.load = vi.fn();
   HTMLVideoElement.prototype.play = vi.fn().mockResolvedValue(undefined);
   HTMLVideoElement.prototype.pause = vi.fn();
   // Non-Safari: no native HLS, force the hls.js path
   HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
+};
+
+/**
+ * Put a MediaError on a video element and fire its `error` event.
+ *
+ * jsdom's `error` property is a read-only getter, so the stub is installed
+ * as a configurable own property that shadows it.
+ *
+ * @param videoEl - Target video element
+ * @param code - MediaError code (2 = MEDIA_ERR_NETWORK, 3 = decode)
+ * @param message - MediaError message surfaced as the HLS error details
+ */
+export const fireVideoError = (
+  videoEl: HTMLVideoElement,
+  code: number,
+  message: string
+): void => {
+  Object.defineProperty(videoEl, 'error', {
+    value: { code, message },
+    configurable: true,
+  });
+  videoEl.dispatchEvent(new Event('error'));
 };
 
 /** Flush microtasks (and zero-delay timers when fake timers are active). */

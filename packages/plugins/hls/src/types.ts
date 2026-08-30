@@ -22,9 +22,19 @@ export interface HLSPluginConfig {
   backBufferLength?: number;
   /** Enable worker for hls.js (better performance) */
   enableWorker?: boolean;
-  /** Max network error retries before giving up (default: 3) */
+  /**
+   * Max network error retries before giving up (default: 3).
+   *
+   * Governs both playback branches: hls.js retries the load, and the native
+   * (Safari/iOS) path reloads the source and restores position.
+   */
   maxNetworkRetries?: number;
-  /** Max media error retries before giving up (default: 2) */
+  /**
+   * Max media error retries before giving up (default: 2).
+   *
+   * Governs both playback branches: hls.js calls recoverMediaError(), and the
+   * native (Safari/iOS) path reloads the source and restores position.
+   */
   maxMediaRetries?: number;
   /** Cap quality to player element dimensions (default: true) */
   capLevelToPlayerSize?: boolean;

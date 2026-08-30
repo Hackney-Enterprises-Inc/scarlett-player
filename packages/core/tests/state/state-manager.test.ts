@@ -473,6 +473,25 @@ describe('StateManager', () => {
 
       expect(() => state.get('playing')).toThrow();
     });
+
+    it('should report a destroyed manager rather than an unknown key', () => {
+      state.destroy();
+
+      // The old message blamed a typo for what is a lifecycle problem: a
+      // continuation that outlived destroy() reading a perfectly valid key
+      expect(() => state.get('playing')).toThrow(
+        "[StateManager] Manager is destroyed (reading 'playing')"
+      );
+      expect(() => state.getValue('playing')).toThrow('Manager is destroyed');
+      expect(() => state.set('playing', true)).toThrow('Manager is destroyed');
+    });
+
+    it('should still report a genuine typo as an unknown key before destroy', () => {
+      expect(() => {
+        // @ts-expect-error - Testing invalid key
+        state.get('unknownKey');
+      }).toThrow('[StateManager] Unknown state key: unknownKey');
+    });
   });
 
   describe('Live/DVR state (TSP features)', () => {

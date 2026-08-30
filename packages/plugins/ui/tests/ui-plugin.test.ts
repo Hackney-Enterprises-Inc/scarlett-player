@@ -128,6 +128,79 @@ describe('UI Plugin', () => {
     });
   });
 
+  describe('reconnect presentation', () => {
+    /**
+     * Capture the plugin's event handlers so a reconnect cycle can be driven
+     * end to end (the default mock `on` throws the handler away).
+     */
+    const captureHandlers = (): Record<string, (payload?: unknown) => void> => {
+      const handlers: Record<string, (payload?: unknown) => void> = {};
+      (api.on as ReturnType<typeof vi.fn>).mockImplementation(
+        (event: string, handler: (payload?: unknown) => void) => {
+          handlers[event] = handler;
+          return vi.fn();
+        }
+      );
+      return handlers;
+    };
+
+    const overlay = () =>
+      api.container.querySelector('.sp-error-overlay') as HTMLElement;
+
+    it('shows the reconnecting state while the provider retries', async () => {
+      const handlers = captureHandlers();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      handlers['error:reconnecting']?.({ attempt: 1, delayMs: 2000, elapsedMs: 0, windowMs: 300000 });
+
+      expect(overlay().classList.contains('sp-error-overlay--reconnecting')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('drops the reconnecting state on the terminal error after exhaustion', async () => {
+      const handlers = captureHandlers();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      handlers['error:reconnecting']?.({ attempt: 1, delayMs: 2000, elapsedMs: 0, windowMs: 8000 });
+      expect(overlay().classList.contains('sp-error-overlay--reconnecting')).toBe(true);
+
+      // Exhaustion is announced, then the provider emits its final fatal
+      // error: without that second event the viewer would be stranded on a
+      // permanent spinner with no Retry
+      handlers['error:reconnect-exhausted']?.({ attempts: 3, elapsedMs: 9000, windowMs: 8000 });
+      handlers['error']?.({
+        code: 'MEDIA_NETWORK_ERROR',
+        message: 'HLS auto-reconnect gave up after 3 attempts over 9s',
+        fatal: true,
+        detail: { reconnectExhausted: true },
+      });
+
+      expect(overlay().classList.contains('sp-error-overlay--reconnecting')).toBe(false);
+      expect(overlay().classList.contains('sp-error-overlay--visible')).toBe(true);
+      expect(
+        (overlay().querySelector('.sp-error-overlay__retry') as HTMLButtonElement)?.disabled
+      ).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('hides the overlay when the reconnect recovers instead', async () => {
+      const handlers = captureHandlers();
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      handlers['error:reconnecting']?.({ attempt: 1, delayMs: 2000, elapsedMs: 0, windowMs: 300000 });
+      handlers['error:recovered']?.({ attempt: 1, elapsedMs: 2150 });
+
+      expect(overlay().classList.contains('sp-error-overlay--visible')).toBe(false);
+
+      await plugin.destroy();
+    });
+  });
+
   describe('control rendering', () => {
     it('should render default controls', async () => {
       const plugin = uiPlugin();

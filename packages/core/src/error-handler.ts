@@ -42,6 +42,37 @@ export enum ErrorCode {
 }
 
 /**
+ * Provider-supplied diagnostics attached to an emitted error.
+ *
+ * A bare code plus message cannot answer "why did this stream die?" after
+ * the fact: diagnosing a manifest failure otherwise means correlating
+ * timestamps across users. Every field is optional, so a provider fills in
+ * whatever it actually knows.
+ */
+export interface PlayerErrorDetail {
+  /** Failure class as the provider classified it */
+  type?: 'network' | 'media' | 'mux' | 'other';
+  /** True when the provider gave up after exhausting its retry budget */
+  retriesExhausted?: boolean;
+  /** How many recovery attempts were made before this error was emitted */
+  attempts?: number;
+  /**
+   * True on the terminal error a provider emits when its auto-reconnect
+   * window closes. A consumer showing "reconnecting" UI must take it down
+   * on this: nothing further will be attempted.
+   */
+  reconnectExhausted?: boolean;
+  /** HTTP status of the failed request, when the provider knows it */
+  httpStatus?: number;
+  /**
+   * Failing request URL, stripped of its query string and fragment.
+   * Providers must sanitize before setting this: tokens, signatures, and
+   * session ids live in query strings and must not reach telemetry.
+   */
+  url?: string;
+}
+
+/**
  * Structured player error.
  */
 export interface PlayerError {
@@ -57,6 +88,8 @@ export interface PlayerError {
   context?: Record<string, any>;
   /** Original error if wrapped */
   originalError?: Error;
+  /** Optional provider diagnostics (network status, retry counts, URL) */
+  detail?: PlayerErrorDetail;
 }
 
 /**

@@ -484,7 +484,14 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       });
 
       // While the provider auto-reconnects, tell the viewer the player is
-      // working on it instead of presenting a dead-end error
+      // working on it instead of presenting a dead-end error.
+      //
+      // Taking this state back down needs no separate listener: a reconnect
+      // cycle always terminates in either 'error:recovered' (handled below)
+      // or 'error:reconnect-exhausted', and the provider always follows
+      // exhaustion with a final fatal 'error', which the handler above
+      // renders through show() - that clears the reconnecting presentation
+      // and re-enables Try Again.
       reconnectingUnsubscribe = api.on('error:reconnecting', () => {
         errorOverlay?.showReconnecting();
       });

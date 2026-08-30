@@ -260,11 +260,69 @@ export interface PlayerEventMap {
   /** User dismissed error overlay */
   'error:dismiss': void;
 
-  /** Provider is attempting an automatic reconnect after a fatal error */
-  'error:reconnecting': { attempt: number; delayMs: number };
+  /**
+   * Provider is attempting an automatic reconnect after a fatal error.
+   *
+   * Reconnect is capped by a TIME WINDOW, not an attempt count, so there is
+   * no `maxAttempts` to render against: `elapsedMs`/`windowMs` are what a UI
+   * uses to show progress toward giving up.
+   *
+   * Ordering guarantee for a reconnect cycle: one or more
+   * `error:reconnecting`, then EXACTLY ONE of `error:recovered` or
+   * `error:reconnect-exhausted`. A UI that shows a reconnecting state on the
+   * first may take it down on either terminator and will never be stranded.
+   *
+   * - `attempt`: 1-based number of the attempt about to be made
+   * - `delayMs`: backoff before that attempt fires
+   * - `elapsedMs`: time since the first failure in this reconnect window
+   * - `windowMs`: total window the provider will keep reconnecting for
+   *
+   * `elapsedMs`/`windowMs` are optional. They were added after
+   * `attempt`/`delayMs`, so requiring them would compile-break any
+   * third-party provider already emitting this event, and a provider that
+   * caps recovery by attempt count rather than by time has no window to
+   * report. The built-in HLS provider always populates both.
+   */
+  'error:reconnecting': {
+    attempt: number;
+    delayMs: number;
+    elapsedMs?: number;
+    windowMs?: number;
+  };
 
-  /** Playback recovered after a fatal error (auto-reconnect or retry succeeded) */
-  'error:recovered': void;
+  /**
+   * Playback recovered after a fatal error (auto-reconnect or retry
+   * succeeded). `attempt` is which attempt worked, `elapsedMs` how long the
+   * viewer was interrupted.
+   *
+   * The payload is optional because this event previously carried none:
+   * a third-party provider emitting `undefined` must keep compiling. The
+   * built-in HLS provider always sends the object, so a consumer that wants
+   * the fields narrows first (`if (payload) ...`).
+   *
+   * Terminates a reconnect cycle; see {@link PlayerEventMap['error:reconnecting']}.
+   */
+  'error:recovered': void | { attempt: number; elapsedMs: number };
+
+  /**
+   * Auto-reconnect gave up: the reconnect window closed without recovery and
+   * nothing further will be attempted.
+   *
+   * Terminates a reconnect cycle, and is always followed by a final fatal
+   * `error` carrying `detail.reconnectExhausted`, so lifecycle-driven and
+   * error-driven UIs both terminate. Without this event a consumer that
+   * rendered "Reconnecting..." had no signal to ever take it down, leaving a
+   * permanent spinner after an outage longer than the window.
+   *
+   * - `attempts`: how many reconnect attempts were made
+   * - `elapsedMs`: how long the provider kept trying
+   * - `windowMs`: the window it was working against
+   */
+  'error:reconnect-exhausted': {
+    attempts: number;
+    elapsedMs: number;
+    windowMs: number;
+  };
 
   // === Media Load Events ===
   /** Request to load a new media source (used by plugins like playlist) */

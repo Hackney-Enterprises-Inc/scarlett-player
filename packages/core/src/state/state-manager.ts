@@ -138,6 +138,12 @@ export class StateManager {
   private definedDefaults = new Map<StateKey, unknown>();
 
   /**
+   * Set by destroy(). Kept so a read after teardown reports a lifecycle
+   * problem instead of masquerading as an unknown-key typo.
+   */
+  private destroyed = false;
+
+  /**
    * Create a new StateManager with default initial state.
    *
    * @param initialState - Optional partial initial state (merged with defaults)
@@ -215,6 +221,7 @@ export class StateManager {
    *
    * @param key - State property key
    * @returns Signal for the property
+   * @throws If the manager has been destroyed, or the key was never registered
    *
    * @example
    * ```ts
@@ -224,6 +231,14 @@ export class StateManager {
    * ```
    */
   get<K extends StateKey>(key: K): Signal<StateValue<K>> {
+    // destroy() clears the signals map, so without this branch EVERY key -
+    // including perfectly registered ones - fails with the unknown-key
+    // message and a lifecycle bug reads as a typo. Consumers hit this when
+    // an async continuation (a load, an overlay retry) outlives destroy().
+    if (this.destroyed) {
+      throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
+    }
+
     const stateSignal = this.signals.get(key);
     if (!stateSignal) {
       throw new Error(`[StateManager] Unknown state key: ${key}`);
@@ -236,6 +251,7 @@ export class StateManager {
    *
    * @param key - State property key
    * @returns Current value
+   * @throws If the manager has been destroyed, or the key was never registered
    *
    * @example
    * ```ts
@@ -427,6 +443,11 @@ export class StateManager {
   /**
    * Destroy the state manager and cleanup all signals.
    *
+   * After this, every read or write ({@link get}, {@link getValue},
+   * {@link set}) throws a destroyed-specific error. Returning last-known
+   * values instead was considered and rejected: it silently masks the
+   * lifecycle bugs this throw exposes.
+   *
    * @example
    * ```ts
    * state.destroy();
@@ -439,5 +460,7 @@ export class StateManager {
 
     // Clear change subscribers
     this.changeSubscribers.clear();
+
+    this.destroyed = true;
   }
 }
