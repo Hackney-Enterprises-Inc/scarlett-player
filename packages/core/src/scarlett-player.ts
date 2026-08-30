@@ -220,6 +220,11 @@ export class ScarlettPlayer {
       if (this.stateManager.getValue('chromecastActive')) return;
 
       await this.load(src);
+
+      // Same post-await window as error:retry below: an unawaited async
+      // closure calling play() on a destroyed player throws into nothing.
+      if (this.destroyed) return;
+
       if (autoplay !== false) {
         await this.play();
       }
@@ -235,6 +240,14 @@ export class ScarlettPlayer {
 
       await this.load(src);
 
+      // A destroy() while the retry load was in flight (navigation, SPA
+      // unmount, a consumer rebuilding the player) tore the state manager
+      // down. This handler is an unawaited async closure, so reading state
+      // here would surface as an unhandled rejection rather than a caught
+      // error. The pre-await reads above need no guard: eventBus.destroy()
+      // clears every listener, so the event cannot fire post-destroy.
+      if (this.destroyed) return;
+
       // load() reports failures through the ErrorHandler rather than throwing;
       // if the retry failed, the error state is set again and there is no
       // provider to seek or play against.
@@ -245,6 +258,10 @@ export class ScarlettPlayer {
       } else if (resume_at > 0) {
         this.seek(resume_at);
       }
+
+      // seek()/seekToLive() emit into consumer handlers, any of which may
+      // tear the player down before play() runs.
+      if (this.destroyed) return;
       await this.play();
     });
 
@@ -848,6 +865,13 @@ export class ScarlettPlayer {
     }
 
     this.logger.info('Destroying player');
+
+    // Cancel every in-flight load through the mechanism load() already
+    // trusts. Its post-await "bail if superseded" checks guard the reads
+    // that would otherwise walk into a torn-down state manager, but
+    // destroy() did not participate in the generation counter, so a destroy
+    // mid-load left the generation matching and the continuation ran on.
+    this.loadGeneration++;
 
     // Clear any pending seek resume timeout
     if (this.seekResumeTimeout !== null) {

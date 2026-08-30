@@ -8,6 +8,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ScarlettPlayer, createPlayer } from '../src/scarlett-player';
 import type { Plugin } from '../src/types/plugin';
 
+/** Let queued microtasks and zero-delay timers run. */
+const tick = (): Promise<void> =>
+  new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 // Mock plugin for testing
 const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
   id: 'test-plugin',
@@ -554,6 +558,40 @@ describe('ScarlettPlayer', () => {
       player.destroy();
 
       // Should not throw
+    });
+
+    it('should cancel an in-flight load instead of running its continuation', async () => {
+      let settleLoad: (() => void) | undefined;
+      const loadSource = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settleLoad = resolve;
+          })
+      );
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource,
+      });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.init();
+
+      const playSpy = vi.fn();
+      player.on('playback:play', playSpy);
+      (player as any).stateManager.set('autoplay', true);
+
+      const loadPromise = player.load('video.m3u8');
+      await tick();
+      expect(loadSource).toHaveBeenCalled();
+
+      // Destroy mid-load: the continuation must self-cancel through the
+      // load-generation guard rather than read a torn-down state manager
+      player.destroy();
+      settleLoad?.();
+
+      await expect(loadPromise).resolves.toBeUndefined();
+      expect(playSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -1136,6 +1174,47 @@ describe('ScarlettPlayer', () => {
 
       expect(seekingSpy).not.toHaveBeenCalled();
       expect(playSpy).not.toHaveBeenCalled();
+    });
+
+    it('should not escape an unhandled rejection when destroyed mid-retry', async () => {
+      let settleLoad: (() => void) | undefined;
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              settleLoad = resolve;
+            })
+        ),
+      });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.init();
+
+      // The retry handler is an unawaited async closure, so anything it
+      // throws after its await surfaces as an unhandled rejection rather
+      // than a caught error (Sentry TSP-WEB-2GA).
+      const rejections: unknown[] = [];
+      const trap = (reason: unknown) => rejections.push(reason);
+      process.on('unhandledRejection', trap);
+
+      try {
+        (player as any).eventBus.emit('error:retry', { src: 'video.mp4' });
+        await tick();
+
+        // Viewer navigates away (or the consumer rebuilds the player) while
+        // the retry load is still in flight
+        player.destroy();
+        settleLoad?.();
+
+        await tick();
+        await tick();
+      } finally {
+        process.off('unhandledRejection', trap);
+      }
+
+      expect(rejections).toEqual([]);
     });
   });
 

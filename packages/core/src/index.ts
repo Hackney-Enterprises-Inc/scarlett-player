@@ -28,7 +28,12 @@ export { EventBus } from './events/event-bus';
 export { Logger, createLogger, type LogLevel, type LogEntry, type LogHandler } from './logger';
 
 // Re-export ErrorHandler
-export { ErrorHandler, ErrorCode, type PlayerError } from './error-handler';
+export {
+  ErrorHandler,
+  ErrorCode,
+  type PlayerError,
+  type PlayerErrorDetail,
+} from './error-handler';
 
 // Re-export PluginManager
 export { PluginManager, type PluginManagerOptions } from './plugin-manager';

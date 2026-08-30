@@ -18,7 +18,7 @@
  */
 
 import { ErrorCode } from '@scarlett-player/core';
-import type { IPluginAPI, PluginType } from '@scarlett-player/core';
+import type { IPluginAPI, PluginType, PlayerErrorDetail } from '@scarlett-player/core';
 import type {
   HLSPluginConfig,
   HLSQualityLevel,
@@ -31,6 +31,7 @@ import type {
 import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
 import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 import { createValidatingPlaylistLoader, PLAYLIST_INVALID_TEXT } from './playlist-validation';
+import { sanitizeUrl } from './sanitize-url';
 
 /**
  * The loader-module surface a build variant injects: the full build passes
@@ -152,6 +153,12 @@ export function createHLSPluginWith(
   let reconnectWindowStart = 0;
   let reconnectResumePosition = 0; // Viewer position captured at first failure
   let onlineListener: (() => void) | null = null;
+  // Error that opened the current reconnect window, reused to classify the
+  // terminal error emitted when the window closes
+  let reconnectTriggerError: HLSError | null = null;
+  // Latched once the window closes so exhaustion is announced exactly once
+  // and no further attempt can be scheduled against a closed window
+  let reconnectExhausted = false;
 
   /** Get video element from container */
   const getOrCreateVideo = (): HTMLVideoElement => {
@@ -318,11 +325,52 @@ export function createHLSPluginWith(
   };
 
   /**
+   * Build the diagnostic `detail` block carried by a fatal error event.
+   *
+   * `{ code, message }` alone could not answer why a stream died during the
+   * 2026-08-29 origin outage: no HTTP status, no URL, no attempt count, so
+   * diagnosis meant correlating timestamps across viewers. The URL goes
+   * through sanitizeUrl() because signed-URL tokens live in the query.
+   */
+  const buildErrorDetail = (error: HLSError, retriesExhausted: boolean): PlayerErrorDetail => {
+    const attempts =
+      error.type === 'network'
+        ? networkRetryCount
+        : error.type === 'media'
+          ? mediaRetryCount
+          : 0;
+
+    const detail: PlayerErrorDetail = {
+      type: error.type,
+      retriesExhausted,
+      attempts,
+    };
+
+    // Only network failures carry a request; a synthetic playlist-validation
+    // error reports code 0, which is not an HTTP status
+    if (typeof error.response?.code === 'number' && error.response.code > 0) {
+      detail.httpStatus = error.response.code;
+    }
+
+    const url = sanitizeUrl(error.url);
+    if (url) {
+      detail.url = url;
+    }
+
+    return detail;
+  };
+
+  /**
    * Emit fatal error and stop playback.
    *
    * Emits a structured error code (network vs decode) so the UI can show an
-   * accurate message instead of a generic fallback, then hands off to the
-   * auto-reconnect scheduler when the failure class is worth reconnecting for.
+   * accurate message instead of a generic fallback, attaches diagnostics for
+   * the consumer's telemetry, then hands off to the auto-reconnect scheduler
+   * when the failure class is worth reconnecting for.
+   *
+   * @param error - Parsed HLS error
+   * @param retriesExhausted - Whether the retry budget ran out (adds the
+   *        "(max retries exceeded)" message suffix)
    */
   const emitFatalError = (error: HLSError, retriesExhausted: boolean) => {
     const message = retriesExhausted
@@ -338,6 +386,7 @@ export function createHLSPluginWith(
       message,
       fatal: true,
       timestamp: Date.now(),
+      detail: buildErrorDetail(error, retriesExhausted),
     });
 
     maybeScheduleReconnect(error);
@@ -458,6 +507,121 @@ export function createHLSPluginWith(
     return false;
   };
 
+  /**
+   * Handle a fatal media-element error on the native (Safari/iOS) path.
+   *
+   * The MSE branch gives network errors `maxNetworkRetries` and media errors
+   * `maxMediaRetries` before anything is declared fatal. Native had no budget
+   * at all: the FIRST media element error went straight to emitFatalError, so
+   * during the 2026-08-29 outage a single transient decode hiccup flashed the
+   * error overlay on iOS streams the reconnect scheduler then healed 2.15
+   * seconds later. Both budgets apply here because the native recovery action
+   * is identical for either class: reload the source.
+   *
+   * @param error - Error synthesized from the media element's MediaError
+   * @param resumePosition - Position to restore, captured at the FIRST
+   *        failure. A failed reload resets the element to 0, so re-sampling
+   *        per attempt would resume a recovered VOD from the start.
+   */
+  const handleNativeFatalError = (error: HLSError, resumePosition?: number): void => {
+    const is_network = error.type === 'network';
+    const max_retries = is_network
+      ? (mergedConfig.maxNetworkRetries ?? 3)
+      : (mergedConfig.maxMediaRetries ?? 2);
+    const used = is_network ? networkRetryCount : mediaRetryCount;
+
+    // No source to reload means nothing to recover with
+    if (!currentSrc || used >= max_retries) {
+      emitFatalError(error, used >= max_retries);
+      return;
+    }
+
+    const resume_position = resumePosition ?? video?.currentTime ?? 0;
+
+    if (is_network) {
+      networkRetryCount++;
+    } else {
+      mediaRetryCount++;
+    }
+
+    const attempt = used + 1;
+    const delay = getRetryDelay(attempt - 1);
+
+    api?.logger.info(
+      `Attempting native ${error.type} error recovery (attempt ${attempt}/${max_retries}) in ${delay}ms`
+    );
+    api?.emit(is_network ? 'error:network' : 'error:media', {
+      error: new Error(error.details),
+    });
+
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+    }
+
+    const retry_session = loadSession;
+    retryTimeout = setTimeout(() => {
+      if (retry_session !== loadSession) return;
+      void recoverNative(error, resume_position);
+    }, delay);
+  };
+
+  /**
+   * Recovery action for the native path: reload the source in place.
+   *
+   * Native HLS has no hls.js error channel and no `recoverMediaError()`, so
+   * the only recovery available is a reload. It goes through loadNative()
+   * rather than re-setting `videoEl.src` directly, because loadNative is what
+   * re-wires the fatal-error listener and participates in the loadSession
+   * supersede bookkeeping.
+   *
+   * @param error - Error being recovered from, re-entered on failure so the
+   *        remaining budget is spent before anything is declared fatal
+   * @param resumePosition - Viewer position captured at the first failure
+   */
+  const recoverNative = async (error: HLSError, resumePosition: number): Promise<void> => {
+    if (!currentSrc) return;
+
+    // Tearing down and restarting a pipeline is a new session
+    const session = ++loadSession;
+    const saved_src = currentSrc;
+    const was_live = api?.getState('live') ?? false;
+
+    try {
+      // Detaches the dead pipeline's video handlers (including the fatal
+      // listener loadNative is about to re-attach) while keeping source
+      // identity and the retry budgets this recovery is spending
+      teardownPipeline(new Error('HLS load cancelled: native error recovery'));
+
+      api?.setState('playbackState', 'loading');
+
+      await loadNative(saved_src);
+
+      // A user load, a destroy, or a reconnect superseded this recovery
+      if (session !== loadSession) return;
+
+      // Live streams rejoin at the live edge, which is where a viewer of a
+      // live event wants to be after a blip
+      if (!was_live && video && resumePosition > 0) {
+        video.currentTime = resumePosition;
+      }
+
+      api?.setState('playbackState', 'ready');
+      api?.setState('buffering', false);
+
+      try {
+        await video?.play();
+      } catch {
+        // Autoplay policy blocked the resume; the play button still works
+      }
+    } catch {
+      if (session !== loadSession) return;
+      api?.logger.warn('Native error recovery attempt failed');
+      // The reload itself failed: re-enter so the remaining budget is spent
+      // and the error goes fatal exactly when it runs out
+      handleNativeFatalError(error, resumePosition);
+    }
+  };
+
   /** Load source using native HLS */
   const loadNative = async (src: string): Promise<void> => {
     const session = loadSession;
@@ -508,10 +672,10 @@ export function createHLSPluginWith(
 
         hasPlayedContent = true;
 
-        // Native HLS has no hls.js error channel. Surface subsequent fatal
-        // video element errors as structured player errors so the UI shows
-        // an overlay (and auto-reconnect can kick in) instead of dying
-        // silently on Safari.
+        // Native HLS has no hls.js error channel. Route subsequent fatal
+        // video element errors through the native retry budget so a
+        // transient hiccup is absorbed, and only a genuinely dead stream
+        // reaches the error overlay (and auto-reconnect) on Safari.
         const onFatalVideoError = () => {
           const media_error = videoEl.error;
           const hls_error: HLSError = {
@@ -519,10 +683,27 @@ export function createHLSPluginWith(
             details: media_error?.message || 'Native HLS playback error',
             fatal: true,
           };
-          emitFatalError(hls_error, false);
+          handleNativeFatalError(hls_error);
         };
         videoEl.addEventListener('error', onFatalVideoError);
-        const removeFatalListener = () => videoEl.removeEventListener('error', onFatalVideoError);
+
+        // Media is flowing again: restore the full retry budget. This is the
+        // native analog of the MSE branch's onFragLoaded reset - without it,
+        // blips spread across a long live event permanently consume the
+        // budget and an outage hours in becomes instantly terminal.
+        const onPlayingResetBudget = () => {
+          if (networkRetryCount > 0 || mediaRetryCount > 0) {
+            api?.logger.debug('Native playback recovered, resetting retry budgets');
+            networkRetryCount = 0;
+            mediaRetryCount = 0;
+          }
+        };
+        videoEl.addEventListener('playing', onPlayingResetBudget);
+
+        const removeFatalListener = () => {
+          videoEl.removeEventListener('error', onFatalVideoError);
+          videoEl.removeEventListener('playing', onPlayingResetBudget);
+        };
         const previous_cleanup = cleanupVideoEvents;
         cleanupVideoEvents = () => {
           removeFatalListener();
@@ -699,20 +880,68 @@ export function createHLSPluginWith(
     reconnectAttempts = 0;
     reconnectWindowStart = 0;
     reconnectResumePosition = 0;
+    reconnectTriggerError = null;
+    reconnectExhausted = false;
+  };
+
+  /**
+   * Announce that auto-reconnect has given up.
+   *
+   * Window exhaustion used to log a warning and return, emitting nothing.
+   * A consumer that put up "Reconnecting..." on `error:reconnecting` then had
+   * no signal to ever take it down, so an outage longer than the window
+   * (the 2026-08-29 one was) left a permanent spinner with no way back.
+   *
+   * Two events fire, exactly once per window: the dedicated
+   * `error:reconnect-exhausted` for lifecycle-driven UIs, then a final fatal
+   * `error` for error-driven ones. The fatal error deliberately does NOT go
+   * through emitFatalError(), which would re-enter the reconnect scheduler.
+   *
+   * @param elapsedMs - How long the provider kept trying
+   * @param windowMs - The window it was working against
+   */
+  const emitReconnectExhausted = (elapsedMs: number, windowMs: number) => {
+    if (reconnectExhausted) return;
+    reconnectExhausted = true;
+
+    const attempts = reconnectAttempts;
+    const trigger = reconnectTriggerError;
+
+    api?.emit('error:reconnect-exhausted', { attempts, elapsedMs, windowMs });
+
+    api?.setState('playbackState', 'error');
+    api?.setState('buffering', false);
+    api?.emit('error', {
+      code: trigger ? mapFatalErrorCode(trigger) : ErrorCode.PLAYBACK_FAILED,
+      message: `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1000)}s`,
+      fatal: true,
+      timestamp: Date.now(),
+      detail: {
+        type: trigger?.type ?? 'other',
+        retriesExhausted: true,
+        attempts,
+        reconnectExhausted: true,
+      },
+    });
   };
 
   /**
    * Schedule the next auto-reconnect attempt with capped exponential backoff.
    *
    * Emits `error:reconnecting` so the UI can tell the viewer the player is
-   * working on it rather than showing a dead-end error.
+   * working on it rather than showing a dead-end error. The payload reports
+   * `elapsedMs`/`windowMs` rather than a max attempt count because giving up
+   * is decided by the TIME WINDOW, not by an attempt cap.
    */
   const scheduleReconnectAttempt = () => {
+    if (reconnectExhausted) return; // Window already closed and announced
     if (reconnectTimer) return; // Already scheduled
 
     const window_ms = mergedConfig.reconnectWindowMs ?? 300000;
-    if (Date.now() - reconnectWindowStart > window_ms) {
+    const elapsed_ms = Date.now() - reconnectWindowStart;
+    if (elapsed_ms > window_ms) {
       api?.logger.warn(`Auto-reconnect window exhausted after ${reconnectAttempts} attempts`);
+      emitReconnectExhausted(elapsed_ms, window_ms);
       return;
     }
 
@@ -723,7 +952,12 @@ export function createHLSPluginWith(
     const delay = Math.round(backoff * (0.7 + Math.random() * 0.3));
 
     api?.logger.info(`Scheduling auto-reconnect attempt ${reconnectAttempts + 1} in ${delay}ms`);
-    api?.emit('error:reconnecting', { attempt: reconnectAttempts + 1, delayMs: delay });
+    api?.emit('error:reconnecting', {
+      attempt: reconnectAttempts + 1,
+      delayMs: delay,
+      elapsedMs: elapsed_ms,
+      windowMs: window_ms,
+    });
 
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -750,6 +984,9 @@ export function createHLSPluginWith(
       // reconnect attempts reset the video element to 0, so sampling the
       // position per-attempt would resume a recovered VOD from the start.
       reconnectResumePosition = video?.currentTime ?? 0;
+      // Remembered so the terminal error emitted when the window closes
+      // carries the same classification as the failure that opened it
+      reconnectTriggerError = error;
     }
     scheduleReconnectAttempt();
   };
@@ -808,7 +1045,12 @@ export function createHLSPluginWith(
 
       api.setState('playbackState', 'ready');
       api.setState('buffering', false);
-      api.emit('error:recovered', undefined);
+      // Emitted before cancelReconnect(), which resets the bookkeeping the
+      // payload reports
+      api.emit('error:recovered', {
+        attempt: reconnectAttempts,
+        elapsedMs: Date.now() - reconnectWindowStart,
+      });
       api.logger.info('Auto-reconnect succeeded');
       cancelReconnect();
 

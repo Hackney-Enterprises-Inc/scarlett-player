@@ -21,6 +21,9 @@ export type {
   IHLSPlugin,
 } from './types';
 
+// Telemetry helper used to build the `detail.url` on emitted fatal errors
+export { sanitizeUrl } from './sanitize-url';
+
 /**
  * Create an HLS Provider Plugin instance.
  *
