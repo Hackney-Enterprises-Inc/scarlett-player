@@ -276,12 +276,18 @@ export interface PlayerEventMap {
    * - `delayMs`: backoff before that attempt fires
    * - `elapsedMs`: time since the first failure in this reconnect window
    * - `windowMs`: total window the provider will keep reconnecting for
+   *
+   * `elapsedMs`/`windowMs` are optional. They were added after
+   * `attempt`/`delayMs`, so requiring them would compile-break any
+   * third-party provider already emitting this event, and a provider that
+   * caps recovery by attempt count rather than by time has no window to
+   * report. The built-in HLS provider always populates both.
    */
   'error:reconnecting': {
     attempt: number;
     delayMs: number;
-    elapsedMs: number;
-    windowMs: number;
+    elapsedMs?: number;
+    windowMs?: number;
   };
 
   /**
@@ -289,9 +295,14 @@ export interface PlayerEventMap {
    * succeeded). `attempt` is which attempt worked, `elapsedMs` how long the
    * viewer was interrupted.
    *
+   * The payload is optional because this event previously carried none:
+   * a third-party provider emitting `undefined` must keep compiling. The
+   * built-in HLS provider always sends the object, so a consumer that wants
+   * the fields narrows first (`if (payload) ...`).
+   *
    * Terminates a reconnect cycle; see {@link PlayerEventMap['error:reconnecting']}.
    */
-  'error:recovered': { attempt: number; elapsedMs: number };
+  'error:recovered': void | { attempt: number; elapsedMs: number };
 
   /**
    * Auto-reconnect gave up: the reconnect window closed without recovery and
