@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/ui",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "UI Controls Plugin for Scarlett Player",
   "type": "module",
   "main": "dist/index.cjs",
