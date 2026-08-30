@@ -36515,6 +36515,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.changeSubscribers = /* @__PURE__ */ new Set();
       /** Initial values for keys registered via define(), for reset support */
       this.definedDefaults = /* @__PURE__ */ new Map();
+      /**
+       * Set by destroy(). Kept so a read after teardown reports a lifecycle
+       * problem instead of masquerading as an unknown-key typo.
+       */
+      this.destroyed = false;
       this.initializeSignals(initialState);
     }
     /**
@@ -36575,6 +36580,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      *
      * @param key - State property key
      * @returns Signal for the property
+     * @throws If the manager has been destroyed, or the key was never registered
      *
      * @example
      * ```ts
@@ -36584,6 +36590,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * ```
      */
     get(key) {
+      if (this.destroyed) {
+        throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
+      }
       const stateSignal = this.signals.get(key);
       if (!stateSignal) {
         throw new Error(`[StateManager] Unknown state key: ${key}`);
@@ -36595,6 +36604,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      *
      * @param key - State property key
      * @returns Current value
+     * @throws If the manager has been destroyed, or the key was never registered
      *
      * @example
      * ```ts
@@ -36762,6 +36772,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     /**
      * Destroy the state manager and cleanup all signals.
      *
+     * After this, every read or write ({@link get}, {@link getValue},
+     * {@link set}) throws a destroyed-specific error. Returning last-known
+     * values instead was considered and rejected: it silently masks the
+     * lifecycle bugs this throw exposes.
+     *
      * @example
      * ```ts
      * state.destroy();
@@ -36771,6 +36786,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.signals.forEach((stateSignal) => stateSignal.destroy());
       this.signals.clear();
       this.changeSubscribers.clear();
+      this.destroyed = true;
     }
   };
 
@@ -38000,6 +38016,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
         if (this.stateManager.getValue("chromecastActive")) return;
         await this.load(src);
+        if (this.destroyed) return;
         if (autoplay !== false) {
           await this.play();
         }
@@ -38008,12 +38025,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const was_live = this.stateManager.getValue("live");
         const resume_at = this.stateManager.getValue("currentTime");
         await this.load(src);
+        if (this.destroyed) return;
         if (this.stateManager.getValue("error")) return;
         if (was_live) {
           this.seekToLive();
         } else if (resume_at > 0) {
           this.seek(resume_at);
         }
+        if (this.destroyed) return;
         await this.play();
       });
       if (this.initialSrc) {
@@ -38511,6 +38530,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       this.logger.info("Destroying player");
+      this.loadGeneration++;
       if (this.seekResumeTimeout !== null) {
         clearTimeout(this.seekResumeTimeout);
         this.seekResumeTimeout = null;
@@ -39097,6 +39117,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/hls/src/sanitize-url.ts
+  function sanitizeUrl(url) {
+    if (!url) return void 0;
+    try {
+      const parsed = new URL(url);
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return void 0;
+    }
+  }
+
   // packages/plugins/hls/src/create-hls-plugin.ts
   var DEFAULT_CONFIG = {
     debug: false,
@@ -39153,6 +39184,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let reconnectWindowStart = 0;
     let reconnectResumePosition = 0;
     let onlineListener = null;
+    let reconnectTriggerError = null;
+    let reconnectExhausted = false;
     const getOrCreateVideo = () => {
       if (video) return video;
       const existing = api?.container.querySelector("video");
@@ -39261,6 +39294,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return "PLAYBACK_FAILED" /* PLAYBACK_FAILED */;
       }
     };
+    const buildErrorDetail = (error, retriesExhausted) => {
+      const attempts = error.type === "network" ? networkRetryCount : error.type === "media" ? mediaRetryCount : 0;
+      const detail = {
+        type: error.type,
+        retriesExhausted,
+        attempts
+      };
+      if (typeof error.response?.code === "number" && error.response.code > 0) {
+        detail.httpStatus = error.response.code;
+      }
+      const url = sanitizeUrl(error.url);
+      if (url) {
+        detail.url = url;
+      }
+      return detail;
+    };
     const emitFatalError = (error, retriesExhausted) => {
       const message = retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`;
       api?.logger.error(message, { type: error.type, details: error.details });
@@ -39270,7 +39319,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         code: mapFatalErrorCode(error),
         message,
         fatal: true,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        detail: buildErrorDetail(error, retriesExhausted)
       });
       maybeScheduleReconnect(error);
     };
@@ -39347,6 +39397,62 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return false;
     };
+    const handleNativeFatalError = (error, resumePosition) => {
+      const is_network = error.type === "network";
+      const max_retries = is_network ? mergedConfig.maxNetworkRetries ?? 3 : mergedConfig.maxMediaRetries ?? 2;
+      const used = is_network ? networkRetryCount : mediaRetryCount;
+      if (!currentSrc || used >= max_retries) {
+        emitFatalError(error, used >= max_retries);
+        return;
+      }
+      const resume_position = resumePosition ?? video?.currentTime ?? 0;
+      if (is_network) {
+        networkRetryCount++;
+      } else {
+        mediaRetryCount++;
+      }
+      const attempt = used + 1;
+      const delay = getRetryDelay2(attempt - 1);
+      api?.logger.info(
+        `Attempting native ${error.type} error recovery (attempt ${attempt}/${max_retries}) in ${delay}ms`
+      );
+      api?.emit(is_network ? "error:network" : "error:media", {
+        error: new Error(error.details)
+      });
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+      const retry_session = loadSession;
+      retryTimeout = setTimeout(() => {
+        if (retry_session !== loadSession) return;
+        void recoverNative(error, resume_position);
+      }, delay);
+    };
+    const recoverNative = async (error, resumePosition) => {
+      if (!currentSrc) return;
+      const session = ++loadSession;
+      const saved_src = currentSrc;
+      const was_live = api?.getState("live") ?? false;
+      try {
+        teardownPipeline(new Error("HLS load cancelled: native error recovery"));
+        api?.setState("playbackState", "loading");
+        await loadNative(saved_src);
+        if (session !== loadSession) return;
+        if (!was_live && video && resumePosition > 0) {
+          video.currentTime = resumePosition;
+        }
+        api?.setState("playbackState", "ready");
+        api?.setState("buffering", false);
+        try {
+          await video?.play();
+        } catch {
+        }
+      } catch {
+        if (session !== loadSession) return;
+        api?.logger.warn("Native error recovery attempt failed");
+        handleNativeFatalError(error, resumePosition);
+      }
+    };
     const loadNative = async (src) => {
       const session = loadSession;
       const videoEl = getOrCreateVideo();
@@ -39391,10 +39497,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               details: media_error?.message || "Native HLS playback error",
               fatal: true
             };
-            emitFatalError(hls_error, false);
+            handleNativeFatalError(hls_error);
           };
           videoEl.addEventListener("error", onFatalVideoError);
-          const removeFatalListener = () => videoEl.removeEventListener("error", onFatalVideoError);
+          const onPlayingResetBudget = () => {
+            if (networkRetryCount > 0 || mediaRetryCount > 0) {
+              api?.logger.debug("Native playback recovered, resetting retry budgets");
+              networkRetryCount = 0;
+              mediaRetryCount = 0;
+            }
+          };
+          videoEl.addEventListener("playing", onPlayingResetBudget);
+          const removeFatalListener = () => {
+            videoEl.removeEventListener("error", onFatalVideoError);
+            videoEl.removeEventListener("playing", onPlayingResetBudget);
+          };
           const previous_cleanup = cleanupVideoEvents;
           cleanupVideoEvents = () => {
             removeFatalListener();
@@ -39519,12 +39636,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       reconnectAttempts = 0;
       reconnectWindowStart = 0;
       reconnectResumePosition = 0;
+      reconnectTriggerError = null;
+      reconnectExhausted = false;
+    };
+    const emitReconnectExhausted = (elapsedMs, windowMs) => {
+      if (reconnectExhausted) return;
+      reconnectExhausted = true;
+      const attempts = reconnectAttempts;
+      const trigger = reconnectTriggerError;
+      api?.emit("error:reconnect-exhausted", { attempts, elapsedMs, windowMs });
+      api?.setState("playbackState", "error");
+      api?.setState("buffering", false);
+      api?.emit("error", {
+        code: trigger ? mapFatalErrorCode(trigger) : "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
+        message: `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1e3)}s`,
+        fatal: true,
+        timestamp: Date.now(),
+        detail: {
+          type: trigger?.type ?? "other",
+          retriesExhausted: true,
+          attempts,
+          reconnectExhausted: true
+        }
+      });
     };
     const scheduleReconnectAttempt = () => {
+      if (reconnectExhausted) return;
       if (reconnectTimer) return;
       const window_ms = mergedConfig.reconnectWindowMs ?? 3e5;
-      if (Date.now() - reconnectWindowStart > window_ms) {
+      const elapsed_ms = Date.now() - reconnectWindowStart;
+      if (elapsed_ms > window_ms) {
         api?.logger.warn(`Auto-reconnect window exhausted after ${reconnectAttempts} attempts`);
+        emitReconnectExhausted(elapsed_ms, window_ms);
         return;
       }
       const base_delay = mergedConfig.reconnectBaseDelayMs ?? 2e3;
@@ -39532,7 +39675,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const backoff = Math.min(base_delay * Math.pow(2, reconnectAttempts), max_delay);
       const delay = Math.round(backoff * (0.7 + Math.random() * 0.3));
       api?.logger.info(`Scheduling auto-reconnect attempt ${reconnectAttempts + 1} in ${delay}ms`);
-      api?.emit("error:reconnecting", { attempt: reconnectAttempts + 1, delayMs: delay });
+      api?.emit("error:reconnecting", {
+        attempt: reconnectAttempts + 1,
+        delayMs: delay,
+        elapsedMs: elapsed_ms,
+        windowMs: window_ms
+      });
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         void attemptReconnect();
@@ -39545,6 +39693,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (reconnectWindowStart === 0) {
         reconnectWindowStart = Date.now();
         reconnectResumePosition = video?.currentTime ?? 0;
+        reconnectTriggerError = error;
       }
       scheduleReconnectAttempt();
     };
@@ -39576,7 +39725,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         api.setState("playbackState", "ready");
         api.setState("buffering", false);
-        api.emit("error:recovered", void 0);
+        api.emit("error:recovered", {
+          attempt: reconnectAttempts,
+          elapsedMs: Date.now() - reconnectWindowStart
+        });
         api.logger.info("Auto-reconnect succeeded");
         cancelReconnect();
         try {
@@ -43395,7 +43547,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.6.0" : "dev";
+  var VERSION = true ? "1.7.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
