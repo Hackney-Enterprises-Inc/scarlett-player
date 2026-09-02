@@ -1,14 +1,43 @@
 /**
  * Tests for Watermark Plugin
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import type { IPluginAPI } from '@scarlett-player/core';
 import { createWatermarkPlugin } from '../src/index';
 import type { IWatermarkPlugin } from '../src/types';
 
-// Helper to create mock plugin API
-function createMockApi() {
+/**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks.
+ *
+ * Extending `IPluginAPI` is what lets `plugin.init(mockApi)` type-check without
+ * a cast at every call site, while each method stays a `Mock` so a case can read
+ * `.mock.calls` or install an implementation. Declaring the extension is also
+ * what catches drift: this stub had fallen behind the interface (no `pluginId`,
+ * no `defineState`) and nothing said so until the package gained a `typecheck`
+ * script on 2026-09-02.
+ */
+interface MockPluginApi extends IPluginAPI {
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
+
+/**
+ * Build a mock plugin API backed by a real container element.
+ *
+ * @returns Mock plugin API
+ */
+function createMockApi(): MockPluginApi {
   const container = document.createElement('div');
   return {
+    pluginId: 'watermark',
     container,
     logger: {
       info: vi.fn(),
@@ -20,6 +49,7 @@ function createMockApi() {
     off: vi.fn(),
     emit: vi.fn(),
     setState: vi.fn(),
+    defineState: vi.fn(),
     getState: vi.fn().mockReturnValue(null),
     subscribeToState: vi.fn().mockReturnValue(vi.fn()),
     onDestroy: vi.fn(),

@@ -37,6 +37,7 @@ import {
   isDevelopment,
   safeStringify,
 } from './helpers';
+import { PKG_VERSION } from './version';
 
 // Re-export types
 export type {
@@ -49,8 +50,16 @@ export type {
   AnalyticsEventType,
 } from './types';
 
-// Plugin version
-const PLUGIN_VERSION = '0.1.0';
+/**
+ * Version this plugin reports, both as its descriptor `version` and as the
+ * `playerVersion` on every beacon.
+ *
+ * It was the literal '0.1.0' while the package published at 1.7.0 (measured
+ * 2026-09-02), so every beacon in the analytics store carries a version string
+ * that never matched a release. It now comes from the package's own
+ * package.json through the build-time define in tsup.config.ts.
+ */
+const PLUGIN_VERSION = PKG_VERSION;
 const PLUGIN_NAME = 'scarlett-player';
 
 /**

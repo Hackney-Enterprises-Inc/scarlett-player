@@ -7,6 +7,7 @@ import { getInitialBandwidthEstimate } from '../src/quality';
 import { setupHlsEventHandlers } from '../src/event-map';
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { HlsInstance } from '../src/types';
+import { createMockAPI } from './helpers';
 
 describe('getInitialBandwidthEstimate()', () => {
   const originalNavigator = globalThis.navigator;
@@ -116,23 +117,7 @@ describe('bandwidth state from FRAG_LOADED', () => {
       handlers,
     };
 
-    mockApi = {
-      pluginId: 'hls-provider',
-      container: document.createElement('div'),
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-      },
-      getState: vi.fn(),
-      setState: vi.fn(),
-      on: vi.fn(() => vi.fn()),
-      off: vi.fn(),
-      emit: vi.fn(),
-      getPlugin: vi.fn(),
-      onDestroy: vi.fn(),
-    };
+    mockApi = createMockAPI();
 
     cleanup = setupHlsEventHandlers(mockHls, mockApi, {});
   });

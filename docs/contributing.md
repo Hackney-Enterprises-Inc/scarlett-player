@@ -1,6 +1,9 @@
 # Scarlett Player - Development Guidelines
 
-**Last Updated**: October 10, 2025
+**Last Updated**: September 2, 2026
+
+Companion documents: `docs/architecture.md` (how the player is put together)
+and `docs/plugin-authoring.md` (writing a plugin package).
 
 ## Code Standards
 
@@ -9,9 +12,13 @@
 **Required**:
 - All code must be TypeScript
 - Strict mode enabled
-- No `any` types (use `unknown` if needed)
+- Prefer `unknown` over `any`. The exceptions in the tree are deliberate and
+  local: the duck-typed provider calls in `ScarlettPlayer` (`getLevels`,
+  `setLevel`, `getLiveInfo`, `loadSource`) and third-party globals such as the
+  Cast SDK. Keep the cast at the call site and say why in a comment
 - Explicit return types for public APIs
-- JSDoc comments for public APIs
+- TSDoc on every exported function, class and public method, with the reasoning
+  when the behaviour is not obvious from the code
 
 **Example**:
 ```typescript
@@ -58,10 +65,11 @@ event-bus.ts
 hls-provider.ts
 ```
 
-**Packages**: kebab-case with scope
+**Packages**: kebab-case with scope, and the scope carries no `plugin-` prefix
 ```
 @scarlett-player/core
-@scarlett-player/plugin-hls
+@scarlett-player/hls
+@scarlett-player/media-session
 ```
 
 ### Code Organization
@@ -72,16 +80,19 @@ package/
 ├── src/
 │   ├── index.ts          # Public exports
 │   ├── types.ts          # TypeScript types
-│   ├── constants.ts      # Constants
 │   ├── *.ts              # Implementation files
-│   └── utils/            # Utility functions
 ├── tests/
-│   ├── *.test.ts         # Test files
-│   └── fixtures/         # Test fixtures
+│   └── *.test.ts         # Test files
 ├── package.json
-├── tsconfig.json
+├── tsconfig.json         # Build config; excludes tests
+├── tsconfig.typecheck.json  # Optional: adds type-contract tests to the program
+├── vitest.config.ts
 └── README.md
 ```
+
+`package.json` must declare a `typecheck` and a `test` script.
+`scripts/check-package-scripts.mjs` fails CI otherwise, because pnpm's
+recursive run silently skips a package that has neither.
 
 **Imports Order**:
 1. External dependencies
@@ -93,7 +104,7 @@ package/
 import { createScope } from 'some-library';
 
 // Internal core
-import { Plugin, PluginAPI } from '@scarlett-player/core';
+import type { IPluginAPI, Plugin } from '@scarlett-player/core';
 
 // Relative
 import { HLSConfig } from './types';
@@ -149,29 +160,45 @@ async loadSource(src: string): Promise<void> {
 
 **Example**:
 ```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { PluginManager } from './plugin-manager';
+import { describe, it, expect } from 'vitest';
+import { EventBus, Logger, PluginManager, StateManager } from '@scarlett-player/core';
 
 describe('PluginManager', () => {
-  it('should register a plugin', () => {
-    const manager = new PluginManager();
-    const plugin = { name: 'test', version: '1.0.0', type: 'feature' };
+  const build = () =>
+    new PluginManager(new EventBus(), new StateManager(), new Logger(), {
+      container: document.createElement('div'),
+    });
+
+  const plugin = {
+    id: 'test',
+    name: 'Test',
+    version: '1.0.0',
+    type: 'feature' as const,
+    init: () => {},
+    destroy: () => {},
+  };
+
+  it('registers a plugin', () => {
+    const manager = build();
 
     manager.register(plugin);
 
-    expect(manager.has('test')).toBe(true);
+    expect(manager.hasPlugin('test')).toBe(true);
+    expect(manager.getPluginState('test')).toBe('registered');
   });
 
-  it('should throw on duplicate plugin name', () => {
-    const manager = new PluginManager();
-    const plugin = { name: 'test', version: '1.0.0', type: 'feature' };
+  it('rejects a duplicate plugin id', () => {
+    const manager = build();
 
     manager.register(plugin);
 
-    expect(() => manager.register(plugin)).toThrow('Plugin already registered');
+    expect(() => manager.register(plugin)).toThrow('is already registered');
   });
 });
 ```
+
+Plugins are tested against a mock `IPluginAPI`, one typed helper per package
+rather than a cast at every call site.
 
 ### Documentation
 
@@ -182,81 +209,88 @@ Every package must have:
 - API documentation link
 - License
 
-**JSDoc for Public APIs**:
+**TSDoc for Public APIs**:
 ```typescript
 /**
- * Plugin for HLS streaming support
+ * Create an HLS provider plugin.
+ *
+ * @param config - Plugin configuration
+ * @returns Plugin instance to hand to the player
  *
  * @example
  * ```typescript
- * const player = new ScarlettPlayer('#video', {
- *   plugins: [new HLSPlugin({
- *     library: 'https://cdn.jsdelivr.net/npm/hls.js@latest'
- *   })]
+ * const player = await createPlayer({
+ *   container: '#video',
+ *   src: 'https://example.com/video.m3u8',
+ *   plugins: [createHLSPlugin()],
  * });
  * ```
  */
-export class HLSPlugin implements ProviderPlugin {
+export function createHLSPlugin(config: HLSPluginConfig = {}): Plugin {
   // ...
 }
 ```
+
+Every example in a docblock or a README constructs the player with
+`createPlayer()`.
 
 **CHANGELOG.md**:
 Keep a changelog for each package following [Keep a Changelog](https://keepachangelog.com/) format.
 
 ## Plugin Development Guidelines
 
+`docs/plugin-authoring.md` is the full guide: events, state keys, control-bar
+controls, and the checklist for a new package. The shape in short:
+
 ### Plugin Structure
 
 ```typescript
-import { Plugin, PluginAPI } from '@scarlett-player/core';
+import type { IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
 
 export interface MyPluginConfig {
   option1?: string;
   option2?: number;
+  [key: string]: unknown;
 }
 
-export class MyPlugin implements Plugin {
-  readonly name = 'my-plugin';
-  readonly version = '1.0.0';
-  readonly type = 'feature';
+const DEFAULT_CONFIG: MyPluginConfig = { option1: 'a' };
 
-  private api: PluginAPI | null = null;
-  private config: MyPluginConfig;
+export function createMyPlugin(config: MyPluginConfig = {}): Plugin {
+  const merged = { ...DEFAULT_CONFIG, ...config };
+  let api: IPluginAPI | null = null;
 
-  constructor(config: MyPluginConfig = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-  }
+  return {
+    id: 'my-plugin',
+    name: 'My Plugin',
+    version: '1.0.0',
+    type: 'feature' as PluginType,
 
-  setup(api: PluginAPI): void {
-    this.api = api;
+    init(pluginApi: IPluginAPI): void {
+      api = pluginApi;
 
-    // Subscribe to events
-    api.on('play', this.handlePlay);
-    api.on('pause', this.handlePause);
+      // Register any state key this plugin owns, before first use
+      api.defineState('myPluginActive', false);
 
-    // Subscribe to state
-    api.subscribe('currentTime', this.handleTimeUpdate);
-  }
+      // Subscribe to events; on() returns an unsubscribe function
+      api.onDestroy(api.on('playback:play', handlePlay));
+      api.onDestroy(api.on('playback:pause', handlePause));
 
-  destroy(): void {
-    // Cleanup
-    this.api = null;
-  }
+      // Every state change, as a StateChangeEvent
+      api.onDestroy(api.subscribeToState(handleStateChange));
+    },
 
-  private handlePlay = (): void => {
-    // Implementation
-  };
-
-  private handlePause = (): void => {
-    // Implementation
-  };
-
-  private handleTimeUpdate = (time: number): void => {
-    // Implementation
+    destroy(): void {
+      api = null;
+    },
   };
 }
 ```
+
+The lifecycle hook is `init(api)`. There is no `setup` hook, and `destroy()` is
+required, not optional. Factory functions (`createMyPlugin()`) are the convention across the
+workspace; a class is fine as long as it satisfies the same `Plugin` interface.
+`IPluginAPI` is the type a plugin is handed; `PluginAPI` is core's concrete
+implementation and plugins should not depend on it.
 
 ### Plugin Best Practices
 
@@ -280,18 +314,31 @@ export class MyPlugin implements Plugin {
    }
    ```
 
-4. **Emit events for plugin actions**
+4. **Emit events for plugin actions**, namespaced with the plugin id and
+   declared by merging into `PlayerEventMap`
    ```typescript
+   declare module '@scarlett-player/core' {
+     interface PlayerEventMap {
+       'myplugin:actionCompleted': { data: string };
+     }
+   }
+
    api.emit('myplugin:actionCompleted', { data: 'value' });
    ```
 
-5. **Handle errors gracefully**
+5. **Handle errors gracefully.** The `error` payload is a structured
+   `PlayerError`, so emit one or let the player's `ErrorHandler` build it
    ```typescript
    try {
-     await this.doSomething();
+     await doSomething();
    } catch (error) {
-     api.emit('error', { plugin: this.name, error });
-     // Don't throw, let player continue
+     api.emit('error', {
+       code: ErrorCode.PLUGIN_SETUP_FAILED,
+       message: (error as Error).message,
+       fatal: false,
+       timestamp: Date.now(),
+     });
+     // Don't throw, let the player continue
    }
    ```
 
@@ -299,12 +346,14 @@ export class MyPlugin implements Plugin {
 
 ### Branch Naming
 
-- `main` - Production-ready code
-- `develop` - Integration branch
-- `feature/description` - New features
+- `main` - the only long-lived branch; everything merges here
+- `feat/description` - New features
 - `fix/description` - Bug fixes
 - `refactor/description` - Refactoring
 - `docs/description` - Documentation
+
+`changeset-release/main` is created and owned by the release automation. Do not
+branch from it or push to it.
 
 ### Commit Messages
 
@@ -337,14 +386,23 @@ test(core): add PluginManager integration tests
 
 ### Pull Request Process
 
-1. Create feature branch from `develop`
+1. Create a branch from `main`
 2. Make changes with tests
-3. Update documentation
-4. Run `npm run validate` (lint + test + build)
-5. Create PR to `develop`
-6. Request review from relevant agent
+3. Update the documentation and the package README the change affects
+4. Add a changeset (`pnpm changeset`) for anything that reaches a published
+   package. Versions are never hand-edited: the group is fixed, so every package
+   publishes at one version
+5. Run `pnpm validate` (package-script guard, lint, typecheck, test, build)
+6. Open a PR against `main`
 7. Address review comments
 8. Merge when approved
+
+Never commit `demo/demo.bundle.js` or `docs/demo/demo.bundle.js`. The release
+workflow rebuilds and commits both on every push to `main`, so a bundle
+committed from a branch only produces binary merge conflicts with that commit.
+Build it locally to preview, then leave it out of the PR. Do not gitignore it
+either: the deployed `index.html` is stamped with a version and points at a file
+that has to exist in the repo.
 
 ## Code Review Checklist
 
@@ -370,16 +428,15 @@ test(core): add PluginManager integration tests
 
 ### Bundle Size
 
-- Core must be < 50KB gzipped
-- Each plugin < 20KB gzipped
-- Tree-shakeable exports
+- Tree-shakeable exports; no side effects at module scope beyond control
+  registration
 - No circular dependencies
-
-**Check bundle size**:
-```bash
-npm run build
-npm run analyze
-```
+- Heavy dependencies load lazily. hls.js is fetched through a dynamic import
+  inside `loadHlsJs()`, and the playlist plugin reaches the UI package with
+  `void import('@scarlett-player/ui')` so it still works when that package is
+  absent
+- Watch the sizes Vite and tsup print during `pnpm build` rather than adding a
+  budget nobody enforces
 
 ### Runtime Performance
 
@@ -403,20 +460,21 @@ private handleResize = debounce(() => {
 - Remove DOM references
 - Avoid memory leaks
 
+Prefer `api.onDestroy(unsubscribe)` at the point of subscription over
+remembering to undo each one in `destroy()`: `PluginManager` runs those cleanups
+for you when the plugin is destroyed.
+
 ```typescript
 destroy(): void {
-  // Clear listeners
-  this.api?.off('play', this.handlePlay);
-
   // Clear timers
-  clearInterval(this.interval);
+  clearInterval(interval);
 
   // Remove DOM
-  this.element?.remove();
+  element?.remove();
 
   // Clear references
-  this.api = null;
-  this.element = null;
+  api = null;
+  element = null;
 }
 ```
 
@@ -500,7 +558,10 @@ liveRegion.textContent = 'Video playing';
 
 ## Version Guidelines
 
-**Semantic Versioning** (SemVer):
+**Semantic Versioning** (SemVer), applied through Changesets in fixed mode: all
+seventeen packages share one version number, so a release publishes them
+together even where a package did not change.
+
 - MAJOR: Breaking changes
 - MINOR: New features (backwards compatible)
 - PATCH: Bug fixes
@@ -526,7 +587,9 @@ MIT License - https://github.com/vidstack/player
 ## Questions?
 
 When in doubt:
-1. Check architecture.md
-2. Ask Dev-Master
-3. Look at existing code
+1. Read `docs/architecture.md` for how the pieces fit together
+2. Read `docs/plugin-authoring.md` if the change is a plugin
+3. Read the existing code: it is the specification, and a claim about how the
+   player behaves is not worth making until it has been checked against the
+   source
 4. Reference Vidstack for patterns (not implementation)

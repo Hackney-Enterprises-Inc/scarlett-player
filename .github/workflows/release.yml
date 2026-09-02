@@ -52,6 +52,22 @@ jobs:
       - name: Build packages
         run: pnpm run build
 
+      # Gate the publish on the tarballs actually containing what their
+      # manifests promise. v1.7.0 went out with @scarlett-player/embed and
+      # @scarlett-player/vue both declaring `types: ./dist/index.d.ts` and
+      # neither tarball containing a single .d.ts (checked with npm pack
+      # --dry-run on 2026-09-02): a Vite emptyOutDir deleted the declarations
+      # tsc had just emitted and the build stayed green. What that costs the
+      # consumer depends on its own settings, measured on TypeScript 5.9.3:
+      # with noImplicitAny on, which is what strict gives you, the import does
+      # not compile at all (TS7016); with it off the module is typed any and
+      # nothing is reported. Deliberately before "Publish to npm" and not
+      # continue-on-error: a package whose advertised files are missing must
+      # not reach the registry, because a published version cannot be
+      # replaced.
+      - name: Check package artifacts
+        run: node scripts/check-package-artifacts.mjs
+
       # Get version from embed package (main distributable)
       - name: Get version
         id: version

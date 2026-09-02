@@ -23,6 +23,7 @@ export type {
   MediaSessionArtwork,
   IMediaSessionPlugin,
 } from './types';
+import { PKG_VERSION } from './version';
 
 /** Default configuration */
 const DEFAULT_CONFIG: MediaSessionPluginConfig = {
@@ -48,9 +49,10 @@ function isMediaSessionSupported(): boolean {
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createMediaSessionPlugin } from '@scarlett-player/media-session';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: document.getElementById('player'),
  *   plugins: [
  *     createMediaSessionPlugin({
@@ -247,7 +249,7 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
   const plugin: IMediaSessionPlugin = {
     id: 'media-session',
     name: 'Media Session',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
     description: 'Media Session API integration for system-level media controls',
 

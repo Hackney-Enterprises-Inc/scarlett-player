@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { chromecastPlugin } from '../src/index';
 import { resetCastLoader } from '../src/cast-loader';
 import type { IPluginAPI } from '@scarlett-player/core';
+import { PKG_VERSION } from '../src/version';
 
 // Mock Cast SDK
 const createMockCastSDK = () => {
@@ -184,7 +185,7 @@ describe('Chromecast Plugin', () => {
 
       expect(plugin.id).toBe('chromecast');
       expect(plugin.name).toBe('Chromecast');
-      expect(plugin.version).toBe('1.0.0');
+      expect(plugin.version).toBe(PKG_VERSION);
       expect(plugin.type).toBe('feature');
     });
 

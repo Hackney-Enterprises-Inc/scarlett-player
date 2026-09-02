@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHLSPlugin } from '../src/index';
 import * as hlsLoader from '../src/hls-loader';
+import { PKG_VERSION } from '../src/version';
 
 describe('HLS Plugin - canPlay()', () => {
   let plugin: ReturnType<typeof createHLSPlugin>;
@@ -98,7 +99,7 @@ describe('HLS Plugin - canPlay()', () => {
     });
 
     it('should have version number', () => {
-      expect(plugin.version).toBe('1.0.0');
+      expect(plugin.version).toBe(PKG_VERSION);
     });
 
     it('should have description', () => {

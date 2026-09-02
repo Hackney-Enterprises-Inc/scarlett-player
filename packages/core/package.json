@@ -8,9 +8,9 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "vite",
     "demo": "vite",
-    "build": "rm -f tsconfig.tsbuildinfo && tsc && vite build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc && vite build",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --coverage",

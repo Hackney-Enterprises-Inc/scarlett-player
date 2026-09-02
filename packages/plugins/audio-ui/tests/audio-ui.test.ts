@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAudioUIPlugin, type IAudioUIPlugin } from '../src/index';
+import { PKG_VERSION } from '../src/version';
 
 // Mock requestAnimationFrame
 let rafCallbacks: ((time: number) => void)[] = [];
@@ -67,7 +68,7 @@ describe('createAudioUIPlugin', () => {
 
     expect(plugin.id).toBe('audio-ui');
     expect(plugin.name).toBe('Audio UI');
-    expect(plugin.version).toBe('1.0.0');
+    expect(plugin.version).toBe(PKG_VERSION);
     expect(plugin.type).toBe('ui');
     expect(plugin.description).toContain('audio player');
   });

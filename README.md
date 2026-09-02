@@ -12,6 +12,7 @@
 - **HLS Playback** - Native Safari HLS + hls.js fallback with quality selection and live DVR
 - **Self-Healing Playback** - Auto-reconnect with backoff, load watchdog, playlist refresh validation, structured error codes, and a retry UI; a playback fault recovers silently or offers Try Again, never a dead end
 - **Native Media** - Video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
+- **Poster & Big Play Button** - Artwork before the first frame, a centred play affordance over it, and `setPoster()` to change it mid-session (the playlist swaps it per track)
 - **Adaptive Bitrate** - ABR with manual quality override
 - **Live Streaming** - Live indicator, DVR seeking, seek-to-live, latency tracking
 - **AirPlay & Chromecast** - Built-in casting with session management
@@ -27,7 +28,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,550+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **1,752 Tests** (2026-09-02) - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -64,13 +65,19 @@ npm install @scarlett-player/embed
 ### Video (HLS)
 
 ```typescript
-import { ScarlettPlayer } from '@scarlett-player/core';
+import { createPlayer } from '@scarlett-player/core';
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
 
-const player = new ScarlettPlayer({
+// createPlayer() constructs the player, initialises every plugin and loads
+// `src`, in one call. It is the documented entry point for every consumer.
+const player = await createPlayer({
   container: document.getElementById('player'),
+  src: 'https://example.com/video.m3u8',
+  // Shown until the first frame renders, with a big play button over it.
+  // Change it later with player.setPoster(url), or '' to clear it.
+  poster: 'https://example.com/poster.jpg',
   plugins: [
     createHLSPlugin(),       // HLS streams (.m3u8)
     createNativePlugin(),    // Native formats (MP4, WebM, MOV, MKV)
@@ -79,20 +86,18 @@ const player = new ScarlettPlayer({
     }),
   ],
 });
-
-await player.load('https://example.com/video.m3u8');
 ```
 
 ### Audio (with playlist and lock screen controls)
 
 ```typescript
-import { ScarlettPlayer } from '@scarlett-player/core';
+import { createPlayer } from '@scarlett-player/core';
 import { createNativePlugin } from '@scarlett-player/native';
 import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
-import { createPlaylistPlugin } from '@scarlett-player/playlist';
+import { createPlaylistPlugin, type IPlaylistPlugin } from '@scarlett-player/playlist';
 import { createMediaSessionPlugin } from '@scarlett-player/media-session';
 
-const player = new ScarlettPlayer({
+const player = await createPlayer({
   container: document.getElementById('audio-player'),
   plugins: [
     createNativePlugin(),
@@ -106,6 +111,15 @@ const player = new ScarlettPlayer({
     createMediaSessionPlugin(),
   ],
 });
+
+// Start the first track through the playlist, not through `src` or
+// player.load(). The playlist owns the current index: play() sets it, writes
+// the track's title and artwork into state, and emits `media:load-request`,
+// which the player loads and plays. Loading a source behind the playlist's
+// back leaves its index pointing at nothing, so next/previous and
+// auto-advance start from the wrong place.
+const playlist = player.getPlugin<IPlaylistPlugin>('playlist');
+playlist?.play(0);
 ```
 
 ## Vue 3
@@ -287,12 +301,17 @@ uiPlugin({ controls: ['play', 'volume', 'time', 'spacer', 'example', 'fullscreen
 Namespace your events and state keys with the plugin id. Order does not matter:
 a control registered after the control bar was built triggers a rebuild.
 
+[Full plugin authoring guide ->](./docs/plugin-authoring.md) - events, state,
+controls, testing, and the checklist for a new package.
+[Architecture ->](./docs/architecture.md) |
+[Contributing ->](./docs/contributing.md)
+
 ## Development
 
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all 1,550+ tests
+pnpm test             # Run all 1,752 tests (2026-09-02)
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
@@ -307,10 +326,15 @@ destroy-mid-append races, malformed live playlist refreshes). Requires a local
 Chrome and ffmpeg on PATH; the HLS fixture is generated on first run into the
 gitignored `scripts/fixtures/`.
 
+Scenario 1 exercises the committed demo bundle, so on a branch run `node
+demo/build.cjs` first and leave the rebuilt bundle out of the commit (CI
+rebuilds it on main); against a bundle older than 1.7.1 the `setPoster` check
+fails because that version is where `setPoster()` was added.
+
 ```bash
 pnpm build && node demo/build.cjs
 python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
-node scripts/verify-browser.mjs                # 21 checks, exits non-zero on failure
+node scripts/verify-browser.mjs                # 30 checks, exits non-zero on failure
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
 ```
 

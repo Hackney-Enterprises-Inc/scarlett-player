@@ -13,6 +13,7 @@ import type {
   WebkitVideoElement,
   WebkitPlaybackTargetAvailabilityEvent,
 } from './types';
+import { PKG_VERSION } from './version';
 
 export type { IAirPlayPlugin, AirPlayAvailabilityEvent, AirPlayConnectionEvent } from './types';
 
@@ -32,9 +33,10 @@ export function isAirPlaySupported(): boolean {
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { airplayPlugin } from '@scarlett-player/airplay';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [airplayPlugin()],
  * });
@@ -130,7 +132,7 @@ export function airplayPlugin(): IAirPlayPlugin {
     id: 'airplay',
     name: 'AirPlay',
     type: 'feature',
-    version: '1.0.0',
+    version: PKG_VERSION,
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;

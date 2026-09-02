@@ -31,7 +31,11 @@ const mockBeacon = (url: string, payload: BeaconPayload) => {
 
 // Mock PluginAPI
 function createMockAPI(): IPluginAPI {
-  const state = {
+  // Typed as an index signature on purpose: the mock's getState/setState take a
+  // plain string key, and a bare object literal has no index signature, so both
+  // accesses below were implicit `any` (TS7053) once the package started
+  // type-checking its tests on 2026-09-02.
+  const state: Record<string, unknown> = {
     currentTime: 0,
     duration: 100,
     playing: false,

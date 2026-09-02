@@ -1,803 +1,504 @@
-# Scarlett Player - Architecture Design
+# Scarlett Player - Architecture
 
-**Version**: 1.0.0-alpha
-**Last Updated**: October 10, 2025
+**Version**: 1.7.0 (fixed versioning: every package in the workspace ships this number)
+**Last Updated**: September 2, 2026
 
-## System Overview
+This describes the player as it is built, not as it was planned. Every class,
+method and event named here exists in `packages/*/src`. Where a name in an
+older revision of this document did not survive contact with the code (the
+plugin lifecycle hook has never been called `setup`, and no package name has
+ever carried a `plugin-` prefix), the name here is the one the code uses.
+
+## System overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Scarlett Player                          │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              User Application Code                     │ │
-│  └────────────┬───────────────────────────────────────────┘ │
-│               │                                              │
-│  ┌────────────▼───────────────────────────────────────────┐ │
-│  │          Framework Adapter (Optional)                  │ │
-│  │        @scarlett-player/react | vue                    │ │
-│  └────────────┬───────────────────────────────────────────┘ │
-│               │                                              │
-│  ┌────────────▼───────────────────────────────────────────┐ │
-│  │                  Core Player                           │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │           Plugin Manager                         │  │ │
-│  │  │  ┌────────────────────────────────────────────┐  │  │ │
-│  │  │  │  Registered Plugins                        │  │  │ │
-│  │  │  │                                            │  │  │ │
-│  │  │  │  [Provider] [UI] [Feature] [Analytics]    │  │  │ │
-│  │  │  └────────────────────────────────────────────┘  │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │              Event Bus                           │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │            State Manager                         │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │             Plugin API                           │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
++---------------------------------------------------------------+
+|  Host application                                             |
+|    createPlayer(options) -> ScarlettPlayer                    |
+|    or the Vue wrapper (@scarlett-player/vue)                  |
+|    or the CDN embed (@scarlett-player/embed)                  |
++------------------------------+--------------------------------+
+                               |
++------------------------------v--------------------------------+
+|  @scarlett-player/core                                        |
+|                                                               |
+|   ScarlettPlayer    public API, lifecycle,                    |
+|                     provider selection, load                  |
+|                     generations                               |
+|                                                               |
+|   PluginManager     register / init / destroy,                |
+|                     plugin states, dependency                 |
+|                     order, canPlay() selection                |
+|                                                               |
+|   PluginAPI         what a plugin is handed in                |
+|                     init(api): state, events,                 |
+|                     container, scoped logger,                 |
+|                     cleanup registration                      |
+|                                                               |
+|   EventBus          typed pub/sub over                        |
+|                     PlayerEventMap, plus                      |
+|                     interceptors                              |
+|                                                               |
+|   StateManager      one Signal per state key,                 |
+|                     change subscribers,                       |
+|                     define() for plugin keys                  |
+|                                                               |
+|   ErrorHandler      classification, history,                  |
+|                     emission                                  |
+|                                                               |
+|   Logger            levelled, scoped per plugin               |
++------------------------------+--------------------------------+
+                               |
++------------------------------v--------------------------------+
+|  Plugins (one npm package each)                               |
+|   provider:  hls, native                                      |
+|   ui:        ui, audio-ui                                     |
+|   feature:   playlist, captions, chapters, gestures,          |
+|              share, watermark, media-session, airplay,        |
+|              chromecast                                       |
+|   analytics: analytics                                        |
++---------------------------------------------------------------+
 ```
 
-## Core Components
-
-### 1. ScarlettPlayer (Main Class)
-
-The main entry point that orchestrates all components.
-
-```typescript
-class ScarlettPlayer {
-  private pluginManager: PluginManager;
-  private eventBus: EventBus;
-  private stateManager: StateManager;
-  private container: HTMLElement;
-  private mediaElement: HTMLVideoElement | null = null;
-
-  constructor(
-    container: string | HTMLElement,
-    options: PlayerOptions
-  ) {
-    this.container = this.resolveContainer(container);
-    this.pluginManager = new PluginManager(this);
-    this.eventBus = new EventBus();
-    this.stateManager = new StateManager();
-
-    this.initialize(options);
-  }
-
-  private initialize(options: PlayerOptions): void {
-    // 1. Register plugins
-    options.plugins?.forEach(plugin => {
-      this.pluginManager.register(plugin);
-    });
-
-    // 2. Setup plugins
-    this.pluginManager.setupAll();
-
-    // 3. Load initial source if provided
-    if (options.src) {
-      this.loadSource(options.src);
-    }
-  }
-
-  // Public API
-  loadSource(src: string | SourceObject): Promise<void>;
-  play(): Promise<void>;
-  pause(): Promise<void>;
-  seek(time: number): void;
-  destroy(): void;
-
-  // Plugin API access
-  getPluginAPI(): PluginAPI;
-}
-```
-
-### 2. PluginManager
-
-Manages plugin lifecycle and orchestration.
-
-```typescript
-class PluginManager {
-  private plugins: Map<string, PluginInstance> = new Map();
-  private player: ScarlettPlayer;
-  private setupQueue: Plugin[] = [];
-
-  register(plugin: Plugin): void {
-    const instance: PluginInstance = {
-      plugin,
-      state: 'registered',
-      api: null
-    };
-
-    this.plugins.set(plugin.name, instance);
-  }
-
-  setupAll(): void {
-    for (const [name, instance] of this.plugins) {
-      this.setupPlugin(name, instance);
-    }
-  }
-
-  private setupPlugin(name: string, instance: PluginInstance): void {
-    try {
-      instance.state = 'setting-up';
-
-      // Create plugin-specific API
-      const api = this.createPluginAPI(name);
-      instance.api = api;
-
-      // Call plugin setup
-      instance.plugin.setup(api);
-
-      instance.state = 'active';
-    } catch (error) {
-      instance.state = 'error';
-      instance.error = error;
-      console.error(`Plugin ${name} failed to setup:`, error);
-    }
-  }
-
-  get<T = Plugin>(name: string): T | null {
-    const instance = this.plugins.get(name);
-    return instance ? (instance.plugin as T) : null;
-  }
-
-  has(name: string): boolean {
-    return this.plugins.has(name);
-  }
-
-  destroyAll(): void {
-    for (const [name, instance] of this.plugins) {
-      try {
-        instance.plugin.destroy?.();
-        instance.state = 'destroyed';
-      } catch (error) {
-        console.error(`Plugin ${name} cleanup error:`, error);
-      }
-    }
-    this.plugins.clear();
-  }
-}
-```
-
-### 3. EventBus
-
-Central event system for player-plugin and plugin-plugin communication.
-
-```typescript
-class EventBus {
-  private listeners: Map<string, Set<EventHandler>> = new Map();
-  private interceptors: Map<string, EventInterceptor[]> = new Map();
-
-  on(event: string, handler: EventHandler): UnsubscribeFn {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set());
-    }
-
-    this.listeners.get(event)!.add(handler);
-
-    // Return unsubscribe function
-    return () => this.off(event, handler);
-  }
-
-  off(event: string, handler: EventHandler): void {
-    this.listeners.get(event)?.delete(handler);
-  }
-
-  emit(event: string, data?: any): void {
-    // Run interceptors first
-    const interceptors = this.interceptors.get(event) || [];
-    let eventData = data;
-
-    for (const interceptor of interceptors) {
-      const result = interceptor(eventData);
-      if (result === false) return; // Cancel event
-      if (result !== undefined) eventData = result; // Transform data
-    }
-
-    // Emit to listeners
-    const handlers = this.listeners.get(event);
-    if (handlers) {
-      handlers.forEach(handler => {
-        try {
-          handler(eventData);
-        } catch (error) {
-          console.error(`Error in event handler for ${event}:`, error);
-        }
-      });
-    }
-  }
-
-  once(event: string, handler: EventHandler): UnsubscribeFn {
-    const wrappedHandler = (data: any) => {
-      handler(data);
-      this.off(event, wrappedHandler);
-    };
-    return this.on(event, wrappedHandler);
-  }
-
-  intercept(event: string, interceptor: EventInterceptor): void {
-    if (!this.interceptors.has(event)) {
-      this.interceptors.set(event, []);
-    }
-    this.interceptors.get(event)!.push(interceptor);
-  }
-
-  clear(): void {
-    this.listeners.clear();
-    this.interceptors.clear();
-  }
-}
-```
-
-### 4. StateManager
-
-Reactive state management using custom signals (~2KB).
-
-```typescript
-// Custom Signal Implementation
-class Signal<T> {
-  private value: T;
-  private subscribers = new Set<() => void>();
-
-  constructor(initialValue: T) {
-    this.value = initialValue;
-  }
-
-  get(): T {
-    // Track dependency if in effect context
-    if (currentEffect) {
-      this.subscribers.add(currentEffect);
-    }
-    return this.value;
-  }
-
-  set(newValue: T): void {
-    if (this.value === newValue) return;
-    this.value = newValue;
-    this.notify();
-  }
-
-  private notify(): void {
-    this.subscribers.forEach(effect => {
-      try {
-        effect();
-      } catch (error) {
-        console.error('Error in signal effect:', error);
-      }
-    });
-  }
-
-  subscribe(callback: () => void): UnsubscribeFn {
-    this.subscribers.add(callback);
-    return () => this.subscribers.delete(callback);
-  }
-}
-
-// Computed signals
-class Computed<T> {
-  private value: T | undefined;
-  private dirty = true;
-  private subscribers = new Set<() => void>();
-  private computation: () => T;
-
-  constructor(computation: () => T) {
-    this.computation = computation;
-  }
-
-  get(): T {
-    if (this.dirty) {
-      this.value = this.computation();
-      this.dirty = false;
-    }
-    if (currentEffect) {
-      this.subscribers.add(currentEffect);
-    }
-    return this.value!;
-  }
-
-  invalidate(): void {
-    this.dirty = true;
-    this.subscribers.forEach(effect => effect());
-  }
-}
-
-// Effect tracking
-let currentEffect: (() => void) | null = null;
-
-function effect(fn: () => void): UnsubscribeFn {
-  const execute = () => {
-    currentEffect = execute;
-    try {
-      fn();
-    } finally {
-      currentEffect = null;
-    }
-  };
-
-  execute(); // Run immediately
-
-  return () => {
-    // Cleanup logic
-  };
-}
-
-// StateManager using Signals
-class StateManager {
-  private signals: Map<string, Signal<any>> = new Map();
-
-  constructor() {
-    this.initializeSignals();
-  }
-
-  private initializeSignals(): void {
-    // Create signals for each state property
-    this.signal('playing', false);
-    this.signal('paused', true);
-    this.signal('ended', false);
-    this.signal('waiting', false);
-    this.signal('seeking', false);
-
-    this.signal('currentTime', 0);
-    this.signal('duration', 0);
-    this.signal('buffered', []);
-
-    this.signal('volume', 1);
-    this.signal('muted', false);
-
-    this.signal('src', null);
-    this.signal('currentSrc', null);
-
-    this.signal('mediaType', null);
-    this.signal('streamType', null);
-
-    this.signal('canPlay', false);
-    this.signal('canSeek', false);
-    this.signal('canSetVolume', true);
-
-    this.signal('fullscreen', false);
-    this.signal('pictureInPicture', false);
-
-    this.signal('provider', null);
-    this.signal('providerType', null);
-
-    // Live/DVR state
-    this.signal('live', false);              // Is live stream
-    this.signal('liveEdge', true);           // At live edge or in DVR
-    this.signal('seekableRange', null);      // DVR window { start, end }
-    this.signal('liveLatency', 0);           // Seconds behind live edge
-    this.signal('lowLatencyMode', false);    // LL-HLS/LL-DASH mode
-
-    // Chapters/Markers
-    this.signal('chapters', []);             // Chapter markers
-    this.signal('currentChapter', null);     // Active chapter
-  }
-
-  private signal<T>(key: string, initialValue: T): void {
-    this.signals.set(key, new Signal(initialValue));
-  }
-
-  get<T>(key: string): T {
-    return this.signals.get(key)?.get();
-  }
-
-  set<T>(key: string, value: T): void {
-    this.signals.get(key)?.set(value);
-  }
-
-  subscribe(key: string, callback: () => void): UnsubscribeFn {
-    return this.signals.get(key)?.subscribe(callback) || (() => {});
-  }
-
-  // Computed state example
-  computed<T>(computation: () => T): Computed<T> {
-    return new Computed(computation);
-  }
-}
-```
-
-### 5. PluginAPI
-
-The API surface exposed to plugins.
-
-```typescript
-class PluginAPIImpl implements PluginAPI {
-  private player: ScarlettPlayer;
-  private pluginName: string;
-  private eventBus: EventBus;
-  private stateManager: StateManager;
-
-  constructor(
-    player: ScarlettPlayer,
-    pluginName: string,
-    eventBus: EventBus,
-    stateManager: StateManager
-  ) {
-    this.player = player;
-    this.pluginName = pluginName;
-    this.eventBus = eventBus;
-    this.stateManager = stateManager;
-  }
-
-  // Player control
-  play(): Promise<void> {
-    return this.player.play();
-  }
-
-  pause(): Promise<void> {
-    return this.player.pause();
-  }
-
-  seek(time: number): void {
-    this.player.seek(time);
-  }
-
-  setVolume(volume: number): void {
-    this.player.setVolume(volume);
-  }
-
-  setMuted(muted: boolean): void {
-    this.player.setMuted(muted);
-  }
-
-  // State access
-  getState<K extends keyof StateStore>(key?: K): any {
-    return key ? this.stateManager.get(key) : this.stateManager.getAll();
-  }
-
-  setState<K extends keyof StateStore>(key: K, value: StateStore[K]): void {
-    this.stateManager.set(key, value);
-  }
-
-  subscribe<K extends keyof StateStore>(
-    key: K,
-    callback: StateSubscriber<StateStore[K]>
-  ): UnsubscribeFn {
-    return this.stateManager.subscribe(key, callback);
-  }
-
-  // Events
-  on(event: string, handler: EventHandler): UnsubscribeFn {
-    return this.eventBus.on(event, handler);
-  }
-
-  off(event: string, handler: EventHandler): void {
-    this.eventBus.off(event, handler);
-  }
-
-  once(event: string, handler: EventHandler): UnsubscribeFn {
-    return this.eventBus.once(event, handler);
-  }
-
-  emit(event: string, data?: any): void {
-    this.eventBus.emit(event, data);
-  }
-
-  intercept(event: string, interceptor: EventInterceptor): void {
-    this.eventBus.intercept(event, interceptor);
-  }
-
-  // Plugin communication
-  getPlugin<T = Plugin>(name: string): T | null {
-    return this.player.getPluginManager().get<T>(name);
-  }
-
-  hasPlugin(name: string): boolean {
-    return this.player.getPluginManager().has(name);
-  }
-
-  // DOM access
-  getContainer(): HTMLElement {
-    return this.player.getContainer();
-  }
-
-  getMediaElement(): HTMLMediaElement | null {
-    return this.player.getMediaElement();
-  }
-
-  createMediaElement(type: 'video' | 'audio'): HTMLMediaElement {
-    const element = document.createElement(type);
-    this.player.setMediaElement(element);
-    this.getContainer().appendChild(element);
-    return element;
-  }
-
-  // Utility
-  logger(): Logger {
-    return this.player.getLogger().child(this.pluginName);
-  }
-}
-```
-
-## Plugin Interface
-
-### Base Plugin Interface
-
-```typescript
-interface Plugin {
-  // Required
+Nothing outside the core layer is required: a host can build a player with a
+provider and nothing else. The three plugins that contribute control-bar
+controls (playlist, chapters, share) declare `@scarlett-player/ui` as an
+OPTIONAL peer and register their controls through a dynamic import, so they keep
+working when no UI package is installed.
+
+## Packages
+
+Seventeen packages, all published at one version by a fixed Changesets group.
+
+| Path | Package |
+|---|---|
+| `packages/core` | `@scarlett-player/core` |
+| `packages/vue` | `@scarlett-player/vue` |
+| `packages/embed` | `@scarlett-player/embed` |
+| `packages/plugins/hls` | `@scarlett-player/hls` |
+| `packages/plugins/native` | `@scarlett-player/native` |
+| `packages/plugins/ui` | `@scarlett-player/ui` |
+| `packages/plugins/audio-ui` | `@scarlett-player/audio-ui` |
+| `packages/plugins/playlist` | `@scarlett-player/playlist` |
+| `packages/plugins/captions` | `@scarlett-player/captions` |
+| `packages/plugins/chapters` | `@scarlett-player/chapters` |
+| `packages/plugins/gestures` | `@scarlett-player/gestures` |
+| `packages/plugins/share` | `@scarlett-player/share` |
+| `packages/plugins/watermark` | `@scarlett-player/watermark` |
+| `packages/plugins/media-session` | `@scarlett-player/media-session` |
+| `packages/plugins/airplay` | `@scarlett-player/airplay` |
+| `packages/plugins/chromecast` | `@scarlett-player/chromecast` |
+| `packages/plugins/analytics` | `@scarlett-player/analytics` |
+
+There is no React package and no presets package. `packages/plugins/*` also
+contains directories that hold no source; a name under `packages/plugins/`
+means a package only when it has a `package.json`.
+
+## Lifecycle
+
+### Construction
+
+`new ScarlettPlayer(options)` resolves the container (an `HTMLElement` or a CSS
+selector, throwing when neither resolves), builds the `EventBus`,
+`StateManager`, `Logger`, `ErrorHandler` and `PluginManager`, wires the three
+listeners that keep the `error` state key in sync (`error` sets it,
+`media:loaded` clears it, `media:error` is recorded through
+`ErrorHandler.record()` without flipping the state), and calls
+`PluginManager.register()` for each plugin in `options.plugins`.
+
+Registration is all the constructor does to plugins. No plugin's `init()` runs
+yet, and no source is loaded.
+
+### Initialisation
+
+`init()` and `load()` both go through the private `ensureInitialized()`, which
+is idempotent and safe to call re-entrantly. One pass (`runInitialization()`):
+
+1. Walk `PluginManager.getPluginIds()`. For every plugin that is not
+   `type: 'provider'` and is still in the `registered` state, call
+   `PluginManager.initPlugin()`. Plugins in any other state are skipped, so a
+   plugin added through `registerPlugin()` after start-up is picked up by the
+   next call and nothing is initialised twice.
+2. `wireLifecycleListeners()`, guarded by the private `listenersWired` flag so
+   the two listeners it installs exist exactly once no matter how many times
+   `load()` runs.
+3. Emit `player:ready`, guarded by the private `readyEmitted` flag so it is
+   emitted at the end of the FIRST pass only.
+
+`ensureInitialized()` returns the in-flight promise when a pass is already
+running. That matters because one of the listeners wired in step 2 calls
+`load()`, which calls `ensureInitialized()` again: without the shared promise,
+`initPlugin()` would find a plugin in the `initializing` state and throw
+"possible circular dependency".
+
+`init()` is `ensureInitialized()` followed by a `load()` of `options.src` when
+one was given. `createPlayer(options)` is `new ScarlettPlayer(options)` plus
+`await player.init()`, and is the documented entry point.
+
+`load()` calls `ensureInitialized()` before it selects a provider, so
+constructing a player and calling `load()` without `init()` produces a fully
+wired player rather than a provider with no UI, no error overlay and no working
+playlist. That shape was widely copied out of the READMEs, which is why the
+auto-initialisation exists.
+
+Two listeners are installed by `wireLifecycleListeners()`:
+
+- `media:load-request` (emitted by the playlist plugin, among others): loads the
+  requested source, then plays unless the payload says `autoplay: false`. It
+  returns early while Chromecast is active, because the Chromecast plugin owns
+  loading then.
+- `error:retry` (emitted by the UI error overlay's Try Again button): reloads
+  through the normal provider path, then restores position, live streams at the
+  live edge through `seekToLive()`, VOD at the previous `currentTime`.
+
+Both handlers re-check the destroyed flag after each await. They are unawaited
+async closures, so a read against a torn-down `StateManager` would surface as an
+unhandled rejection rather than a caught error.
+
+### `player:ready`
+
+Emitted once, at the end of the first initialisation pass. It used to be the
+constructor's last statement, where no consumer and no plugin could have
+subscribed yet, so no listener could ever observe it. A host that wants the
+event subscribes between construction and the first `init()`/`load()`; a host
+using `createPlayer()` has the returned promise as its readiness signal and does
+not need the event at all.
+
+### Loading a source
+
+`load(source)`:
+
+1. Increments `loadGeneration` and captures the value. Every post-await step
+   compares against it and bails when a newer `load()` (or a `destroy()`, which
+   also increments the counter) has started.
+2. Resets the playback state keys through `StateManager.update()` and clears
+   `error`.
+3. Destroys the previous provider through `PluginManager.destroyPlugin()`, which
+   returns it to the `registered` state so it can be initialised again later.
+4. `ensureInitialized()`.
+5. `PluginManager.selectProvider(source)`. No provider means
+   `ErrorHandler.throw(ErrorCode.PROVIDER_NOT_FOUND, ...)` and a return, not an
+   exception.
+6. `PluginManager.initPlugin()` for the selected provider only. Providers are
+   initialised lazily, per source; every other plugin was initialised in step 4.
+7. Writes `source` state (`src` plus the MIME type derived by the private
+   `detectMimeType()`), calls the provider's `loadSource()`, and plays when the
+   `autoplay` state key is set.
+
+Failures inside `load()` are reported, never thrown at the caller: when the
+error state is already populated (a provider that emitted a structured fatal
+error of its own) the catch only logs, so a specific code is not overwritten by
+a generic one.
+
+### Destruction
+
+`destroy()` increments `loadGeneration` so in-flight loads self-cancel through
+the mechanism `load()` already trusts, clears the pending seek-resume timeout,
+emits `player:destroy`, then `PluginManager.destroyAll()`, `EventBus.destroy()`
+and `StateManager.destroy()`. Every public method calls the private
+`checkDestroyed()` first and throws on a destroyed player. The state getters do
+not: they read through `StateManager`, which raises its own destroyed-specific
+error rather than the misleading unknown-key one.
+
+## PluginManager
+
+`register(plugin, config?)` validates the plugin (`id`, `name`, `version`,
+`type`, `init`, `destroy` all present and of the right kind), rejects a
+duplicate `id`, builds that plugin's `PluginAPI`, stores the record in the
+`registered` state and emits `plugin:registered`.
+
+`PluginState` is `registered`, `initializing`, `ready`, `error` or `destroyed`.
+`initPlugin(id)` returns immediately when the plugin is already `ready`, throws
+when it is `initializing` (the circular-dependency guard), initialises any
+entries in the plugin's `dependencies` array first, subscribes the plugin's
+optional `onStateChange` and `onError` hooks (unsubscribing them through
+`api.onDestroy()`), then awaits `plugin.init(api, config)`. Success emits
+`plugin:active`; a throw sets the `error` state, emits `plugin:error` and
+rethrows.
+
+`destroyPlugin(id)` awaits `plugin.destroy()`, runs the API's registered cleanup
+functions and resets the record to `registered` so the plugin can be
+initialised again. `initAll()` and `destroyAll()` walk
+`resolveDependencyOrder()`, a topological sort that throws
+`Circular dependency detected` with the cycle path; `destroyAll()` walks it in
+reverse.
+
+`getPlugin(id)` returns any registered plugin. `getReadyPlugin(id)` returns it
+only when it is `ready`, and is what `IPluginAPI.getPlugin()` is wired to, so a
+plugin can never reach another plugin that has not finished initialising.
+
+### Provider selection
+
+`selectProvider(source)` takes the plugins with `type: 'provider'` in
+registration order and returns the first whose `canPlay(source)` returns true.
+There is no priority table and no scoring: registration order is the priority,
+so a host that wants HLS to win registers `createHLSPlugin()` before
+`createNativePlugin()`.
+
+- `@scarlett-player/hls`: `canPlay()` requires hls.js support or native HLS, and
+  a source whose path ends in `.m3u8` or whose URL carries an mpegurl MIME hint.
+- `@scarlett-player/native`: `canPlay()` requires a known extension and a
+  positive `HTMLMediaElement.canPlayType()` answer for the mapped MIME type.
+
+A source no provider accepts produces `ErrorCode.PROVIDER_NOT_FOUND`.
+
+## Plugin interface
+
+```ts
+interface Plugin<TConfig extends PluginConfig = PluginConfig> {
+  readonly id: string;
   readonly name: string;
   readonly version: string;
   readonly type: PluginType;
+  readonly description?: string;
+  readonly dependencies?: string[];
 
-  // Lifecycle
-  setup(api: PluginAPI): void;
-  destroy?(): void;
+  init(api: IPluginAPI, config?: TConfig): void | Promise<void>;
+  destroy(): void | Promise<void>;
+
+  onStateChange?(event: StateChangeEvent): void;
+  onError?(error: Error): void;
 }
 
-type PluginType =
-  | 'provider'      // Media playback (HLS, DASH, native, etc.)
-  | 'ui'            // User interface components
-  | 'feature'       // Features (fullscreen, PiP, etc.)
-  | 'analytics'     // Analytics and tracking
-  | 'utility';      // Utility plugins
-
+type PluginType = 'provider' | 'ui' | 'feature' | 'analytics' | 'utility';
 ```
 
-### Provider Plugin Interface
+The lifecycle hook is `init(api)`. There is no `setup()`, and `destroy()` is
+required, not optional.
 
-```typescript
-interface ProviderPlugin extends Plugin {
-  type: 'provider';
+A provider adds `canPlay(src: string): boolean` and
+`loadSource(src: string): Promise<void>`; `ScarlettPlayer` calls both by duck
+typing rather than through a separate interface, and proxies `getLevels()`,
+`setLevel()`, `getCurrentLevel()` and `getLiveInfo()` the same way, so a
+provider that implements none of them still works.
 
-  // Provider-specific
-  canHandle(src: string | SourceObject): boolean;
-  loadSource(src: SourceObject, api: PluginAPI): Promise<void>;
+Plugins expose an imperative API by hanging methods off the same object
+(`@scarlett-player/playlist` is the example: `add()`, `play()`, `next()`,
+`previous()`), which a host reaches through `player.getPlugin(id)`.
 
-  // Playback control
-  play?(api: PluginAPI): Promise<void>;
-  pause?(api: PluginAPI): Promise<void>;
-  seek?(time: number, api: PluginAPI): void;
-  setVolume?(volume: number, api: PluginAPI): void;
-  setMuted?(muted: boolean, api: PluginAPI): void;
-  setPlaybackRate?(rate: number, api: PluginAPI): void;
+`PluginFactory` is the exported type for the `createXPlugin(config?)` factory
+functions every package ships.
 
-  // Capabilities
-  readonly capabilities?: ProviderCapabilities;
-}
+## IPluginAPI
 
-interface ProviderCapabilities {
-  canSeek: boolean;
-  canSetVolume: boolean;
-  canSetPlaybackRate: boolean;
-  canChangeQuality: boolean;
-  supportsFullscreen: boolean;
-  supportsPictureInPicture: boolean;
-  supportsTextTracks: boolean;
-}
+The whole surface a plugin is handed. `PluginAPI` in
+`packages/core/src/plugin-api.ts` is the implementation; the interface lives in
+`packages/core/src/types/plugin.ts`.
+
+| Member | Purpose |
+|---|---|
+| `pluginId` | The plugin's own id |
+| `container` | The player container element |
+| `logger` | `debug`/`info`/`warn`/`error`, prefixed with the plugin id |
+| `getState(key)` | Read one state key, typed by `StateValue<K>` |
+| `setState(key, value)` | Write one state key |
+| `defineState(key, initialValue)` | Register a key this plugin owns, before first use |
+| `on(event, handler)` | Subscribe; returns an unsubscribe function |
+| `off(event, handler)` | Unsubscribe |
+| `emit(event, payload)` | Emit a typed event |
+| `getPlugin(id)` | Another plugin, only if it is `ready` |
+| `onDestroy(cleanup)` | Register a cleanup function |
+| `subscribeToState(callback)` | Every state change, as a `StateChangeEvent` |
+
+There is no `play()`, `pause()` or `seek()` on the API: a plugin drives playback
+by emitting `playback:play`, `playback:pause` or `playback:seeking`, which the
+active provider is subscribed to. That keeps plugins independent of which
+provider is loaded.
+
+`runCleanups()` and `getCleanupFns()` exist on the concrete `PluginAPI` for
+`PluginManager` to call; they are marked `@internal` and are not part of
+`IPluginAPI`.
+
+## State
+
+`StateManager` holds one `Signal` per key. `DEFAULT_STATE` supplies the initial
+values and is typed against `CoreStateStore`, not `StateStore`:
+
+- `CoreStateStore` is the closed set of keys core owns, so `DEFAULT_STATE` can
+  be exhaustive over exactly those keys.
+- `StateStore extends CoreStateStore` and is open. A plugin adds the state it
+  owns by declaration merging into `StateStore`, so augmenting it cannot break
+  core's own compilation with a "missing properties" error.
+
+At runtime the store is closed too: `get()` throws `Unknown state key` for a key
+nobody registered, which is a deliberate typo-catcher. A plugin therefore calls
+`api.defineState(key, initialValue)` in `init()` before first use. `define()` is
+idempotent: re-defining an existing key keeps the current value, because plugins
+re-run setup after a source change and that must not wipe live state. The
+initial value is remembered in `definedDefaults` so `reset()` and `resetKey()`
+work on plugin keys, which have no entry in `DEFAULT_STATE`.
+
+Reads and writes: `get(key)` (the `Signal`), `getValue(key)`, `set(key, value)`,
+`update(partial)`, `snapshot()` (a frozen `StateStore`), `reset()`,
+`resetKey(key)`. Subscriptions: `subscribeToKey(key, cb)` for one key,
+`subscribe(cb)` for every change. `ScarlettPlayer.getState()` returns
+`snapshot()`.
+
+After `destroy()`, `get()` throws a destroyed-specific message rather than the
+unknown-key one. Returning last-known values instead was considered and
+rejected: it masks the lifecycle bugs the throw exposes.
+
+The signal primitives (`Signal`, `signal`, `Computed`, `computed`, `effect`, and
+the `currentEffect` tracking helpers) are exported from core for consumers that
+want them directly.
+
+## Events
+
+`PlayerEventMap` is the single typed map of event name to payload; `EventName`,
+`EventPayload<T>` and `EventHandler<T>` derive from it. Like `StateStore`, it is
+an interface, so a plugin adds its own events by declaration merging without a
+core change.
+
+Core owns these namespaces: `player:`, `playback:`, `media:`, `volume:`,
+`quality:`, `track:`, `fullscreen:`, `pip:`, `airplay:`, `chromecast:`, `live:`,
+`chapter:`, `gesture:`, `controls:`, `ui:`, `state:`, `plugin:`, `error:` and
+`playlist:`, plus the single unnamespaced `error`. A plugin namespaces its own
+events with its plugin id.
+
+`EventBus` provides `on`, `once`, `off`, `emit`, `emitAsync`, `intercept`,
+`removeAllListeners`, `listenerCount` and `destroy`. A handler that throws is
+caught and logged, so one bad listener cannot stop the others. An
+`EventInterceptor` runs before the handlers and can rewrite the payload or
+cancel the event by returning `null`; interceptors are enabled by default and
+can be turned off through `EventEmitterOptions`.
+
+## Error and reconnect model
+
+`ErrorHandler` normalises anything thrown into a `PlayerError`
+(`code`, `message`, `fatal`, `timestamp`, optional `context`, `originalError`
+and `detail`), keeps a bounded history (ten entries by default), logs it at
+error level when fatal and warn level otherwise, and emits `error`.
+
+- `handle(error, context)` does all of that.
+- `record(error, context)` does everything except emit, for advisory channels:
+  media element errors go through it so they are visible in `getHistory()`
+  without flipping the error state that the retry flow reads.
+- `throw(code, message, options)` builds a `PlayerError` from an `ErrorCode` and
+  handles it. It does not throw a JavaScript exception.
+
+`ErrorCode` covers source loading (`SOURCE_NOT_SUPPORTED`,
+`SOURCE_LOAD_FAILED`), providers (`PROVIDER_NOT_FOUND`,
+`PROVIDER_SETUP_FAILED`), plugins (`PLUGIN_SETUP_FAILED`, `PLUGIN_NOT_FOUND`),
+playback and media (`PLAYBACK_FAILED`, `MEDIA_DECODE_ERROR`,
+`MEDIA_NETWORK_ERROR`, `MEDIA_APPEND_ERROR`, `MEDIA_BUFFER_FULL`,
+`PLAYLIST_INVALID`) and `UNKNOWN_ERROR`. `SOURCE_NOT_SUPPORTED`,
+`PROVIDER_NOT_FOUND` and `MEDIA_DECODE_ERROR` are classified fatal by default.
+
+Providers attach diagnostics through `PlayerErrorDetail`: `type`,
+`retriesExhausted`, `attempts`, `reconnectExhausted`, `httpStatus` and `url`.
+`url` must be sanitised by the provider before it is set. The HLS plugin does
+that with its exported `sanitizeUrl()`, which strips the query string and the
+fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
+so a consumer whose playback URLs carry a credential in the path scrubs the path
+on its own side before forwarding the value to telemetry.
+
+Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
+
+- Bounded retries first, with jittered exponential backoff:
+  `maxNetworkRetries` (default 3) and `maxMediaRetries` (default 2). Both
+  budgets apply on the hls.js branch and, through `handleNativeFatalError()`, on
+  the native Safari branch, where recovery means reloading the source and
+  restoring the position captured at the first failure. The budgets reset once
+  media flows again, so a long event's transient blips never accumulate.
+- `emitFatalError()` emits the fatal `error` and then calls
+  `maybeScheduleReconnect()`, which hands over to the auto-reconnect scheduler
+  only when playback had already started and the failure was a network or media
+  one. `scheduleReconnectAttempt()` emits `error:reconnecting`
+  (`{ attempt, delayMs, elapsedMs?, windowMs? }`) and `attemptReconnect()`
+  rebuilds the pipeline, resuming VOD at the previous position and rejoining
+  live at the edge.
+- Giving up is decided by a TIME WINDOW (`reconnectWindowMs`, default 300000ms),
+  not by an attempt count, which is why the payload reports
+  `elapsedMs`/`windowMs` and there is no `maxAttempts` to render against.
+- `emitReconnectExhausted()` closes the cycle exactly once, behind a latch that
+  `cancelReconnect()` clears: it emits `error:reconnect-exhausted`
+  (`{ attempts, elapsedMs, windowMs }`) and then a final fatal `error` carrying
+  `detail.reconnectExhausted`. The final error deliberately does not go through
+  `emitFatalError()`, which would re-enter the scheduler.
+
+The ordering guarantee a UI can rely on: one or more `error:reconnecting`, then
+exactly one of `error:recovered` or `error:reconnect-exhausted`. A consumer that
+shows a reconnecting state on the first can take it down on either terminator
+and will never be stranded.
+
+The UI plugin's `ErrorOverlay` renders viewer-facing copy per `ErrorCode`, shows
+the reconnecting state while the provider self-heals, and emits `error:retry`
+when Try Again is pressed, which core's own listener turns back into a `load()`.
+
+## Data flow
+
+```
+host call or user gesture
+        |
+        v
+ScarlettPlayer method  ->  EventBus.emit(...)
+        |                        |
+        |                        v
+        |                 interceptors (may rewrite or cancel)
+        |                        |
+        |                        v
+        |                 plugin handlers, provider handlers
+        v                        |
+StateManager.set/update  <-------+
+        |
+        v
+signal subscribers  ->  StateManager change subscribers
+        |                        |
+        v                        v
+   plugin.onStateChange     api.subscribeToState(...)
+        |
+        v
+   UI controls redraw
 ```
 
-### UI Plugin Interface
+Playback state is written by the provider from real media element events, not
+optimistically by the player: `play()` emits `playback:play` and lets the
+provider report what actually happened, because setting `playing: true` up front
+caused state to drift from the element.
 
-```typescript
-interface UIPlugin extends Plugin {
-  type: 'ui';
+## Build and distribution
 
-  // UI-specific
-  render?(container: HTMLElement, api: PluginAPI): void;
-  update?(api: PluginAPI): void;
-  hide?(): void;
-  show?(): void;
-}
-```
+- `@scarlett-player/core`, `@scarlett-player/vue` and `@scarlett-player/embed`
+  build with Vite; every plugin builds with tsup and emits its own declarations
+  through `--dts`. Core's build runs `tsc` first and Vite second into the same
+  `dist`, which is why emptying that directory is wrong for it.
+- Every package restricts `files` to its build output, so nothing but `dist`
+  is published (embed also ships its `iframe.html`).
+- hls.js is loaded lazily by `loadHlsJs()` through a dynamic `import`, so a page
+  that never plays HLS never fetches it. `@scarlett-player/hls/light` is a second
+  entry over the same factory (`src/create-hls-plugin.ts`) built on hls.js/light:
+  no subtitles, no ID3, no DRM.
+- The playlist plugin registers its control-bar controls through
+  `void import('@scarlett-player/ui')` and logs and continues when the UI package
+  is absent, which is what makes it work headless.
+- Versioning is Changesets in fixed mode: all seventeen packages share one
+  version number.
 
-## Standard Events
+## Testing
 
-### Playback Events
-```typescript
-'play'              // Playback started
-'pause'             // Playback paused
-'ended'             // Playback ended
-'seeking'           // Seeking started
-'seeked'            // Seeking completed
-'waiting'           // Buffering
-'playing'           // Playback resumed after buffering
-'timeupdate'        // Current time changed
-'durationchange'    // Duration changed
-'volumechange'      // Volume or muted changed
-'ratechange'        // Playback rate changed
-```
+- Vitest per package, with jsdom. `pnpm test` fans out over the workspace.
+- Typechecking is a separate gate: vitest transpiles without type-checking, so a
+  test that exercises a type contract proves nothing unless `tsc` also sees the
+  file. Every build `tsconfig.json` scopes the program to `src`, so several
+  packages carry a `tsconfig.typecheck.json` that adds the type-contract tests
+  back in; core's copy documents the trap that `exclude` is inherited from the
+  extended config and filters `include`, so it has to be restated.
+  `scripts/check-package-scripts.mjs` fails the build when a workspace package
+  declares no `typecheck` or `test` script, which is how the gap that left ten
+  packages silently unchecked is kept closed.
+- `scripts/verify-browser.mjs` drives the built demo in a real headless Chrome
+  through Playwright, covering what jsdom cannot: manifest failures, a
+  mid-playback outage and automatic recovery, destroy-mid-append races against a
+  locally generated HLS fixture, malformed live playlist refreshes, and the shape
+  of the `window.ScarlettPlayer` global the CDN embed publishes.
 
-### Loading Events
-```typescript
-'loadstart'         // Source loading started
-'loadedmetadata'    // Metadata loaded
-'loadeddata'        // First frame loaded
-'canplay'           // Can start playing
-'canplaythrough'    // Can play without buffering
-'progress'          // Download progress
-'error'             // Error occurred
-```
+## Browser support
 
-### Source Events
-```typescript
-'sourcechange'      // Source changed
-'providerchange'    // Provider plugin changed
-'qualitychange'     // Quality changed
-```
+Chrome and Edge 80+, Firefox 78+, Safari 14+, iOS Safari 14+, Android Chrome
+90+. The same list is in the root README; keep the two in step.
 
-### UI Events
-```typescript
-'fullscreenchange'  // Fullscreen state changed
-'pipchange'         // Picture-in-picture state changed
-'controlschange'    // Controls visibility changed
-```
+## See also
 
-### Custom Events (plugin-defined)
-Plugins can emit custom events with namespace:
-```typescript
-'hls:manifestParsed'
-'dash:streamInitialized'
-'cast:sessionStarted'
-'analytics:eventTracked'
-```
-
-## Provider Plugin Priority
-
-When multiple provider plugins can handle a source:
-
-```typescript
-class ProviderSelector {
-  selectProvider(
-    src: SourceObject,
-    providers: ProviderPlugin[]
-  ): ProviderPlugin | null {
-    // 1. Check explicit type hint
-    if (src.type) {
-      const provider = providers.find(p =>
-        p.canHandle({ ...src, type: src.type })
-      );
-      if (provider) return provider;
-    }
-
-    // 2. Check all providers
-    const candidates = providers.filter(p => p.canHandle(src));
-
-    if (candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
-
-    // 3. Use priority order (configurable)
-    return this.selectByPriority(candidates);
-  }
-}
-```
-
-**Default Priority**:
-1. HLS provider (for .m3u8)
-2. DASH provider (for .mpd)
-3. Native provider (for everything else)
-
-## State Flow
-
-```
-User Action -> Player Method -> Event Emitted
-                                    ↓
-                        Plugin Intercept (optional)
-                                    ↓
-                         Plugins React via Listeners
-                                    ↓
-                         State Manager Updated
-                                    ↓
-                    State Subscribers Notified
-                                    ↓
-                         UI Updates
-```
-
-## Error Handling
-
-```typescript
-class ErrorHandler {
-  private eventBus: EventBus;
-  private errors: PlayerError[] = [];
-
-  handleError(error: Error, context: ErrorContext): void {
-    const playerError: PlayerError = {
-      code: this.getErrorCode(error),
-      message: error.message,
-      fatal: this.isFatal(error),
-      context,
-      timestamp: Date.now()
-    };
-
-    this.errors.push(playerError);
-
-    // Emit error event
-    this.eventBus.emit('error', playerError);
-
-    // Log to console in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error('[Scarlett Player]', playerError);
-    }
-  }
-
-  getLastError(): PlayerError | null {
-    return this.errors[this.errors.length - 1] || null;
-  }
-
-  clearErrors(): void {
-    this.errors = [];
-  }
-}
-```
-
-## Performance Considerations
-
-### Bundle Size Targets
-- **Core**: < 50KB gzipped
-- **Provider plugins**: < 20KB each (excluding external libs)
-- **UI plugins**: < 15KB each
-- **Feature plugins**: < 10KB each
-
-### Optimization Strategies
-1. **Tree-shaking**: ESM modules, no side effects
-2. **Code splitting**: Lazy load plugins
-3. **External dependencies**: HLS.js, DASH.js as peer deps
-4. **Minification**: Terser for production builds
-5. **Compression**: Brotli + gzip
-
-### Runtime Performance
-- Event handler debouncing for high-frequency events
-- State updates batched when possible
-- DOM updates minimized
-- RequestAnimationFrame for smooth UI
-
-## Browser Support
-
-### Targets
-- Chrome/Edge 90+
-- Firefox 88+
-- Safari 14+
-- iOS Safari 14+
-- Android Chrome 90+
-
-### Polyfills
-None required for core. Plugins may require:
-- HLS.js for HLS support (non-Safari)
-- DASH.js for DASH support
-- Cast SDK for Chromecast
-
-## Security Considerations
-
-### Content Security Policy
-```
-script-src: Required for plugin loading
-media-src: Required for media sources
-connect-src: Required for HLS/DASH manifests
-frame-src: Required for YouTube/Vimeo embeds
-```
-
-### XSS Prevention
-- No innerHTML for user content
-- Sanitize all URLs
-- Validate plugin configuration
-
-### CORS
-- HLS/DASH manifests must allow CORS
-- Subtitle files must allow CORS
-- Thumbnail images must allow CORS
-
-## Testing Strategy
-
-### Core Tests
-- Unit tests for all core classes
-- Integration tests for plugin system
-- Event system tests
-- State management tests
-
-### Plugin Tests
-- Each plugin has its own test suite
-- Provider plugins tested with mock media
-- UI plugins tested with DOM snapshots
-- Feature plugins integration tested
-
-### E2E Tests
-- Playwright for browser testing
-- Real media playback tests
-- Framework adapter tests
-- Accessibility tests
-
----
-
-**Next**: See `plugin-api.md` for detailed plugin development guide.
+- `docs/plugin-authoring.md` - writing a plugin: events, state and controls
+- `docs/contributing.md` - code standards, testing and review conventions
+- `README.md` - installation, quick starts and the package table

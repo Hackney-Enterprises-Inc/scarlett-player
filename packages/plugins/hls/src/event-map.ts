@@ -252,10 +252,35 @@ export function setupVideoEventHandlers(
     handlers.push({ event, handler });
   };
 
+  /**
+   * Mirror the element's own `ended` flag back onto the `ended` state key.
+   *
+   * `HTMLMediaElement.ended` is derived from the playback position, so it goes
+   * false the moment the position leaves the end of the media: `play()` on an
+   * ended element seeks to the earliest position before the `play` event is
+   * fired, and a scrub back from the end flips it while still paused. The
+   * state key is not derived. Until 2026-09-02 the only writer that cleared it
+   * was `ScarlettPlayer.load()`, so after one replay it stayed true for the
+   * rest of the session and the control bar's play button kept the Replay
+   * glyph over playing video (the reason `BigPlayButton` reads `video.ended`
+   * instead of the key).
+   *
+   * Called from `play`, `playing` and `seeking`: the three events that can
+   * carry the position away from the end. The element is asked rather than
+   * assumed, so a seek that lands ON the end leaves the key alone; setting it
+   * true stays the `ended` handler's job.
+   */
+  const syncEndedFromElement = (): void => {
+    if (!video.ended) {
+      api.setState('ended', false);
+    }
+  };
+
   // Playback events
   // 'play' fires immediately when video.play() is called
   addHandler('play', () => {
     api.setState('paused', false);
+    syncEndedFromElement();
   });
 
   // 'playing' fires when playback actually starts (after buffering)
@@ -265,6 +290,7 @@ export function setupVideoEventHandlers(
     api.setState('waiting', false);
     api.setState('buffering', false);
     api.setState('playbackState', 'playing');
+    syncEndedFromElement();
   });
 
   addHandler('pause', () => {
@@ -335,6 +361,9 @@ export function setupVideoEventHandlers(
   // Seeking - only emit state update, not playback:seeking (which would cause a loop)
   addHandler('seeking', () => {
     api.setState('seeking', true);
+    // A scrub back from the end never fires play or playing while paused, so
+    // this is the only place the key can be cleared for a paused viewer.
+    syncEndedFromElement();
   });
 
   addHandler('seeked', () => {

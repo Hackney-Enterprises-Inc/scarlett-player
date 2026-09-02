@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { uiPlugin } from '../src/index';
 import type { IPluginAPI } from '@scarlett-player/core';
+import { PKG_VERSION } from '../src/version';
 
 /**
  * Create a mock plugin API
@@ -31,6 +32,8 @@ function createMockApi(): IPluginAPI {
     airplayActive: false,
     buffered: null,
     seekableRange: null,
+    playbackState: 'idle',
+    error: null,
   };
 
   const container = document.createElement('div');
@@ -84,7 +87,7 @@ describe('UI Plugin', () => {
       expect(plugin.id).toBe('ui-controls');
       expect(plugin.name).toBe('UI Controls');
       expect(plugin.type).toBe('ui');
-      expect(plugin.version).toBe('1.0.0');
+      expect(plugin.version).toBe(PKG_VERSION);
     });
 
     it('should inject styles on init', async () => {
@@ -434,6 +437,175 @@ describe('UI Plugin', () => {
       await plugin.destroy();
 
       expect(() => container.dispatchEvent(pointer('pointermove', 'mouse'))).not.toThrow();
+    });
+  });
+  // The big play button is the only play affordance on the picture itself: a
+  // mouse click on the video surface only reveals the control bar, and touch
+  // taps belong to the gestures plugin. Before it existed a poster had no
+  // visible way to start playback except the small button in the bar.
+  describe('big play button', () => {
+    /** The plugin's state subscriber, captured so a change can be pushed in. */
+    let notify: (() => void) | null;
+    /** Frame callbacks the plugin has queued but not yet run. */
+    let frames: Array<(t: number) => void>;
+
+    const button = (): HTMLElement | null =>
+      api.container.querySelector('.sp-big-play');
+
+    const isVisible = (): boolean =>
+      button()?.classList.contains('sp-big-play--visible') ?? false;
+
+    /**
+     * Run the queued frame.
+     *
+     * Deliberately not a synchronous requestAnimationFrame stub: the plugin
+     * assigns the handle AFTER the call returns, so a stub that ran the
+     * callback inline would leave the handle set forever and every later
+     * update would be dropped as already scheduled.
+     */
+    const flushFrame = (): void => {
+      const queued = frames;
+      frames = [];
+      queued.forEach((cb) => cb(0));
+    };
+
+    /** Push a state change through the plugin's own scheduleUpdate() pass. */
+    const setState = (key: string, value: unknown): void => {
+      api.setState(key as never, value as never);
+      notify?.();
+      flushFrame();
+    };
+
+    beforeEach(() => {
+      notify = null;
+      frames = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+      (api.subscribeToState as any).mockImplementation((cb: () => void) => {
+        notify = cb;
+        return vi.fn();
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('renders the button by default', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      expect(button()).not.toBeNull();
+      expect(button()?.tagName).toBe('BUTTON');
+      expect(button()?.getAttribute('aria-label')).toBe('Play');
+
+      await plugin.destroy();
+    });
+
+    it('does not render the button when bigPlayButton is false', async () => {
+      const plugin = uiPlugin({ bigPlayButton: false });
+      await plugin.init(api);
+
+      expect(button()).toBeNull();
+
+      await plugin.destroy();
+    });
+
+    it('is visible before playback starts', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      expect(isVisible()).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('hides once playback starts', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('playing', true);
+
+      expect(isVisible()).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('hides while an error is set', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+
+      expect(isVisible()).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('comes back as Replay when playback ends', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('playing', true);
+      // The control reads video.ended, not the `ended` state key: neither
+      // provider clears that key on a replay, so it stays true for the rest
+      // of the session (measured in Chrome, 2026-09-02).
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'ended', { value: true, configurable: true });
+      setState('playing', false);
+      setState('currentTime', 120);
+      setState('ended', true);
+
+      expect(isVisible()).toBe(true);
+      expect(button()?.getAttribute('aria-label')).toBe('Replay');
+
+      await plugin.destroy();
+    });
+
+    it('hides again once a replay is under way', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      setState('playing', true);
+      Object.defineProperty(video, 'ended', { value: true, configurable: true });
+      setState('playing', false);
+      setState('ended', true);
+      expect(isVisible()).toBe(true);
+
+      // Replay: the element leaves the end, the state key does not.
+      Object.defineProperty(video, 'ended', { value: false, configurable: true });
+      setState('playing', true);
+
+      expect(isVisible()).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('starts playback when clicked', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      video.play = vi.fn(() => Promise.resolve());
+
+      button()?.click();
+
+      expect(video.play).toHaveBeenCalled();
+
+      await plugin.destroy();
+    });
+
+    it('removes the button on destroy', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      await plugin.destroy();
+
+      expect(button()).toBeNull();
     });
   });
 });

@@ -97,20 +97,52 @@ upload() {
     --only-show-errors
 }
 
-# Full build (default, includes everything)
-upload "${DIST}/embed.js" "embed.js"
-upload "${DIST}/embed.umd.cjs" "embed.umd.cjs"
+# Every bundle, chunk and stylesheet the build produced, by glob.
+#
+# This used to be a hand-written list of six bundles plus hls.js. Rollup emits
+# a chunk per lazily imported module, so the audio build has always produced a
+# SECOND chunk (the @scarlett-player/ui control registry the playlist plugin
+# pulls in through a dynamic import), which the list did not name. It was named
+# hls2.js by the old fixed chunkFileNames and never uploaded, so embed.audio.js
+# on the CDN imported a URL that 404s. That shipped from the v1.6.0 release on
+# 2026-08-11, the first release containing the dynamic import (commit 55cf252),
+# and was still reproducible on 2026-09-02 against v1.6.0, v1.7.0 and latest.
+# The playlist plugin catches the failed import and logs, so the audio embed
+# lost its prev/next controls in silence. The chunk is now named
+# embed.audio.index.js and this glob picks it up.
+#
+# A hand list can only ever describe the build that existed when it was
+# written. The glob describes the build that just ran, and
+# scripts/check-embed-chunks.mjs proves the set is internally complete before
+# anything is uploaded.
+#
+# Source maps stay off the CDN, as before. The .map files are 2 MB and up, they
+# are shipped in the npm tarball for anyone who wants them, and nothing on the
+# CDN references them.
+uploaded=0
+for src in "${DIST}"/*.js "${DIST}"/*.cjs "${DIST}"/*.css; do
+  [ -e "$src" ] || continue
 
-# Video-only build (lightweight)
-upload "${DIST}/embed.video.js" "embed.video.js"
-upload "${DIST}/embed.video.umd.cjs" "embed.video.umd.cjs"
+  name="$(basename "$src")"
 
-# Audio-only build
-upload "${DIST}/embed.audio.js" "embed.audio.js"
-upload "${DIST}/embed.audio.umd.cjs" "embed.audio.umd.cjs"
+  # Source maps are excluded by the globs themselves: embed.js.map ends in
+  # .map, not .js, so it is never matched.
+  case "$name" in
+    *.css) content_type="text/css" ;;
+    *) content_type="application/javascript" ;;
+  esac
 
-# HLS chunk (dynamically loaded by the ESM builds)
-upload "${DIST}/hls.js" "hls.js"
+  upload "$src" "$name" "$content_type"
+  uploaded=$((uploaded + 1))
+done
+
+# A glob that matches nothing expands to itself, and `[ -e ]` then skips every
+# iteration. Without this the script would report a cheerful success having
+# uploaded nothing at all.
+if [ "$uploaded" -eq 0 ]; then
+  echo "Error: no .js, .cjs or .css files in ${DIST}. Run 'pnpm run build' first." >&2
+  exit 1
+fi
 
 # iframe embed page
 upload "packages/embed/iframe.html" "iframe.html" "text/html"

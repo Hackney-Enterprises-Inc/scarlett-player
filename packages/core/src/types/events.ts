@@ -23,7 +23,14 @@ export interface PlaylistTrack {
  */
 export interface PlayerEventMap {
   // === Lifecycle Events ===
-  /** Player is ready (initialized) */
+  /**
+   * Player is ready: emitted once, at the end of the first initialisation
+   * (the first `init()` or the first `load()`), never again.
+   *
+   * Subscribe before calling `init()` or `load()`. It used to be emitted as
+   * the constructor's last statement, where no consumer or plugin could have
+   * subscribed yet, so no listener could ever observe it.
+   */
   'player:ready': void;
 
   /** Player is being destroyed */

@@ -6,23 +6,32 @@
  * plus the jsdom media stubs and a mock IPluginAPI.
  */
 
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 import type { IPluginAPI } from '@scarlett-player/core';
 
 export type HlsEventHandler = (...args: unknown[]) => void;
 
-/** A mock hls.js instance plus its captured event handlers. */
+/**
+ * A mock hls.js instance plus its captured event handlers.
+ *
+ * The members are typed `Mock` rather than `ReturnType<typeof vi.fn>`: the
+ * latter resolves to `vi.fn`'s implementation overload, `Mock<any[], unknown>`,
+ * and a mock created with a typed implementation (`on` below) is not assignable
+ * to it, because `withImplementation` puts the argument tuple in a contravariant
+ * position. Bare `Mock` is `Mock<any, any>`, which accepts every shape while
+ * still exposing `.mock`, `.mockImplementation` and friends to the suites.
+ */
 export interface CapturedHls {
   instance: {
-    loadSource: ReturnType<typeof vi.fn>;
-    attachMedia: ReturnType<typeof vi.fn>;
-    detachMedia: ReturnType<typeof vi.fn>;
-    startLoad: ReturnType<typeof vi.fn>;
-    stopLoad: ReturnType<typeof vi.fn>;
-    recoverMediaError: ReturnType<typeof vi.fn>;
-    destroy: ReturnType<typeof vi.fn>;
-    on: ReturnType<typeof vi.fn>;
-    off: ReturnType<typeof vi.fn>;
+    loadSource: Mock;
+    attachMedia: Mock;
+    detachMedia: Mock;
+    startLoad: Mock;
+    stopLoad: Mock;
+    recoverMediaError: Mock;
+    destroy: Mock;
+    on: Mock;
+    off: Mock;
     levels: Array<{ width: number; height: number; bitrate: number }>;
     currentLevel: number;
     autoLevelEnabled: boolean;
@@ -95,11 +104,38 @@ export const createMockHlsConstructor = () => {
 };
 
 /**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks.
+ *
+ * Extending `IPluginAPI` is what makes the stub usable without a cast: it
+ * satisfies the real interface, so `plugin.init(api)` type-checks, while each
+ * method is still a `Mock` so a suite can read `.mock.calls` or swap in an
+ * implementation. The previous `as unknown as IPluginAPI` cast hid the fact
+ * that the stub had drifted behind the interface (it was missing `defineState`
+ * and `subscribeToState`), which only surfaced when the package gained a
+ * `typecheck` script on 2026-09-02.
+ */
+export interface MockPluginAPI extends IPluginAPI {
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
+
+/**
  * Build a stubbed IPluginAPI backed by a real container element.
+ *
+ * `getState('live')` answers `false` rather than `undefined` so the provider
+ * takes its VOD path unless a suite says otherwise.
  *
  * @returns Mock plugin API
  */
-export const createMockAPI = (): IPluginAPI => {
+export const createMockAPI = (): MockPluginAPI => {
   const container = document.createElement('div');
   return {
     pluginId: 'hls-provider',
@@ -115,12 +151,14 @@ export const createMockAPI = (): IPluginAPI => {
       return undefined;
     }),
     setState: vi.fn(),
+    defineState: vi.fn(),
     on: vi.fn(() => vi.fn()),
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(),
     onDestroy: vi.fn(),
-  } as unknown as IPluginAPI;
+    subscribeToState: vi.fn(() => vi.fn()),
+  };
 };
 
 /**

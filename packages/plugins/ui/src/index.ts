@@ -33,8 +33,10 @@ import {
   Spacer,
   ErrorOverlay,
   BandwidthIndicator,
+  BigPlayButton,
 } from './controls';
 import { getControlFactory, onControlRegistered } from './control-registry';
+import { PKG_VERSION } from './version';
 
 export type {
   IUIPlugin,
@@ -82,9 +84,10 @@ const DEFAULT_HIDE_DELAY = 3000;
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { uiPlugin } from '@scarlett-player/ui';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [
  *     uiPlugin({
@@ -102,6 +105,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let progressBar: ProgressBar | null = null;
   let bufferingIndicator: HTMLDivElement | null = null;
   let errorOverlay: ErrorOverlay | null = null;
+  let bigPlayButton: BigPlayButton | null = null;
   let styleEl: HTMLStyleElement | null = null;
   let controls: Control[] = [];
   let hideTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -115,6 +119,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
   const layout = config.controls || DEFAULT_LAYOUT;
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
+  const showBigPlayButton = config.bigPlayButton !== false;
 
   /**
    * Create a control instance for a given slot.
@@ -230,6 +235,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
     // Update error overlay (auto-hide on recovery)
     errorOverlay?.update();
+
+    // After the overlay, so the button sees the visibility the viewer will:
+    // it stands down while an error is on screen.
+    bigPlayButton?.update();
   };
 
   /**
@@ -426,7 +435,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     id: 'ui-controls',
     name: 'UI Controls',
     type: 'ui',
-    version: '1.0.0',
+    version: PKG_VERSION,
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
@@ -500,6 +509,16 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       recoveredUnsubscribe = api.on('error:recovered', () => {
         errorOverlay?.hide();
       });
+
+      // Big play button, over the poster. Rendered into the container like
+      // the error overlay rather than into a control-bar slot: it is an
+      // overlay on the picture, not a control in the bar. It asks the overlay
+      // whether it is showing, because `error` state alone cannot tell a live
+      // error from one the viewer already dismissed.
+      if (showBigPlayButton) {
+        bigPlayButton = new BigPlayButton(api, () => errorOverlay?.isVisible() ?? false);
+        container.appendChild(bigPlayButton.render());
+      }
 
       // Create progress bar (positioned above controls)
       progressBar = new ProgressBar(api);
@@ -622,6 +641,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Destroy error overlay
       errorOverlay?.destroy();
       errorOverlay = null;
+
+      // Destroy big play button
+      bigPlayButton?.destroy();
+      bigPlayButton = null;
 
       // Remove DOM elements
       controlBar?.remove();

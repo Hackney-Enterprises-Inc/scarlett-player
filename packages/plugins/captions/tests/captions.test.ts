@@ -1,16 +1,47 @@
 /**
  * Tests for Captions Plugin
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import type { IPluginAPI } from '@scarlett-player/core';
 import { createCaptionsPlugin } from '../src/index';
 
-// Helper to create mock plugin API with a video element
-function createMockApi() {
+/**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks, plus the `<video>`
+ * element the plugin finds inside the container.
+ *
+ * Extending `IPluginAPI` is what lets `plugin.init(mockApi)` type-check without
+ * a cast at every call site, while each method stays a `Mock` so a case can read
+ * `.mock.calls` or install an implementation. Declaring the extension is also
+ * what catches drift: this stub had fallen behind the interface (no `pluginId`,
+ * no `defineState`) and nothing said so until the package gained a `typecheck`
+ * script on 2026-09-02.
+ */
+interface MockPluginApi extends IPluginAPI {
+  video: HTMLVideoElement;
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
+
+/**
+ * Build a mock plugin API backed by a real container holding a real `<video>`.
+ *
+ * @returns Mock plugin API
+ */
+function createMockApi(): MockPluginApi {
   const container = document.createElement('div');
   const video = document.createElement('video');
   container.appendChild(video);
 
   return {
+    pluginId: 'captions',
     container,
     video,
     logger: {
@@ -23,6 +54,7 @@ function createMockApi() {
     off: vi.fn(),
     emit: vi.fn(),
     setState: vi.fn(),
+    defineState: vi.fn(),
     getState: vi.fn().mockReturnValue(null),
     subscribeToState: vi.fn().mockReturnValue(vi.fn()),
     onDestroy: vi.fn(),
@@ -323,7 +355,11 @@ function fakeHlsPlugin(subtitleTracks: Array<{ id: number; name: string; lang: s
 describe('native HLS (Safari/iOS)', () => {
   it('syncs tracks the browser created, with no hls.js instance', () => {
     const mockApi = createMockApi();
-    let mediaLoadedCallback: (() => void) | null = null;
+    // Initialised to a no-op rather than null: TypeScript does not track the
+    // assignment made inside the mockImplementation callback below, so a null
+    // initialiser leaves the variable narrowed to null and the call site below
+    // is typed `never`.
+    let mediaLoadedCallback: () => void = () => {};
     mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
       if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
       return vi.fn();
@@ -460,7 +496,11 @@ describe('auto-select', () => {
   it('does not override a selection made outside the player', () => {
     const mockApi = createMockApi();
     withStatefulApi(mockApi);
-    let mediaLoadedCallback: (() => void) | null = null;
+    // Initialised to a no-op rather than null: TypeScript does not track the
+    // assignment made inside the mockImplementation callback below, so a null
+    // initialiser leaves the variable narrowed to null and the call site below
+    // is typed `never`.
+    let mediaLoadedCallback: () => void = () => {};
     mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
       if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
       return vi.fn();
@@ -499,7 +539,11 @@ describe('hls instance retry', () => {
     vi.useFakeTimers();
 
     const mockApi = createMockApi();
-    let mediaLoadedCallback: (() => void) | null = null;
+    // Initialised to a no-op rather than null: TypeScript does not track the
+    // assignment made inside the mockImplementation callback below, so a null
+    // initialiser leaves the variable narrowed to null and the call site below
+    // is typed `never`.
+    let mediaLoadedCallback: () => void = () => {};
     mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
       if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
       return vi.fn();
@@ -538,7 +582,11 @@ describe('destroy', () => {
 
   it('cleans up <track> elements on destroy', () => {
     const mockApi = createMockApi();
-    let mediaLoadedCallback: (() => void) | null = null;
+    // Initialised to a no-op rather than null: TypeScript does not track the
+    // assignment made inside the mockImplementation callback below, so a null
+    // initialiser leaves the variable narrowed to null and the call site below
+    // is typed `never`.
+    let mediaLoadedCallback: () => void = () => {};
     mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
       if (event === 'media:loaded') mediaLoadedCallback = cb as () => void;
       return vi.fn();

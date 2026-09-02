@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createNativePlugin } from '../src/index';
+import { PKG_VERSION } from '../src/version';
 
 // Mock canPlayType since jsdom doesn't support it
 const originalCreateElement = document.createElement.bind(document);
@@ -30,7 +31,7 @@ describe('createNativePlugin', () => {
 
     expect(plugin.id).toBe('native-provider');
     expect(plugin.name).toBe('Native Media Provider');
-    expect(plugin.version).toBe('1.0.0');
+    expect(plugin.version).toBe(PKG_VERSION);
     expect(plugin.type).toBe('provider');
     expect(plugin.description).toContain('Native HTML5');
   });
@@ -146,7 +147,9 @@ describe('init and destroy', () => {
       },
       on: vi.fn().mockReturnValue(vi.fn()), // Returns unsubscribe function
       emit: vi.fn(),
+      getState: vi.fn(),
       setState: vi.fn(),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
       onDestroy: vi.fn(),
     };
   });
@@ -200,6 +203,7 @@ describe('audio title fallback (#45)', () => {
       setState: vi.fn((key: string, value: unknown) => {
         state[key] = value;
       }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
       onDestroy: vi.fn(),
     };
 
@@ -243,5 +247,213 @@ describe('audio title fallback (#45)', () => {
     startLoad('https://example.com/movie.mp4');
 
     expect(state.title).toBe('Some Video Title');
+  });
+});
+
+// The `poster` state key is the player's pre-play image. Nothing asserted it
+// on this provider before 2026-09-02, and nothing re-applied it after the
+// element existed: a setPoster(), a playlist track change and a Vue prop
+// change were all invisible to the viewer.
+describe('poster', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, unknown>;
+  let posterSubscriber: ((event: { key: string }) => void) | null;
+
+  /** Push a new poster into state the way core's setPoster() does. */
+  const setPoster = (value: string): void => {
+    state.poster = value;
+    posterSubscriber?.({ key: 'poster' });
+  };
+
+  /**
+   * Start a load without awaiting it: the promise waits on `loadedmetadata`,
+   * which jsdom never fires, while everything asserted here is synchronous.
+   */
+  const startLoad = (src: string): void => {
+    void plugin.loadSource(src).catch(() => {});
+  };
+
+  const videoEl = (): HTMLVideoElement | null =>
+    mockApi.container.querySelector('video');
+
+  beforeEach(async () => {
+    plugin = createNativePlugin();
+    posterSubscriber = null;
+    state = { title: '', muted: false, volume: 1, poster: 'https://cdn.test/art.jpg' };
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn().mockReturnValue(vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn((cb: (event: { key: string }) => void) => {
+        posterSubscriber = cb;
+        return vi.fn();
+      }),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+  });
+
+  it('creates the element with the poster from state', () => {
+    startLoad('https://example.com/movie.mp4');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/art.jpg');
+  });
+
+  it('applies a poster state change to the existing element', () => {
+    startLoad('https://example.com/movie.mp4');
+
+    setPoster('https://cdn.test/next.jpg');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/next.jpg');
+  });
+
+  it('clears the attribute when the poster is set to an empty string', () => {
+    startLoad('https://example.com/movie.mp4');
+
+    setPoster('');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('');
+  });
+
+  it('re-applies the current poster on a later loadSource', () => {
+    startLoad('https://example.com/first.mp4');
+    // A consumer that writes the next item's art before requesting the load
+    // (what the playlist plugin does) must see the NEW art over the gap.
+    state.poster = 'https://cdn.test/second.jpg';
+
+    startLoad('https://example.com/second.mp4');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/second.jpg');
+  });
+
+  it('keeps the attribute cleared for an audio source', () => {
+    startLoad('https://example.com/song.mp3');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('');
+  });
+
+  it('keeps the attribute cleared for audio even when the poster changes', () => {
+    startLoad('https://example.com/song.mp3');
+
+    setPoster('https://cdn.test/album-art.jpg');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('');
+  });
+
+  it('releases the state subscription through onDestroy', async () => {
+    const unsubscribe = mockApi.subscribeToState.mock.results[0]?.value;
+
+    const cleanups = mockApi.onDestroy.mock.calls.map((call: any[]) => call[0]);
+    cleanups.forEach((fn: () => void) => fn());
+
+    expect(unsubscribe).toHaveBeenCalled();
+    await plugin.destroy();
+  });
+});
+
+// The `ended` state key was written true by the `ended` handler and reset only
+// by core's load(), so after a replay it stayed true for the rest of the
+// session while the element's own `ended` was false, and the control bar's
+// play button kept the Replay glyph over playing video (wave 3 finding,
+// fixed 2026-09-02).
+describe('ended state key', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, unknown>;
+
+  /** Start a load without awaiting it; the listeners attach synchronously. */
+  const startLoad = (src: string): void => {
+    void plugin.loadSource(src).catch(() => {});
+  };
+
+  const videoEl = (): HTMLVideoElement =>
+    mockApi.container.querySelector('video') as HTMLVideoElement;
+
+  /**
+   * Shadow the element's read-only `ended` getter.
+   *
+   * jsdom answers false for every element, so a test that wants the
+   * end-of-media case has to say so.
+   */
+  const setElementEnded = (value: boolean): void => {
+    Object.defineProperty(videoEl(), 'ended', { value, configurable: true });
+  };
+
+  beforeEach(async () => {
+    plugin = createNativePlugin();
+    state = { title: '', muted: false, volume: 1, poster: '', ended: false };
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn().mockReturnValue(vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+    startLoad('https://example.com/movie.mp4');
+  });
+
+  it('sets the key when the element ends', () => {
+    setElementEnded(true);
+
+    videoEl().dispatchEvent(new Event('ended'));
+
+    expect(state.ended).toBe(true);
+  });
+
+  it('clears the key on play, before the first frame', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    // play() rewinds an ended element to the earliest position before firing
+    // `play`, so the element is no longer ended by the time we are called.
+    setElementEnded(false);
+    videoEl().dispatchEvent(new Event('play'));
+
+    expect(state.ended).toBe(false);
+  });
+
+  it('clears the key when playback resumes', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    setElementEnded(false);
+    videoEl().dispatchEvent(new Event('playing'));
+
+    expect(state.ended).toBe(false);
+  });
+
+  it('clears the key when a paused viewer scrubs back from the end', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    setElementEnded(false);
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.ended).toBe(false);
+  });
+
+  it('leaves the key set when a seek lands on the end', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.ended).toBe(true);
   });
 });

@@ -16,8 +16,7 @@
   "license": "MIT",
   "workspaces": [
     "packages/*",
-    "packages/plugins/*",
-    "packages/presets/*"
+    "packages/plugins/*"
   ],
   "scripts": {
     "build": "pnpm --filter '@scarlett-player/core' run build && pnpm --filter './packages/**' --filter '!@scarlett-player/core' run build",
@@ -29,7 +28,7 @@
     "format": "prettier --write \"packages/**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\"",
     "clean": "pnpm --filter './packages/**' run clean && rm -rf node_modules",
-    "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "validate": "node scripts/check-package-scripts.mjs && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm run build && changeset publish"

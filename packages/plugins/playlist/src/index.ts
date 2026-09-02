@@ -30,6 +30,7 @@ export type {
   RepeatMode,
   IPlaylistPlugin,
 } from './types';
+import { PKG_VERSION } from './version';
 
 export { PlaylistPanel, PlaylistSkipButton, PLAYLIST_ICONS } from './controls';
 export type { PlaylistControl, PlaylistPanelOptions } from './controls';
@@ -73,9 +74,10 @@ function shuffleArray<T>(array: T[]): T[] {
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createPlaylistPlugin } from '@scarlett-player/playlist';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: document.getElementById('player'),
  *   plugins: [
  *     createPlaylistPlugin({
@@ -296,10 +298,13 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     // the track has none) so a previous track's title never leaks into the
     // next one; provider plugins fill in a fallback (e.g. the audio filename)
     // when it is empty. (#45)
+    //
+    // The poster follows the same rule for the same reason: a conditional
+    // write left a track with no artwork showing the PREVIOUS track's image,
+    // the exact leak #45 fixed for titles. An empty write clears the media
+    // element's poster attribute in both providers.
     api?.setState('title', track.title || '');
-    if (track.artwork) {
-      api?.setState('poster', track.artwork);
-    }
+    api?.setState('poster', track.artwork || '');
     api?.setState('mediaType', track.type || 'audio');
 
     // Emit change event
@@ -315,7 +320,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
   const plugin: IPlaylistPlugin = {
     id: 'playlist',
     name: 'Playlist',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
     description: 'Playlist management with shuffle, repeat, and gapless playback',
 

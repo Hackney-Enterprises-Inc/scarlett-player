@@ -22,15 +22,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest --run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.0.3",
-    "@scarlett-player/ui": "^1.5.0"
+    "@scarlett-player/core": "^1.7.0",
+    "@scarlett-player/ui": "^1.7.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",

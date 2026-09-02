@@ -87,6 +87,27 @@ describe('PlayButton', () => {
     expect(el.getAttribute('aria-label')).toBe('Replay');
   });
 
+  // Regression for the stale `ended` key (found in wave 3, fixed 2026-09-02):
+  // the key was written true by both providers and reset only by core's
+  // load(), so once a viewer replayed a video this button kept the Replay
+  // glyph over playing video for the rest of the session. The providers now
+  // clear the key from their play, playing and seeking handlers; this is the
+  // control that has to follow it back.
+  it('should leave the Replay label once the ended key is cleared', () => {
+    const el = button.render();
+
+    api.setState('ended', true);
+    button.update();
+    expect(el.getAttribute('aria-label')).toBe('Replay');
+
+    // What a provider now does when playback leaves the end of the media.
+    api.setState('ended', false);
+    api.setState('playing', true);
+    button.update();
+
+    expect(el.getAttribute('aria-label')).toBe('Pause');
+  });
+
   it('should call video.play() when clicked while paused', () => {
     const video = api.container.querySelector('video')!;
     button.render().click();

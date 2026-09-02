@@ -21,6 +21,7 @@ export type {
   ChromecastConnectedEvent,
   ChromecastErrorEvent,
 } from './types';
+import { PKG_VERSION } from './version';
 export { loadCastSDK, isCastSDKLoaded, isCastSupported } from './cast-loader';
 
 /**
@@ -28,9 +29,10 @@ export { loadCastSDK, isCastSDKLoaded, isCastSupported } from './cast-loader';
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { chromecastPlugin } from '@scarlett-player/chromecast';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [chromecastPlugin()],
  * });
@@ -303,7 +305,7 @@ export function chromecastPlugin(): IChromecastPlugin {
     id: 'chromecast',
     name: 'Chromecast',
     type: 'feature',
-    version: '1.0.0',
+    version: PKG_VERSION,
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;

@@ -32,9 +32,10 @@ export { sanitizeUrl } from './sanitize-url';
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createHLSPlugin } from '@scarlett-player/hls';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: document.getElementById('player'),
  *   plugins: [createHLSPlugin()],
  * });

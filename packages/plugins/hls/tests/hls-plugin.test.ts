@@ -21,6 +21,18 @@ import {
   setupHlsEventHandlers,
   setupVideoEventHandlers,
 } from '../src/event-map';
+import {
+  createMockAPI,
+  createCapturedHls,
+  createMockHlsConstructor,
+  installMediaStubs,
+  fireManifest,
+  flush,
+  type CapturedHls,
+  type HlsEventHandler,
+  type MockPluginAPI,
+} from './helpers';
+import { PKG_VERSION } from '../src/version';
 
 // Mock hls.js
 const mockHlsInstance = {
@@ -59,31 +71,6 @@ const mockHlsConstructor = vi.fn(() => mockHlsInstance);
   NETWORK_ERROR: 'networkError',
   MEDIA_ERROR: 'mediaError',
   OTHER_ERROR: 'otherError',
-};
-
-// Mock PluginAPI
-const createMockAPI = (): IPluginAPI => {
-  const container = document.createElement('div');
-  return {
-    pluginId: 'hls-provider',
-    container,
-    logger: {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    },
-    getState: vi.fn((key: string) => {
-      if (key === 'live') return false;
-      return undefined;
-    }),
-    setState: vi.fn(),
-    on: vi.fn(() => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    getPlugin: vi.fn(),
-    onDestroy: vi.fn(),
-  };
 };
 
 describe('HLSPlugin', () => {
@@ -134,7 +121,7 @@ describe('HLSPlugin', () => {
     });
 
     it('should have correct version', () => {
-      expect(plugin.version).toBe('1.0.0');
+      expect(plugin.version).toBe(PKG_VERSION);
     });
 
     it('should have correct type', () => {
@@ -626,14 +613,19 @@ describe('HLSPlugin', () => {
       vi.spyOn(hlsLoader, 'createHlsInstance').mockReturnValue(mockHlsInstance as any);
       vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockHlsConstructor as any);
 
-      // Capture the error handler
-      let errorHandler: Function | null = null;
-      mockHlsInstance.on.mockImplementation((event: string, handler: Function) => {
+      // Capture the error handler. Collected into an array rather than a `let`
+      // because TypeScript does not track assignments made inside a callback:
+      // a `let` initialised to null keeps its `null` flow type, so the truthy
+      // guard narrowed it to `never` and the call below did not type-check.
+      // The last entry is the one fired, which is what the overwritten `let`
+      // held.
+      const errorHandlers: HlsEventHandler[] = [];
+      mockHlsInstance.on.mockImplementation((event: string, handler: HlsEventHandler) => {
         if (event === 'hlsManifestParsed') {
           setTimeout(() => handler('hlsManifestParsed', { levels: mockHlsInstance.levels }), 0);
         }
         if (event === 'hlsError') {
-          errorHandler = handler;
+          errorHandlers.push(handler);
         }
       });
 
@@ -643,13 +635,11 @@ describe('HLSPlugin', () => {
       const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
 
       // Trigger a fatal network error to invoke retry with backoff + jitter
-      if (errorHandler) {
-        errorHandler('hlsError', {
-          type: 'networkError',
-          details: 'manifestLoadError',
-          fatal: true,
-        });
-      }
+      errorHandlers[errorHandlers.length - 1]?.('hlsError', {
+        type: 'networkError',
+        details: 'manifestLoadError',
+        fatal: true,
+      });
 
       // Find the retry setTimeout call (ignore any 0ms calls from test setup)
       const retryCall = setTimeoutSpy.mock.calls.find(
@@ -779,23 +769,7 @@ describe('event-map', () => {
         },
       };
 
-      mockApi = {
-        pluginId: 'hls-provider',
-        container: document.createElement('div'),
-        logger: {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-        },
-        getState: vi.fn(),
-        setState: vi.fn(),
-        on: vi.fn(() => vi.fn()),
-        off: vi.fn(),
-        emit: vi.fn(),
-        getPlugin: vi.fn(),
-        onDestroy: vi.fn(),
-      };
+      mockApi = createMockAPI();
     });
 
     it('should setup event handlers and return cleanup function', () => {
@@ -890,23 +864,7 @@ describe('event-map', () => {
       Object.defineProperty(video, 'playbackRate', { value: 1, writable: true });
       Object.defineProperty(video, 'videoWidth', { value: 1920, writable: true });
 
-      mockApi = {
-        pluginId: 'hls-provider',
-        container: document.createElement('div'),
-        logger: {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-        },
-        getState: vi.fn(),
-        setState: vi.fn(),
-        on: vi.fn(() => vi.fn()),
-        off: vi.fn(),
-        emit: vi.fn(),
-        getPlugin: vi.fn(),
-        onDestroy: vi.fn(),
-      };
+      mockApi = createMockAPI();
     });
 
     it('should setup video event handlers and return cleanup function', () => {
@@ -946,6 +904,70 @@ describe('event-map', () => {
 
       expect(mockApi.setState).toHaveBeenCalledWith('ended', true);
       expect(mockApi.emit).toHaveBeenCalledWith('playback:ended', undefined);
+    });
+
+    // The `ended` state key was written true by the `ended` handler and reset
+    // only by core's load(), so after a replay it stayed true for the rest of
+    // the session while the element's own `ended` was false, and the control
+    // bar's play button kept the Replay glyph over playing video (wave 3
+    // finding, fixed 2026-09-02).
+    describe('ended state key', () => {
+      /**
+       * Shadow the element's read-only `ended` getter.
+       *
+       * jsdom answers false for every element, so a test that wants the
+       * end-of-media case has to say so.
+       */
+      const setElementEnded = (value: boolean): void => {
+        Object.defineProperty(video, 'ended', { value, configurable: true });
+      };
+
+      it('clears the key on play, before the first frame', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        // play() rewinds an ended element to the earliest position before
+        // firing `play`, so the element is no longer ended by then.
+        setElementEnded(false);
+        video.dispatchEvent(new Event('play'));
+
+        expect(mockApi.setState).toHaveBeenCalledWith('ended', false);
+      });
+
+      it('clears the key when playback resumes', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        setElementEnded(false);
+        video.dispatchEvent(new Event('playing'));
+
+        expect(mockApi.setState).toHaveBeenCalledWith('ended', false);
+      });
+
+      it('clears the key when a paused viewer scrubs back from the end', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        setElementEnded(false);
+        video.dispatchEvent(new Event('seeking'));
+
+        expect(mockApi.setState).toHaveBeenCalledWith('ended', false);
+      });
+
+      it('leaves the key alone when a seek lands on the end', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        setElementEnded(true);
+        video.dispatchEvent(new Event('seeking'));
+
+        expect(mockApi.setState).not.toHaveBeenCalledWith('ended', false);
+      });
+
+      it('leaves the key alone when the element is still ended on play', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        setElementEnded(true);
+        video.dispatchEvent(new Event('play'));
+
+        expect(mockApi.setState).not.toHaveBeenCalledWith('ended', false);
+      });
     });
 
     it('should handle timeupdate event', () => {
@@ -1377,5 +1399,127 @@ describe('hls-loader', () => {
       HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
       expect(hlsLoader.isHLSSupported()).toBe(false);
     });
+  });
+});
+
+// The `poster` state key is the player's pre-play image. Until 2026-09-02 this
+// provider set it once, when it created the element, and never again: nothing
+// asserted video.poster here at all, the attribute survives an src change, so
+// a playlist moving from a pre-roll to the feature kept showing the pre-roll's
+// art, and setPoster() plus the Vue prop did nothing.
+describe('HLS plugin poster', () => {
+  let plugin: ReturnType<typeof createHLSPlugin>;
+  let api: MockPluginAPI;
+  let state: Record<string, unknown>;
+  let created: CapturedHls[];
+  let posterSubscriber: ((event: { key: string }) => void) | null;
+  const mockCtor = createMockHlsConstructor();
+
+  const SRC_A = 'http://example.com/a.m3u8';
+  const SRC_B = 'http://example.com/b.m3u8';
+
+  /** Push a new poster into state the way core's setPoster() does. */
+  const setPoster = (value: string): void => {
+    state.poster = value;
+    posterSubscriber?.({ key: 'poster' });
+  };
+
+  /** Run a full hls.js load, resolving it through a manifest-parsed event. */
+  const load = async (src: string): Promise<void> => {
+    const pending = plugin.loadSource(src);
+    await flush();
+    fireManifest(created[created.length - 1]);
+    await pending;
+  };
+
+  const videoEl = (): HTMLVideoElement | null => api.container.querySelector('video');
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    hlsLoader.resetLoader();
+    created = [];
+    posterSubscriber = null;
+    installMediaStubs();
+
+    vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockCtor as any);
+    vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockCtor as any);
+    vi.spyOn(hlsLoader, 'createHlsInstance').mockImplementation(() => {
+      const captured = createCapturedHls();
+      created.push(captured);
+      return captured.instance as any;
+    });
+
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    state = { live: false, muted: false, volume: 1, poster: 'https://cdn.test/art.jpg' };
+
+    plugin = createHLSPlugin();
+    api = createMockAPI();
+    api.getState.mockImplementation((key: string) => state[key]);
+    api.subscribeToState.mockImplementation((cb: (event: { key: string }) => void) => {
+      posterSubscriber = cb;
+      return vi.fn();
+    });
+
+    await plugin.init(api);
+  });
+
+  afterEach(async () => {
+    await plugin.destroy();
+    vi.restoreAllMocks();
+  });
+
+  it('creates the element with the poster from state', async () => {
+    await load(SRC_A);
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/art.jpg');
+  });
+
+  it('applies a poster state change to the existing element', async () => {
+    await load(SRC_A);
+
+    setPoster('https://cdn.test/next.jpg');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/next.jpg');
+  });
+
+  it('clears the attribute when the poster is set to an empty string', async () => {
+    await load(SRC_A);
+
+    setPoster('');
+
+    expect(videoEl()?.getAttribute('poster')).toBe('');
+  });
+
+  it('re-applies the current poster on a later loadSource', async () => {
+    await load(SRC_A);
+    // What the playlist plugin does: write the next track's artwork, then
+    // request the load. The viewer must see the NEW art over the gap.
+    state.poster = 'https://cdn.test/second.jpg';
+
+    await load(SRC_B);
+
+    expect(videoEl()?.getAttribute('poster')).toBe('https://cdn.test/second.jpg');
+  });
+
+  it('clears a stale poster on a later loadSource when state has none', async () => {
+    await load(SRC_A);
+    state.poster = '';
+
+    await load(SRC_B);
+
+    expect(videoEl()?.getAttribute('poster')).toBe('');
+  });
+
+  it('releases the state subscription through onDestroy', async () => {
+    const unsubscribe = api.subscribeToState.mock.results[0]?.value;
+
+    const cleanups = api.onDestroy.mock.calls.map((call: unknown[]) => call[0] as () => void);
+    cleanups.forEach((fn) => fn());
+
+    expect(unsubscribe).toHaveBeenCalled();
   });
 });

@@ -20,6 +20,7 @@
  */
 
 import { ErrorCode, type IPluginAPI, type PluginType } from '@scarlett-player/core';
+import { PKG_VERSION } from './version';
 
 /** Supported video extensions */
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv', 'ogv', 'm4v'];
@@ -80,9 +81,10 @@ export interface INativePlugin {
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createNativePlugin } from '@scarlett-player/native';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: document.getElementById('player'),
  *   plugins: [createNativePlugin()],
  * });
@@ -100,6 +102,15 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   let cleanupEvents: (() => void) | null = null;
   /** Last title THIS plugin derived from a filename (never an external title) */
   let derived_title: string | null = null;
+  /**
+   * Whether the source currently loaded is audio.
+   *
+   * Remembered rather than re-derived, because `applyPoster()` runs from a
+   * state subscription with no source in hand and an audio player must never
+   * grow a poster attribute (the element is display:none, and the audio UI
+   * renders the artwork itself).
+   */
+  let is_audio_source = false;
 
   /** Get file extension from URL */
   const getExtension = (src: string): string => {
@@ -135,6 +146,33 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     return canPlay === 'probably' || canPlay === 'maybe';
   };
 
+  /**
+   * Mirror the `poster` state key onto the media element.
+   *
+   * Called at element creation, on every `loadSource()`, and from the state
+   * subscription in `init()`. The subscription is what makes `setPoster()`,
+   * the playlist plugin's per-track artwork and the Vue `poster` prop take
+   * effect on an element that already exists: the attribute survives an `src`
+   * change, so without a re-apply the gap between a pre-roll and the feature
+   * showed the PREVIOUS item's art.
+   *
+   * An empty state value clears the attribute, so a track without artwork
+   * cannot inherit the last one's image.
+   *
+   * Audio keeps the attribute cleared regardless of state: the element is
+   * hidden for audio and the audio UI draws the artwork itself.
+   */
+  const applyPoster = (): void => {
+    if (!video) return;
+
+    if (is_audio_source) {
+      video.poster = '';
+      return;
+    }
+
+    video.poster = api?.getState('poster') || '';
+  };
+
   /** Get or create video element */
   const getOrCreateVideo = (): HTMLVideoElement => {
     if (video) return video;
@@ -153,11 +191,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     video.controls = false;
     video.playsInline = true;
 
-    // Set poster from state if available
-    const poster = api?.getState('poster');
-    if (poster) {
-      video.poster = poster;
-    }
+    applyPoster();
 
     api?.container.appendChild(video);
     return video;
@@ -172,10 +206,35 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       handlers.push([event, handler]);
     };
 
+    /**
+     * Mirror the element's own `ended` flag back onto the `ended` state key.
+     *
+     * `HTMLMediaElement.ended` is derived from the playback position, so it
+     * goes false the moment the position leaves the end of the media:
+     * `play()` on an ended element seeks to the earliest position before the
+     * `play` event is fired, and a scrub back from the end flips it while
+     * still paused. The state key is not derived. Until 2026-09-02 the only
+     * writer that cleared it was `ScarlettPlayer.load()`, so after one replay
+     * it stayed true for the rest of the session and the control bar's play
+     * button kept the Replay glyph over playing video (the reason
+     * `BigPlayButton` reads `video.ended` instead of the key).
+     *
+     * Called from `play`, `playing` and `seeking`: the three events that can
+     * carry the position away from the end. The element is asked rather than
+     * assumed, so a seek that lands ON the end leaves the key alone; setting
+     * it true stays the `ended` handler's job.
+     */
+    const syncEndedFromElement = (): void => {
+      if (!videoEl.ended) {
+        api?.setState('ended', false);
+      }
+    };
+
     // Playback state events
     // 'play' fires immediately when video.play() is called
     on('play', () => {
       api?.setState('paused', false);
+      syncEndedFromElement();
     });
 
     // 'playing' fires when playback actually starts (after buffering)
@@ -183,6 +242,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api?.setState('playing', true);
       api?.setState('paused', false);
       api?.emit('playback:play', undefined);
+      syncEndedFromElement();
     });
 
     on('pause', () => {
@@ -241,6 +301,9 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     // Seeking events - only emit state update, not playback:seeking (which would cause a loop)
     on('seeking', () => {
       api?.setState('seeking', true);
+      // A scrub back from the end never fires play or playing while paused, so
+      // this is the only place the key can be cleared for a paused viewer.
+      syncEndedFromElement();
     });
 
     on('seeked', () => {
@@ -365,7 +428,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   const plugin: INativePlugin = {
     id: 'native-provider',
     name: 'Native Media Provider',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'provider' as PluginType,
     description: 'Native HTML5 playback for video (MP4, WebM, MOV) and audio (MP3, WAV, FLAC, AAC)',
 
@@ -421,6 +484,13 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         if (video) video.playbackRate = rate;
       });
 
+      // Re-apply the poster whenever it changes. Without this the element
+      // keeps whatever image it was created with, so setPoster(), a playlist
+      // track change and a Vue prop change were all invisible to the viewer.
+      const unsubPoster = api.subscribeToState((event) => {
+        if (event.key === 'poster') applyPoster();
+      });
+
       // Register cleanup
       api.onDestroy(() => {
         unsubPlay();
@@ -429,6 +499,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         unsubVolume();
         unsubMute();
         unsubRate();
+        unsubPoster();
       });
     },
 
@@ -442,6 +513,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       video = null;
       api = null;
       derived_title = null;
+      is_audio_source = false;
     },
 
     async loadSource(src: string): Promise<void> {
@@ -450,6 +522,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       const ext = getExtension(src);
       const mimeType = getMimeType(ext);
       const isAudio = isAudioExtension(ext);
+      is_audio_source = isAudio;
 
       api.logger.info('Loading native media source', { src, mimeType, isAudio });
 
@@ -489,17 +562,8 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       const videoEl = getOrCreateVideo();
 
       // Hide video element for audio content
-      if (isAudio) {
-        videoEl.style.display = 'none';
-        videoEl.poster = ''; // Clear poster for audio
-      } else {
-        videoEl.style.display = 'block';
-        // Set poster from state if available
-        const poster = api.getState('poster');
-        if (poster) {
-          videoEl.poster = poster;
-        }
-      }
+      videoEl.style.display = isAudio ? 'none' : 'block';
+      applyPoster();
 
       // Setup event listeners
       cleanupEvents = setupEventListeners(videoEl);
