@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/share",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Share Plugin for Scarlett Player - native share sheet, copy link, timestamps and embed codes",
   "type": "module",
   "main": "dist/index.cjs",

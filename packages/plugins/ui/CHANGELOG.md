@@ -1,5 +1,63 @@
 # @scarlett-player/ui
 
+## 1.7.1
+
+### Patch Changes
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Reports its real version, and requires `@scarlett-player/core@^1.7.0`.
+
+  The descriptor's `version` was the hand-written literal '1.0.0' while the
+  package published at 1.7.0, so anything that read a version off the plugin
+  reported a number that had not been true since the descriptor was written
+  (measured 2026-09-02). It comes from the package's own package.json now:
+  `src/version.ts` reads a `__PKG_VERSION__` define set by the new
+  `tsup.config.ts`, with a '0.0.0-dev' fallback for test runs. The `build` and
+  `dev` scripts call plain `tsup`, so the entry points, formats and `--dts` flag
+  are written down once in the config instead of twice in package.json. The
+  move does not change what tsup emits: the md5 of `dist/index.d.ts` and
+  `dist/index.d.cts` is unchanged across it (compared 2026-09-02).
+
+  The `@scarlett-player/core` peer range moves from `^1.0.3` to `^1.7.0`.
+  The old ranges were
+  wrong across the workspace, not merely inconsistent: three of the packages
+  declaring `^1.0.3` (audio-ui, media-session, ui) call `defineState`, which core
+  gained in 1.4.0. Changesets is configured with
+  `onlyUpdatePeerDependentsWhenOutOfRange`, so future minors of core will not
+  cascade this into a major.
+
+  The `@example` docblock shows `createPlayer()`. The `new ScarlettPlayer(...)`
+  shape it used to show left the player with a provider and nothing else before
+  core 1.7.1, so anyone copying the example got no controls and no working
+  "Try Again".
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Big play button over the poster, on by default.
+
+  A poster with no visible play affordance is worse for the viewer than no
+  poster: on desktop a click on the picture only revealed the control bar
+  (touch taps belong to `@scarlett-player/gestures`), so the only way to start a
+  video was the small button in the bar. `BigPlayButton` is a real `<button>`
+  with an `aria-label`, rendered into the container like the error overlay,
+  sized past the control bar's 44 px minimum target and coloured with
+  `--sp-accent`.
+
+  It is visible before playback starts and again as Replay when playback ends,
+  hidden from the first `playing` onward, hidden while the source is loading
+  (the spinner owns that state) and while an error is set or the error overlay
+  is showing. It updates from the same `scheduleUpdate()` pass as every other
+  control, and its z-index puts it above the gestures plugin's tap surface, so a
+  tap starts playback rather than toggling the controls, exactly as the control
+  bar's play button already behaved.
+
+  `UIPluginConfig.bigPlayButton: false` turns it off for a host page that draws
+  its own affordance.
+
+  It reads `video.ended` rather than the `ended` state key. Measured in Chrome
+  on 2026-09-02: neither provider clears that key on a replay (only `load()`
+  does), so it stays true for the rest of the session, and a control trusting it
+  would sit over playing video. The control bar's play button has the same
+  source and does show "Replay" while a replayed video plays; that is a separate
+  provider defect, untouched here.
+
 ## 1.7.0
 
 ### Patch Changes
