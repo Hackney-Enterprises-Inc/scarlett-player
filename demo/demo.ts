@@ -2,7 +2,7 @@
  * Scarlett Player Demo
  */
 
-import { ScarlettPlayer } from '../packages/core/src/index';
+import { createPlayer } from '../packages/core/src/index';
 import { createHLSPlugin } from '../packages/plugins/hls/src/index';
 import { createNativePlugin } from '../packages/plugins/native/src/index';
 import { uiPlugin } from '../packages/plugins/ui/src/index';
@@ -32,9 +32,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Create player with plugins
+  // Create and initialise the player with its plugins. createPlayer() is the
+  // documented entry point every README teaches: it constructs, initialises
+  // the plugins and loads `src`, and its promise resolves after `player:ready`
+  // has been emitted.
   // Provider plugins (HLS and Native) are tried in order - first one that can play the source wins
-  const player = new ScarlettPlayer({
+  const player = await createPlayer({
     container,
     src: VIDEO_URL,
     poster: 'https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg',
@@ -88,9 +91,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     ].filter(Boolean),
   });
 
-  // Initialize player (inits UI plugins, then loads source)
-  await player.init();
-
   // Log events for debugging
   player.on('playback:play', () => console.log('▶️ Playing'));
   player.on('playback:pause', () => console.log('⏸️ Paused'));
@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ];
 
     // Create audio player with playlist, media session, and audio UI
-    const audioPlayer = new ScarlettPlayer({
+    const audioPlayer = await createPlayer({
       container: audioContainer,
       logLevel: 'debug',
       plugins: [
@@ -145,9 +145,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }),
       ].filter(Boolean),
     });
-
-    // Initialize audio player
-    await audioPlayer.init();
 
     // Get playlist plugin
     const playlist = audioPlayer.getPlugin<any>('playlist');
@@ -188,7 +185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const miniContainer = document.getElementById('mini-player');
   if (miniContainer) {
     // Create mini audio player with compact UI (no artwork)
-    const miniPlayer = new ScarlettPlayer({
+    const miniPlayer = await createPlayer({
       container: miniContainer,
       logLevel: 'debug',
       plugins: [
@@ -209,9 +206,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }),
       ].filter(Boolean),
     });
-
-    // Initialize mini player
-    await miniPlayer.init();
 
     // Load the same audio track
     await miniPlayer.load('https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3');

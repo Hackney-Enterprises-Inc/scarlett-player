@@ -223,11 +223,22 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
      * carry the position away from the end. The element is asked rather than
      * assumed, so a seek that lands ON the end leaves the key alone; setting
      * it true stays the `ended` handler's job.
+     *
+     * Clearing the key also re-derives `playbackState` from the element, so a
+     * paused scrub away from the end does not leave that key at `'ended'`
+     * (second review of the 1.7.1 wave, 2026-09-02). `videoEl.paused` decides
+     * between `'paused'` and `'playing'` rather than the `playing` state key,
+     * which the `playing` handler has not written yet during a replay.
+     *
+     * Both writes are gated on the key having been true, read back through
+     * `getState`, so an ordinary seek in the middle of a video (where `ended`
+     * was already false) restates neither key.
      */
     const syncEndedFromElement = (): void => {
-      if (!videoEl.ended) {
-        api?.setState('ended', false);
-      }
+      if (videoEl.ended || !api?.getState('ended')) return;
+
+      api?.setState('ended', false);
+      api?.setState('playbackState', videoEl.paused ? 'paused' : 'playing');
     };
 
     // Playback state events
@@ -238,9 +249,16 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     });
 
     // 'playing' fires when playback actually starts (after buffering)
+    //
+    // The `playbackState` writes in this handler, `pause` and `ended` mirror
+    // the ones the HLS provider has always made. Until 2026-09-02 this
+    // provider wrote only `'loading'` and `'ready'`, so which of the two
+    // providers was in use decided what a reader of the key saw during
+    // ordinary playback (second review of the 1.7.1 wave).
     on('playing', () => {
       api?.setState('playing', true);
       api?.setState('paused', false);
+      api?.setState('playbackState', 'playing');
       api?.emit('playback:play', undefined);
       syncEndedFromElement();
     });
@@ -248,12 +266,14 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     on('pause', () => {
       api?.setState('playing', false);
       api?.setState('paused', true);
+      api?.setState('playbackState', 'paused');
       api?.emit('playback:pause', undefined);
     });
 
     on('ended', () => {
       api?.setState('playing', false);
       api?.setState('ended', true);
+      api?.setState('playbackState', 'ended');
       api?.emit('playback:ended', undefined);
     });
 

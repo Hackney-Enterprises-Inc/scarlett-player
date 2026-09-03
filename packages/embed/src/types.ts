@@ -19,6 +19,18 @@ export interface EmbedConfig {
   poster?: string;
   /** Show/hide UI controls */
   controls?: boolean;
+  /**
+   * Show the centred big play button over the poster (video only, default:
+   * true).
+   *
+   * Mirrors `UIPluginConfig.bigPlayButton` in `@scarlett-player/ui`, which is
+   * where the default lives: the embed forwards this to the video UI plugin
+   * only when it is set, so leaving it out keeps the plugin's own default
+   * rather than pinning a second copy of it here. Set it to `false` when the
+   * host page draws its own play affordance over the player. The audio UIs
+   * have no such control and ignore it.
+   */
+  bigPlayButton?: boolean;
   /** Brand/accent color for the player UI */
   brandColor?: string;
   /** Primary color for UI elements */

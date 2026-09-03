@@ -457,3 +457,112 @@ describe('ended state key', () => {
     expect(state.ended).toBe(true);
   });
 });
+
+// Until 2026-09-02 this provider wrote `playbackState` only as 'loading' and
+// 'ready', so the key said something different depending on which provider was
+// playing, and a paused scrub away from the end left it at 'ended' once the
+// writes were added (second review of the 1.7.1 wave).
+describe('playbackState key', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, unknown>;
+
+  /** Start a load without awaiting it; the listeners attach synchronously. */
+  const startLoad = (src: string): void => {
+    void plugin.loadSource(src).catch(() => {});
+  };
+
+  const videoEl = (): HTMLVideoElement =>
+    mockApi.container.querySelector('video') as HTMLVideoElement;
+
+  /** Shadow the element's read-only `ended` getter (jsdom always says false). */
+  const setElementEnded = (value: boolean): void => {
+    Object.defineProperty(videoEl(), 'ended', { value, configurable: true });
+  };
+
+  /** Shadow the element's read-only `paused` getter (jsdom always says true). */
+  const setElementPaused = (value: boolean): void => {
+    Object.defineProperty(videoEl(), 'paused', { value, configurable: true });
+  };
+
+  beforeEach(async () => {
+    plugin = createNativePlugin();
+    state = { title: '', muted: false, volume: 1, poster: '', ended: false };
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn().mockReturnValue(vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+    startLoad('https://example.com/movie.mp4');
+  });
+
+  it('is playing once playback actually starts', () => {
+    videoEl().dispatchEvent(new Event('playing'));
+
+    expect(state.playbackState).toBe('playing');
+  });
+
+  it('is paused when the element pauses', () => {
+    videoEl().dispatchEvent(new Event('pause'));
+
+    expect(state.playbackState).toBe('paused');
+  });
+
+  it('is ended when the element ends', () => {
+    videoEl().dispatchEvent(new Event('ended'));
+
+    expect(state.playbackState).toBe('ended');
+  });
+
+  it('becomes paused when a paused viewer scrubs away from the end', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    setElementEnded(false);
+    setElementPaused(true);
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.ended).toBe(false);
+    expect(state.playbackState).toBe('paused');
+  });
+
+  it('becomes playing when a playing viewer seeks away from the end', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    setElementEnded(false);
+    setElementPaused(false);
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.ended).toBe(false);
+    expect(state.playbackState).toBe('playing');
+  });
+
+  it('is untouched when a seek lands on the end', () => {
+    setElementEnded(true);
+    videoEl().dispatchEvent(new Event('ended'));
+
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.playbackState).toBe('ended');
+  });
+
+  it('is untouched by an ordinary seek, with the ended key already false', () => {
+    setElementEnded(false);
+    setElementPaused(true);
+
+    videoEl().dispatchEvent(new Event('seeking'));
+
+    expect(state.playbackState).toBe('loading');
+  });
+});

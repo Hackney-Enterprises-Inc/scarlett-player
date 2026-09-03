@@ -845,7 +845,9 @@ describe('event-map', () => {
 
   describe('setupVideoEventHandlers()', () => {
     let video: HTMLVideoElement;
-    let mockApi: IPluginAPI;
+    // Typed as the mock rather than the interface so a suite can swap in a
+    // getState implementation; the handlers read the `ended` key back.
+    let mockApi: MockPluginAPI;
 
     beforeEach(() => {
       video = document.createElement('video');
@@ -922,6 +924,35 @@ describe('event-map', () => {
         Object.defineProperty(video, 'ended', { value, configurable: true });
       };
 
+      /**
+       * Shadow the element's read-only `paused` getter.
+       *
+       * jsdom answers true for every element, so the playing-viewer cases
+       * have to say otherwise.
+       */
+      const setElementPaused = (value: boolean): void => {
+        Object.defineProperty(video, 'paused', { value, configurable: true });
+      };
+
+      /**
+       * Answer `getState('ended')` with the value the key holds.
+       *
+       * `createMockAPI()` answers undefined for every key but `live`, and the
+       * provider only clears a key it can see is set, so a test that wants
+       * the clearing path has to say the key is true.
+       */
+      const setKeyEnded = (value: boolean): void => {
+        mockApi.getState.mockImplementation((key: string) => {
+          if (key === 'ended') return value;
+          if (key === 'live') return false;
+          return undefined;
+        });
+      };
+
+      beforeEach(() => {
+        setKeyEnded(true);
+      });
+
       it('clears the key on play, before the first frame', () => {
         setupVideoEventHandlers(video, mockApi);
 
@@ -967,6 +998,54 @@ describe('event-map', () => {
         video.dispatchEvent(new Event('play'));
 
         expect(mockApi.setState).not.toHaveBeenCalledWith('ended', false);
+      });
+
+      it('leaves both keys alone on an ordinary seek, with the key already false', () => {
+        setupVideoEventHandlers(video, mockApi);
+
+        setKeyEnded(false);
+        setElementEnded(false);
+        video.dispatchEvent(new Event('seeking'));
+
+        expect(mockApi.setState).not.toHaveBeenCalledWith('ended', false);
+        expect(mockApi.setState).not.toHaveBeenCalledWith('playbackState', 'paused');
+        expect(mockApi.setState).not.toHaveBeenCalledWith('playbackState', 'playing');
+      });
+
+      // `playbackState` was left at 'ended' by the same scrub that cleared the
+      // `ended` key, which is the disagreement the key itself was fixed for
+      // (second review of the 1.7.1 wave, 2026-09-02).
+      describe('playbackState', () => {
+        it('becomes paused when a paused viewer scrubs away from the end', () => {
+          setupVideoEventHandlers(video, mockApi);
+
+          setElementEnded(false);
+          setElementPaused(true);
+          video.dispatchEvent(new Event('seeking'));
+
+          expect(mockApi.setState).toHaveBeenCalledWith('playbackState', 'paused');
+        });
+
+        it('becomes playing when a playing viewer seeks away from the end', () => {
+          setupVideoEventHandlers(video, mockApi);
+
+          setElementEnded(false);
+          setElementPaused(false);
+          video.dispatchEvent(new Event('seeking'));
+
+          expect(mockApi.setState).toHaveBeenCalledWith('playbackState', 'playing');
+        });
+
+        it('is untouched when a seek lands on the end', () => {
+          setupVideoEventHandlers(video, mockApi);
+
+          setElementEnded(true);
+          setElementPaused(true);
+          video.dispatchEvent(new Event('seeking'));
+
+          expect(mockApi.setState).not.toHaveBeenCalledWith('playbackState', 'paused');
+          expect(mockApi.setState).not.toHaveBeenCalledWith('playbackState', 'playing');
+        });
       });
     });
 

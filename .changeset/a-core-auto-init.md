@@ -23,3 +23,8 @@ attached before `init()` or `load()`.
 Also pins `emptyOutDir: false` in the Vite config: the build is
 `tsc && vite build`, so emptying `dist` would delete the declarations that
 `types` and every plugin's tsconfig `paths` point at.
+
+One consequence worth knowing: because the pass now runs inside `load()`, a
+non-provider plugin whose `init()` throws surfaces through `load()`'s error
+path, reported through the `ErrorHandler` with `operation: 'load'` and
+populating the `error` state key, rather than only as a rejected `init()` call.

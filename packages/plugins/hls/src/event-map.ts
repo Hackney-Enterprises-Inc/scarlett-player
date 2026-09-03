@@ -269,11 +269,24 @@ export function setupVideoEventHandlers(
    * carry the position away from the end. The element is asked rather than
    * assumed, so a seek that lands ON the end leaves the key alone; setting it
    * true stays the `ended` handler's job.
+   *
+   * Clearing the key also re-derives `playbackState` from the element, for the
+   * same reason: the `ended` handler writes `'ended'` there, and nothing wrote
+   * it again after a paused scrub away from the end, so the key sat at
+   * `'ended'` over a player the viewer had just parked mid-video (second
+   * review of the 1.7.1 wave, 2026-09-02). `video.paused` decides between
+   * `'paused'` and `'playing'` rather than the `playing` state key, which the
+   * `playing` handler has not written yet during a replay.
+   *
+   * Both writes are gated on the key having been true, read back through
+   * `getState`, so an ordinary seek in the middle of a video (where `ended`
+   * was already false) restates neither key.
    */
   const syncEndedFromElement = (): void => {
-    if (!video.ended) {
-      api.setState('ended', false);
-    }
+    if (video.ended || !api.getState('ended')) return;
+
+    api.setState('ended', false);
+    api.setState('playbackState', video.paused ? 'paused' : 'playing');
   };
 
   // Playback events

@@ -1206,8 +1206,15 @@ export class ScarlettPlayer {
  * Convenience factory function that creates and initializes
  * the player in a single async call.
  *
+ * The returned promise resolves AFTER `player:ready` has been emitted, so the
+ * promise itself is the readiness signal: a listener attached to that event
+ * once this has been awaited can never observe it. Anything that must see the
+ * event has to be subscribed earlier, which for a plugin means inside its own
+ * `init()`, and for a consumer means constructing the player with
+ * `new ScarlettPlayer(...)`, calling `on()` and then `init()`.
+ *
  * @param options - Player configuration
- * @returns Promise resolving to initialized player
+ * @returns Promise resolving to initialized player, after `player:ready`
  *
  * @example
  * ```ts

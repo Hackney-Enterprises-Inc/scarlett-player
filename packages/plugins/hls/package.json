@@ -31,7 +31,7 @@
   },
   "peerDependencies": {
     "@scarlett-player/core": "^1.7.0",
-    "hls.js": "^1.5.0"
+    "hls.js": "^1.6.0"
   },
   "peerDependenciesMeta": {
     "hls.js": {

@@ -23,7 +23,7 @@ The old ranges were wrong across the workspace, not merely inconsistent: three
 of the packages declaring `^1.0.3` (audio-ui, media-session, ui) call
 `defineState`, which core gained in 1.4.0. Changesets is configured with
 `onlyUpdatePeerDependentsWhenOutOfRange`, so future minors of core will not
-cascade this into a major. The `hls.js` peer range is unchanged.
+cascade this into a major. The `hls.js` peer floor moves to `^1.6.0` in the same release (see the separate entry).
 
 The `@example` docblock shows `createPlayer()`. The `new ScarlettPlayer(...)`
 shape it used to show left the player with a provider and nothing else before

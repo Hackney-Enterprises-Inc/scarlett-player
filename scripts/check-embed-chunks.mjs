@@ -19,12 +19,27 @@
  * `packages/embed/dist` and assert that each relative specifier it imports
  * resolves to a file that is actually there. It runs after the build, in CI.
  *
+ * The second assertion guards the naming rule itself. `chunkFileNames` prefixes
+ * every chunk with its build name and leaves exactly two names unprefixed,
+ * `hls.js` and `hls.light.js`, because those are shared on purpose. A third
+ * unprefixed name in the three-build dist means the prefixing regressed, and
+ * the next build to emit the same name would silently overwrite it: the file
+ * would still exist, so the import check above would still pass. That is the
+ * failure this catches and the first one cannot.
+ *
+ * The two are complementary and neither is the byte check: whether two builds
+ * write the SAME bytes to a shared name is settled at build time by
+ * `guardSharedChunks()` in `packages/embed/vite.config.ts`.
+ *
  * It cannot see the CDN, only the build output. The companion guarantee is that
  * `upload-cdn.sh` now uploads dist by glob rather than by hand list, so what
  * this script validates is exactly what gets published.
  *
- * Usage: node scripts/check-embed-chunks.mjs
- * Exit code: 0 when every reference resolves, 1 with the missing names.
+ * Usage: node scripts/check-embed-chunks.mjs (after a full three-build
+ * `pnpm --filter @scarlett-player/embed build`, which is what the expected set
+ * of unprefixed chunks describes)
+ * Exit code: 0 when every reference resolves and the unprefixed set matches,
+ * 1 with the offending names.
  */
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -32,6 +47,21 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(REPO_ROOT, 'packages', 'embed', 'dist');
+
+/**
+ * The `lib.fileName` base of each build, which is also the prefix
+ * `chunkFileNames` puts on that build's chunks. Every file the three builds
+ * write is expected to start with one of these, apart from SHARED_CHUNKS.
+ */
+const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio'];
+
+/**
+ * The chunk names `chunkFileNames` deliberately leaves unprefixed, kept in
+ * step with SHARED_CHUNK_NAMES in packages/embed/vite.config.ts. `hls.js` is
+ * the full hls.js bundle the full and video builds both emit; `hls.light.js`
+ * is the audio build's lighter one.
+ */
+const SHARED_CHUNKS = ['hls.js', 'hls.light.js'];
 
 /**
  * Every relative module specifier a bundle references.
@@ -106,3 +136,34 @@ if (missing.length > 0) {
 }
 
 console.log('OK: every chunk an embed bundle imports exists in dist.');
+
+// Second assertion: the unprefixed names in dist are exactly the shared ones.
+const unprefixed = bundles.filter(
+  (name) => !BUILD_BASE_NAMES.some((base) => name.startsWith(`${base}.`))
+);
+const unexpected = unprefixed.filter((name) => !SHARED_CHUNKS.includes(name));
+const absent = SHARED_CHUNKS.filter((name) => !unprefixed.includes(name));
+
+console.log(
+  `Checked ${unprefixed.length} unprefixed chunk file(s) in packages/embed/dist: ${unprefixed.join(', ') || 'none'}`
+);
+
+if (unexpected.length > 0 || absent.length > 0) {
+  console.error('');
+  console.error('Unprefixed chunks in dist are not the expected set:');
+  for (const name of unexpected) {
+    console.error(`  unexpected: ${name}`);
+  }
+  for (const name of absent) {
+    console.error(`  missing: ${name}`);
+  }
+  console.error('');
+  console.error('chunkFileNames in packages/embed/vite.config.ts gives every chunk its');
+  console.error('build prefix and leaves only the shared hls chunks unprefixed. An extra');
+  console.error('unprefixed name is the next silent overwrite between the three builds');
+  console.error('that share dist. A missing one usually means only part of the build ran:');
+  console.error('rerun pnpm --filter @scarlett-player/embed build.');
+  process.exit(1);
+}
+
+console.log('OK: the only unprefixed chunks in dist are hls.js and hls.light.js.');

@@ -54,6 +54,27 @@ const videoOnlyTypes: PlayerType[] = ['video'];
 const pluginsOf = (player: unknown): unknown[] =>
   (player as { config?: { plugins?: unknown[] } } | null)?.config?.plugins ?? [];
 
+/**
+ * Read the config object a mocked UI plugin creator was called with.
+ *
+ * `toHaveBeenCalledWith` can only assert what IS in that object; proving a key
+ * is absent needs the object itself. `vi.clearAllMocks()` in beforeEach makes
+ * call 0 the current test's call.
+ *
+ * @param creator - A mocked creator from one of the PluginCreators sets above
+ * @returns The first argument of its first call
+ * @throws If the creator was never called, which would make an absence
+ *   assertion pass for the wrong reason
+ */
+const uiConfigOf = (creator: unknown): Record<string, unknown> => {
+  const calls = vi.mocked(creator as (config: Record<string, unknown>) => unknown).mock.calls;
+  const first = calls[0];
+  if (!first) {
+    throw new Error('Expected the UI plugin creator to have been called');
+  }
+  return first[0];
+};
+
 // Mock the core dependencies
 vi.mock('@scarlett-player/core', () => ({
   ScarlettPlayer: vi.fn(),
@@ -203,6 +224,47 @@ describe('createEmbedPlayer', () => {
       fullAvailableTypes
     );
 
+    expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
+  });
+
+  it('should forward bigPlayButton false to the video UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', bigPlayButton: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.videoUI).toHaveBeenCalledWith(
+      expect.objectContaining({ bigPlayButton: false })
+    );
+  });
+
+  it('should omit bigPlayButton from the video UI config when it is unset', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The key has to be absent, not present as `undefined`: the ui plugin
+    // reads `config.bigPlayButton !== false` and owns the default, so the
+    // embed must not hand it a value nobody asked for.
+    const uiConfig = uiConfigOf(fullPluginCreators.videoUI);
+    expect(uiConfig).not.toHaveProperty('bigPlayButton');
+  });
+
+  it('should not pass bigPlayButton to the audio UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio', bigPlayButton: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The audio UIs have no big play button; the option is video only.
+    expect(uiConfigOf(fullPluginCreators.audioUI)).not.toHaveProperty('bigPlayButton');
     expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
   });
 

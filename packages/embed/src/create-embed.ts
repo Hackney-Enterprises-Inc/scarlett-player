@@ -136,6 +136,12 @@ export async function createEmbedPlayer(
         const uiConfig: Record<string, unknown> = {};
         if (Object.keys(theme).length > 0) uiConfig.theme = theme;
         if (config.hideDelay !== undefined) uiConfig.hideDelay = config.hideDelay;
+        // Only forwarded when the embed was actually told. The ui plugin owns
+        // the default (`config.bigPlayButton !== false`), so an absent key
+        // there and an absent attribute here mean the same thing, and the
+        // default is not duplicated in two packages. The audio UIs below have
+        // no big play button, which is why this sits in the video branch.
+        if (config.bigPlayButton !== undefined) uiConfig.bigPlayButton = config.bigPlayButton;
         plugins.push(pluginCreators.videoUI(uiConfig));
       } else if ((type === 'audio' || type === 'audio-mini') && pluginCreators.audioUI) {
         plugins.push(pluginCreators.audioUI({

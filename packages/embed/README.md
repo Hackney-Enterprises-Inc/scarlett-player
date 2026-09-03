@@ -134,6 +134,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-muted` | boolean | `false` | Start muted |
 | `data-poster` | string | - | Poster/artwork image URL |
 | `data-controls` | boolean | `true` | Show/hide UI controls |
+| `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
 | `data-brand-color` | string | - | Accent color (e.g., `#e50914`) |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |
@@ -145,7 +146,6 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-loop` | boolean | `false` | Loop playback |
 | `data-playback-rate` | number | `1.0` | Playback speed |
 | `data-start-time` | number | `0` | Start position (seconds) |
-| `data-share-url` | string | - | Canonical page URL for the share plugin. Set this on iframe embeds, or sharing links to the player page instead of yours |
 | `data-class` | string | - | Custom CSS class(es) |
 
 #### Audio-specific Attributes
@@ -175,6 +175,9 @@ For dynamic player creation:
     muted: true,
     brandColor: '#e50914',
     aspectRatio: '16:9',
+    // Video only, and optional: omit it to keep the centred play button.
+    // false hides it, for a page that draws its own play affordance.
+    bigPlayButton: false,
   });
 
   // Create audio player
@@ -278,6 +281,7 @@ All data attributes work as URL parameters (use kebab-case):
 - `autoplay`, `muted`, `loop`
 - `poster`
 - `brand-color`, `primary-color`, `background-color`
+- `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
 
 ## Player Types
 
