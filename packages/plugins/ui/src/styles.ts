@@ -673,6 +673,70 @@ export const styles = `
 }
 
 /* ============================================
+   Big Play Button
+
+   z-index 12 puts it above the gradient (5) and above the gestures plugin's
+   tap surface (6), so a tap lands on the button and starts playback instead
+   of being read as a tap-to-toggle-controls gesture - exactly how the control
+   bar's play button (10) already behaves. It stays below the spinner (15) and
+   the error overlay (25), both of which own the middle of the picture when
+   they are up.
+
+   Hidden with visibility, not opacity alone, so it takes no pointer events
+   while it is away.
+   ============================================ */
+.sp-big-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Comfortably past the 44px minimum touch target the control bar uses. */
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.2s ease, visibility 0.2s, transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.sp-big-play--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sp-big-play svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
+  /* Optical centring: the play triangle's mass sits left of the glyph box. */
+  margin-left: 3px;
+}
+
+.sp-big-play:hover {
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+.sp-big-play:active {
+  transform: translate(-50%, -50%) scale(0.96);
+}
+
+.sp-big-play:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* ============================================
    Error Overlay
    ============================================ */
 .sp-error-overlay {
@@ -851,10 +915,16 @@ export const styles = `
   .sp-settings-panel__item,
   .sp-settings-panel__header,
   .sp-buffering,
+  .sp-big-play,
   .sp-error-overlay,
   .sp-error-overlay__retry,
   .sp-error-overlay__dismiss {
     transition: none;
+  }
+
+  .sp-big-play:hover,
+  .sp-big-play:active {
+    transform: translate(-50%, -50%);
   }
 
   .sp-live__dot,

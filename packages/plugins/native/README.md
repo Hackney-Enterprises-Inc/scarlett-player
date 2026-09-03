@@ -11,16 +11,14 @@ npm install @scarlett-player/core @scarlett-player/native
 ## Usage
 
 ```typescript
-import { ScarlettPlayer } from '@scarlett-player/core';
+import { createPlayer } from '@scarlett-player/core';
 import { createNativePlugin } from '@scarlett-player/native';
 
-const player = new ScarlettPlayer({
+const player = await createPlayer({
   container: document.getElementById('player'),
+  src: 'https://example.com/video.mp4',
   plugins: [createNativePlugin()],
 });
-
-await player.init();
-await player.load('https://example.com/video.mp4');
 ```
 
 ## Supported Formats

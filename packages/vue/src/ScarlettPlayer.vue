@@ -3,14 +3,9 @@
 </template>
 
 <script setup lang="ts">
-import {
-  ref,
-  onMounted,
-  onBeforeUnmount,
-  watch,
-  type PropType,
-  defineExpose,
-} from 'vue';
+// `defineExpose` is a compiler macro, not a runtime export: importing it made
+// the SFC compiler warn on every build and every test run.
+import { ref, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
 import type { ScarlettPlayer, PlayerOptions, Plugin } from '@scarlett-player/core';
 
 // Props
@@ -23,7 +18,12 @@ const props = defineProps({
     required: false,
   },
   /**
-   * Poster image URL
+   * Poster image URL, shown until the first frame renders.
+   *
+   * Watched: changing it calls `setPoster()` on the running player, and
+   * clearing it takes the image away. Before that watcher existed the prop
+   * was read once at construction and every later change was silently
+   * ignored.
    */
   poster: {
     type: String,
@@ -73,7 +73,14 @@ const props = defineProps({
     default: () => [],
   },
   /**
-   * Player options (overrides individual props)
+   * Player options, merged over the individual props at construction.
+   *
+   * Construction-time only: this prop is deliberately not watched. The player
+   * merges it once, in onMounted, and there is no way to re-apply it to a live
+   * instance (plugins cannot be re-registered), so a watcher could only fake
+   * the update or silently destroy and rebuild the player under the consumer.
+   * Change the reactive props (src, volume, muted, autoplay) for anything that
+   * has to change at runtime, or re-key the component to rebuild it.
    */
   options: {
     type: Object as PropType<Partial<PlayerOptions>>,
@@ -164,6 +171,18 @@ watch(
   }
 );
 
+// Watch for poster changes. An unset prop writes '' rather than skipping the
+// call: a consumer clearing the poster means "take the image away", and the
+// providers treat an empty value as exactly that.
+watch(
+  () => props.poster,
+  (newPoster) => {
+    if (playerInstance.value) {
+      playerInstance.value.setPoster(newPoster ?? '');
+    }
+  }
+);
+
 // Watch for volume changes
 watch(
   () => props.volume,
@@ -196,8 +215,10 @@ watch(
 
 // Event listeners setup
 function setupEventListeners(player: ScarlettPlayer) {
-  // Player events
-  player.on('player:ready', () => emit('ready', player));
+  // Player events. There is deliberately no 'player:ready' subscription: core
+  // emits that event once, during the first initialisation, and this function
+  // runs after `await player.init()` has already returned. The explicit
+  // emit('ready', player) in onMounted is what tells the parent.
   player.on('player:destroy', () => emit('destroy'));
 
   // Playback events
@@ -248,6 +269,11 @@ defineExpose({
   },
   setMuted(muted: boolean) {
     playerInstance.value?.setMuted(muted);
+  },
+
+  // Poster ('' clears it)
+  setPoster(url: string) {
+    playerInstance.value?.setPoster(url);
   },
 
   // Playback rate

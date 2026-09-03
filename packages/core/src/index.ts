@@ -5,6 +5,19 @@
  * @packageDocumentation
  */
 
+/**
+ * Version of @scarlett-player/core this build was produced from.
+ *
+ * Exported so a host application can report the running player version instead
+ * of defining its own constant and letting it drift. tsp-web currently tags
+ * Sentry with a `__SCARLETT_VERSION__` define of its own (checked 2026-09-02);
+ * this is the value it should read instead.
+ *
+ * It is '0.0.0-dev' when core is bundled from source without the build-time
+ * define. See src/version.ts.
+ */
+export { PKG_VERSION as VERSION } from './version';
+
 // Re-export all state management primitives
 export {
   Signal,

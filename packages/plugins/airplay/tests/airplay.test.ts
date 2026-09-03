@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { airplayPlugin, isAirPlaySupported } from '../src/index';
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { WebkitVideoElement, WebkitPlaybackTargetAvailabilityEvent } from '../src/types';
+import { PKG_VERSION } from '../src/version';
 
 // Create a mock video element with webkit APIs
 const createMockVideo = (): WebkitVideoElement => {
@@ -86,7 +87,7 @@ describe('AirPlay Plugin', () => {
 
       expect(plugin.id).toBe('airplay');
       expect(plugin.name).toBe('AirPlay');
-      expect(plugin.version).toBe('1.0.0');
+      expect(plugin.version).toBe(PKG_VERSION);
       expect(plugin.type).toBe('feature');
     });
 

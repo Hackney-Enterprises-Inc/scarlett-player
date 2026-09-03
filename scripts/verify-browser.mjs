@@ -5,7 +5,10 @@
  * viewer-facing failure behaviors that jsdom cannot test:
  *
  *   1. Manifest 404 on initial load -> bounded failure, accurate message,
- *      structured error state, init() resolves, Try Again recovers.
+ *      structured error state, init() resolves, Try Again recovers. Also the
+ *      poster contract, which only a real element can answer: the demo passes
+ *      a poster, so before any click the video element must carry it and be
+ *      paused, and setPoster('') must clear the attribute.
  *   2. Mid-playback network outage -> reconnecting overlay, then automatic
  *      recovery with zero interaction and VOD position preserved.
  *   3. First-click-on-play regression (idempotent control rendering).
@@ -15,6 +18,13 @@
  *   5. Malformed live playlist refreshes (error page mid-stream): playback
  *      survives on the previous playlist and recovers, zero uncaught
  *      errors (the undefined-segments / Sentry 2D8 class).
+ *   6. The built embed UMD, loaded the way a CDN consumer loads it: the
+ *      window.ScarlettPlayer global keeps its shape and reports the embed
+ *      package's own version. Pins output.exports:
+ *      'named' in packages/embed/vite.config.ts, which silences Rollup's
+ *      mixed-exports warning but could just as easily have moved the API
+ *      behind window.ScarlettPlayer.default and broken every embed on the
+ *      web without a single test noticing.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -31,12 +41,32 @@
  * exercised here (headless Chrome cannot enter PiP); the readiness gate
  * is covered by unit tests in @scarlett-player/ui.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { ensureHlsFixture } from './hls-fixture.mjs';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The version @scarlett-player/embed is published at, read from its manifest.
+ *
+ * Read rather than written down because the whole point of the check below is
+ * that the number a viewer sees is the package's own. Every version constant in
+ * this repo used to be hand-written and every one had drifted: the CDN's
+ * latest/embed.umd.cjs answered window.ScarlettPlayer.version === '0.5.3' while
+ * the package published at 1.7.0 (measured 2026-09-02).
+ */
+const EMBED_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, 'packages/embed/package.json'), 'utf8')
+).version;
 
 const URL = 'http://127.0.0.1:8899/demo/index.html';
 const FIXTURE_VOD = 'http://127.0.0.1:8899/scripts/fixtures/hls/vod.m3u8';
 const FIXTURE_SEG = (i) => `http://127.0.0.1:8899/scripts/fixtures/hls/seg${i}.ts`;
+const EMBED_UMD = 'http://127.0.0.1:8899/packages/embed/dist/embed.umd.cjs';
+const EMBED_DIST = 'http://127.0.0.1:8899/packages/embed/dist/';
 
 ensureHlsFixture();
 
@@ -99,6 +129,41 @@ const state = (page) => page.evaluate(() => {
   record('message is network-specific (not generic)', s.msg.includes('trouble connecting'), s.msg);
   record('error state populated with structured code', s.errorCode === 'MEDIA_NETWORK_ERROR', String(s.errorCode));
   record('playbackState is error (not stuck loading)', s.playbackState === 'error', String(s.playbackState));
+
+  // Poster, before anything is clicked. The demo passes one, so the element
+  // must be showing it while paused: this is the only check that proves the
+  // provider actually wrote the attribute onto a real media element.
+  const poster = await page.evaluate(() => {
+    const v = document.querySelector('video');
+    return { poster: v?.getAttribute('poster') ?? null, paused: v?.paused ?? null };
+  });
+  record(
+    'poster attribute set before playback',
+    typeof poster.poster === 'string' && poster.poster.length > 0,
+    String(poster.poster)
+  );
+  record('video is paused while the poster shows', poster.paused === true, String(poster.paused));
+
+  // setPoster('') clears it on the live element. Before the providers
+  // subscribed to poster state, this call changed state and nothing else.
+  //
+  // This scenario runs the DEMO BUNDLE, which is committed and rebuilt by CI on
+  // main, so on a branch it can predate the core that added setPoster(). The
+  // absent method is reported as a failure with the command that fixes it, and
+  // never skipped: a missing setPoster() is exactly the regression this check
+  // exists to catch when the bundle is current.
+  const cleared = await page.evaluate(() => {
+    if (typeof window.player?.setPoster !== 'function') return { missing: true, poster: null };
+    window.player.setPoster('');
+    return { missing: false, poster: document.querySelector('video')?.getAttribute('poster') ?? null };
+  });
+  record(
+    'setPoster("") clears the attribute',
+    cleared.missing === false && cleared.poster === '',
+    cleared.missing
+      ? 'window.player.setPoster is not a function: the demo bundle predates core 1.7.1. Rebuild it with `node demo/build.cjs` and re-run, then leave the bundle uncommitted.'
+      : JSON.stringify(cleared.poster)
+  );
 
   const initSettles = await page.evaluate(async () => {
     if (!window.player) return 'no player';
@@ -328,6 +393,68 @@ const state = (page) => page.evaluate(() => {
     errs.rejections.length === 0,
     errs.rejections.slice(0, 3).join(' | ')
   );
+  await page.close();
+}
+
+// ============================================================ SCENARIO 6
+// The built embed UMD, loaded from a <script> tag the way every CDN embed
+// loads it. Each entry assigns its API object to window.ScarlettPlayer inside
+// the module body AND default-exports it, so Rollup warned about mixed
+// exports. output.exports: 'named' silences that; these checks are what stop a
+// future config change from quietly moving the whole API behind
+// window.ScarlettPlayer.default, which no unit test can see (the embed tests
+// mock core and never load a bundle).
+{
+  console.log('\n--- Scenario 6: built embed UMD global surface ---');
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  // Same origin as the bundle, so the script tag is not a cross-origin load.
+  await page.goto(EMBED_DIST, { waitUntil: 'domcontentloaded' });
+
+  let loadError = '';
+  try {
+    await page.addScriptTag({ url: EMBED_UMD });
+  } catch (e) {
+    loadError = String(e);
+  }
+  record('built embed UMD loads in a browser', loadError === '', loadError);
+
+  const api = await page.evaluate(() => {
+    const sp = window.ScarlettPlayer;
+    return {
+      defined: !!sp,
+      createType: typeof sp?.create,
+      initAllType: typeof sp?.initAll,
+      availableTypes: sp?.availableTypes ?? null,
+      version: sp?.version ?? null,
+      // A 'default' key here means the named/default mix leaked into the global
+      hasDefaultWrapper: !!sp && typeof sp.default === 'object',
+    };
+  });
+
+  record('window.ScarlettPlayer is defined by the UMD bundle', api.defined === true, JSON.stringify(api));
+  record(
+    'ScarlettPlayer.create is a function (not behind .default)',
+    api.createType === 'function' && api.hasDefaultWrapper === false,
+    `create=${api.createType}, default wrapper=${api.hasDefaultWrapper}`
+  );
+  record(
+    'ScarlettPlayer.availableTypes is present',
+    Array.isArray(api.availableTypes) && api.availableTypes.length > 0,
+    JSON.stringify(api.availableTypes)
+  );
+  record('ScarlettPlayer.initAll is a function', api.initAllType === 'function', api.initAllType);
+  // The version the global reports is the only thing support can read off a
+  // page to tell which build a viewer is running, and it was a hand-written
+  // literal until this release: the CDN's latest/embed.umd.cjs still answered
+  // '0.5.3' on 2026-09-02 while the package published at 1.7.0. It comes from
+  // packages/embed/package.json through the vite.config.ts define now, and
+  // nothing but a real browser load can prove the define survived the bundle.
+  record(
+    'ScarlettPlayer.version is the embed package version',
+    api.version === EMBED_VERSION,
+    `global=${api.version}, package.json=${EMBED_VERSION}`
+  );
+
   await page.close();
 }
 

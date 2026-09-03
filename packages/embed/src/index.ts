@@ -5,6 +5,7 @@
  * - Video UI (full video player controls)
  * - Audio UI (full + mini audio player)
  * - HLS streaming
+ * - Native progressive playback (MP4, WebM, MP3, ...)
  * - Analytics
  * - Playlist management
  * - Media Session (lock screen controls)
@@ -13,6 +14,7 @@
  */
 
 import { createHLSPlugin } from '@scarlett-player/hls';
+import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
 import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
@@ -22,17 +24,19 @@ import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
+import { PKG_VERSION } from './version';
 
 // Re-export types
 export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
 export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-const VERSION = '0.5.3';
+const VERSION = PKG_VERSION;
 
 const AVAILABLE_TYPES: PlayerType[] = ['video', 'audio', 'audio-mini'];
 
 const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
+  native: createNativePlugin,
   videoUI: uiPlugin,
   audioUI: createAudioUIPlugin,
   analytics: createAnalyticsPlugin,

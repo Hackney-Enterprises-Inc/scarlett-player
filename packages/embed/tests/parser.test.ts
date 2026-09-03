@@ -96,6 +96,25 @@ describe('parseDataAttributes', () => {
       expect(config.controls).toBe(false);
     });
 
+    it('should parse big play button attribute as false', () => {
+      element.setAttribute('data-big-play-button', 'false');
+      const config = parseDataAttributes(element);
+      expect(config.bigPlayButton).toBe(false);
+    });
+
+    it('should parse big play button attribute as true', () => {
+      element.setAttribute('data-big-play-button', 'true');
+      const config = parseDataAttributes(element);
+      expect(config.bigPlayButton).toBe(true);
+    });
+
+    it('should leave big play button out of the config when the attribute is absent', () => {
+      const config = parseDataAttributes(element);
+      // Absent, not `undefined`: createEmbedPlayer() forwards the key only
+      // when it is present, so the ui plugin keeps its own default.
+      expect('bigPlayButton' in config).toBe(false);
+    });
+
     it('should parse keyboard attribute', () => {
       element.setAttribute('data-keyboard', 'true');
       const config = parseDataAttributes(element);

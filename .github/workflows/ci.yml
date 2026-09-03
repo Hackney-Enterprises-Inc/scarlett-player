@@ -38,6 +38,27 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # Catches a manifest that advertises a file the build did not leave on
+      # disk: @scarlett-player/embed@1.7.0 and @scarlett-player/vue@1.7.0 both
+      # shipped with `types` pointing at a .d.ts that a Vite emptyOutDir had
+      # deleted (confirmed against both tarballs on 2026-09-02), and both
+      # publishes were green.
+      - name: Check package artifacts
+        run: node scripts/check-package-artifacts.mjs
+
+      # Catches an embed bundle importing a chunk the build did not emit: the
+      # audio build's second chunk was named hls2.js and never uploaded, so it
+      # 404'd on the CDN from the v1.6.0 release (2026-08-11) through v1.7.0,
+      # still reproducible 2026-09-02, while every build stayed green.
+      - name: Check embed chunks
+        run: node scripts/check-embed-chunks.mjs
+
+      # Catches a package with no `typecheck` or `test` script. pnpm's recursive
+      # run skips those silently, so the two steps below would pass vacuously
+      # for it, which is how ten packages went unchecked.
+      - name: Check package scripts
+        run: node scripts/check-package-scripts.mjs
+
       - name: Type check
         run: pnpm run typecheck
 

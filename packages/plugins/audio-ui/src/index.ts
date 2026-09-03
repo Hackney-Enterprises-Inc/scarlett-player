@@ -26,6 +26,7 @@ export type {
   AudioUITheme,
   IAudioUIPlugin,
 } from './types';
+import { PKG_VERSION } from './version';
 
 /** Default theme */
 const DEFAULT_THEME: AudioUITheme = {
@@ -781,7 +782,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
   const plugin: IAudioUIPlugin = {
     id: 'audio-ui',
     name: 'Audio UI',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'ui' as PluginType,
     description: 'Compact audio player interface',
 

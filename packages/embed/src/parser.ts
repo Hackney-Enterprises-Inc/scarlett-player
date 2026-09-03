@@ -47,6 +47,15 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.controls = controls !== 'false';
   }
 
+  // Left unset when the attribute is absent, so createEmbedPlayer() can tell
+  // "not asked for" from "asked for false" and leave the ui plugin's own
+  // default (true) in charge. Like the other booleans here, only the exact
+  // string "false" turns it off; "0" or "no" read as true.
+  const bigPlayButton = getAttr(element, 'data-big-play-button', 'big-play-button');
+  if (bigPlayButton !== null) {
+    config.bigPlayButton = bigPlayButton !== 'false';
+  }
+
   const keyboard = getAttr(element, 'data-keyboard', 'keyboard');
   if (keyboard !== null) {
     config.keyboard = keyboard !== 'false';

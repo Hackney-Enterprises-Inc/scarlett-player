@@ -45,6 +45,15 @@
       loop: params.get('loop') === 'true' || params.get('loop') === '1',
     };
 
+    // Centred play button over the poster. Set only when the parameter is
+    // present: an untouched iframe URL must keep the ui plugin's default
+    // (shown), not pin a copy of it here. '0' counts as off alongside
+    // 'false', matching the controls parameter above.
+    const bigPlayButton = params.get('bigPlayButton') ?? params.get('big-play-button');
+    if (bigPlayButton !== null) {
+      config.bigPlayButton = bigPlayButton !== 'false' && bigPlayButton !== '0';
+    }
+
     // Parse numeric params
     const hideDelay = params.get('hideDelay') || params.get('hide-delay');
     if (hideDelay) {
@@ -61,15 +70,6 @@
       config.startTime = parseFloat(startTime);
     }
 
-    // The page this embed lives on. Inside an iframe, window.location.href is
-    // this player page, and cross-origin rules block reading the parent - so
-    // without being told, a share from here would link to the bare player
-    // rather than to the page the viewer is actually watching.
-    const shareUrl = params.get('shareUrl') || params.get('share-url');
-    if (shareUrl) {
-      config.shareUrl = shareUrl;
-    }
-
     // Validate src
     if (!config.src) {
       document.body.innerHTML = `
@@ -84,11 +84,33 @@
         </div>
       `;
     } else {
-      // Import and initialize player
-      import('./dist/embed.js')
+      // Import and initialize player.
+      //
+      // Two layouts ship this page and the bundle sits in a different place in
+      // each. scripts/upload-cdn.sh puts iframe.html BESIDE the bundles, so on
+      // the CDN the page is latest/iframe.html and the bundle is
+      // latest/embed.js; in the npm tarball the page is at the package root
+      // and the bundle is under dist/. The flat layout is tried first because
+      // it is the deployed one: './dist/embed.js' has been the only path here
+      // since the initial release (2b8fd69, 2025-12-14), and it 404s on the
+      // CDN, so this page has never worked there.
+      import('./embed.js')
+        .catch(() => import('./dist/embed.js'))
         .then((module) => {
-          const player = module.create(config);
-
+          // The API object is the bundle's DEFAULT export: the ES build ends
+          // in `export { applyContainerStyles, aspectRatioToPercent,
+          // ScarlettPlayerAPI as default, parseDataAttributes }`, so
+          // `module.create` is undefined and `module.default.create` is the
+          // function. Loading the module also assigns the same object to
+          // window.ScarlettPlayer as a side effect.
+          //
+          // create() is async, so the null it returns for a missing container
+          // or an empty src arrives on the next tick; awaiting it here also
+          // routes a failed player creation into the catch below, which is
+          // where the viewer-facing error lives.
+          return module.default.create(config);
+        })
+        .then((player) => {
           if (!player) {
             console.error('Failed to create player');
           }

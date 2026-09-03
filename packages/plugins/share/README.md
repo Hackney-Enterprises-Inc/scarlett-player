@@ -9,11 +9,11 @@ npm install @scarlett-player/share
 ## Usage
 
 ```ts
-import { ScarlettPlayer } from '@scarlett-player/core';
+import { createPlayer } from '@scarlett-player/core';
 import { uiPlugin } from '@scarlett-player/ui';
 import { createSharePlugin } from '@scarlett-player/share';
 
-const player = new ScarlettPlayer({
+const player = await createPlayer({
   container: '#player',
   src: 'https://example.com/video.m3u8',
   plugins: [

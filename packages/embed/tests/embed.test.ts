@@ -8,6 +8,7 @@ import type { PlayerType } from '../src/types';
 
 // Mock plugins
 const mockHLSPlugin = { id: 'hls-provider', name: 'HLS Provider' };
+const mockNativePlugin = { id: 'native-provider', name: 'Native Media Provider' };
 const mockVideoUIPlugin = { id: 'ui', name: 'Video UI Plugin' };
 const mockAudioUIPlugin = { id: 'audio-ui', name: 'Audio UI Plugin' };
 const mockAnalyticsPlugin = { id: 'analytics', name: 'Analytics Plugin' };
@@ -17,6 +18,7 @@ const mockMediaSessionPlugin = { id: 'media-session', name: 'Media Session Plugi
 // Mock plugin creators
 const fullPluginCreators: PluginCreators = {
   hls: vi.fn(() => mockHLSPlugin),
+  native: vi.fn(() => mockNativePlugin),
   videoUI: vi.fn(() => mockVideoUIPlugin),
   audioUI: vi.fn(() => mockAudioUIPlugin),
   analytics: vi.fn(() => mockAnalyticsPlugin),
@@ -26,11 +28,52 @@ const fullPluginCreators: PluginCreators = {
 
 const videoOnlyPluginCreators: PluginCreators = {
   hls: vi.fn(() => mockHLSPlugin),
+  native: vi.fn(() => mockNativePlugin),
   videoUI: vi.fn(() => mockVideoUIPlugin),
+};
+
+// A build that supplies no native provider. Kept to prove the slot is optional
+// and that nothing is pushed when it is absent.
+const hlsOnlyPluginCreators: PluginCreators = {
+  hls: vi.fn(() => mockHLSPlugin),
 };
 
 const fullAvailableTypes: PlayerType[] = ['video', 'audio', 'audio-mini'];
 const videoOnlyTypes: PlayerType[] = ['video'];
+
+/**
+ * Read the plugin array createEmbedPlayer() assembled.
+ *
+ * The core mock below returns the config it was handed, which is the only
+ * place the assembled array is observable. ScarlettPlayer itself exposes no
+ * `config`, so this keeps the cast in one documented place.
+ *
+ * @param player - Value returned by createEmbedPlayer with the core mock active
+ * @returns The plugins passed to createPlayer(), or an empty array
+ */
+const pluginsOf = (player: unknown): unknown[] =>
+  (player as { config?: { plugins?: unknown[] } } | null)?.config?.plugins ?? [];
+
+/**
+ * Read the config object a mocked UI plugin creator was called with.
+ *
+ * `toHaveBeenCalledWith` can only assert what IS in that object; proving a key
+ * is absent needs the object itself. `vi.clearAllMocks()` in beforeEach makes
+ * call 0 the current test's call.
+ *
+ * @param creator - A mocked creator from one of the PluginCreators sets above
+ * @returns The first argument of its first call
+ * @throws If the creator was never called, which would make an absence
+ *   assertion pass for the wrong reason
+ */
+const uiConfigOf = (creator: unknown): Record<string, unknown> => {
+  const calls = vi.mocked(creator as (config: Record<string, unknown>) => unknown).mock.calls;
+  const first = calls[0];
+  if (!first) {
+    throw new Error('Expected the UI plugin creator to have been called');
+  }
+  return first[0];
+};
 
 // Mock the core dependencies
 vi.mock('@scarlett-player/core', () => ({
@@ -184,6 +227,47 @@ describe('createEmbedPlayer', () => {
     expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
   });
 
+  it('should forward bigPlayButton false to the video UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', bigPlayButton: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.videoUI).toHaveBeenCalledWith(
+      expect.objectContaining({ bigPlayButton: false })
+    );
+  });
+
+  it('should omit bigPlayButton from the video UI config when it is unset', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The key has to be absent, not present as `undefined`: the ui plugin
+    // reads `config.bigPlayButton !== false` and owns the default, so the
+    // embed must not hand it a value nobody asked for.
+    const uiConfig = uiConfigOf(fullPluginCreators.videoUI);
+    expect(uiConfig).not.toHaveProperty('bigPlayButton');
+  });
+
+  it('should not pass bigPlayButton to the audio UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio', bigPlayButton: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The audio UIs have no big play button; the option is video only.
+    expect(uiConfigOf(fullPluginCreators.audioUI)).not.toHaveProperty('bigPlayButton');
+    expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
+  });
+
   it('should always include HLS plugin', async () => {
     await createEmbedPlayer(
       container,
@@ -193,6 +277,59 @@ describe('createEmbedPlayer', () => {
     );
 
     expect(fullPluginCreators.hls).toHaveBeenCalled();
+  });
+
+  // Provider registration. Up to 1.7.0 no embed build registered the native
+  // provider, so `PluginManager.selectProvider` found nothing for an .mp3 or
+  // .mp4 source and the player failed with PROVIDER_NOT_FOUND. selectProvider
+  // takes the FIRST registered provider whose canPlay() accepts the source,
+  // so the order these are pushed in is part of the contract.
+  it('should register the native provider for an .mp3 audio source', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/episode-42.mp3', type: 'audio' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.native).toHaveBeenCalled();
+    expect(pluginsOf(player)).toContain(mockNativePlugin);
+  });
+
+  it('should register the native provider for an .mp4 video source', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/bout-13.mp4', type: 'video' },
+      videoOnlyPluginCreators,
+      videoOnlyTypes
+    );
+
+    expect(videoOnlyPluginCreators.native).toHaveBeenCalled();
+    expect(pluginsOf(player)).toContain(mockNativePlugin);
+  });
+
+  it('should register the HLS provider before the native provider', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/stream.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    const plugins = pluginsOf(player);
+    expect(plugins[0]).toBe(mockHLSPlugin);
+    expect(plugins[1]).toBe(mockNativePlugin);
+  });
+
+  it('should register only the HLS provider when the build has no native creator', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/stream.m3u8', controls: false },
+      hlsOnlyPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(pluginsOf(player)).toEqual([mockHLSPlugin]);
   });
 
   it('should include analytics plugin when configured', async () => {

@@ -35,6 +35,34 @@ npm install @scarlett-player/embed
 pnpm add @scarlett-player/embed
 ```
 
+## Supported sources
+
+Every build registers two providers and picks the first one that accepts the
+source URL, by file extension:
+
+| Source | Provider | Extensions |
+|--------|----------|------------|
+| HLS | hls.js, or the browser's own HLS in Safari | `.m3u8` |
+| Progressive video | native `<video>` element | `.mp4`, `.m4v`, `.webm`, `.mov`, `.mkv`, `.ogv` |
+| Progressive audio | native media element | `.mp3`, `.m4a`, `.aac`, `.wav`, `.ogg`, `.opus`, `.flac`, `.weba` |
+
+HLS always wins for `.m3u8`. The native provider also asks the browser whether
+it can play the format before claiming a source, so an `.mkv` in a browser
+without Matroska support is declined rather than played into a black frame.
+
+Before 1.7.1 no embed build registered the native provider at all, and any
+non-HLS source failed with `PROVIDER_NOT_FOUND`. If you are on an older build,
+upgrade rather than working around it.
+
+### Audio build: hls.js/light
+
+`embed.audio.js` / `embed.audio.umd.cjs` build on `hls.js/light`, which drops
+in-stream subtitle parsing, ID3 tag parsing and EME/DRM in exchange for a much
+smaller bundle. The audio build ships no captions plugin and audio embeds are
+not DRM sources, so **ID3 timed metadata is the one capability an audio embed
+gives up**. If you need ID3 (in-stream "now playing" updates on a live audio
+stream, typically), use the Full build.
+
 ## Usage
 
 ### 1. Declarative (Data Attributes)
@@ -54,13 +82,23 @@ The simplest way to embed a player. Just add the script and use data attributes:
     data-src="https://example.com/stream.m3u8"
   ></div>
 
-  <!-- Audio player -->
+  <!-- Audio player (HLS) -->
   <div
     data-scarlett-player
     data-src="https://example.com/podcast.m3u8"
     data-type="audio"
     data-title="Episode 1: Introduction"
     data-artist="My Podcast"
+  ></div>
+
+  <!-- Audio player (progressive MP3 file) -->
+  <div
+    data-scarlett-player
+    data-src="https://example.com/episode-42.mp3"
+    data-type="audio"
+    data-title="Episode 42: Deep Dive"
+    data-artist="My Podcast"
+    data-artwork="https://example.com/podcast-cover.jpg"
   ></div>
 
   <!-- Compact audio player -->
@@ -90,12 +128,13 @@ The simplest way to embed a player. Just add the script and use data attributes:
 
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data-src` | string | **required** | Media source URL (HLS .m3u8) |
+| `data-src` | string | **required** | Media source URL. HLS (`.m3u8`) or a progressive file, see [Supported sources](#supported-sources) |
 | `data-type` | string | `video` | Player type: `video`, `audio`, or `audio-mini` |
 | `data-autoplay` | boolean | `false` | Auto-play on load |
 | `data-muted` | boolean | `false` | Start muted |
 | `data-poster` | string | - | Poster/artwork image URL |
 | `data-controls` | boolean | `true` | Show/hide UI controls |
+| `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
 | `data-brand-color` | string | - | Accent color (e.g., `#e50914`) |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |
@@ -107,7 +146,6 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-loop` | boolean | `false` | Loop playback |
 | `data-playback-rate` | number | `1.0` | Playback speed |
 | `data-start-time` | number | `0` | Start position (seconds) |
-| `data-share-url` | string | - | Canonical page URL for the share plugin. Set this on iframe embeds, or sharing links to the player page instead of yours |
 | `data-class` | string | - | Custom CSS class(es) |
 
 #### Audio-specific Attributes
@@ -137,6 +175,9 @@ For dynamic player creation:
     muted: true,
     brandColor: '#e50914',
     aspectRatio: '16:9',
+    // Video only, and optional: omit it to keep the centred play button.
+    // false hides it, for a page that draws its own play affordance.
+    bigPlayButton: false,
   });
 
   // Create audio player
@@ -147,6 +188,16 @@ For dynamic player creation:
     title: 'Episode Title',
     artist: 'Podcast Name',
     artwork: 'https://example.com/artwork.jpg',
+  });
+
+  // Create audio player from a progressive MP3 file
+  const mp3Player = await ScarlettPlayer.create({
+    container: '#mp3-player',
+    src: 'https://example.com/episode-42.mp3',
+    type: 'audio',
+    title: 'Episode 42: Deep Dive',
+    artist: 'Tech Podcast',
+    artwork: 'https://example.com/podcast-cover.jpg',
   });
 
   // Create compact audio player
@@ -230,23 +281,28 @@ All data attributes work as URL parameters (use kebab-case):
 - `autoplay`, `muted`, `loop`
 - `poster`
 - `brand-color`, `primary-color`, `background-color`
+- `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
 
 ## Player Types
 
 ### Video Player (default)
 
 Standard video player with full controls, fullscreen, picture-in-picture support.
+Takes an HLS manifest or a progressive video file.
 
 ```html
 <div data-scarlett-player data-src="video.m3u8"></div>
+<div data-scarlett-player data-src="bout-13.mp4"></div>
 ```
 
 ### Audio Player
 
 Full-sized audio player with waveform, track info, and media session integration.
+Takes an HLS manifest or a progressive audio file.
 
 ```html
 <div data-scarlett-player data-src="audio.m3u8" data-type="audio"></div>
+<div data-scarlett-player data-src="episode-42.mp3" data-type="audio"></div>
 ```
 
 ### Compact Audio Player
@@ -287,13 +343,13 @@ All builds are available at `https://assets.thestreamplatform.com/scarlett-playe
 |-------|-------|----------|
 | **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session |
 | **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight) |
-| **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session |
+| **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session, on `hls.js/light` (no ID3) |
 
 **Which build should I use?**
 
 - Use **Full** (`embed.umd.cjs`) if you need both video and audio, or want analytics
 - Use **Video** (`embed.video.umd.cjs`) for video-only sites to reduce bundle size
-- Use **Audio** (`embed.audio.umd.cjs`) for audio-only sites (podcasts, music streaming)
+- Use **Audio** (`embed.audio.umd.cjs`) for audio-only sites (podcasts, music streaming). It is built on `hls.js/light`, so it cannot read ID3 timed metadata: see [Audio build: hls.js/light](#audio-build-hlsjslight)
 
 **Note:** Using a build without support for a player type will throw an error. For example, using the Video build and setting `data-type="audio"` will fail with a helpful error message.
 

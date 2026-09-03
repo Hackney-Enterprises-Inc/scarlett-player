@@ -32,6 +32,7 @@ import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
 import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 import { createValidatingPlaylistLoader, PLAYLIST_INVALID_TEXT } from './playlist-validation';
 import { sanitizeUrl } from './sanitize-url';
+import { PKG_VERSION } from './version';
 
 /**
  * The loader-module surface a build variant injects: the full build passes
@@ -160,6 +161,25 @@ export function createHLSPluginWith(
   // and no further attempt can be scheduled against a closed window
   let reconnectExhausted = false;
 
+  /**
+   * Mirror the `poster` state key onto the media element.
+   *
+   * Called at element creation, at the top of every `loadSource()`, and from
+   * the state subscription in `init()`. Until 2026-09-02 this provider set the
+   * poster once, when it created the element, and never again: the attribute
+   * survives an `src` change, so a playlist moving from a pre-roll to the
+   * feature showed the PREVIOUS item's art over the gap, and `setPoster()`
+   * plus the Vue `poster` prop did nothing at all.
+   *
+   * An empty state value clears the attribute, so an item without artwork
+   * cannot inherit the last one's image.
+   */
+  const applyPoster = (): void => {
+    if (!video) return;
+
+    video.poster = api?.getState('poster') || '';
+  };
+
   /** Get video element from container */
   const getOrCreateVideo = (): HTMLVideoElement => {
     if (video) return video;
@@ -178,11 +198,7 @@ export function createHLSPluginWith(
     video.controls = false;
     video.playsInline = true;
 
-    // Set poster from state if available
-    const poster = api?.getState('poster');
-    if (poster) {
-      video.poster = poster;
-    }
+    applyPoster();
 
     api?.container.appendChild(video);
     return video;
@@ -1072,7 +1088,7 @@ export function createHLSPluginWith(
   const plugin: IHLSPlugin = {
     id: 'hls-provider',
     name: variant.name,
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'provider' as PluginType,
     description: variant.description,
 
@@ -1189,6 +1205,13 @@ export function createHLSPluginWith(
         window.addEventListener('online', onlineListener);
       }
 
+      // Re-apply the poster whenever it changes. Without this the element
+      // keeps whatever image it was created with, so setPoster(), a playlist
+      // track change and a Vue prop change were all invisible to the viewer.
+      const unsubPoster = api.subscribeToState((event) => {
+        if (event.key === 'poster') applyPoster();
+      });
+
       // Register cleanup
       api.onDestroy(() => {
         unsubPlay();
@@ -1198,6 +1221,7 @@ export function createHLSPluginWith(
         unsubMute();
         unsubRate();
         unsubQuality();
+        unsubPoster();
       });
     },
 
@@ -1232,6 +1256,11 @@ export function createHLSPluginWith(
       // Cleanup previous source (also settles a pending load promise)
       cleanup(new Error('HLS load cancelled: superseded by a new load'));
       currentSrc = src;
+
+      // Before the load, not after: the poster is what the viewer looks at
+      // while the next source is fetched, and on a reused element it is still
+      // showing the previous item's art until this runs.
+      applyPoster();
 
       // Update state
       api.setState('playbackState', 'loading');

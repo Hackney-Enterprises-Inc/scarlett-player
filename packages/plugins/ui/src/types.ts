@@ -73,6 +73,16 @@ export interface ThemeConfig {
 export interface UIPluginConfig extends LayoutConfig {
   /** Theme configuration */
   theme?: ThemeConfig;
+  /**
+   * Show the centred big play button over the poster (default: true).
+   *
+   * It is the only play affordance on the picture itself: a mouse click on
+   * the video surface only reveals the control bar, and touch taps belong to
+   * the gestures plugin, so a player showing a poster with this off asks the
+   * viewer to find the small button in the bar. Set it to `false` when the
+   * host page draws its own play affordance over the player.
+   */
+  bigPlayButton?: boolean;
 }
 
 /**

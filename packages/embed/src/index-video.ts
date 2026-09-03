@@ -4,6 +4,7 @@
  * Lightweight video player with:
  * - Video UI (full video player controls)
  * - HLS streaming
+ * - Native progressive playback (MP4, WebM, MOV, ...)
  *
  * Does NOT include: Audio UI, Analytics, Playlist, Media Session
  * Use embed.js for full features or embed.audio.js for audio.
@@ -12,22 +13,25 @@
  */
 
 import { createHLSPlugin } from '@scarlett-player/hls';
+import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
+import { PKG_VERSION } from './version';
 
 // Re-export types
 export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
 export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
 
-const VERSION = '0.5.3-video';
+const VERSION = `${PKG_VERSION}-video`;
 
 const AVAILABLE_TYPES: PlayerType[] = ['video'];
 
 const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
+  native: createNativePlugin,
   videoUI: uiPlugin,
   watermark: createWatermarkPlugin,
   captions: createCaptionsPlugin,

@@ -109,15 +109,31 @@ describe('ScarlettPlayer', () => {
       expect(player.getPlugin('test-plugin')).toBe(plugin);
     });
 
-    it('should emit player:ready event', () => {
+    it('should emit player:ready once to a listener attached before init()', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
       const readySpy = vi.fn();
 
-      const player = new ScarlettPlayer({ container });
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      // Emitting from the constructor put this listener out of reach; the
+      // event now fires at the end of the first initialisation.
       player.on('player:ready', readySpy);
 
-      // Event was already emitted during construction
-      // But we can verify the event bus is working
-      expect(readySpy).not.toHaveBeenCalled(); // Because we subscribed after construction
+      await player.init();
+
+      expect(readySpy).toHaveBeenCalledTimes(1);
+
+      // Readiness is announced once: neither a second init() nor a load()
+      // repeats it.
+      await player.init();
+      await player.load('video.mp4');
+
+      expect(readySpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -418,6 +434,88 @@ describe('ScarlettPlayer', () => {
       player.setPlaybackRate(2.0);
 
       expect(rateSpy).toHaveBeenCalledWith({ rate: 2.0 });
+    });
+  });
+
+  describe('setPoster()', () => {
+    it('should update the poster state and the getter', () => {
+      const player = new ScarlettPlayer({ container });
+
+      expect(player.poster).toBe('');
+
+      player.setPoster('https://example.com/art.jpg');
+
+      expect(player.poster).toBe('https://example.com/art.jpg');
+      expect(player.getState().poster).toBe('https://example.com/art.jpg');
+    });
+
+    it('should seed the poster from PlayerOptions', () => {
+      const player = new ScarlettPlayer({
+        container,
+        poster: 'https://example.com/initial.jpg',
+      });
+
+      expect(player.poster).toBe('https://example.com/initial.jpg');
+    });
+
+    it('should clear the poster when given an empty string', () => {
+      const player = new ScarlettPlayer({
+        container,
+        poster: 'https://example.com/art.jpg',
+      });
+
+      player.setPoster('');
+
+      expect(player.poster).toBe('');
+    });
+
+    it('should notify state subscribers so providers can re-apply it', () => {
+      const player = new ScarlettPlayer({ container });
+      const changes: Array<{ key: string; value: unknown }> = [];
+
+      // The provider plugins react through this subscription, so a silent
+      // write would leave the element showing the previous image.
+      (player as any).stateManager.subscribe((event: { key: string; value: unknown }) => {
+        changes.push({ key: event.key, value: event.value });
+      });
+
+      player.setPoster('https://example.com/next.jpg');
+
+      expect(changes).toContainEqual({
+        key: 'poster',
+        value: 'https://example.com/next.jpg',
+      });
+    });
+
+    it('should throw after destroy()', () => {
+      const player = new ScarlettPlayer({ container });
+      player.destroy();
+
+      expect(() => player.setPoster('https://example.com/art.jpg')).toThrow(
+        'destroyed player'
+      );
+    });
+
+    it('should leave the poster untouched across load()', async () => {
+      // The poster is metadata the consumer or the playlist owns, and it is
+      // written BEFORE the load it belongs to: clearing it on load would
+      // blank the image over exactly the gap it exists to cover.
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({
+        container,
+        poster: 'https://example.com/art.jpg',
+        plugins: [provider],
+      });
+
+      await player.load('video.m3u8');
+
+      expect(player.poster).toBe('https://example.com/art.jpg');
     });
   });
 
@@ -730,6 +828,94 @@ describe('ScarlettPlayer', () => {
       await player.init();
 
       expect((provider as any).loadSource).toHaveBeenCalledWith('video.m3u8');
+    });
+  });
+
+  describe('auto-initialization', () => {
+    /** A provider that accepts anything and resolves immediately. */
+    const createProvider = () =>
+      createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+    it('should initialize non-provider plugins when load() is the first call', async () => {
+      const ui = createMockPlugin({ id: 'ui', type: 'ui' });
+      const provider = createProvider();
+
+      const player = new ScarlettPlayer({ container, plugins: [ui, provider] });
+
+      await player.load('video.mp4');
+
+      expect(ui.init).toHaveBeenCalledTimes(1);
+      expect(provider.init).toHaveBeenCalledTimes(1);
+    });
+
+    it('should wire the media:load-request handler once across load() and init()', async () => {
+      const provider = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      await player.load('first.mp4');
+      await player.init();
+      await player.init();
+
+      const loadSpy = vi.spyOn(player, 'load');
+
+      (player as any).eventBus.emit('media:load-request', {
+        src: 'second.mp4',
+        autoplay: false,
+      });
+      await tick();
+
+      expect(loadSpy).toHaveBeenCalledTimes(1);
+      expect(loadSpy).toHaveBeenCalledWith('second.mp4');
+    });
+
+    it('should wire the error:retry handler once across load() and init()', async () => {
+      const provider = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      await player.load('first.mp4');
+      await player.init();
+      await player.init();
+
+      const loadSpy = vi.spyOn(player, 'load');
+
+      (player as any).eventBus.emit('error:retry', { src: 'second.mp4' });
+      await tick();
+
+      expect(loadSpy).toHaveBeenCalledTimes(1);
+      expect(loadSpy).toHaveBeenCalledWith('second.mp4');
+    });
+
+    it('should initialize a plugin registered after init() on the next load()', async () => {
+      const provider = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      await player.init();
+
+      const late = createMockPlugin({ id: 'late-ui', type: 'ui' });
+      player.registerPlugin(late);
+
+      expect(late.init).not.toHaveBeenCalled();
+
+      await player.load('video.mp4');
+
+      expect(late.init).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not re-initialize an already initialized plugin', async () => {
+      const ui = createMockPlugin({ id: 'ui', type: 'ui' });
+      const provider = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [ui, provider] });
+
+      await player.init();
+      await player.load('video.mp4');
+      await player.init();
+
+      expect(ui.init).toHaveBeenCalledTimes(1);
     });
   });
 

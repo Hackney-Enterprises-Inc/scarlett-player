@@ -10,10 +10,24 @@ import type { EmbedConfig, EmbedPlayerOptions, PlayerType, ScarlettPlayerGlobal 
 import { parseDataAttributes, applyContainerStyles } from './parser';
 
 /**
- * Plugin creators that builds can provide
+ * Plugin creators that builds can provide.
+ *
+ * `hls` and `native` are the two provider plugins. They are not
+ * interchangeable and they are not alternatives: `PluginManager.selectProvider`
+ * walks the registered providers in registration order and takes the first
+ * whose `canPlay()` accepts the source, so a build that omits `native` answers
+ * `PROVIDER_NOT_FOUND` for every progressive file. That was the shipped
+ * behaviour up to 1.7.0: an `.mp3` or `.mp4` `data-src` failed in every embed
+ * build, including the audio one.
  */
 export interface PluginCreators {
   hls: () => Plugin;
+  /**
+   * Native media element provider (progressive MP4/WebM/MOV/MKV/OGV/M4V and
+   * MP3/WAV/OGG/FLAC/AAC/M4A/Opus/WebA). Optional so a build can still be
+   * assembled without it, but every shipped embed build passes it.
+   */
+  native?: () => Plugin;
   videoUI?: (config: any) => Plugin;
   audioUI?: (config: any) => Plugin;
   analytics?: (config: any) => Plugin;
@@ -59,8 +73,19 @@ export async function createEmbedPlayer(
     if (config.primaryColor) theme.primaryColor = config.primaryColor;
     if (config.backgroundColor) theme.backgroundColor = config.backgroundColor;
 
-    // Build plugins array
+    // Build plugins array.
+    //
+    // Provider order is load-bearing: selectProvider() takes the FIRST
+    // provider whose canPlay() accepts the source. HLS goes first because it
+    // is the only one that claims .m3u8 (the native provider's supported
+    // extension list has no m3u8 entry, so it never competes for a manifest,
+    // not even in Safari where the media element could play one natively).
+    // The native provider then picks up everything HLS refuses.
     const plugins: Plugin[] = [pluginCreators.hls()];
+
+    if (pluginCreators.native) {
+      plugins.push(pluginCreators.native());
+    }
 
     // Add playlist plugin if available and playlist provided
     if (pluginCreators.playlist && config.playlist?.length) {
@@ -111,6 +136,12 @@ export async function createEmbedPlayer(
         const uiConfig: Record<string, unknown> = {};
         if (Object.keys(theme).length > 0) uiConfig.theme = theme;
         if (config.hideDelay !== undefined) uiConfig.hideDelay = config.hideDelay;
+        // Only forwarded when the embed was actually told. The ui plugin owns
+        // the default (`config.bigPlayButton !== false`), so an absent key
+        // there and an absent attribute here mean the same thing, and the
+        // default is not duplicated in two packages. The audio UIs below have
+        // no big play button, which is why this sits in the video branch.
+        if (config.bigPlayButton !== undefined) uiConfig.bigPlayButton = config.bigPlayButton;
         plugins.push(pluginCreators.videoUI(uiConfig));
       } else if ((type === 'audio' || type === 'audio-mini') && pluginCreators.audioUI) {
         plugins.push(pluginCreators.audioUI({

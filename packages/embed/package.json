@@ -8,19 +8,19 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/embed.js",
-      "require": "./dist/embed.umd.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/embed.umd.cjs"
     },
     "./video": {
+      "types": "./dist/index-video.d.ts",
       "import": "./dist/embed.video.js",
-      "require": "./dist/embed.video.umd.cjs",
-      "types": "./dist/index-video.d.ts"
+      "require": "./dist/embed.video.umd.cjs"
     },
     "./audio": {
+      "types": "./dist/index-audio.d.ts",
       "import": "./dist/embed.audio.js",
-      "require": "./dist/embed.audio.umd.cjs",
-      "types": "./dist/index-audio.d.ts"
+      "require": "./dist/embed.audio.umd.cjs"
     }
   },
   "files": [
@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && BUILD_VIDEO=true vite build && BUILD_AUDIO=true vite build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc && vite build && BUILD_VIDEO=true vite build && BUILD_AUDIO=true vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -61,6 +61,7 @@
   "dependencies": {
     "@scarlett-player/core": "workspace:*",
     "@scarlett-player/hls": "workspace:*",
+    "@scarlett-player/native": "workspace:*",
     "@scarlett-player/ui": "workspace:*",
     "@scarlett-player/audio-ui": "workspace:*",
     "@scarlett-player/analytics": "workspace:*",

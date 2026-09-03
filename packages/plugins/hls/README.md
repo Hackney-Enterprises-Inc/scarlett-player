@@ -11,16 +11,14 @@ npm install @scarlett-player/core @scarlett-player/hls
 ## Usage
 
 ```typescript
-import { ScarlettPlayer } from '@scarlett-player/core';
+import { createPlayer } from '@scarlett-player/core';
 import { createHLSPlugin } from '@scarlett-player/hls';
 
-const player = new ScarlettPlayer({
+const player = await createPlayer({
   container: document.getElementById('player'),
+  src: 'https://example.com/video.m3u8',
   plugins: [createHLSPlugin()],
 });
-
-await player.init();
-await player.load('https://example.com/video.m3u8');
 ```
 
 ## Features

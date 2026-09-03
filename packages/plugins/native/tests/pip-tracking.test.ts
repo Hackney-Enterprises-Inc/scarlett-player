@@ -51,6 +51,7 @@ describe('native provider PiP state tracking', () => {
       emit: vi.fn(),
       getPlugin: vi.fn(),
       onDestroy: vi.fn(),
+      subscribeToState: vi.fn(() => vi.fn()),
     } as unknown as IPluginAPI;
 
     // jsdom media element stubs: load resolves via loadedmetadata

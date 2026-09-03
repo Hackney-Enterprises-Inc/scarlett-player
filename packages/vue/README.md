@@ -194,14 +194,20 @@ function formatTime(seconds: number): string {
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `src` | `string` | - | Video source URL |
-| `poster` | `string` | - | Poster image URL |
+| `poster` | `string` | - | Poster image URL, shown until the first frame. Reactive: changing it calls `setPoster()`, unsetting it clears the image |
 | `autoplay` | `boolean` | `false` | Auto-play video on load |
 | `loop` | `boolean` | `false` | Loop playback |
 | `volume` | `number` | `1.0` | Initial volume (0-1) |
 | `muted` | `boolean` | `false` | Start muted |
 | `logLevel` | `'debug' \| 'info' \| 'warn' \| 'error'` | `'warn'` | Console log level |
 | `plugins` | `Plugin[]` | `[]` | Scarlett Player plugins |
-| `options` | `PlayerOptions` | `{}` | Additional player options |
+| `options` | `PlayerOptions` | `{}` | Additional player options, merged over the props above. Construction-time only (see below) |
+
+`src`, `poster`, `volume`, `muted` and `autoplay` are watched and applied to the
+running player. `options` is not: it is merged once, when the player is constructed.
+There is no way to re-apply it to a live instance, because plugins cannot be
+re-registered, so change one of the watched props at runtime, or re-key the
+component to rebuild the player with new options.
 
 ## Component Events
 
@@ -255,6 +261,7 @@ playerRef.value.requestFullscreen();
 - `load(src: string)` - Load new source
 - `setVolume(volume: number)` - Set volume (0-1)
 - `setMuted(muted: boolean)` - Set muted state
+- `setPoster(url: string)` - Set the poster ('' clears it)
 - `setPlaybackRate(rate: number)` - Set playback speed
 - `getQualities()` - Get available quality levels
 - `setQuality(index: number)` - Set quality level (-1 for auto)
@@ -303,6 +310,7 @@ const {
   load,
   setVolume,
   setMuted,
+  setPoster,
   requestFullscreen,
   exitFullscreen,
   toggleFullscreen,
@@ -311,6 +319,12 @@ const {
   getCurrentQuality,
 } = useScarlettPlayer(options);
 ```
+
+Inside a component's `setup()` the composable mounts the player for you
+(unless `autoInit: false`) and destroys it before unmount. Called anywhere
+else (a store, a plain module, a test), there is no component lifecycle to
+hook, so it registers none: call `init()` yourself and destroy the player
+through `player.value.destroy()` when you are done with it.
 
 ## Global Plugin Installation
 

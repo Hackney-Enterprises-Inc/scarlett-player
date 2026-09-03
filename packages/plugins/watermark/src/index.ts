@@ -11,6 +11,7 @@
 
 import type { IPluginAPI, PluginType } from '@scarlett-player/core';
 import type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './types';
+import { PKG_VERSION } from './version';
 
 export type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './types';
 
@@ -34,9 +35,10 @@ function getPositionStyles(padding: number, bottomPadding: number): Record<Water
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createWatermarkPlugin } from '@scarlett-player/watermark';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [
  *     createWatermarkPlugin({
@@ -195,7 +197,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   return {
     id: 'watermark',
     name: 'Watermark',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
     description: 'Anti-piracy watermark overlay with text/image support and dynamic repositioning',
 

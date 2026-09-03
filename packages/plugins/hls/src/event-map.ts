@@ -252,10 +252,48 @@ export function setupVideoEventHandlers(
     handlers.push({ event, handler });
   };
 
+  /**
+   * Mirror the element's own `ended` flag back onto the `ended` state key.
+   *
+   * `HTMLMediaElement.ended` is derived from the playback position, so it goes
+   * false the moment the position leaves the end of the media: `play()` on an
+   * ended element seeks to the earliest position before the `play` event is
+   * fired, and a scrub back from the end flips it while still paused. The
+   * state key is not derived. Until 2026-09-02 the only writer that cleared it
+   * was `ScarlettPlayer.load()`, so after one replay it stayed true for the
+   * rest of the session and the control bar's play button kept the Replay
+   * glyph over playing video (the reason `BigPlayButton` reads `video.ended`
+   * instead of the key).
+   *
+   * Called from `play`, `playing` and `seeking`: the three events that can
+   * carry the position away from the end. The element is asked rather than
+   * assumed, so a seek that lands ON the end leaves the key alone; setting it
+   * true stays the `ended` handler's job.
+   *
+   * Clearing the key also re-derives `playbackState` from the element, for the
+   * same reason: the `ended` handler writes `'ended'` there, and nothing wrote
+   * it again after a paused scrub away from the end, so the key sat at
+   * `'ended'` over a player the viewer had just parked mid-video (second
+   * review of the 1.7.1 wave, 2026-09-02). `video.paused` decides between
+   * `'paused'` and `'playing'` rather than the `playing` state key, which the
+   * `playing` handler has not written yet during a replay.
+   *
+   * Both writes are gated on the key having been true, read back through
+   * `getState`, so an ordinary seek in the middle of a video (where `ended`
+   * was already false) restates neither key.
+   */
+  const syncEndedFromElement = (): void => {
+    if (video.ended || !api.getState('ended')) return;
+
+    api.setState('ended', false);
+    api.setState('playbackState', video.paused ? 'paused' : 'playing');
+  };
+
   // Playback events
   // 'play' fires immediately when video.play() is called
   addHandler('play', () => {
     api.setState('paused', false);
+    syncEndedFromElement();
   });
 
   // 'playing' fires when playback actually starts (after buffering)
@@ -265,6 +303,7 @@ export function setupVideoEventHandlers(
     api.setState('waiting', false);
     api.setState('buffering', false);
     api.setState('playbackState', 'playing');
+    syncEndedFromElement();
   });
 
   addHandler('pause', () => {
@@ -335,6 +374,9 @@ export function setupVideoEventHandlers(
   // Seeking - only emit state update, not playback:seeking (which would cause a loop)
   addHandler('seeking', () => {
     api.setState('seeking', true);
+    // A scrub back from the end never fires play or playing while paused, so
+    // this is the only place the key can be cleared for a paused viewer.
+    syncEndedFromElement();
   });
 
   addHandler('seeked', () => {

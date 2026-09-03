@@ -24,7 +24,13 @@ export interface PlayerOptions {
   container: HTMLElement | string;
   /** Initial source URL */
   src?: string;
-  /** Poster image URL */
+  /**
+   * Poster image URL, shown until the first frame renders.
+   *
+   * Seeds the `poster` state key, which the provider plugins mirror onto the
+   * media element. Change it later with `setPoster()`; `load()` deliberately
+   * leaves it alone.
+   */
   poster?: string;
   /** Initial log level (default: 'warn') */
   logLevel?: 'debug' | 'info' | 'warn' | 'error';
@@ -65,7 +71,9 @@ export interface QualityLevel {
  *
  * @example
  * ```ts
- * const player = new ScarlettPlayer({
+ * // createPlayer() constructs and initialises in one call; it is the
+ * // documented entry point for every consumer.
+ * const player = await createPlayer({
  *   container: document.getElementById('player'),
  *   plugins: [hlsPlugin, controlsPlugin],
  * });
@@ -122,6 +130,24 @@ export class ScarlettPlayer {
 
   /** Counter to detect stale load() calls */
   private loadGeneration = 0;
+
+  /** True once the lifecycle listeners have been wired (they are wired once) */
+  private listenersWired = false;
+
+  /** True once `player:ready` has been emitted (it is emitted once) */
+  private readyEmitted = false;
+
+  /**
+   * In-flight initialisation pass, shared by concurrent callers.
+   *
+   * `load()` is called from inside the `media:load-request` handler, so a
+   * second initialisation pass can start while the first is still awaiting a
+   * plugin's `init()`. Without this, `PluginManager.initPlugin()` would see
+   * the plugin in the `initializing` state and throw "possible circular
+   * dependency". Cleared when the pass settles so a plugin registered later
+   * is still picked up by the next call.
+   */
+  private initializing: Promise<void> | null = null;
 
   /**
    * Create a new ScarlettPlayer.
@@ -190,29 +216,91 @@ export class ScarlettPlayer {
       }
     }
 
-    this.logger.info('ScarlettPlayer initialized', {
+    this.logger.info('ScarlettPlayer constructed', {
       autoplay: options.autoplay,
       plugins: options.plugins?.length ?? 0,
     });
 
-    // Emit ready event after initialization
-    this.eventBus.emit('player:ready', undefined);
+    // `player:ready` is deliberately NOT emitted here. As the constructor's
+    // last statement it fired before any consumer or plugin could subscribe,
+    // so nothing could ever observe it (the old core test pinned that by
+    // asserting the spy was never called). It now fires at the end of the
+    // first initialisation instead: see ensureInitialized().
   }
 
   /**
-   * Initialize the player asynchronously.
-   * Initializes non-provider plugins and loads initial source if provided.
+   * Initialise every registered non-provider plugin and wire the player's
+   * own lifecycle listeners. Idempotent, and safe to call re-entrantly.
+   *
+   * This exists because `new ScarlettPlayer(...)` followed by `load()` used
+   * to leave the player with a provider and nothing else: the READMEs and 12
+   * plugin `@example` blocks show exactly that shape, and every one of them
+   * produced a dead UI (no controls, no overlay, no playlist). `load()` now
+   * calls this first, so the trap cannot be reached.
+   *
+   * The `media:load-request` and `error:retry` listeners live here rather
+   * than in the constructor because they are part of initialisation, not
+   * construction: without them the playlist plugin cannot load a track and
+   * the error overlay's "Try Again" button does nothing.
+   *
+   * Provider plugins are excluded: they are initialised lazily, per source,
+   * by `load()` once `selectProvider()` has picked one.
+   *
+   * @returns Promise resolving when the pass (or the in-flight one) completes
    */
-  async init(): Promise<void> {
-    this.checkDestroyed();
+  private ensureInitialized(): Promise<void> {
+    if (this.initializing) return this.initializing;
 
-    // Initialize non-provider plugins (UI, feature, analytics, utility)
-    // Providers are initialized on-demand when load() is called
-    for (const [id, record] of (this.pluginManager as any).plugins) {
-      if (record.plugin.type !== 'provider' && record.state === 'registered') {
-        await this.pluginManager.initPlugin(id);
-      }
+    this.initializing = this.runInitialization().finally(() => {
+      this.initializing = null;
+    });
+
+    return this.initializing;
+  }
+
+  /**
+   * One initialisation pass. Never call directly; go through
+   * `ensureInitialized()`, which owns the re-entrancy guard.
+   *
+   * @returns Promise resolving when the pass completes
+   */
+  private async runInitialization(): Promise<void> {
+    // Initialize non-provider plugins (UI, feature, analytics, utility).
+    // Plugins already in any state other than 'registered' are skipped, so a
+    // plugin added through registerPlugin() after start-up is picked up by
+    // the next call and the rest are not re-initialised.
+    for (const id of this.pluginManager.getPluginIds()) {
+      if (this.destroyed) return;
+
+      const plugin = this.pluginManager.getPlugin(id);
+      if (!plugin || plugin.type === 'provider') continue;
+      if (this.pluginManager.getPluginState(id) !== 'registered') continue;
+
+      await this.pluginManager.initPlugin(id);
     }
+
+    if (this.destroyed) return;
+
+    this.wireLifecycleListeners();
+
+    // Emit ready once, at the end of the FIRST pass, so a listener attached
+    // between construction and init()/load() sees it.
+    if (!this.readyEmitted) {
+      this.readyEmitted = true;
+      this.eventBus.emit('player:ready', undefined);
+    }
+  }
+
+  /**
+   * Wire the two listeners the player owns, exactly once.
+   *
+   * Guarded by a flag rather than by "init() runs once" because
+   * `ensureInitialized()` runs on every `load()`: wiring them twice would
+   * load and play each requested source twice.
+   */
+  private wireLifecycleListeners(): void {
+    if (this.listenersWired) return;
+    this.listenersWired = true;
 
     // Listen for media:load-request events from plugins (e.g., playlist)
     this.eventBus.on('media:load-request', async ({ src, autoplay }) => {
@@ -264,19 +352,45 @@ export class ScarlettPlayer {
       if (this.destroyed) return;
       await this.play();
     });
+  }
+
+  /**
+   * Initialize the player asynchronously.
+   *
+   * Initialises non-provider plugins, wires the lifecycle listeners and loads
+   * `initialSrc` when one was given. Idempotent: calling it twice, or calling
+   * it after a `load()` has already initialised the player, wires nothing a
+   * second time and re-emits nothing.
+   *
+   * @returns Promise resolving when initialisation (and any initial load) is done
+   */
+  async init(): Promise<void> {
+    this.checkDestroyed();
+
+    await this.ensureInitialized();
 
     // Load initial source if provided
     if (this.initialSrc) {
       await this.load(this.initialSrc);
     }
-
-    return Promise.resolve();
   }
 
   /**
    * Load a media source.
    *
-   * Selects appropriate provider plugin and loads the source.
+   * Initialises the player if that has not happened yet (see
+   * `ensureInitialized()`), then selects the provider plugin for the source
+   * and loads it. The auto-initialisation is what makes the widely copied
+   * `new ScarlettPlayer(...)` plus `load()` shape work: before it, that shape
+   * produced a player with a provider and no UI, no error overlay and no
+   * working playlist.
+   *
+   * Resets playback state, and deliberately does NOT touch `poster`. The
+   * poster is metadata owned by whoever set it (the consumer through
+   * `PlayerOptions.poster` or `setPoster()`, or the playlist plugin on a track
+   * change), not playback state, and it is written BEFORE the load that goes
+   * with it: clearing it here would blank the image over exactly the gap it
+   * exists to cover, while the next source loads.
    *
    * @param source - Media source URL
    * @returns Promise that resolves when source is loaded
@@ -315,6 +429,13 @@ export class ScarlettPlayer {
         await this.pluginManager.destroyPlugin(previousProviderId);
         this._currentProvider = null;
       }
+
+      // Initialise non-provider plugins and the lifecycle listeners before a
+      // provider is chosen, so a consumer that never calls init() still gets
+      // a working UI. Idempotent, and re-entrant-safe: the media:load-request
+      // handler wired by wireLifecycleListeners() calls load(), so this line
+      // runs again while the first pass may still be in flight.
+      await this.ensureInitialized();
 
       // Bail if a newer load() was called while we were awaiting
       if (generation !== this.loadGeneration) {
@@ -574,6 +695,33 @@ export class ScarlettPlayer {
   }
 
   /**
+   * Set the poster image shown until the first frame renders.
+   *
+   * Writes the `poster` state key; the provider plugins subscribe to it and
+   * mirror it onto the media element, so this takes effect on a player that
+   * is already running. Before this method existed the poster could only be
+   * chosen at construction, which left a playlist showing the previous
+   * track's art (and a Vue `poster` prop change doing nothing at all).
+   *
+   * An empty string clears the poster, which is how a consumer takes the
+   * image away rather than replacing it.
+   *
+   * @param url - Poster image URL, or '' to clear it
+   *
+   * @example
+   * ```ts
+   * player.setPoster('https://example.com/art.jpg');
+   * player.setPoster(''); // back to the bare video surface
+   * ```
+   */
+  setPoster(url: string): void {
+    this.checkDestroyed();
+
+    this.stateManager.set('poster', url);
+    this.logger.debug('Poster set', { poster: url });
+  }
+
+  /**
    * Subscribe to an event.
    *
    * @param event - Event name
@@ -604,9 +752,13 @@ export class ScarlettPlayer {
    *
    * @example
    * ```ts
+   * // player:ready fires once, at the end of the first initialisation, so a
+   * // one-shot listener has to be attached before init() or load() runs.
+   * const player = new ScarlettPlayer({ container });
    * player.once('player:ready', () => {
    *   console.log('Player ready!');
    * });
+   * await player.init();
    * ```
    */
   once<T extends EventName>(event: T, handler: EventHandlerFn<T>): () => void {
@@ -980,6 +1132,17 @@ export class ScarlettPlayer {
   }
 
   /**
+   * Get the current poster URL ('' when there is none).
+   *
+   * Reads state rather than the media element: the element only exists once a
+   * provider has been initialised, and for an audio source it never carries
+   * the attribute at all.
+   */
+  get poster(): string {
+    return this.stateManager.getValue('poster');
+  }
+
+  /**
    * Check if player is destroyed.
    * @private
    */
@@ -1043,8 +1206,15 @@ export class ScarlettPlayer {
  * Convenience factory function that creates and initializes
  * the player in a single async call.
  *
+ * The returned promise resolves AFTER `player:ready` has been emitted, so the
+ * promise itself is the readiness signal: a listener attached to that event
+ * once this has been awaited can never observe it. Anything that must see the
+ * event has to be subscribed earlier, which for a plugin means inside its own
+ * `init()`, and for a consumer means constructing the player with
+ * `new ScarlettPlayer(...)`, calling `on()` and then `init()`.
+ *
  * @param options - Player configuration
- * @returns Promise resolving to initialized player
+ * @returns Promise resolving to initialized player, after `player:ready`
  *
  * @example
  * ```ts

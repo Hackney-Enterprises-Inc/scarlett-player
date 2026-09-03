@@ -11,9 +11,10 @@
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createGesturesPlugin } from '@scarlett-player/gestures';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [uiPlugin(), createGesturesPlugin({ seekSeconds: 10 })],
  * });
@@ -25,6 +26,7 @@ import type { GesturesPluginConfig, GestureZone, PointerRecord } from './types';
 import { createRecognizer, DEFAULT_RECOGNIZER_OPTIONS } from './recognizer';
 import type { Recognizer } from './recognizer';
 import { GestureOverlay } from './overlay';
+import { PKG_VERSION } from './version';
 
 export type { GesturesPluginConfig, GestureZone, PointerRecord, RecognizerEvent } from './types';
 export { createRecognizer, zoneFor, DEFAULT_RECOGNIZER_OPTIONS } from './recognizer';
@@ -244,7 +246,7 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
   return {
     id: 'gestures',
     name: 'Gestures',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
 
     init(pluginApi: IPluginAPI): void {

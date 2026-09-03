@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMediaSessionPlugin, type IMediaSessionPlugin } from '../src/index';
+import { PKG_VERSION } from '../src/version';
 
 // Mock MediaSession API
 const mockSetActionHandler = vi.fn();
@@ -97,7 +98,7 @@ describe('createMediaSessionPlugin', () => {
 
     expect(plugin.id).toBe('media-session');
     expect(plugin.name).toBe('Media Session');
-    expect(plugin.version).toBe('1.0.0');
+    expect(plugin.version).toBe(PKG_VERSION);
     expect(plugin.type).toBe('feature');
     expect(plugin.description).toContain('Media Session API');
   });

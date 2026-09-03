@@ -4,6 +4,7 @@
 
 export type { Control } from './Control';
 export { PlayButton } from './PlayButton';
+export { BigPlayButton } from './BigPlayButton';
 export { ProgressBar } from './ProgressBar';
 export { TimeDisplay } from './TimeDisplay';
 export { VolumeControl } from './VolumeControl';

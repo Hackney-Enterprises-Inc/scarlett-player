@@ -13,9 +13,10 @@
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createChaptersPlugin } from '@scarlett-player/chapters';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [
  *     uiPlugin({ controls: ['play', 'chapters', 'time', 'spacer', 'fullscreen'] }),
@@ -49,6 +50,7 @@ export {
   normaliseChapters,
   previousChapterIndex,
 } from './normalise';
+import { PKG_VERSION } from './version';
 
 const STYLE_ID = 'sp-chapters-styles';
 const DEFAULT_PREVIOUS_THRESHOLD = 3;
@@ -165,7 +167,7 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
   return {
     id: 'chapters',
     name: 'Chapters',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
 
     init(pluginApi: IPluginAPI): void {

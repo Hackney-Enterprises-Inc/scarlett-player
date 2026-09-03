@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPlaylistPlugin, type PlaylistTrack, type IPlaylistPlugin } from '../src/index';
+import { PKG_VERSION } from '../src/version';
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -60,7 +61,7 @@ describe('createPlaylistPlugin', () => {
 
     expect(plugin.id).toBe('playlist');
     expect(plugin.name).toBe('Playlist');
-    expect(plugin.version).toBe('1.0.0');
+    expect(plugin.version).toBe(PKG_VERSION);
     expect(plugin.type).toBe('feature');
     expect(plugin.description).toContain('Playlist management');
   });
@@ -909,12 +910,15 @@ describe('auto-advance', () => {
 // Regression tests for #45: title state must always be written on track
 // change (empty when the track has none) so a previous track's title never
 // leaks into the next one. Providers fill the fallback when empty.
+//
+// The poster follows the same rule: it was written only when the track had
+// artwork, so a track without any kept the previous track's image on screen.
 describe('title state on track change (#45)', () => {
   let plugin: ReturnType<typeof createPlaylistPlugin>;
   let mockApi: ReturnType<typeof createMockApi>;
 
   const mixedTracks: PlaylistTrack[] = [
-    { id: '1', src: 'titled.mp3', title: 'Has A Title' },
+    { id: '1', src: 'titled.mp3', title: 'Has A Title', artwork: 'art1.jpg' },
     { id: '2', src: 'untitled.mp3' },
   ];
 
@@ -938,5 +942,20 @@ describe('title state on track change (#45)', () => {
     // Empty write lets the provider derive a fallback (e.g. filename)
     // instead of showing the previous track's title
     expect(mockApi.setState).toHaveBeenCalledWith('title', '');
+  });
+
+  it('writes the track artwork as the poster on selection', () => {
+    plugin.play(0);
+
+    expect(mockApi.setState).toHaveBeenCalledWith('poster', 'art1.jpg');
+  });
+
+  it('clears the poster when the next track has no artwork', () => {
+    plugin.play(0);
+    plugin.next();
+
+    // Empty write clears the media element's poster attribute instead of
+    // leaving the previous track's image over the next one
+    expect(mockApi.setState).toHaveBeenCalledWith('poster', '');
   });
 });

@@ -12,9 +12,10 @@
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createSharePlugin } from '@scarlett-player/share';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [
  *     uiPlugin({ controls: ['play', 'volume', 'time', 'spacer', 'share', 'fullscreen'] }),
@@ -32,6 +33,7 @@ import { buildEmbedSnippet, canUseNativeShare, copyText, nativeShare } from './a
 import { ShareSheet } from './ShareSheet';
 import { ShareButton } from './ShareButton';
 import { styles } from './styles';
+import { PKG_VERSION } from './version';
 
 export type { SharePluginConfig, ShareTarget, ShareContext } from './types';
 export type { ShareButtonOptions } from './ShareButton';
@@ -208,7 +210,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
   return {
     id: 'share',
     name: 'Share',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
     description: 'Native share sheet, copy link, timestamps and embed codes',
 

@@ -17,6 +17,7 @@
 
 import type { IPluginAPI, Plugin, PluginType, TextTrack as ScarlettTextTrack } from '@scarlett-player/core';
 import type { CaptionsPluginConfig, CaptionSource } from './types';
+import { PKG_VERSION } from './version';
 
 export type { CaptionsPluginConfig, CaptionSource } from './types';
 
@@ -62,9 +63,10 @@ const HLS_INSTANCE_RETRY_MS = 500;
  *
  * @example
  * ```ts
+ * import { createPlayer } from '@scarlett-player/core';
  * import { createCaptionsPlugin } from '@scarlett-player/captions';
  *
- * const player = new ScarlettPlayer({
+ * const player = await createPlayer({
  *   container: '#player',
  *   plugins: [
  *     createCaptionsPlugin({
@@ -389,7 +391,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   return {
     id: 'captions',
     name: 'Captions',
-    version: '1.0.0',
+    version: PKG_VERSION,
     type: 'feature' as PluginType,
     description: 'WebVTT subtitles and closed captions with HLS extraction',
 

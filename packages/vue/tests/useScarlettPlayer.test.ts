@@ -15,6 +15,7 @@ vi.mock('@scarlett-player/core', () => {
     load: vi.fn().mockResolvedValue(undefined),
     setVolume: vi.fn(),
     setMuted: vi.fn(),
+    setPoster: vi.fn(),
     requestFullscreen: vi.fn().mockResolvedValue(undefined),
     exitFullscreen: vi.fn().mockResolvedValue(undefined),
     toggleFullscreen: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +78,7 @@ describe('useScarlettPlayer', () => {
     expect(typeof result.load).toBe('function');
     expect(typeof result.setVolume).toBe('function');
     expect(typeof result.setMuted).toBe('function');
+    expect(typeof result.setPoster).toBe('function');
     expect(typeof result.requestFullscreen).toBe('function');
     expect(typeof result.exitFullscreen).toBe('function');
     expect(typeof result.toggleFullscreen).toBe('function');
@@ -140,5 +142,61 @@ describe('useScarlettPlayer', () => {
     result.currentTime.value = 30;
     result.duration.value = 100;
     expect(result.progress.value).toBe(30);
+  });
+
+  it('emits no Vue warning when called outside a component', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    // Vue routes its warnings through console.warn. Unconditional
+    // onMounted/onBeforeUnmount registration produced a pair of "no active
+    // component instance" warnings for every call made outside setup().
+    const warn_spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const containerRef = ref<HTMLElement | null>(container);
+      useScarlettPlayer({
+        container: containerRef,
+        src: 'https://example.com/video.m3u8',
+      });
+
+      expect(warn_spy).not.toHaveBeenCalled();
+    } finally {
+      warn_spy.mockRestore();
+    }
+  });
+});
+
+describe('useScarlettPlayer setPoster', () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+    vi.clearAllMocks();
+  });
+
+  it('forwards setPoster to the player once it exists', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    const containerRef = ref<HTMLElement | null>(container);
+    const result = useScarlettPlayer({
+      container: containerRef,
+      src: 'https://example.com/video.m3u8',
+      autoInit: false,
+    });
+
+    // Before init there is no player: the call must be a no-op, not a throw
+    expect(() => result.setPoster('https://example.com/art.jpg')).not.toThrow();
+
+    await result.init();
+    result.setPoster('https://example.com/art.jpg');
+
+    expect(result.player.value?.setPoster).toHaveBeenCalledWith(
+      'https://example.com/art.jpg'
+    );
   });
 });

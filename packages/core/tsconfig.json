@@ -1,10 +1,12 @@
 {
+  "//": "emitDeclarationOnly: the build is `tsc && vite build`; tsc exists here to produce dist/*.d.ts, Vite produces the runtime bundles. Before 2026-09-02 tsc also wrote a compiled .js per module into dist, and every one of them shipped in the tarball although only `.` is exported. tsconfig.typecheck.json turns this back off because it turns declaration off.",
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
+    "emitDeclarationOnly": true,
     "composite": true,
     "allowImportingTsExtensions": false
   },

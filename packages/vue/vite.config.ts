@@ -33,6 +33,16 @@ export default defineConfig({
         drop_console: false,
       },
     },
+    // NEVER true. The build runs `tsc` first, which emits the dist/*.d.ts that
+    // `types` and `exports["."].types` point at, and Vite then writes
+    // index.js/index.cjs beside them. `outDir` is inside the project root, so
+    // Vite's default is to empty it: it deleted the declarations tsc had just
+    // emitted, and @scarlett-player/vue@1.7.0 on npm lists 8 files and not one
+    // .d.ts while its `types` field still promises ./dist/index.d.ts (measured
+    // 2026-09-02 with `npm pack --dry-run`). The same defect shipped in
+    // @scarlett-player/embed@1.7.0. The `rimraf dist` in the package's build
+    // script is what cleans the directory now, once, before tsc runs.
+    emptyOutDir: false,
   },
   resolve: {
     alias: {
