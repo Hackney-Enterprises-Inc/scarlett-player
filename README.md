@@ -28,7 +28,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,752 Tests** (2026-09-02) - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **1,700+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -311,7 +311,7 @@ controls, testing, and the checklist for a new package.
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all 1,752 tests (2026-09-02)
+pnpm test             # Run all tests (1,700+)
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier

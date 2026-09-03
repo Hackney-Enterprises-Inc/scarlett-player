@@ -72,7 +72,7 @@ const SHARED_CHUNKS = ['hls.js', 'hls.light.js'];
  * references simply passes.
  *
  * @param {string} source - Bundle contents
- * @returns {string[]} Unique relative specifiers, in first-seen order
+ * @returns {string[]} Unique relative specifiers
  */
 const relativeSpecifiers = (source) => {
   const patterns = [
