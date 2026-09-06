@@ -10,6 +10,2684 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // packages/core/src/version.ts
+  var init_version = __esm({
+    "packages/core/src/version.ts"() {
+      "use strict";
+    }
+  });
+
+  // packages/core/src/state/effect.ts
+  function trackEffectSubscription(effectFn, unsubscribe) {
+    let cleanups = effectCleanups.get(effectFn);
+    if (!cleanups) {
+      cleanups = /* @__PURE__ */ new Set();
+      effectCleanups.set(effectFn, cleanups);
+    }
+    cleanups.add(unsubscribe);
+  }
+  var currentEffect, effectCleanups;
+  var init_effect = __esm({
+    "packages/core/src/state/effect.ts"() {
+      "use strict";
+      currentEffect = null;
+      effectCleanups = /* @__PURE__ */ new WeakMap();
+    }
+  });
+
+  // packages/core/src/state/signal.ts
+  function signal(initialValue) {
+    return new Signal(initialValue);
+  }
+  var Signal;
+  var init_signal = __esm({
+    "packages/core/src/state/signal.ts"() {
+      "use strict";
+      init_effect();
+      Signal = class {
+        constructor(initialValue) {
+          this.subscribers = /* @__PURE__ */ new Set();
+          this.value = initialValue;
+        }
+        /**
+         * Get the current value and track dependency if called within an effect.
+         *
+         * @returns Current value
+         */
+        get() {
+          if (currentEffect) {
+            const effect2 = currentEffect;
+            this.subscribers.add(effect2);
+            trackEffectSubscription(effect2, () => this.subscribers.delete(effect2));
+          }
+          return this.value;
+        }
+        /**
+         * Set a new value and notify subscribers if changed.
+         *
+         * @param newValue - New value to set
+         */
+        set(newValue) {
+          if (Object.is(this.value, newValue)) {
+            return;
+          }
+          this.value = newValue;
+          this.notify();
+        }
+        /**
+         * Update the value using a function.
+         *
+         * @param updater - Function that receives current value and returns new value
+         *
+         * @example
+         * ```ts
+         * const count = new Signal(0);
+         * count.update(n => n + 1); // Increments by 1
+         * ```
+         */
+        update(updater) {
+          this.set(updater(this.value));
+        }
+        /**
+         * Subscribe to changes without automatic dependency tracking.
+         *
+         * @param callback - Function to call when value changes
+         * @returns Unsubscribe function
+         */
+        subscribe(callback) {
+          this.subscribers.add(callback);
+          return () => this.subscribers.delete(callback);
+        }
+        /**
+         * Notify all subscribers of a change.
+         * @internal
+         */
+        notify() {
+          this.subscribers.forEach((subscriber) => {
+            try {
+              subscriber();
+            } catch (error) {
+              console.error("[Scarlett Player] Error in signal subscriber:", error);
+            }
+          });
+        }
+        /**
+         * Clean up all subscriptions.
+         * Call this when destroying the signal.
+         */
+        destroy() {
+          this.subscribers.clear();
+        }
+        /**
+         * Get the current number of subscribers (for debugging).
+         * @internal
+         */
+        getSubscriberCount() {
+          return this.subscribers.size;
+        }
+      };
+    }
+  });
+
+  // packages/core/src/state/computed.ts
+  var init_computed = __esm({
+    "packages/core/src/state/computed.ts"() {
+      "use strict";
+      init_effect();
+    }
+  });
+
+  // packages/core/src/state/index.ts
+  var init_state = __esm({
+    "packages/core/src/state/index.ts"() {
+      "use strict";
+      init_signal();
+      init_computed();
+      init_effect();
+    }
+  });
+
+  // packages/core/src/state/state-manager.ts
+  var DEFAULT_STATE, StateManager;
+  var init_state_manager = __esm({
+    "packages/core/src/state/state-manager.ts"() {
+      "use strict";
+      init_signal();
+      DEFAULT_STATE = {
+        // Core Playback State
+        playbackState: "idle",
+        playing: false,
+        paused: true,
+        ended: false,
+        buffering: false,
+        waiting: false,
+        seeking: false,
+        // Time & Duration
+        currentTime: 0,
+        duration: NaN,
+        buffered: null,
+        bufferedAmount: 0,
+        // Media Info
+        mediaType: "unknown",
+        source: null,
+        title: "",
+        poster: "",
+        // Volume & Audio
+        volume: 1,
+        muted: false,
+        // Playback Controls
+        playbackRate: 1,
+        fullscreen: false,
+        pip: false,
+        controlsVisible: true,
+        // Quality & Tracks
+        qualities: [],
+        currentQuality: null,
+        audioTracks: [],
+        currentAudioTrack: null,
+        textTracks: [],
+        currentTextTrack: null,
+        // Live/DVR State (TSP features)
+        live: false,
+        liveEdge: true,
+        seekableRange: null,
+        liveLatency: 0,
+        lowLatencyMode: false,
+        // Chapters (TSP features)
+        chapters: [],
+        currentChapter: null,
+        // Error State
+        error: null,
+        // Network & Performance
+        bandwidth: 0,
+        autoplay: false,
+        loop: false,
+        // Casting State
+        airplayAvailable: false,
+        airplayActive: false,
+        chromecastAvailable: false,
+        chromecastActive: false,
+        // Thumbnail Preview
+        thumbnails: null,
+        // UI State
+        interacting: false,
+        hovering: false,
+        focused: false
+      };
+      StateManager = class {
+        /**
+         * Create a new StateManager with default initial state.
+         *
+         * @param initialState - Optional partial initial state (merged with defaults)
+         */
+        constructor(initialState) {
+          /** Internal map of state signals */
+          this.signals = /* @__PURE__ */ new Map();
+          /** Global state change subscribers */
+          this.changeSubscribers = /* @__PURE__ */ new Set();
+          /** Initial values for keys registered via define(), for reset support */
+          this.definedDefaults = /* @__PURE__ */ new Map();
+          /**
+           * Set by destroy(). Kept so a read after teardown reports a lifecycle
+           * problem instead of masquerading as an unknown-key typo.
+           */
+          this.destroyed = false;
+          this.initializeSignals(initialState);
+        }
+        /**
+         * Initialize all state signals with default or provided values.
+         * @private
+         */
+        initializeSignals(overrides) {
+          const initialState = { ...DEFAULT_STATE, ...overrides };
+          for (const [key, value] of Object.entries(initialState)) {
+            this.createSignal(key, value);
+          }
+        }
+        /**
+         * Create and register a signal, wired to the global change subscribers.
+         *
+         * Shared by initializeSignals() and define() so a plugin-defined key behaves
+         * exactly like a built-in one and the two paths cannot drift apart.
+         *
+         * @private
+         */
+        createSignal(key, value) {
+          const stateSignal = signal(value);
+          stateSignal.subscribe(() => {
+            this.notifyChangeSubscribers(key);
+          });
+          this.signals.set(key, stateSignal);
+        }
+        /**
+         * Register a state key at runtime, for state a plugin owns.
+         *
+         * Core cannot know every plugin's keys, and {@link get} deliberately throws
+         * for unregistered ones - that throw is a useful typo-catcher and is worth
+         * keeping - so a plugin declares its keys before first use.
+         *
+         * Idempotent by design: re-defining an existing key leaves the current value
+         * untouched. Plugins commonly re-run setup after a source change, and that
+         * must not reset state that is already live.
+         *
+         * Namespace plugin keys with the plugin's own name to avoid collisions.
+         *
+         * @param key - State property key
+         * @param initialValue - Value used only when the key is new
+         *
+         * @example
+         * ```ts
+         * state.define('highlightSelection', null);
+         * ```
+         */
+        define(key, initialValue) {
+          if (this.signals.has(key)) {
+            return;
+          }
+          this.definedDefaults.set(key, initialValue);
+          this.createSignal(key, initialValue);
+        }
+        /**
+         * Get the signal for a state property.
+         *
+         * @param key - State property key
+         * @returns Signal for the property
+         * @throws If the manager has been destroyed, or the key was never registered
+         *
+         * @example
+         * ```ts
+         * const playingSignal = state.get('playing');
+         * playingSignal.get(); // false
+         * playingSignal.set(true);
+         * ```
+         */
+        get(key) {
+          if (this.destroyed) {
+            throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
+          }
+          const stateSignal = this.signals.get(key);
+          if (!stateSignal) {
+            throw new Error(`[StateManager] Unknown state key: ${key}`);
+          }
+          return stateSignal;
+        }
+        /**
+         * Get the current value of a state property (convenience method).
+         *
+         * @param key - State property key
+         * @returns Current value
+         * @throws If the manager has been destroyed, or the key was never registered
+         *
+         * @example
+         * ```ts
+         * state.getValue('playing'); // false
+         * ```
+         */
+        getValue(key) {
+          return this.get(key).get();
+        }
+        /**
+         * Set the value of a state property.
+         *
+         * @param key - State property key
+         * @param value - New value
+         *
+         * @example
+         * ```ts
+         * state.set('playing', true);
+         * state.set('currentTime', 10.5);
+         * ```
+         */
+        set(key, value) {
+          this.get(key).set(value);
+        }
+        /**
+         * Update multiple state properties at once (batch update).
+         *
+         * More efficient than calling set() multiple times.
+         *
+         * @param updates - Partial state object with updates
+         *
+         * @example
+         * ```ts
+         * state.update({
+         *   playing: true,
+         *   currentTime: 0,
+         *   volume: 1.0,
+         * });
+         * ```
+         */
+        update(updates) {
+          for (const [key, value] of Object.entries(updates)) {
+            const stateKey = key;
+            if (this.signals.has(stateKey)) {
+              this.set(stateKey, value);
+            }
+          }
+        }
+        /**
+         * Subscribe to changes on a specific state property.
+         *
+         * @param key - State property key
+         * @param callback - Callback function receiving new value
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * const unsub = state.subscribe('playing', (value) => {
+         *   console.log('Playing:', value);
+         * });
+         * ```
+         */
+        subscribeToKey(key, callback) {
+          const stateSignal = this.get(key);
+          return stateSignal.subscribe(() => {
+            callback(stateSignal.get());
+          });
+        }
+        /**
+         * Subscribe to all state changes.
+         *
+         * Receives a StateChangeEvent for every state property change.
+         *
+         * @param callback - Callback function receiving change events
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * const unsub = state.subscribe((event) => {
+         *   console.log(`${event.key} changed:`, event.value);
+         * });
+         * ```
+         */
+        subscribe(callback) {
+          this.changeSubscribers.add(callback);
+          return () => this.changeSubscribers.delete(callback);
+        }
+        /**
+         * Notify all global change subscribers.
+         * @private
+         */
+        notifyChangeSubscribers(key) {
+          const stateSignal = this.get(key);
+          const value = stateSignal.get();
+          const event = {
+            key,
+            value,
+            previousValue: value
+            // Note: We don't track previous values in this simple impl
+          };
+          this.changeSubscribers.forEach((subscriber) => {
+            try {
+              subscriber(event);
+            } catch (error) {
+              console.error("[StateManager] Error in change subscriber:", error);
+            }
+          });
+        }
+        /**
+         * Reset all state to default values.
+         *
+         * @example
+         * ```ts
+         * state.reset();
+         * ```
+         */
+        reset() {
+          this.update({
+            ...DEFAULT_STATE,
+            ...Object.fromEntries(this.definedDefaults)
+          });
+        }
+        /**
+         * Reset a specific state property to its default value.
+         *
+         * @param key - State property key
+         *
+         * @example
+         * ```ts
+         * state.resetKey('playing');
+         * ```
+         */
+        resetKey(key) {
+          const defaultValue = key in DEFAULT_STATE ? DEFAULT_STATE[key] : this.definedDefaults.get(key);
+          this.set(key, defaultValue);
+        }
+        /**
+         * Get a snapshot of all current state values.
+         *
+         * @returns Frozen snapshot of current state
+         *
+         * @example
+         * ```ts
+         * const snapshot = state.snapshot();
+         * console.log(snapshot.playing, snapshot.currentTime);
+         * ```
+         */
+        snapshot() {
+          const snapshot = {};
+          for (const [key, stateSignal] of this.signals) {
+            snapshot[key] = stateSignal.get();
+          }
+          return Object.freeze(snapshot);
+        }
+        /**
+         * Get the number of subscribers for a state property (for debugging).
+         *
+         * @param key - State property key
+         * @returns Number of subscribers
+         * @internal
+         */
+        getSubscriberCount(key) {
+          return this.signals.get(key)?.getSubscriberCount() ?? 0;
+        }
+        /**
+         * Destroy the state manager and cleanup all signals.
+         *
+         * After this, every read or write ({@link get}, {@link getValue},
+         * {@link set}) throws a destroyed-specific error. Returning last-known
+         * values instead was considered and rejected: it silently masks the
+         * lifecycle bugs this throw exposes.
+         *
+         * @example
+         * ```ts
+         * state.destroy();
+         * ```
+         */
+        destroy() {
+          this.signals.forEach((stateSignal) => stateSignal.destroy());
+          this.signals.clear();
+          this.changeSubscribers.clear();
+          this.destroyed = true;
+        }
+      };
+    }
+  });
+
+  // packages/core/src/events/event-bus.ts
+  var DEFAULT_OPTIONS, EventBus;
+  var init_event_bus = __esm({
+    "packages/core/src/events/event-bus.ts"() {
+      "use strict";
+      DEFAULT_OPTIONS = {
+        maxListeners: 100,
+        async: false,
+        interceptors: true
+      };
+      EventBus = class {
+        /**
+         * Create a new EventBus.
+         *
+         * @param options - Optional configuration
+         */
+        constructor(options) {
+          /** Event listeners map */
+          this.listeners = /* @__PURE__ */ new Map();
+          /** One-time listeners (removed after first call) */
+          this.onceListeners = /* @__PURE__ */ new Map();
+          /** Event interceptors map */
+          this.interceptors = /* @__PURE__ */ new Map();
+          this.options = { ...DEFAULT_OPTIONS, ...options };
+        }
+        /**
+         * Subscribe to an event.
+         *
+         * @param event - Event name
+         * @param handler - Event handler function
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * const unsub = events.on('playback:play', () => {
+         *   console.log('Playing!');
+         * });
+         *
+         * // Later: unsubscribe
+         * unsub();
+         * ```
+         */
+        on(event, handler) {
+          if (!this.listeners.has(event)) {
+            this.listeners.set(event, /* @__PURE__ */ new Set());
+          }
+          const handlers = this.listeners.get(event);
+          handlers.add(handler);
+          this.checkMaxListeners(event);
+          return () => this.off(event, handler);
+        }
+        /**
+         * Subscribe to an event once (auto-unsubscribe after first call).
+         *
+         * @param event - Event name
+         * @param handler - Event handler function
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * events.once('player:ready', () => {
+         *   console.log('Player ready!');
+         * });
+         * ```
+         */
+        once(event, handler) {
+          if (!this.onceListeners.has(event)) {
+            this.onceListeners.set(event, /* @__PURE__ */ new Set());
+          }
+          const handlers = this.onceListeners.get(event);
+          handlers.add(handler);
+          if (!this.listeners.has(event)) {
+            this.listeners.set(event, /* @__PURE__ */ new Set());
+          }
+          return () => {
+            handlers.delete(handler);
+          };
+        }
+        /**
+         * Unsubscribe from an event.
+         *
+         * @param event - Event name
+         * @param handler - Event handler function to remove
+         *
+         * @example
+         * ```ts
+         * const handler = () => console.log('Playing!');
+         * events.on('playback:play', handler);
+         * events.off('playback:play', handler);
+         * ```
+         */
+        off(event, handler) {
+          const handlers = this.listeners.get(event);
+          if (handlers) {
+            handlers.delete(handler);
+            if (handlers.size === 0) {
+              this.listeners.delete(event);
+            }
+          }
+          const onceHandlers = this.onceListeners.get(event);
+          if (onceHandlers) {
+            onceHandlers.delete(handler);
+            if (onceHandlers.size === 0) {
+              this.onceListeners.delete(event);
+            }
+          }
+        }
+        /**
+         * Emit an event synchronously.
+         *
+         * Runs interceptors first, then calls all handlers.
+         *
+         * @param event - Event name
+         * @param payload - Event payload
+         *
+         * @example
+         * ```ts
+         * events.emit('playback:play', undefined);
+         * events.emit('playback:timeupdate', { currentTime: 10.5 });
+         * ```
+         */
+        emit(event, payload) {
+          const interceptedPayload = this.runInterceptors(event, payload);
+          if (interceptedPayload === null) {
+            return;
+          }
+          const handlers = this.listeners.get(event);
+          if (handlers) {
+            const handlersArray = Array.from(handlers);
+            handlersArray.forEach((handler) => {
+              this.safeCallHandler(handler, interceptedPayload);
+            });
+          }
+          const onceHandlers = this.onceListeners.get(event);
+          if (onceHandlers) {
+            const handlersArray = Array.from(onceHandlers);
+            handlersArray.forEach((handler) => {
+              this.safeCallHandler(handler, interceptedPayload);
+            });
+            this.onceListeners.delete(event);
+          }
+        }
+        /**
+         * Emit an event asynchronously (next tick).
+         *
+         * @param event - Event name
+         * @param payload - Event payload
+         * @returns Promise that resolves when all handlers complete
+         *
+         * @example
+         * ```ts
+         * await events.emitAsync('media:loaded', { src: 'video.mp4', type: 'video/mp4' });
+         * ```
+         */
+        async emitAsync(event, payload) {
+          const interceptedPayload = await this.runInterceptorsAsync(event, payload);
+          if (interceptedPayload === null) {
+            return;
+          }
+          const handlers = this.listeners.get(event);
+          if (handlers) {
+            const promises = Array.from(handlers).map(
+              (handler) => this.safeCallHandlerAsync(handler, interceptedPayload)
+            );
+            await Promise.all(promises);
+          }
+          const onceHandlers = this.onceListeners.get(event);
+          if (onceHandlers) {
+            const handlersArray = Array.from(onceHandlers);
+            const promises = handlersArray.map(
+              (handler) => this.safeCallHandlerAsync(handler, interceptedPayload)
+            );
+            await Promise.all(promises);
+            this.onceListeners.delete(event);
+          }
+        }
+        /**
+         * Add an event interceptor.
+         *
+         * Interceptors run before handlers and can modify or cancel events.
+         *
+         * @param event - Event name
+         * @param interceptor - Interceptor function
+         * @returns Remove interceptor function
+         *
+         * @example
+         * ```ts
+         * events.intercept('playback:timeupdate', (payload) => {
+         *   // Round time to 2 decimals
+         *   return { currentTime: Math.round(payload.currentTime * 100) / 100 };
+         * });
+         *
+         * // Cancel events
+         * events.intercept('playback:play', (payload) => {
+         *   if (notReady) return null; // Cancel event
+         *   return payload;
+         * });
+         * ```
+         */
+        intercept(event, interceptor) {
+          if (!this.options.interceptors) {
+            return () => {
+            };
+          }
+          if (!this.interceptors.has(event)) {
+            this.interceptors.set(event, /* @__PURE__ */ new Set());
+          }
+          const interceptorsSet = this.interceptors.get(event);
+          interceptorsSet.add(interceptor);
+          return () => {
+            interceptorsSet.delete(interceptor);
+            if (interceptorsSet.size === 0) {
+              this.interceptors.delete(event);
+            }
+          };
+        }
+        /**
+         * Remove all listeners for an event (or all events if no event specified).
+         *
+         * @param event - Optional event name
+         *
+         * @example
+         * ```ts
+         * events.removeAllListeners('playback:play'); // Remove all playback:play listeners
+         * events.removeAllListeners(); // Remove ALL listeners
+         * ```
+         */
+        removeAllListeners(event) {
+          if (event) {
+            this.listeners.delete(event);
+            this.onceListeners.delete(event);
+          } else {
+            this.listeners.clear();
+            this.onceListeners.clear();
+          }
+        }
+        /**
+         * Get the number of listeners for an event.
+         *
+         * @param event - Event name
+         * @returns Number of listeners
+         *
+         * @example
+         * ```ts
+         * events.listenerCount('playback:play'); // 3
+         * ```
+         */
+        listenerCount(event) {
+          const regularCount = this.listeners.get(event)?.size ?? 0;
+          const onceCount = this.onceListeners.get(event)?.size ?? 0;
+          return regularCount + onceCount;
+        }
+        /**
+         * Destroy event bus and cleanup all listeners/interceptors.
+         *
+         * @example
+         * ```ts
+         * events.destroy();
+         * ```
+         */
+        destroy() {
+          this.listeners.clear();
+          this.onceListeners.clear();
+          this.interceptors.clear();
+        }
+        /**
+         * Run interceptors synchronously.
+         * @private
+         */
+        runInterceptors(event, payload) {
+          if (!this.options.interceptors) {
+            return payload;
+          }
+          const interceptorsSet = this.interceptors.get(event);
+          if (!interceptorsSet || interceptorsSet.size === 0) {
+            return payload;
+          }
+          let currentPayload = payload;
+          for (const interceptor of interceptorsSet) {
+            try {
+              currentPayload = interceptor(currentPayload);
+              if (currentPayload === null) {
+                return null;
+              }
+            } catch (error) {
+              console.error("[EventBus] Error in interceptor:", error);
+            }
+          }
+          return currentPayload;
+        }
+        /**
+         * Run interceptors asynchronously.
+         * @private
+         */
+        async runInterceptorsAsync(event, payload) {
+          if (!this.options.interceptors) {
+            return payload;
+          }
+          const interceptorsSet = this.interceptors.get(event);
+          if (!interceptorsSet || interceptorsSet.size === 0) {
+            return payload;
+          }
+          let currentPayload = payload;
+          for (const interceptor of interceptorsSet) {
+            try {
+              const result = interceptor(currentPayload);
+              currentPayload = result instanceof Promise ? await result : result;
+              if (currentPayload === null) {
+                return null;
+              }
+            } catch (error) {
+              console.error("[EventBus] Error in interceptor:", error);
+            }
+          }
+          return currentPayload;
+        }
+        /**
+         * Safely call a handler with error handling.
+         * @private
+         */
+        safeCallHandler(handler, payload) {
+          try {
+            handler(payload);
+          } catch (error) {
+            console.error("[EventBus] Error in event handler:", error);
+          }
+        }
+        /**
+         * Safely call a handler asynchronously with error handling.
+         * @private
+         */
+        async safeCallHandlerAsync(handler, payload) {
+          try {
+            const result = handler(payload);
+            if (result instanceof Promise) {
+              await result;
+            }
+          } catch (error) {
+            console.error("[EventBus] Error in event handler:", error);
+          }
+        }
+        /**
+         * Check if max listeners exceeded and warn.
+         * @private
+         */
+        checkMaxListeners(event) {
+          const count = this.listenerCount(event);
+          if (count > this.options.maxListeners) {
+            console.warn(
+              `[EventBus] Max listeners (${this.options.maxListeners}) exceeded for event: ${event}. Current count: ${count}. This may indicate a memory leak.`
+            );
+          }
+        }
+      };
+    }
+  });
+
+  // packages/core/src/logger.ts
+  var LOG_LEVELS, defaultConsoleHandler, Logger;
+  var init_logger = __esm({
+    "packages/core/src/logger.ts"() {
+      "use strict";
+      LOG_LEVELS = ["debug", "info", "warn", "error"];
+      defaultConsoleHandler = (entry) => {
+        const prefix = entry.scope ? `[${entry.scope}]` : "[ScarlettPlayer]";
+        const message = `${prefix} ${entry.message}`;
+        const metadata = entry.metadata ?? "";
+        switch (entry.level) {
+          case "debug":
+            console.debug(message, metadata);
+            break;
+          case "info":
+            console.info(message, metadata);
+            break;
+          case "warn":
+            console.warn(message, metadata);
+            break;
+          case "error":
+            console.error(message, metadata);
+            break;
+        }
+      };
+      Logger = class _Logger {
+        /**
+         * Create a new Logger.
+         *
+         * @param options - Logger configuration
+         */
+        constructor(options) {
+          this.level = options?.level ?? "warn";
+          this.scope = options?.scope;
+          this.enabled = options?.enabled ?? true;
+          this.handlers = options?.handlers ?? [defaultConsoleHandler];
+        }
+        /**
+         * Create a child logger with a scope.
+         *
+         * Child loggers inherit parent settings and chain scopes.
+         *
+         * @param scope - Child logger scope
+         * @returns New child logger
+         *
+         * @example
+         * ```ts
+         * const logger = new Logger();
+         * const hlsLogger = logger.child('hls-plugin');
+         * hlsLogger.info('Loading manifest');
+         * // Output: [ScarlettPlayer:hls-plugin] Loading manifest
+         * ```
+         */
+        child(scope) {
+          return new _Logger({
+            level: this.level,
+            scope: this.scope ? `${this.scope}:${scope}` : scope,
+            enabled: this.enabled,
+            handlers: this.handlers
+          });
+        }
+        /**
+         * Log a debug message.
+         *
+         * @param message - Log message
+         * @param metadata - Optional structured metadata
+         *
+         * @example
+         * ```ts
+         * logger.debug('Request sent', { url: '/api/video' });
+         * ```
+         */
+        debug(message, metadata) {
+          this.log("debug", message, metadata);
+        }
+        /**
+         * Log an info message.
+         *
+         * @param message - Log message
+         * @param metadata - Optional structured metadata
+         *
+         * @example
+         * ```ts
+         * logger.info('Player ready');
+         * ```
+         */
+        info(message, metadata) {
+          this.log("info", message, metadata);
+        }
+        /**
+         * Log a warning message.
+         *
+         * @param message - Log message
+         * @param metadata - Optional structured metadata
+         *
+         * @example
+         * ```ts
+         * logger.warn('Low buffer', { buffered: 2.5 });
+         * ```
+         */
+        warn(message, metadata) {
+          this.log("warn", message, metadata);
+        }
+        /**
+         * Log an error message.
+         *
+         * @param message - Log message
+         * @param metadata - Optional structured metadata
+         *
+         * @example
+         * ```ts
+         * logger.error('Playback failed', { code: 'MEDIA_ERR_DECODE' });
+         * ```
+         */
+        error(message, metadata) {
+          this.log("error", message, metadata);
+        }
+        /**
+         * Set the minimum log level threshold.
+         *
+         * @param level - New log level
+         *
+         * @example
+         * ```ts
+         * logger.setLevel('debug'); // Show all logs
+         * logger.setLevel('error'); // Show only errors
+         * ```
+         */
+        setLevel(level) {
+          this.level = level;
+        }
+        /**
+         * Enable or disable logging.
+         *
+         * @param enabled - Enable flag
+         *
+         * @example
+         * ```ts
+         * logger.setEnabled(false); // Disable all logging
+         * ```
+         */
+        setEnabled(enabled) {
+          this.enabled = enabled;
+        }
+        /**
+         * Add a custom log handler.
+         *
+         * @param handler - Log handler function
+         *
+         * @example
+         * ```ts
+         * logger.addHandler((entry) => {
+         *   if (entry.level === 'error') {
+         *     sendToAnalytics(entry);
+         *   }
+         * });
+         * ```
+         */
+        addHandler(handler) {
+          this.handlers.push(handler);
+        }
+        /**
+         * Remove a custom log handler.
+         *
+         * @param handler - Log handler function to remove
+         *
+         * @example
+         * ```ts
+         * logger.removeHandler(myHandler);
+         * ```
+         */
+        removeHandler(handler) {
+          const index = this.handlers.indexOf(handler);
+          if (index !== -1) {
+            this.handlers.splice(index, 1);
+          }
+        }
+        /**
+         * Core logging implementation.
+         * @private
+         */
+        log(level, message, metadata) {
+          if (!this.enabled || !this.shouldLog(level)) {
+            return;
+          }
+          const entry = {
+            level,
+            message,
+            timestamp: Date.now(),
+            scope: this.scope,
+            metadata
+          };
+          for (const handler of this.handlers) {
+            try {
+              handler(entry);
+            } catch (error) {
+              console.error("[Logger] Handler error:", error);
+            }
+          }
+        }
+        /**
+         * Check if a log level should be output.
+         * @private
+         */
+        shouldLog(level) {
+          return LOG_LEVELS.indexOf(level) >= LOG_LEVELS.indexOf(this.level);
+        }
+      };
+    }
+  });
+
+  // packages/core/src/error-handler.ts
+  var ErrorHandler;
+  var init_error_handler = __esm({
+    "packages/core/src/error-handler.ts"() {
+      "use strict";
+      ErrorHandler = class {
+        /**
+         * Create a new ErrorHandler.
+         *
+         * @param eventBus - Event bus for error emission
+         * @param logger - Logger for error logging
+         * @param options - Optional configuration
+         */
+        constructor(eventBus, logger2, options) {
+          /** Error history */
+          this.errors = [];
+          this.eventBus = eventBus;
+          this.logger = logger2;
+          this.maxHistory = options?.maxHistory ?? 10;
+        }
+        /**
+         * Handle an error.
+         *
+         * Normalizes, logs, emits, and tracks the error.
+         *
+         * @param error - Error to handle (native or PlayerError)
+         * @param context - Optional context (what was happening)
+         * @returns Normalized PlayerError
+         *
+         * @example
+         * ```ts
+         * try {
+         *   loadVideo();
+         * } catch (error) {
+         *   errorHandler.handle(error as Error, { src: 'video.mp4' });
+         * }
+         * ```
+         */
+        handle(error, context) {
+          const playerError = this.normalizeError(error, context);
+          this.addToHistory(playerError);
+          this.logError(playerError);
+          this.eventBus.emit("error", playerError);
+          return playerError;
+        }
+        /**
+         * Record an error into history and logs WITHOUT emitting an `error` event.
+         *
+         * Used for advisory channels (e.g. media element errors that a provider's
+         * recovery path is already handling) that should be visible in
+         * getHistory() for diagnostics but must not flip the player's error state.
+         *
+         * @param error - Error to record (native or PlayerError)
+         * @param context - Optional context (what was happening)
+         * @returns Normalized PlayerError
+         */
+        record(error, context) {
+          const playerError = this.normalizeError(error, context);
+          this.addToHistory(playerError);
+          this.logError(playerError);
+          return playerError;
+        }
+        /**
+         * Create and handle an error from code.
+         *
+         * @param code - Error code
+         * @param message - Error message
+         * @param options - Optional error options
+         * @returns Created PlayerError
+         *
+         * @example
+         * ```ts
+         * errorHandler.throw(
+         *   ErrorCode.SOURCE_NOT_SUPPORTED,
+         *   'MP4 not supported',
+         *   { fatal: true, context: { type: 'video/mp4' } }
+         * );
+         * ```
+         */
+        throw(code, message, options) {
+          const error = {
+            code,
+            message,
+            fatal: options?.fatal ?? this.isFatalCode(code),
+            timestamp: Date.now(),
+            context: options?.context,
+            originalError: options?.originalError
+          };
+          return this.handle(error, options?.context);
+        }
+        /**
+         * Get error history.
+         *
+         * @returns Readonly copy of error history
+         *
+         * @example
+         * ```ts
+         * const history = errorHandler.getHistory();
+         * console.log(`${history.length} errors occurred`);
+         * ```
+         */
+        getHistory() {
+          return [...this.errors];
+        }
+        /**
+         * Get last error that occurred.
+         *
+         * @returns Last error or null if none
+         *
+         * @example
+         * ```ts
+         * const lastError = errorHandler.getLastError();
+         * if (lastError?.fatal) {
+         *   showErrorMessage(lastError.message);
+         * }
+         * ```
+         */
+        getLastError() {
+          return this.errors[this.errors.length - 1] ?? null;
+        }
+        /**
+         * Clear error history.
+         *
+         * @example
+         * ```ts
+         * errorHandler.clearHistory();
+         * ```
+         */
+        clearHistory() {
+          this.errors = [];
+        }
+        /**
+         * Check if any fatal errors occurred.
+         *
+         * @returns True if any fatal error in history
+         *
+         * @example
+         * ```ts
+         * if (errorHandler.hasFatalError()) {
+         *   player.reset();
+         * }
+         * ```
+         */
+        hasFatalError() {
+          return this.errors.some((e) => e.fatal);
+        }
+        /**
+         * Normalize error to PlayerError.
+         * @private
+         */
+        normalizeError(error, context) {
+          if (this.isPlayerError(error)) {
+            return {
+              ...error,
+              context: { ...error.context, ...context }
+            };
+          }
+          return {
+            code: this.getErrorCode(error),
+            message: error.message,
+            fatal: this.isFatal(error),
+            timestamp: Date.now(),
+            context,
+            originalError: error
+          };
+        }
+        /**
+         * Determine error code from native Error.
+         * @private
+         */
+        getErrorCode(error) {
+          const message = error.message.toLowerCase();
+          if (message.includes("quota")) {
+            return "MEDIA_BUFFER_FULL" /* MEDIA_BUFFER_FULL */;
+          }
+          if (message.includes("append") || message.includes("sourcebuffer") || message.includes("arraybuffer")) {
+            return "MEDIA_APPEND_ERROR" /* MEDIA_APPEND_ERROR */;
+          }
+          if (message.includes("network")) {
+            return "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */;
+          }
+          if (message.includes("decode")) {
+            return "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */;
+          }
+          if (message.includes("source")) {
+            return "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */;
+          }
+          if (message.includes("plugin")) {
+            return "PLUGIN_SETUP_FAILED" /* PLUGIN_SETUP_FAILED */;
+          }
+          if (message.includes("provider")) {
+            return "PROVIDER_SETUP_FAILED" /* PROVIDER_SETUP_FAILED */;
+          }
+          return "UNKNOWN_ERROR" /* UNKNOWN_ERROR */;
+        }
+        /**
+         * Determine if error is fatal.
+         * @private
+         */
+        isFatal(error) {
+          return this.isFatalCode(this.getErrorCode(error));
+        }
+        /**
+         * Determine if error code is fatal.
+         * @private
+         */
+        isFatalCode(code) {
+          const fatalCodes = [
+            "SOURCE_NOT_SUPPORTED" /* SOURCE_NOT_SUPPORTED */,
+            "PROVIDER_NOT_FOUND" /* PROVIDER_NOT_FOUND */,
+            "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */
+          ];
+          return fatalCodes.includes(code);
+        }
+        /**
+         * Type guard for PlayerError.
+         * @private
+         */
+        isPlayerError(error) {
+          return typeof error === "object" && error !== null && "code" in error && "message" in error && "fatal" in error && "timestamp" in error;
+        }
+        /**
+         * Add error to history.
+         * @private
+         */
+        addToHistory(error) {
+          this.errors.push(error);
+          if (this.errors.length > this.maxHistory) {
+            this.errors.shift();
+          }
+        }
+        /**
+         * Log error with appropriate level.
+         * @private
+         */
+        logError(error) {
+          const logMessage = `[${error.code}] ${error.message}`;
+          if (error.fatal) {
+            this.logger.error(logMessage, {
+              code: error.code,
+              context: error.context
+            });
+          } else {
+            this.logger.warn(logMessage, {
+              code: error.code,
+              context: error.context
+            });
+          }
+        }
+      };
+    }
+  });
+
+  // packages/core/src/plugin-api.ts
+  var PluginAPI;
+  var init_plugin_api = __esm({
+    "packages/core/src/plugin-api.ts"() {
+      "use strict";
+      PluginAPI = class {
+        /**
+         * Create a new PluginAPI.
+         *
+         * @param pluginId - ID of the plugin this API belongs to
+         * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin)
+         */
+        constructor(pluginId, deps) {
+          /** Cleanup functions registered by this plugin */
+          this.cleanupFns = [];
+          this.pluginId = pluginId;
+          this.stateManager = deps.stateManager;
+          this.eventBus = deps.eventBus;
+          this.container = deps.container;
+          this.getPluginFn = deps.getPlugin;
+          this.logger = {
+            debug: (msg, metadata) => deps.logger.debug(`[${pluginId}] ${msg}`, metadata),
+            info: (msg, metadata) => deps.logger.info(`[${pluginId}] ${msg}`, metadata),
+            warn: (msg, metadata) => deps.logger.warn(`[${pluginId}] ${msg}`, metadata),
+            error: (msg, metadata) => deps.logger.error(`[${pluginId}] ${msg}`, metadata)
+          };
+        }
+        /**
+         * Get a state value.
+         *
+         * @param key - State property key
+         * @returns Current state value
+         */
+        getState(key) {
+          return this.stateManager.getValue(key);
+        }
+        /**
+         * Set a state value.
+         *
+         * @param key - State property key
+         * @param value - New state value
+         */
+        setState(key, value) {
+          this.stateManager.set(key, value);
+        }
+        /**
+         * Register a state key this plugin owns, before first use.
+         *
+         * Idempotent - re-defining an existing key keeps its current value.
+         * See {@link IPluginAPI.defineState}.
+         *
+         * @param key - State property key
+         * @param initialValue - Value used only when the key is new
+         */
+        defineState(key, initialValue) {
+          this.stateManager.define(key, initialValue);
+        }
+        /**
+         * Subscribe to an event.
+         *
+         * @param event - Event name
+         * @param handler - Event handler
+         * @returns Unsubscribe function
+         */
+        on(event, handler) {
+          return this.eventBus.on(event, handler);
+        }
+        /**
+         * Unsubscribe from an event.
+         *
+         * @param event - Event name
+         * @param handler - Event handler to remove
+         */
+        off(event, handler) {
+          this.eventBus.off(event, handler);
+        }
+        /**
+         * Emit an event.
+         *
+         * @param event - Event name
+         * @param payload - Event payload
+         */
+        emit(event, payload) {
+          this.eventBus.emit(event, payload);
+        }
+        /**
+         * Get another plugin by ID (if ready).
+         *
+         * @param id - Plugin ID
+         * @returns Plugin instance or null if not found/ready
+         */
+        getPlugin(id) {
+          return this.getPluginFn(id);
+        }
+        /**
+         * Register a cleanup function to run when plugin is destroyed.
+         *
+         * @param cleanup - Cleanup function
+         */
+        onDestroy(cleanup) {
+          this.cleanupFns.push(cleanup);
+        }
+        /**
+         * Subscribe to state changes.
+         *
+         * @param callback - Callback function called on any state change
+         * @returns Unsubscribe function
+         */
+        subscribeToState(callback) {
+          return this.stateManager.subscribe(callback);
+        }
+        /**
+         * Run all registered cleanup functions.
+         * Called by PluginManager when destroying the plugin.
+         *
+         * @internal
+         */
+        runCleanups() {
+          for (const cleanup of this.cleanupFns) {
+            try {
+              cleanup();
+            } catch (error) {
+              this.logger.error("Cleanup function failed", { error });
+            }
+          }
+          this.cleanupFns = [];
+        }
+        /**
+         * Get all registered cleanup functions.
+         *
+         * @returns Array of cleanup functions
+         * @internal
+         */
+        getCleanupFns() {
+          return this.cleanupFns;
+        }
+      };
+    }
+  });
+
+  // packages/core/src/plugin-manager.ts
+  var PluginManager;
+  var init_plugin_manager = __esm({
+    "packages/core/src/plugin-manager.ts"() {
+      "use strict";
+      init_plugin_api();
+      PluginManager = class {
+        constructor(eventBus, stateManager, logger2, options) {
+          this.plugins = /* @__PURE__ */ new Map();
+          this.eventBus = eventBus;
+          this.stateManager = stateManager;
+          this.logger = logger2;
+          this.container = options.container;
+        }
+        /** Register a plugin with optional configuration. */
+        register(plugin, config) {
+          if (this.plugins.has(plugin.id)) {
+            throw new Error(`Plugin "${plugin.id}" is already registered`);
+          }
+          this.validatePlugin(plugin);
+          const api = new PluginAPI(plugin.id, {
+            stateManager: this.stateManager,
+            eventBus: this.eventBus,
+            logger: this.logger,
+            container: this.container,
+            getPlugin: (id) => this.getReadyPlugin(id)
+          });
+          this.plugins.set(plugin.id, {
+            plugin,
+            state: "registered",
+            config,
+            cleanupFns: [],
+            api
+          });
+          this.logger.info(`Plugin registered: ${plugin.id}`);
+          this.eventBus.emit("plugin:registered", { name: plugin.id, type: plugin.type });
+        }
+        /** Unregister a plugin. Destroys it first if active. */
+        async unregister(id) {
+          const record = this.plugins.get(id);
+          if (!record) return;
+          if (record.state === "ready") {
+            await this.destroyPlugin(id);
+          }
+          this.plugins.delete(id);
+          this.logger.info(`Plugin unregistered: ${id}`);
+        }
+        /** Initialize all registered plugins in dependency order. */
+        async initAll() {
+          const order = this.resolveDependencyOrder();
+          for (const id of order) {
+            await this.initPlugin(id);
+          }
+        }
+        /** Initialize a specific plugin. */
+        async initPlugin(id) {
+          const record = this.plugins.get(id);
+          if (!record) {
+            throw new Error(`Plugin "${id}" not found`);
+          }
+          if (record.state === "ready") return;
+          if (record.state === "initializing") {
+            throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
+          }
+          for (const depId of record.plugin.dependencies || []) {
+            const dep = this.plugins.get(depId);
+            if (!dep) {
+              throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
+            }
+            if (dep.state !== "ready") {
+              await this.initPlugin(depId);
+            }
+          }
+          try {
+            record.state = "initializing";
+            if (record.plugin.onStateChange) {
+              const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
+              record.api.onDestroy(unsub);
+            }
+            if (record.plugin.onError) {
+              const unsub = this.eventBus.on("error", (err) => {
+                record.plugin.onError?.(err.originalError || new Error(err.message));
+              });
+              record.api.onDestroy(unsub);
+            }
+            await record.plugin.init(record.api, record.config);
+            record.state = "ready";
+            this.logger.info(`Plugin ready: ${id}`);
+            this.eventBus.emit("plugin:active", { name: id });
+          } catch (error) {
+            record.state = "error";
+            record.error = error;
+            this.logger.error(`Plugin init failed: ${id}`, { error });
+            this.eventBus.emit("plugin:error", { name: id, error });
+            throw error;
+          }
+        }
+        /** Destroy all plugins in reverse dependency order. */
+        async destroyAll() {
+          const order = this.resolveDependencyOrder().reverse();
+          for (const id of order) {
+            await this.destroyPlugin(id);
+          }
+        }
+        /** Destroy a specific plugin. */
+        async destroyPlugin(id) {
+          const record = this.plugins.get(id);
+          if (!record || record.state !== "ready") return;
+          try {
+            await record.plugin.destroy();
+            record.api.runCleanups();
+            record.state = "registered";
+            this.logger.info(`Plugin destroyed: ${id}`);
+            this.eventBus.emit("plugin:destroyed", { name: id });
+          } catch (error) {
+            this.logger.error(`Plugin destroy failed: ${id}`, { error });
+            record.state = "registered";
+          }
+        }
+        /** Get a plugin by ID (returns any registered plugin). */
+        getPlugin(id) {
+          const record = this.plugins.get(id);
+          return record ? record.plugin : null;
+        }
+        /** Get a plugin by ID only if ready (used by PluginAPI). */
+        getReadyPlugin(id) {
+          const record = this.plugins.get(id);
+          return record?.state === "ready" ? record.plugin : null;
+        }
+        /** Check if a plugin is registered. */
+        hasPlugin(id) {
+          return this.plugins.has(id);
+        }
+        /** Get plugin state. */
+        getPluginState(id) {
+          return this.plugins.get(id)?.state ?? null;
+        }
+        /** Get all registered plugin IDs. */
+        getPluginIds() {
+          return Array.from(this.plugins.keys());
+        }
+        /** Get all ready plugins. */
+        getReadyPlugins() {
+          return Array.from(this.plugins.values()).filter((r) => r.state === "ready").map((r) => r.plugin);
+        }
+        /** Get plugins by type. */
+        getPluginsByType(type) {
+          return Array.from(this.plugins.values()).filter((r) => r.plugin.type === type).map((r) => r.plugin);
+        }
+        /** Select a provider plugin that can play a source. */
+        selectProvider(source) {
+          const providers = this.getPluginsByType("provider");
+          for (const provider of providers) {
+            const canPlay = provider.canPlay;
+            if (typeof canPlay === "function" && canPlay(source)) {
+              return provider;
+            }
+          }
+          return null;
+        }
+        /** Resolve plugin initialization order using topological sort. */
+        resolveDependencyOrder() {
+          const visited = /* @__PURE__ */ new Set();
+          const visiting = /* @__PURE__ */ new Set();
+          const sorted = [];
+          const visit = (id, path = []) => {
+            if (visited.has(id)) return;
+            if (visiting.has(id)) {
+              const cycle = [...path, id].join(" -> ");
+              throw new Error(`Circular dependency detected: ${cycle}`);
+            }
+            const record = this.plugins.get(id);
+            if (!record) return;
+            visiting.add(id);
+            for (const depId of record.plugin.dependencies || []) {
+              if (this.plugins.has(depId)) {
+                visit(depId, [...path, id]);
+              }
+            }
+            visiting.delete(id);
+            visited.add(id);
+            sorted.push(id);
+          };
+          for (const id of this.plugins.keys()) {
+            visit(id);
+          }
+          return sorted;
+        }
+        /** Validate plugin has required properties. */
+        validatePlugin(plugin) {
+          if (!plugin.id || typeof plugin.id !== "string") {
+            throw new Error("Plugin must have a valid id");
+          }
+          if (!plugin.name || typeof plugin.name !== "string") {
+            throw new Error(`Plugin "${plugin.id}" must have a valid name`);
+          }
+          if (!plugin.version || typeof plugin.version !== "string") {
+            throw new Error(`Plugin "${plugin.id}" must have a valid version`);
+          }
+          if (!plugin.type || typeof plugin.type !== "string") {
+            throw new Error(`Plugin "${plugin.id}" must have a valid type`);
+          }
+          if (typeof plugin.init !== "function") {
+            throw new Error(`Plugin "${plugin.id}" must have an init() method`);
+          }
+          if (typeof plugin.destroy !== "function") {
+            throw new Error(`Plugin "${plugin.id}" must have a destroy() method`);
+          }
+        }
+      };
+    }
+  });
+
+  // packages/core/src/fullscreen.ts
+  function videoIn(container) {
+    return container.querySelector("video");
+  }
+  function isFullscreen(container) {
+    const doc = document;
+    const active = doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+    if (active && container.contains(active)) {
+      return true;
+    }
+    return !!videoIn(container)?.webkitDisplayingFullscreen;
+  }
+  async function enterFullscreen(container) {
+    const el = container;
+    if (el.requestFullscreen) {
+      await el.requestFullscreen();
+      return;
+    }
+    if (el.webkitRequestFullscreen) {
+      await el.webkitRequestFullscreen();
+      return;
+    }
+    const video = videoIn(container);
+    if (video?.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      return;
+    }
+    throw new Error("Fullscreen is not supported");
+  }
+  async function exitFullscreen(container) {
+    const video = videoIn(container);
+    if (video?.webkitDisplayingFullscreen) {
+      video.webkitExitFullscreen?.();
+      return;
+    }
+    const doc = document;
+    if (doc.exitFullscreen) {
+      await doc.exitFullscreen();
+      return;
+    }
+    if (doc.webkitExitFullscreen) {
+      await doc.webkitExitFullscreen();
+    }
+  }
+  var init_fullscreen = __esm({
+    "packages/core/src/fullscreen.ts"() {
+      "use strict";
+    }
+  });
+
+  // packages/core/src/scarlett-player.ts
+  async function createPlayer(options) {
+    const player = new ScarlettPlayer(options);
+    await player.init();
+    return player;
+  }
+  var ScarlettPlayer;
+  var init_scarlett_player = __esm({
+    "packages/core/src/scarlett-player.ts"() {
+      "use strict";
+      init_event_bus();
+      init_state_manager();
+      init_logger();
+      init_error_handler();
+      init_plugin_manager();
+      init_fullscreen();
+      ScarlettPlayer = class {
+        /**
+         * Create a new ScarlettPlayer.
+         *
+         * @param options - Player configuration
+         */
+        constructor(options) {
+          /** Current media provider plugin */
+          this._currentProvider = null;
+          /** Player destroyed flag */
+          this.destroyed = false;
+          /** Seeking while playing flag */
+          this.seekingWhilePlaying = false;
+          /** Seek resume timeout */
+          this.seekResumeTimeout = null;
+          /** Counter to detect stale load() calls */
+          this.loadGeneration = 0;
+          /** True once the lifecycle listeners have been wired (they are wired once) */
+          this.listenersWired = false;
+          /** True once `player:ready` has been emitted (it is emitted once) */
+          this.readyEmitted = false;
+          /**
+           * Set when the browser announced a fullscreen change during the current
+           * `requestFullscreen()` / `exitFullscreen()` call.
+           *
+           * The spec fires `fullscreenchange` BEFORE the request's promise resolves, so
+           * in a real browser the listener below has already written and announced the
+           * new state by the time the awaited call returns. Without this flag the
+           * optimistic write that follows would announce the same transition a second
+           * time. jsdom never fires the event, which is why the optimistic write cannot
+           * simply be deleted.
+           */
+          this.fullscreenAnnounced = false;
+          /** Removes the four fullscreen listeners; assigned in the constructor. */
+          this.unwireFullscreen = null;
+          /**
+           * In-flight initialisation pass, shared by concurrent callers.
+           *
+           * `load()` is called from inside the `media:load-request` handler, so a
+           * second initialisation pass can start while the first is still awaiting a
+           * plugin's `init()`. Without this, `PluginManager.initPlugin()` would see
+           * the plugin in the `initializing` state and throw "possible circular
+           * dependency". Cleared when the pass settles so a plugin registered later
+           * is still picked up by the next call.
+           */
+          this.initializing = null;
+          if (typeof options.container === "string") {
+            const el = document.querySelector(options.container);
+            if (!el || !(el instanceof HTMLElement)) {
+              throw new Error(`ScarlettPlayer: container not found: ${options.container}`);
+            }
+            this.container = el;
+          } else if (options.container instanceof HTMLElement) {
+            this.container = options.container;
+          } else {
+            throw new Error("ScarlettPlayer requires a valid HTMLElement container or CSS selector");
+          }
+          this.initialSrc = options.src;
+          this.eventBus = new EventBus();
+          this.stateManager = new StateManager({
+            autoplay: options.autoplay ?? false,
+            loop: options.loop ?? false,
+            volume: options.volume ?? 1,
+            muted: options.muted ?? false,
+            poster: options.poster ?? ""
+          });
+          this.logger = new Logger({
+            level: options.logLevel ?? "warn",
+            scope: "ScarlettPlayer"
+          });
+          this.errorHandler = new ErrorHandler(this.eventBus, this.logger);
+          this.pluginManager = new PluginManager(
+            this.eventBus,
+            this.stateManager,
+            this.logger,
+            { container: this.container }
+          );
+          this.eventBus.on("error", (err) => {
+            this.stateManager.set("error", err);
+          });
+          this.eventBus.on("media:loaded", () => {
+            this.stateManager.set("error", null);
+          });
+          this.eventBus.on("media:error", ({ error }) => {
+            this.errorHandler.record(error, { channel: "media:error" });
+          });
+          this.wireFullscreenListeners();
+          if (options.plugins) {
+            for (const plugin of options.plugins) {
+              this.pluginManager.register(plugin);
+            }
+          }
+          this.logger.info("ScarlettPlayer constructed", {
+            autoplay: options.autoplay,
+            plugins: options.plugins?.length ?? 0
+          });
+        }
+        /**
+         * Initialise every registered non-provider plugin and wire the player's
+         * own lifecycle listeners. Idempotent, and safe to call re-entrantly.
+         *
+         * This exists because `new ScarlettPlayer(...)` followed by `load()` used
+         * to leave the player with a provider and nothing else: the READMEs and 12
+         * plugin `@example` blocks show exactly that shape, and every one of them
+         * produced a dead UI (no controls, no overlay, no playlist). `load()` now
+         * calls this first, so the trap cannot be reached.
+         *
+         * The `media:load-request` and `error:retry` listeners live here rather
+         * than in the constructor because they are part of initialisation, not
+         * construction: without them the playlist plugin cannot load a track and
+         * the error overlay's "Try Again" button does nothing.
+         *
+         * Provider plugins are excluded: they are initialised lazily, per source,
+         * by `load()` once `selectProvider()` has picked one.
+         *
+         * @returns Promise resolving when the pass (or the in-flight one) completes
+         */
+        ensureInitialized() {
+          if (this.initializing) return this.initializing;
+          this.initializing = this.runInitialization().finally(() => {
+            this.initializing = null;
+          });
+          return this.initializing;
+        }
+        /**
+         * One initialisation pass. Never call directly; go through
+         * `ensureInitialized()`, which owns the re-entrancy guard.
+         *
+         * @returns Promise resolving when the pass completes
+         */
+        async runInitialization() {
+          for (const id of this.pluginManager.getPluginIds()) {
+            if (this.destroyed) return;
+            const plugin = this.pluginManager.getPlugin(id);
+            if (!plugin || plugin.type === "provider") continue;
+            if (this.pluginManager.getPluginState(id) !== "registered") continue;
+            await this.pluginManager.initPlugin(id);
+          }
+          if (this.destroyed) return;
+          this.wireLifecycleListeners();
+          if (!this.readyEmitted) {
+            this.readyEmitted = true;
+            this.eventBus.emit("player:ready", void 0);
+          }
+        }
+        /**
+         * Wire the two listeners the player owns, exactly once.
+         *
+         * Guarded by a flag rather than by "init() runs once" because
+         * `ensureInitialized()` runs on every `load()`: wiring them twice would
+         * load and play each requested source twice.
+         */
+        wireLifecycleListeners() {
+          if (this.listenersWired) return;
+          this.listenersWired = true;
+          this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
+            if (this.stateManager.getValue("chromecastActive")) return;
+            await this.load(src);
+            if (this.destroyed) return;
+            if (autoplay !== false) {
+              await this.play();
+            }
+          });
+          this.eventBus.on("error:retry", async ({ src }) => {
+            const was_live = this.stateManager.getValue("live");
+            const resume_at = this.stateManager.getValue("currentTime");
+            await this.load(src);
+            if (this.destroyed) return;
+            if (this.stateManager.getValue("error")) return;
+            if (was_live) {
+              this.seekToLive();
+            } else if (resume_at > 0) {
+              this.seek(resume_at);
+            }
+            if (this.destroyed) return;
+            await this.play();
+          });
+        }
+        /**
+         * Initialize the player asynchronously.
+         *
+         * Initialises non-provider plugins, wires the lifecycle listeners and loads
+         * `initialSrc` when one was given. Idempotent: calling it twice, or calling
+         * it after a `load()` has already initialised the player, wires nothing a
+         * second time and re-emits nothing.
+         *
+         * @returns Promise resolving when initialisation (and any initial load) is done
+         */
+        async init() {
+          this.checkDestroyed();
+          await this.ensureInitialized();
+          if (this.initialSrc) {
+            await this.load(this.initialSrc);
+          }
+        }
+        /**
+         * Load a media source.
+         *
+         * Initialises the player if that has not happened yet (see
+         * `ensureInitialized()`), then selects the provider plugin for the source
+         * and loads it. The auto-initialisation is what makes the widely copied
+         * `new ScarlettPlayer(...)` plus `load()` shape work: before it, that shape
+         * produced a player with a provider and no UI, no error overlay and no
+         * working playlist.
+         *
+         * Resets playback state, and deliberately does NOT touch `poster`. The
+         * poster is metadata owned by whoever set it (the consumer through
+         * `PlayerOptions.poster` or `setPoster()`, or the playlist plugin on a track
+         * change), not playback state, and it is written BEFORE the load that goes
+         * with it: clearing it here would blank the image over exactly the gap it
+         * exists to cover, while the next source loads.
+         *
+         * @param source - Media source URL
+         * @returns Promise that resolves when source is loaded
+         *
+         * @example
+         * ```ts
+         * await player.load('video.m3u8');
+         * ```
+         */
+        async load(source) {
+          this.checkDestroyed();
+          const generation = ++this.loadGeneration;
+          try {
+            this.logger.info("Loading source", { source });
+            this.stateManager.update({
+              playing: false,
+              paused: true,
+              ended: false,
+              buffering: true,
+              currentTime: 0,
+              duration: 0,
+              bufferedAmount: 0,
+              playbackState: "loading",
+              error: null
+            });
+            if (this._currentProvider) {
+              const previousProviderId = this._currentProvider.id;
+              this.logger.info("Destroying previous provider", { provider: previousProviderId });
+              await this.pluginManager.destroyPlugin(previousProviderId);
+              this._currentProvider = null;
+            }
+            await this.ensureInitialized();
+            if (generation !== this.loadGeneration) {
+              this.logger.info("Load superseded by newer load call", { source });
+              return;
+            }
+            const provider = this.pluginManager.selectProvider(source);
+            if (!provider) {
+              this.errorHandler.throw(
+                "PROVIDER_NOT_FOUND" /* PROVIDER_NOT_FOUND */,
+                `No provider found for source: ${source}`,
+                {
+                  fatal: true,
+                  context: { source }
+                }
+              );
+              return;
+            }
+            this._currentProvider = provider;
+            this.logger.info("Provider selected", { provider: provider.id });
+            await this.pluginManager.initPlugin(provider.id);
+            if (generation !== this.loadGeneration) {
+              this.logger.info("Load superseded by newer load call", { source });
+              return;
+            }
+            this.stateManager.set("source", { src: source, type: this.detectMimeType(source) });
+            if (typeof provider.loadSource === "function") {
+              await provider.loadSource(source);
+            }
+            if (generation !== this.loadGeneration) {
+              this.logger.info("Load superseded by newer load call", { source });
+              return;
+            }
+            if (this.stateManager.getValue("autoplay")) {
+              await this.play();
+            }
+          } catch (error) {
+            if (generation === this.loadGeneration) {
+              if (this.stateManager.getValue("error")) {
+                this.logger.error("Load failed", {
+                  source,
+                  error: error.message
+                });
+              } else {
+                this.errorHandler.handle(error, {
+                  operation: "load",
+                  source
+                });
+              }
+            }
+          }
+        }
+        /**
+         * Start playback.
+         *
+         * @returns Promise that resolves when playback starts
+         *
+         * @example
+         * ```ts
+         * await player.play();
+         * ```
+         */
+        async play() {
+          this.checkDestroyed();
+          try {
+            this.logger.debug("Play requested");
+            this.eventBus.emit("playback:play", void 0);
+          } catch (error) {
+            this.errorHandler.handle(error, { operation: "play" });
+          }
+        }
+        /**
+         * Pause playback.
+         *
+         * @example
+         * ```ts
+         * player.pause();
+         * ```
+         */
+        pause() {
+          this.checkDestroyed();
+          try {
+            this.logger.debug("Pause requested");
+            this.seekingWhilePlaying = false;
+            if (this.seekResumeTimeout !== null) {
+              clearTimeout(this.seekResumeTimeout);
+              this.seekResumeTimeout = null;
+            }
+            this.eventBus.emit("playback:pause", void 0);
+          } catch (error) {
+            this.errorHandler.handle(error, { operation: "pause" });
+          }
+        }
+        /**
+         * Seek to a specific time.
+         *
+         * @param time - Time in seconds
+         *
+         * @example
+         * ```ts
+         * player.seek(30); // Seek to 30 seconds
+         * ```
+         */
+        seek(time) {
+          this.checkDestroyed();
+          try {
+            this.logger.debug("Seek requested", { time });
+            const wasPlaying = this.stateManager.getValue("playing");
+            if (wasPlaying) {
+              this.seekingWhilePlaying = true;
+            }
+            if (this.seekResumeTimeout !== null) {
+              clearTimeout(this.seekResumeTimeout);
+              this.seekResumeTimeout = null;
+            }
+            this.eventBus.emit("playback:seeking", { time });
+            this.stateManager.set("currentTime", time);
+            if (this.seekingWhilePlaying) {
+              this.seekResumeTimeout = setTimeout(() => {
+                if (this.seekingWhilePlaying && this.stateManager.getValue("playing")) {
+                  this.logger.debug("Resuming playback after seek");
+                  this.seekingWhilePlaying = false;
+                  this.eventBus.emit("playback:play", void 0);
+                }
+                this.seekResumeTimeout = null;
+              }, 300);
+            }
+          } catch (error) {
+            this.errorHandler.handle(error, { operation: "seek", time });
+          }
+        }
+        /**
+         * Set volume.
+         *
+         * @param volume - Volume 0-1
+         *
+         * @example
+         * ```ts
+         * player.setVolume(0.5); // 50% volume
+         * ```
+         */
+        setVolume(volume) {
+          this.checkDestroyed();
+          const clampedVolume = Math.max(0, Math.min(1, volume));
+          this.stateManager.set("volume", clampedVolume);
+          this.eventBus.emit("volume:change", {
+            volume: clampedVolume,
+            muted: this.stateManager.getValue("muted")
+          });
+        }
+        /**
+         * Set muted state.
+         *
+         * @param muted - Mute flag
+         *
+         * @example
+         * ```ts
+         * player.setMuted(true);
+         * ```
+         */
+        setMuted(muted) {
+          this.checkDestroyed();
+          this.stateManager.set("muted", muted);
+          this.eventBus.emit("volume:mute", { muted });
+        }
+        /**
+         * Set playback rate.
+         *
+         * @param rate - Playback rate (e.g., 1.0 = normal, 2.0 = 2x speed)
+         *
+         * @example
+         * ```ts
+         * player.setPlaybackRate(1.5); // 1.5x speed
+         * ```
+         */
+        setPlaybackRate(rate) {
+          this.checkDestroyed();
+          const clampedRate = Math.max(0.0625, Math.min(16, rate));
+          this.stateManager.set("playbackRate", clampedRate);
+          this.eventBus.emit("playback:ratechange", { rate: clampedRate });
+        }
+        /**
+         * Set autoplay state.
+         *
+         * When enabled, videos will automatically play after loading.
+         *
+         * @param autoplay - Autoplay flag
+         *
+         * @example
+         * ```ts
+         * player.setAutoplay(true);
+         * await player.load('video.mp4'); // Will auto-play
+         * ```
+         */
+        setAutoplay(autoplay) {
+          this.checkDestroyed();
+          this.stateManager.set("autoplay", autoplay);
+          this.logger.debug("Autoplay set", { autoplay });
+        }
+        /**
+         * Set the poster image shown until the first frame renders.
+         *
+         * Writes the `poster` state key; the provider plugins subscribe to it and
+         * mirror it onto the media element, so this takes effect on a player that
+         * is already running. Before this method existed the poster could only be
+         * chosen at construction, which left a playlist showing the previous
+         * track's art (and a Vue `poster` prop change doing nothing at all).
+         *
+         * An empty string clears the poster, which is how a consumer takes the
+         * image away rather than replacing it.
+         *
+         * @param url - Poster image URL, or '' to clear it
+         *
+         * @example
+         * ```ts
+         * player.setPoster('https://example.com/art.jpg');
+         * player.setPoster(''); // back to the bare video surface
+         * ```
+         */
+        setPoster(url) {
+          this.checkDestroyed();
+          this.stateManager.set("poster", url);
+          this.logger.debug("Poster set", { poster: url });
+        }
+        /**
+         * Subscribe to an event.
+         *
+         * @param event - Event name
+         * @param handler - Event handler
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * const unsub = player.on('playback:play', () => {
+         *   console.log('Playing!');
+         * });
+         *
+         * // Later: unsubscribe
+         * unsub();
+         * ```
+         */
+        on(event, handler) {
+          this.checkDestroyed();
+          return this.eventBus.on(event, handler);
+        }
+        /**
+         * Subscribe to an event once.
+         *
+         * @param event - Event name
+         * @param handler - Event handler
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * // player:ready fires once, at the end of the first initialisation, so a
+         * // one-shot listener has to be attached before init() or load() runs.
+         * const player = new ScarlettPlayer({ container });
+         * player.once('player:ready', () => {
+         *   console.log('Player ready!');
+         * });
+         * await player.init();
+         * ```
+         */
+        once(event, handler) {
+          this.checkDestroyed();
+          return this.eventBus.once(event, handler);
+        }
+        /**
+         * Get a plugin by name.
+         *
+         * @param name - Plugin name
+         * @returns Plugin instance or null
+         *
+         * @example
+         * ```ts
+         * const hls = player.getPlugin('hls-plugin');
+         * ```
+         */
+        getPlugin(name) {
+          this.checkDestroyed();
+          return this.pluginManager.getPlugin(name);
+        }
+        /**
+         * Register a plugin.
+         *
+         * @param plugin - Plugin to register
+         *
+         * @example
+         * ```ts
+         * player.registerPlugin(myPlugin);
+         * ```
+         */
+        registerPlugin(plugin) {
+          this.checkDestroyed();
+          this.pluginManager.register(plugin);
+        }
+        /**
+         * Get current state snapshot.
+         *
+         * @returns Readonly state snapshot
+         *
+         * @example
+         * ```ts
+         * const state = player.getState();
+         * console.log(state.playing, state.currentTime);
+         * ```
+         */
+        getState() {
+          this.checkDestroyed();
+          return this.stateManager.snapshot();
+        }
+        // ===== Quality Methods (proxied to provider) =====
+        /**
+         * Get available quality levels from the current provider.
+         * @returns Array of quality levels or empty array if not available
+         */
+        getQualities() {
+          this.checkDestroyed();
+          if (!this._currentProvider) return [];
+          const provider = this._currentProvider;
+          if (typeof provider.getLevels === "function") {
+            return provider.getLevels();
+          }
+          return [];
+        }
+        /**
+         * Set quality level (-1 for auto).
+         * @param index - Quality level index
+         */
+        setQuality(index) {
+          this.checkDestroyed();
+          if (!this._currentProvider) {
+            this.logger.warn("No provider available for quality change");
+            return;
+          }
+          const provider = this._currentProvider;
+          if (typeof provider.setLevel === "function") {
+            if (index !== -1) {
+              const levels = this.getQualities();
+              if (levels.length > 0 && (index < 0 || index >= levels.length)) {
+                this.logger.warn(`Invalid quality index: ${index} (available: ${levels.length})`);
+                return;
+              }
+            }
+            provider.setLevel(index);
+            this.eventBus.emit("quality:change", {
+              quality: index === -1 ? "auto" : `level-${index}`,
+              auto: index === -1
+            });
+          }
+        }
+        /**
+         * Get current quality level index (-1 = auto).
+         */
+        getCurrentQuality() {
+          this.checkDestroyed();
+          if (!this._currentProvider) return -1;
+          const provider = this._currentProvider;
+          if (typeof provider.getCurrentLevel === "function") {
+            return provider.getCurrentLevel();
+          }
+          return -1;
+        }
+        // ===== Fullscreen Methods =====
+        /**
+         * Listen for fullscreen changes the player did not initiate.
+         *
+         * Nothing used to: the `fullscreen` state key was written only by this
+         * class's own `requestFullscreen()` and `exitFullscreen()`. Everything else
+         * left it lying. Entering fullscreen through the UI button or the `f`
+         * shortcut never flipped the icon to "Exit fullscreen", `player.fullscreen`
+         * stayed false and `fullscreen:change` never fired; and after a programmatic
+         * `requestFullscreen()` an Escape exit left the state stuck at true.
+         *
+         * `webkitbeginfullscreen` and `webkitendfullscreen` are the iPhone's native
+         * player announcing itself. They are dispatched on the video element, they do
+         * not bubble, and the element does not exist yet when this runs (a provider
+         * plugin creates it, per source), so they are bound to the container in the
+         * CAPTURE phase, which is the one phase that sees a non-bubbling event on a
+         * descendant.
+         */
+        wireFullscreenListeners() {
+          const onChange = () => {
+            this.fullscreenAnnounced = true;
+            this.setFullscreenState(isFullscreen(this.container));
+          };
+          document.addEventListener("fullscreenchange", onChange);
+          document.addEventListener("webkitfullscreenchange", onChange);
+          this.container.addEventListener("webkitbeginfullscreen", onChange, true);
+          this.container.addEventListener("webkitendfullscreen", onChange, true);
+          this.unwireFullscreen = () => {
+            document.removeEventListener("fullscreenchange", onChange);
+            document.removeEventListener("webkitfullscreenchange", onChange);
+            this.container.removeEventListener("webkitbeginfullscreen", onChange, true);
+            this.container.removeEventListener("webkitendfullscreen", onChange, true);
+          };
+        }
+        /**
+         * Record a fullscreen transition, once.
+         *
+         * @param next - The state the browser is now in
+         */
+        setFullscreenState(next) {
+          if (this.stateManager.getValue("fullscreen") === next) {
+            return;
+          }
+          this.stateManager.set("fullscreen", next);
+          this.eventBus.emit("fullscreen:change", { fullscreen: next });
+        }
+        /**
+         * Request fullscreen mode.
+         *
+         * @returns Promise resolving once the browser has accepted or refused
+         */
+        async requestFullscreen() {
+          this.checkDestroyed();
+          this.fullscreenAnnounced = false;
+          try {
+            await enterFullscreen(this.container);
+            if (!this.fullscreenAnnounced) {
+              this.stateManager.set("fullscreen", true);
+              this.eventBus.emit("fullscreen:change", { fullscreen: true });
+            }
+          } catch (error) {
+            this.logger.error("Fullscreen request failed", { error });
+          }
+        }
+        /**
+         * Exit fullscreen mode.
+         *
+         * @returns Promise resolving once the browser has accepted or refused
+         */
+        async exitFullscreen() {
+          this.checkDestroyed();
+          this.fullscreenAnnounced = false;
+          try {
+            await exitFullscreen(this.container);
+            if (!this.fullscreenAnnounced) {
+              this.stateManager.set("fullscreen", false);
+              this.eventBus.emit("fullscreen:change", { fullscreen: false });
+            }
+          } catch (error) {
+            this.logger.error("Exit fullscreen failed", { error });
+          }
+        }
+        /**
+         * Toggle fullscreen mode.
+         */
+        async toggleFullscreen() {
+          if (this.fullscreen) {
+            await this.exitFullscreen();
+          } else {
+            await this.requestFullscreen();
+          }
+        }
+        // ===== Casting Methods (proxied to plugins) =====
+        /**
+         * Request AirPlay (proxied to airplay plugin).
+         */
+        requestAirPlay() {
+          this.checkDestroyed();
+          const airplay = this.pluginManager.getPlugin("airplay");
+          if (airplay && typeof airplay.showPicker === "function") {
+            airplay.showPicker();
+          } else {
+            this.logger.warn("AirPlay plugin not available");
+          }
+        }
+        /**
+         * Request Chromecast session (proxied to chromecast plugin).
+         */
+        async requestChromecast() {
+          this.checkDestroyed();
+          const chromecast = this.pluginManager.getPlugin("chromecast");
+          if (chromecast && typeof chromecast.requestSession === "function") {
+            await chromecast.requestSession();
+          } else {
+            this.logger.warn("Chromecast plugin not available");
+          }
+        }
+        /**
+         * Stop casting (AirPlay or Chromecast).
+         */
+        stopCasting() {
+          this.checkDestroyed();
+          const airplay = this.pluginManager.getPlugin("airplay");
+          if (airplay && typeof airplay.stop === "function") {
+            airplay.stop();
+          }
+          const chromecast = this.pluginManager.getPlugin("chromecast");
+          if (chromecast && typeof chromecast.stopSession === "function") {
+            chromecast.stopSession();
+          }
+        }
+        // ===== Live Stream Methods =====
+        /**
+         * Seek to live edge (for live streams).
+         */
+        seekToLive() {
+          this.checkDestroyed();
+          const isLive = this.stateManager.getValue("live");
+          if (!isLive) {
+            this.logger.warn("Not a live stream");
+            return;
+          }
+          if (this._currentProvider) {
+            const provider = this._currentProvider;
+            if (typeof provider.getLiveInfo === "function") {
+              const liveInfo = provider.getLiveInfo();
+              if (liveInfo?.liveSyncPosition !== void 0) {
+                this.seek(liveInfo.liveSyncPosition);
+                return;
+              }
+            }
+          }
+          const duration = this.stateManager.getValue("duration");
+          if (duration > 0) {
+            this.seek(duration);
+          }
+        }
+        /**
+         * Destroy the player and cleanup all resources.
+         *
+         * @example
+         * ```ts
+         * player.destroy();
+         * ```
+         */
+        destroy() {
+          if (this.destroyed) {
+            return;
+          }
+          this.logger.info("Destroying player");
+          this.loadGeneration++;
+          if (this.seekResumeTimeout !== null) {
+            clearTimeout(this.seekResumeTimeout);
+            this.seekResumeTimeout = null;
+          }
+          this.unwireFullscreen?.();
+          this.unwireFullscreen = null;
+          this.eventBus.emit("player:destroy", void 0);
+          this.pluginManager.destroyAll();
+          this.eventBus.destroy();
+          this.stateManager.destroy();
+          this.destroyed = true;
+          this.logger.info("Player destroyed");
+        }
+        // ===== State Getters =====
+        /**
+         * Get playing state.
+         */
+        get playing() {
+          return this.stateManager.getValue("playing");
+        }
+        /**
+         * Get paused state.
+         */
+        get paused() {
+          return this.stateManager.getValue("paused");
+        }
+        /**
+         * Get current time in seconds.
+         */
+        get currentTime() {
+          return this.stateManager.getValue("currentTime");
+        }
+        /**
+         * Get duration in seconds.
+         */
+        get duration() {
+          return this.stateManager.getValue("duration");
+        }
+        /**
+         * Get volume (0-1).
+         */
+        get volume() {
+          return this.stateManager.getValue("volume");
+        }
+        /**
+         * Get muted state.
+         */
+        get muted() {
+          return this.stateManager.getValue("muted");
+        }
+        /**
+         * Get playback rate.
+         */
+        get playbackRate() {
+          return this.stateManager.getValue("playbackRate");
+        }
+        /**
+         * Get buffered amount (0-1).
+         */
+        get bufferedAmount() {
+          return this.stateManager.getValue("bufferedAmount");
+        }
+        /**
+         * Get current provider plugin.
+         */
+        get currentProvider() {
+          return this._currentProvider;
+        }
+        /**
+         * Get fullscreen state.
+         */
+        get fullscreen() {
+          return this.stateManager.getValue("fullscreen");
+        }
+        /**
+         * Get live stream state.
+         */
+        get live() {
+          return this.stateManager.getValue("live");
+        }
+        /**
+         * Get autoplay state.
+         */
+        get autoplay() {
+          return this.stateManager.getValue("autoplay");
+        }
+        /**
+         * Get the current poster URL ('' when there is none).
+         *
+         * Reads state rather than the media element: the element only exists once a
+         * provider has been initialised, and for an audio source it never carries
+         * the attribute at all.
+         */
+        get poster() {
+          return this.stateManager.getValue("poster");
+        }
+        /**
+         * Check if player is destroyed.
+         * @private
+         */
+        checkDestroyed() {
+          if (this.destroyed) {
+            throw new Error("Cannot call methods on destroyed player");
+          }
+        }
+        /**
+         * Detect MIME type from source URL.
+         * @private
+         */
+        detectMimeType(source) {
+          let path = source;
+          try {
+            path = new URL(source).pathname;
+          } catch {
+            const noQuery = source.split("?")[0] ?? source;
+            path = noQuery.split("#")[0] ?? noQuery;
+          }
+          const ext = path.split(".").pop()?.toLowerCase() ?? "";
+          switch (ext) {
+            case "m3u8":
+              return "application/x-mpegURL";
+            case "mpd":
+              return "application/dash+xml";
+            case "mp4":
+            case "m4v":
+              return "video/mp4";
+            case "webm":
+              return "video/webm";
+            case "ogg":
+            case "ogv":
+              return "video/ogg";
+            case "mov":
+              return "video/quicktime";
+            case "mkv":
+              return "video/x-matroska";
+            case "mp3":
+              return "audio/mpeg";
+            case "wav":
+              return "audio/wav";
+            case "flac":
+              return "audio/flac";
+            case "aac":
+            case "m4a":
+              return "audio/mp4";
+            default:
+              return "video/mp4";
+          }
+        }
+      };
+    }
+  });
+
+  // packages/core/src/index.ts
+  var init_src = __esm({
+    "packages/core/src/index.ts"() {
+      "use strict";
+      init_version();
+      init_state();
+      init_state_manager();
+      init_event_bus();
+      init_logger();
+      init_error_handler();
+      init_plugin_manager();
+      init_plugin_api();
+      init_scarlett_player();
+      init_fullscreen();
+    }
+  });
+
   // node_modules/.pnpm/hls.js@1.6.15/node_modules/hls.js/dist/hls.mjs
   var hls_exports = {};
   __export(hls_exports, {
@@ -5198,10 +7876,10 @@ ${newDetails.m3u8}`);
       cue.id = generateCueId(cue.startTime, cue.endTime, cue.text);
       const region = regionElements[cueElement.getAttribute("region")];
       const style = styleElements[cueElement.getAttribute("style")];
-      const styles4 = getTtmlStyles(region, style, styleElements);
+      const styles5 = getTtmlStyles(region, style, styleElements);
       const {
         textAlign
-      } = styles4;
+      } = styles5;
       if (textAlign) {
         const lineAlign = textAlignToLineAlign[textAlign];
         if (lineAlign) {
@@ -5209,7 +7887,7 @@ ${newDetails.m3u8}`);
         }
         cue.align = textAlign;
       }
-      _extends(cue, styles4);
+      _extends(cue, styles5);
       return cue;
     }).filter((cue) => cue !== null);
   }
@@ -5264,12 +7942,12 @@ ${newDetails.m3u8}`);
     if (regionStyleName && styleElements.hasOwnProperty(regionStyleName)) {
       regionStyle = styleElements[regionStyleName];
     }
-    return styleAttributes.reduce((styles4, name) => {
+    return styleAttributes.reduce((styles5, name) => {
       const value = getAttributeNS(style, ttsNs, name) || getAttributeNS(region, ttsNs, name) || getAttributeNS(regionStyle, ttsNs, name);
       if (value) {
-        styles4[name] = value;
+        styles5[name] = value;
       }
-      return styles4;
+      return styles5;
     }, {});
   }
   function getAttributeNS(element, ns, name) {
@@ -25800,12 +28478,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.background = "black";
           this.flash = false;
         }
-        setStyles(styles4) {
+        setStyles(styles5) {
           const attribs = ["foreground", "underline", "italics", "background", "flash"];
           for (let i = 0; i < attribs.length; i++) {
             const style = attribs[i];
-            if (styles4.hasOwnProperty(style)) {
-              this[style] = styles4[style];
+            if (styles5.hasOwnProperty(style)) {
+              this[style] = styles5[style];
             }
           }
         }
@@ -25964,8 +28642,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             return chars.join("");
           }
         }
-        setPenStyles(styles4) {
-          this.currPenState.setStyles(styles4);
+        setPenStyles(styles5) {
+          this.currPenState.setStyles(styles5);
           const currChar = this.chars[this.pos];
           currChar.setPenState(this.currPenState);
         }
@@ -26028,9 +28706,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const row = this.rows[this.currRow];
           row.insertChar(char);
         }
-        setPen(styles4) {
+        setPen(styles5) {
           const row = this.rows[this.currRow];
-          row.setPenStyles(styles4);
+          row.setPenStyles(styles5);
         }
         moveCursor(relPos) {
           const row = this.rows[this.currRow];
@@ -26071,14 +28749,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             row.setCursor(pacData.indent);
             pacData.color = row.chars[prevPos].penState.foreground;
           }
-          const styles4 = {
+          const styles5 = {
             foreground: pacData.color,
             underline: pacData.underline,
             italics: pacData.italics,
             background: "black",
             flash: false
           };
-          this.setPen(styles4);
+          this.setPen(styles5);
         }
         /**
          * Set background/extra foreground, but first do back_space, and then insert space (backwards compatibility).
@@ -26291,20 +28969,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.writeScreen.moveCursor(nrCols);
         }
         ccMIDROW(secondByte) {
-          const styles4 = {
+          const styles5 = {
             flash: false
           };
-          styles4.underline = secondByte % 2 === 1;
-          styles4.italics = secondByte >= 46;
-          if (!styles4.italics) {
+          styles5.underline = secondByte % 2 === 1;
+          styles5.italics = secondByte >= 46;
+          if (!styles5.italics) {
             const colorIndex = Math.floor(secondByte / 2) - 16;
             const colors = ["white", "green", "blue", "cyan", "red", "yellow", "magenta"];
-            styles4.foreground = colors[colorIndex];
+            styles5.foreground = colors[colorIndex];
           } else {
-            styles4.foreground = "white";
+            styles5.foreground = "white";
           }
-          this.logger.log(2, "MIDROW: " + stringify(styles4));
-          this.writeScreen.setPen(styles4);
+          this.logger.log(2, "MIDROW: " + stringify(styles5));
+          this.writeScreen.setPen(styles5);
         }
         outputDataUpdate(dispatch = false) {
           const time = this.logger.time;
@@ -33012,6 +35690,90 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/fit.ts
+  function resolveFitItems(layout, priority) {
+    return layout.map((id) => {
+      const rule = DEFAULT_PRIORITY[id];
+      const rank = priority?.[id] ?? rule?.rank ?? UNKNOWN_RANK;
+      return { id, rank, exit: rule?.exit ?? "overflow" };
+    });
+  }
+  function assertFitLayout(layout, priority) {
+    if (!layout.includes("quality") || layout.includes("settings")) {
+      return;
+    }
+    const [quality] = resolveFitItems(["quality"], priority);
+    if (quality.rank === "never") {
+      return;
+    }
+    throw new Error(
+      `uiPlugin: a layout with "quality" needs "settings" as well. The quality control hides when the bar does not fit, and the settings menu is where its Quality row lives. Add "settings" to controls, pin quality with priority: { quality: 'never' }, or set responsive: false.`
+    );
+  }
+  function needed(widths, gap, overflowButtonWidth, trayUsed) {
+    const content = widths.reduce((sum, width) => sum + width, 0);
+    const gaps = gap * Math.max(0, widths.length - 1);
+    const tray = trayUsed ? overflowButtonWidth + gap : 0;
+    return content + gaps + tray;
+  }
+  function planFit(items, available, gap, overflowButtonWidth) {
+    const ids = items.map((item) => item.id);
+    if (available <= 0) {
+      return { inBar: ids, overflow: [], hidden: [] };
+    }
+    const counted = items.filter((item) => item.visible && item.width > 0);
+    const remaining = [...counted];
+    const overflow = /* @__PURE__ */ new Set();
+    const hidden = /* @__PURE__ */ new Set();
+    while (needed(
+      remaining.map((item) => item.width),
+      gap,
+      overflowButtonWidth,
+      overflow.size > 0
+    ) > available) {
+      let victim = -1;
+      for (let i = 0; i < remaining.length; i++) {
+        const candidate = remaining[i];
+        if (candidate.rank === "never") continue;
+        if (victim === -1 || candidate.rank <= remaining[victim].rank) {
+          victim = i;
+        }
+      }
+      if (victim === -1) break;
+      const [removed] = remaining.splice(victim, 1);
+      (removed.exit === "hide" ? hidden : overflow).add(removed.id);
+    }
+    return {
+      inBar: ids.filter((id) => !overflow.has(id) && !hidden.has(id)),
+      overflow: ids.filter((id) => overflow.has(id)),
+      hidden: ids.filter((id) => hidden.has(id))
+    };
+  }
+  var UNKNOWN_RANK, DEFAULT_PRIORITY;
+  var init_fit = __esm({
+    "packages/plugins/ui/src/fit.ts"() {
+      "use strict";
+      UNKNOWN_RANK = 3;
+      DEFAULT_PRIORITY = {
+        "bandwidth-indicator": { rank: 0, exit: "hide" },
+        "skip-backward": { rank: 1, exit: "overflow" },
+        "skip-forward": { rank: 1, exit: "overflow" },
+        pip: { rank: 2, exit: "overflow" },
+        chromecast: { rank: 4, exit: "overflow" },
+        airplay: { rank: 4, exit: "overflow" },
+        volume: { rank: 5, exit: "overflow" },
+        captions: { rank: 6, exit: "overflow" },
+        quality: { rank: 6, exit: "hide" },
+        time: { rank: 7, exit: "hide" },
+        play: { rank: "never", exit: "overflow" },
+        "live-indicator": { rank: "never", exit: "overflow" },
+        settings: { rank: "never", exit: "overflow" },
+        fullscreen: { rank: "never", exit: "overflow" },
+        spacer: { rank: "never", exit: "overflow" }
+      };
+    }
+  });
+
   // packages/plugins/ui/src/styles.ts
   var styles;
   var init_styles = __esm({
@@ -33077,7 +35839,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   display: flex;
   align-items: center;
   padding: 0 12px 12px;
+  /* Composed through a variable so the fullscreen rule below can add the
+     device's own inset without restating the 12px. */
+  padding-bottom: calc(12px + var(--sp-inset-bottom, 0px));
   gap: 4px;
+  /* Declared on the bar because the fit needs the same number the volume rules
+     below use: the slider expands mid-interaction and the plugin reserves the
+     room in advance (see interactionReserve() in index.ts, which reads this
+     property off this element at init). One declaration, so the stylesheet and
+     the arithmetic cannot drift. Both the bar and the overflow tray are inside
+     .sp-controls, so a volume control inherits it wherever the fit put it. */
+  --sp-volume-slider-width: 64px;
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 0.25s ease, transform 0.25s ease;
@@ -33096,11 +35868,36 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ============================================
+   Safe Area (fullscreen only)
+
+   Scoped to :fullscreen on purpose. Applied unconditionally, the inset would
+   push an inline player's controls up on any page whose viewport meta says
+   viewport-fit=cover, where there is no notch or home indicator over the
+   player at all. Both the bar and the progress wrapper are direct children of
+   the container, which is the element that goes fullscreen.
+
+   The :-webkit-full-screen twin is a separate rule because an unknown
+   pseudo-class anywhere in a selector list invalidates the whole rule.
+
+   Nothing is needed in packages/embed/iframe.html: viewport-fit has no effect
+   inside an iframe.
+   ============================================ */
+:fullscreen > .sp-controls,
+:fullscreen > .sp-progress-wrapper {
+  --sp-inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:-webkit-full-screen > .sp-controls,
+:-webkit-full-screen > .sp-progress-wrapper {
+  --sp-inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ============================================
    Progress Bar (Above Controls)
    ============================================ */
 .sp-progress-wrapper {
   position: absolute;
-  bottom: 48px;
+  bottom: calc(48px + var(--sp-inset-bottom, 0px));
   left: 12px;
   right: 12px;
   height: 20px;
@@ -33114,6 +35911,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
 .sp-progress-wrapper--visible {
   opacity: 1;
+}
+
+/* Touch: a 20px wrapper is not a 20px target. The control bar is a later
+   sibling at the same z-index and spans 0..56px from the bottom, so it wins
+   hit-testing in the 48..56 overlap and the exclusive region for scrubbing is
+   12px. The wrapper grows UPWARD to 44px (48..92) because growing downward
+   would be swallowed by the bar; the 3px bar itself stays exactly where it was
+   (centred 8.5px above the wrapper's bottom edge, which is what
+   align-items: center gave it inside 20px). The handle and tooltip
+   enlargements are gated behind (hover: hover) and never match a finger, but
+   .sp-progress--dragging is not, so the handle still appears mid-drag.
+
+   any-pointer, not pointer: (pointer: coarse) describes the PRIMARY pointer
+   only, so a hybrid laptop with a mouse and a touchscreen reports fine and kept
+   the 12px exclusive region under a finger. (any-pointer: coarse) is true
+   whenever a coarse pointer is available at all, which is the population that
+   needs the target. The cost on such a machine is 24px of extra hit area for
+   the mouse, over the player's own bottom edge. */
+@media (any-pointer: coarse) {
+  .sp-progress-wrapper {
+    height: 44px;
+    align-items: flex-end;
+    padding-bottom: 8.5px;
+    box-sizing: border-box;
+  }
 }
 
 .sp-progress {
@@ -33324,6 +36146,61 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ============================================
+   Overflow Tray
+
+   The wrapper is deliberately unpositioned: the strip is absolutely
+   positioned against .sp-controls (the nearest positioned ancestor), so it
+   spans the bar's width and sits directly above it instead of hanging off a
+   44px button.
+
+   The strip wraps horizontally and keeps overflow visible. A vertical menu of
+   44px rows would be taller than a portrait phone player (211px at 375px wide,
+   measured 2026-09-05) and a scrolling one would clip the popovers registered
+   controls own.
+   ============================================ */
+.sp-overflow {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.sp-overflow-tray {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  overflow: visible;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  z-index: 20;
+}
+
+.sp-overflow-tray--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Beats a control's own inline style.display = '' on its next update(), so a
+   control the fit took off screen stays off screen until the fit says
+   otherwise. */
+.sp-control--collapsed {
+  display: none !important;
+}
+
+/* ============================================
    Time Display
    ============================================ */
 .sp-time {
@@ -33350,14 +36227,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transition: width 0.2s ease;
 }
 
+/* Both widths come from --sp-volume-slider-width on .sp-controls, which is also
+   what the fit reserves for this control. focus-within is deliberately not
+   gated on hover: a tap on the mute button focuses it, which is how the slider
+   opens on a phone. */
 @media (hover: hover) {
   .sp-volume:hover .sp-volume__slider-wrap {
-    width: 64px;
+    width: var(--sp-volume-slider-width);
   }
 }
 
 .sp-volume:focus-within .sp-volume__slider-wrap {
-  width: 64px;
+  width: var(--sp-volume-slider-width);
 }
 
 .sp-volume__slider {
@@ -33458,6 +36339,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
+  /* Bounded to the player, see .sp-settings-panel. border-box because the
+     bound is a content-box height by default and this menu adds 8px of padding
+     top and bottom: at the 139px bound a 211px player gives, it rendered 155px
+     and the host clipped the last 16px of it. */
+  box-sizing: border-box;
+  max-height: var(--sp-menu-max-height, none);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(20, 20, 20, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -33526,6 +36415,29 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
+  /* Bounded to the room above the control bar, written by the UI plugin's
+     ResizeObserver as max(120px, container height - the bar's measured height
+     - 16px). The bar is measured rather than assumed because its
+     padding-bottom carries the safe-area inset in fullscreen, which moves the
+     anchor these menus hang from. The Speed sub-panel is 253px (a
+     37px header plus six 36px rows) against a 211px portrait phone player, so
+     without this the host's overflow: hidden cuts off the Back header and the
+     first three speeds and playback speed is unreachable (measured at 375x211
+     on 2026-09-05). With the variable unset the panel behaves exactly as it
+     did before.
+
+     Not applied to .sp-overflow-tray: that one has to keep overflow visible so
+     the popovers its adopted controls own are not clipped.
+
+     border-box because max-height bounds the content box: .sp-settings-panel--main
+     is this same element with 4px of padding top and bottom, so wherever the
+     bound binds the main menu, it rendered 8px past it and the host clipped the
+     difference. The --sub views set padding: 0 and were already exact, which is
+     why the browser harness's speed-panel check could not see this. */
+  box-sizing: border-box;
+  max-height: var(--sp-menu-max-height, none);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(20, 20, 20, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -33537,7 +36449,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transform: translateY(8px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
   z-index: 20;
-  overflow: hidden;
 }
 
 .sp-settings-panel--open {
@@ -33922,6 +36833,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   .sp-control,
   .sp-volume__slider-wrap,
   .sp-quality-menu,
+  .sp-overflow-tray,
   .sp-settings-panel,
   .sp-settings-panel__row,
   .sp-settings-panel__item,
@@ -33983,6 +36895,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         captionsOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.5 5.5v13h-15v-13h15zM19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z"/></svg>`,
         checkmark: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`,
         chevronUp: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg>`,
+        /** Vertical ellipsis for the overflow tray button. */
+        more: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>`,
         chevronDown: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>`,
         spinner: `<svg viewBox="0 0 24 24" fill="currentColor" class="sp-spin"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>`,
         skipForward: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>`,
@@ -35254,6 +38168,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var init_FullscreenButton = __esm({
     "packages/plugins/ui/src/controls/FullscreenButton.ts"() {
       "use strict";
+      init_src();
       init_icons();
       init_utils();
       FullscreenButton = class {
@@ -35278,16 +38193,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             setAttr(this.el, "aria-label", "Fullscreen");
           }
         }
+        /**
+         * Enter or leave fullscreen.
+         *
+         * The direction comes from the browser rather than from the `fullscreen`
+         * state key: state is a report of what happened, and a stale one would invert
+         * the button. Rejections are swallowed because the browser refuses these
+         * routinely (no user gesture, denied by permission policy) and an unhandled
+         * rejection helps nobody.
+         */
         async toggle() {
           const container = this.api.container;
-          const video = getVideo(container);
           try {
-            if (document.fullscreenElement) {
-              await document.exitFullscreen();
-            } else if (container.requestFullscreen) {
-              await container.requestFullscreen();
-            } else if (video?.webkitEnterFullscreen) {
-              video.webkitEnterFullscreen();
+            if (isFullscreen(container)) {
+              await exitFullscreen(container);
+            } else {
+              await enterFullscreen(container);
             }
           } catch {
           }
@@ -36042,6 +38963,163 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/controls/OverflowTray.ts
+  var OverflowTray;
+  var init_OverflowTray = __esm({
+    "packages/plugins/ui/src/controls/OverflowTray.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      OverflowTray = class {
+        /**
+         * @param api - Plugin API, kept for parity with the other controls and for
+         *   logging; the tray itself reads no state
+         */
+        constructor(api) {
+          this.api = api;
+          this.isOpen = false;
+          this.toggleHandler = () => {
+            this.isOpen ? this.close() : this.open();
+          };
+          this.el = createElement("div", { className: "sp-overflow" });
+          this.btn = createButton("sp-overflow__btn", "More controls", icons.more);
+          this.btn.setAttribute("aria-haspopup", "true");
+          this.btn.setAttribute("aria-expanded", "false");
+          this.btn.addEventListener("click", this.toggleHandler);
+          this.panel = createElement("div", {
+            className: "sp-overflow-tray",
+            role: "group",
+            "aria-label": "More controls"
+          });
+          this.el.appendChild(this.btn);
+          this.el.appendChild(this.panel);
+          this.el.style.display = "none";
+          this.closeHandler = (e) => {
+            if (!this.el.contains(e.target)) {
+              this.close();
+            }
+          };
+          document.addEventListener("click", this.closeHandler);
+          this.keyHandler = (e) => {
+            if (!this.isOpen || e.key !== "Escape") return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.close();
+            this.btn.focus();
+          };
+          document.addEventListener("keydown", this.keyHandler);
+        }
+        /**
+         * The bar item to place in the control bar.
+         *
+         * @returns The wrapper holding the button and the strip
+         */
+        render() {
+          return this.el;
+        }
+        /**
+         * No state of its own: the fit loop owns what is inside it.
+         */
+        update() {
+        }
+        /**
+         * Move a control's element into the tray.
+         *
+         * The element is moved as-is, so its class, icon, aria-label, event handlers
+         * and `update()` all keep working.
+         *
+         * @param el - The control element leaving the bar
+         */
+        adopt(el) {
+          this.panel.appendChild(el);
+          this.syncVisibility();
+        }
+        /**
+         * Take a control's element back out of the tray.
+         *
+         * The caller decides where in the bar it goes; this only detaches it and
+         * updates the button's visibility.
+         *
+         * @param el - The control element returning to the bar
+         * @returns The same element, detached
+         */
+        release(el) {
+          if (el.parentNode === this.panel) {
+            this.panel.removeChild(el);
+          }
+          this.syncVisibility();
+          return el;
+        }
+        /**
+         * Whether an element is currently held by the tray.
+         *
+         * @param el - Element to test
+         * @returns True when the tray is its parent
+         */
+        holds(el) {
+          return el.parentNode === this.panel;
+        }
+        /**
+         * Open the strip.
+         */
+        open() {
+          if (this.isOpen) return;
+          this.isOpen = true;
+          this.panel.classList.add("sp-overflow-tray--open");
+          this.btn.setAttribute("aria-expanded", "true");
+        }
+        /**
+         * Close the strip.
+         *
+         * Deliberately not called after a control inside it is used: skip, PiP and
+         * cast are things a viewer taps more than once in a row.
+         */
+        close() {
+          if (!this.isOpen) return;
+          this.isOpen = false;
+          this.panel.classList.remove("sp-overflow-tray--open");
+          this.btn.setAttribute("aria-expanded", "false");
+        }
+        /**
+         * Show the button only while the tray holds something the viewer can see.
+         *
+         * A control that hid itself (no cast device on the network, no text tracks)
+         * can be sitting in the tray with `display: none`, and a button that opens an
+         * empty strip is worse than no button at all.
+         */
+        syncVisibility() {
+          const usable = Array.from(this.panel.children).some(
+            (child) => child.style.display !== "none"
+          );
+          this.el.style.display = usable ? "" : "none";
+          if (!usable && this.isOpen) {
+            this.close();
+          }
+        }
+        /**
+         * Re-check the button's visibility after the controls have updated
+         * themselves.
+         */
+        refresh() {
+          this.syncVisibility();
+        }
+        /**
+         * Remove the document listeners and the tray itself.
+         *
+         * Adopted elements are left where they are: they belong to their own
+         * controls, which are destroyed by the plugin alongside this one.
+         */
+        destroy() {
+          document.removeEventListener("click", this.closeHandler);
+          document.removeEventListener("keydown", this.keyHandler);
+          this.btn.removeEventListener("click", this.toggleHandler);
+          this.el.remove();
+          this.api.logger.debug("Overflow tray destroyed");
+        }
+      };
+    }
+  });
+
   // packages/plugins/ui/src/controls/index.ts
   var init_controls = __esm({
     "packages/plugins/ui/src/controls/index.ts"() {
@@ -36063,6 +39141,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_CaptionsButton();
       init_ThumbnailPreview();
       init_BandwidthIndicator();
+      init_OverflowTray();
     }
   });
 
@@ -36100,7 +39179,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/ui/src/version.ts
   var PKG_VERSION4;
-  var init_version = __esm({
+  var init_version2 = __esm({
     "packages/plugins/ui/src/version.ts"() {
       "use strict";
       PKG_VERSION4 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
@@ -36110,13 +39189,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/ui/src/index.ts
   var src_exports = {};
   __export(src_exports, {
+    DEFAULT_PRIORITY: () => DEFAULT_PRIORITY,
+    assertFitLayout: () => assertFitLayout,
     default: () => src_default,
     formatLiveTime: () => formatLiveTime,
     formatTime: () => formatTime,
     getControlFactory: () => getControlFactory,
     icons: () => icons,
+    planFit: () => planFit,
     registerControl: () => registerControl,
     resetControlRegistry: () => resetControlRegistry,
+    resolveFitItems: () => resolveFitItems,
     styles: () => styles,
     uiPlugin: () => uiPlugin,
     unregisterControl: () => unregisterControl
@@ -36139,9 +39222,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let recoveredUnsubscribe = null;
     let controlsVisible = true;
     let rafHandle = null;
+    let tray = null;
+    let entries = [];
+    let timeEntry = null;
+    let resizeObserver = null;
+    let barPaddingX = FALLBACK_BAR_PADDING_X;
+    let barGap = FALLBACK_BAR_GAP;
+    let volumeSliderWidth = FALLBACK_VOLUME_SLIDER_WIDTH;
+    let lastFitSignature = null;
+    let fitPending = true;
     const layout = config.controls || DEFAULT_LAYOUT;
     const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
     const showBigPlayButton = config.bigPlayButton !== false;
+    const responsive = config.responsive !== false;
+    if (responsive) {
+      assertFitLayout(layout, config.priority);
+    }
     const createControl = (slot) => {
       switch (slot) {
         case "play":
@@ -36195,13 +39291,179 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!controlBar) {
         return;
       }
+      const rules = new Map(
+        resolveFitItems(layout, config.priority).map((template) => [template.id, template])
+      );
       for (const slot of layout) {
         const control = createControl(slot);
-        if (control) {
-          controls.push(control);
-          controlBar.appendChild(control.render());
+        if (!control) {
+          continue;
+        }
+        controls.push(control);
+        const el = control.render();
+        controlBar.appendChild(el);
+        const rule = rules.get(slot);
+        const entry = {
+          slot,
+          control,
+          el,
+          rank: rule?.rank ?? "never",
+          exit: rule?.exit ?? "overflow",
+          width: -1
+        };
+        entries.push(entry);
+        if (slot === "time") {
+          timeEntry = entry;
         }
       }
+      if (responsive) {
+        tray = new OverflowTray(api);
+        controls.push(tray);
+        controlBar.appendChild(tray.render());
+        placeTrayButton();
+      }
+    };
+    const placeTrayButton = () => {
+      if (!controlBar || !tray) {
+        return;
+      }
+      const trayEl = tray.render();
+      const fullscreen = entries.find((entry) => entry.slot === "fullscreen");
+      const before = fullscreen && fullscreen.el.parentNode === controlBar ? fullscreen.el : null;
+      if (before) {
+        if (trayEl.nextSibling !== before) {
+          controlBar.insertBefore(trayEl, before);
+        }
+        return;
+      }
+      if (controlBar.lastChild !== trayEl) {
+        controlBar.appendChild(trayEl);
+      }
+    };
+    const visibilitySignature = () => {
+      let flags = "";
+      for (const entry of entries) {
+        flags += entry.el.style.display === "none" ? "0" : "1";
+      }
+      return `${flags}:${timeEntry?.el.textContent?.length ?? 0}`;
+    };
+    const applyFit = (plan) => {
+      if (!controlBar || !tray) {
+        return;
+      }
+      const overflow = new Set(plan.overflow);
+      const hidden = new Set(plan.hidden);
+      for (const entry of entries) {
+        if (entry.slot === "spacer") {
+          continue;
+        }
+        if (hidden.has(entry.slot)) {
+          if (tray.holds(entry.el)) {
+            returnToBar(entry);
+          }
+          entry.el.classList.add("sp-control--collapsed");
+          continue;
+        }
+        entry.el.classList.remove("sp-control--collapsed");
+        if (overflow.has(entry.slot)) {
+          if (!tray.holds(entry.el)) {
+            tray.adopt(entry.el);
+          }
+        } else if (tray.holds(entry.el)) {
+          returnToBar(entry);
+        }
+      }
+      tray.refresh();
+      placeTrayButton();
+    };
+    const returnToBar = (entry) => {
+      if (!controlBar || !tray) {
+        return;
+      }
+      const el = tray.release(entry.el);
+      const trayEl = tray.render();
+      let before = trayEl.parentNode === controlBar ? trayEl : null;
+      for (let i = entries.indexOf(entry) + 1; i < entries.length; i++) {
+        if (entries[i].el.parentNode === controlBar) {
+          before = entries[i].el;
+          break;
+        }
+      }
+      controlBar.insertBefore(el, before);
+    };
+    const expandedWidth = (entry) => {
+      if (entry.slot !== "volume") {
+        return 0;
+      }
+      const wrap = entry.el.querySelector(".sp-volume__slider-wrap");
+      return wrap ? wrap.getBoundingClientRect().width : 0;
+    };
+    const interactionReserve = (entry) => entry.slot === "volume" ? volumeSliderWidth : 0;
+    const readBarMetrics = (bar) => {
+      const barStyle = getComputedStyle(bar);
+      const paddingLeft = parseFloat(barStyle.paddingLeft);
+      const paddingRight = parseFloat(barStyle.paddingRight);
+      const gap = parseFloat(barStyle.columnGap || barStyle.gap);
+      const sliderWidth = parseFloat(
+        barStyle.getPropertyValue("--sp-volume-slider-width")
+      );
+      barPaddingX = Number.isFinite(paddingLeft) && Number.isFinite(paddingRight) ? paddingLeft + paddingRight : FALLBACK_BAR_PADDING_X;
+      barGap = Number.isFinite(gap) ? gap : FALLBACK_BAR_GAP;
+      volumeSliderWidth = Number.isFinite(sliderWidth) ? sliderWidth : FALLBACK_VOLUME_SLIDER_WIDTH;
+    };
+    const fitControls = () => {
+      if (!responsive || !controlBar || !tray) {
+        return;
+      }
+      if (controlBar.clientWidth === 0) {
+        return;
+      }
+      readBarMetrics(controlBar);
+      const spacerGaps = entries.filter(
+        (entry) => entry.slot === "spacer" && entry.el.style.display !== "none"
+      ).length;
+      const available = controlBar.clientWidth - barPaddingX - spacerGaps * barGap;
+      const items = [];
+      for (const entry of entries) {
+        if (entry.slot === "spacer") {
+          continue;
+        }
+        const visible = entry.el.style.display !== "none";
+        const measurable = visible && entry.el.parentNode === controlBar && !entry.el.classList.contains("sp-control--collapsed");
+        if (measurable) {
+          entry.width = entry.el.getBoundingClientRect().width - expandedWidth(entry);
+        } else if (entry.width < 0) {
+          entry.width = UNMEASURED_CONTROL_WIDTH;
+        }
+        items.push({
+          id: entry.slot,
+          rank: entry.rank,
+          exit: entry.exit,
+          width: entry.width + interactionReserve(entry),
+          visible
+        });
+      }
+      const trayEl = tray.render();
+      const trayWidth = trayEl.style.display === "none" ? 0 : trayEl.getBoundingClientRect().width;
+      applyFit(planFit(items, available, barGap, trayWidth || OVERFLOW_BUTTON_WIDTH));
+      lastFitSignature = visibilitySignature();
+      fitPending = false;
+    };
+    const maybeFit = () => {
+      if (!responsive) {
+        return;
+      }
+      if (!fitPending && visibilitySignature() === lastFitSignature) {
+        return;
+      }
+      fitControls();
+    };
+    const applyMenuBounds = (height) => {
+      const barHeight = controlBar?.offsetHeight || FALLBACK_BAR_HEIGHT;
+      api?.container?.style.setProperty(
+        "--sp-menu-max-height",
+        `${Math.max(MIN_MENU_HEIGHT, Math.round(height) - barHeight - MENU_HEIGHT_RESERVE)}px`
+      );
     };
     const rebuildControlBar = () => {
       if (!controlBar) {
@@ -36209,7 +39471,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       controls.forEach((c) => c.destroy());
       controls = [];
+      entries = [];
+      timeEntry = null;
+      tray = null;
       controlBar.replaceChildren();
+      lastFitSignature = null;
+      fitPending = true;
       populateControlBar();
       updateControls();
     };
@@ -36224,6 +39491,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
       errorOverlay?.update();
       bigPlayButton?.update();
+      maybeFit();
     };
     const scheduleUpdate = () => {
       if (rafHandle !== null) return;
@@ -36302,11 +39570,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           break;
         case "f":
           e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {
+          if (isFullscreen(api.container)) {
+            exitFullscreen(api.container).catch(() => {
             });
           } else {
-            api.container.requestFullscreen?.().catch(() => {
+            enterFullscreen(api.container).catch(() => {
             });
           }
           break;
@@ -36400,6 +39668,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         controlBar.setAttribute("aria-label", "Video controls");
         populateControlBar();
         container.appendChild(controlBar);
+        if (responsive && typeof ResizeObserver === "function") {
+          resizeObserver = new ResizeObserver((observed) => {
+            applyMenuBounds(observed[0]?.contentRect.height ?? container.clientHeight);
+            fitPending = true;
+            scheduleUpdate();
+          });
+          resizeObserver.observe(container);
+        }
         controlRegistryUnsubscribe = onControlRegistered((id) => {
           if (!layout.includes(id)) {
             return;
@@ -36416,7 +39692,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         container.addEventListener("click", handleInteraction);
         document.addEventListener("keydown", handleKeyDown);
         stateUnsubscribe = api.subscribeToState(scheduleUpdate);
-        document.addEventListener("fullscreenchange", scheduleUpdate);
         updateControls();
         if (!container.hasAttribute("tabindex")) {
           container.setAttribute("tabindex", "0");
@@ -36437,6 +39712,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           cancelAnimationFrame(rafHandle);
           rafHandle = null;
         }
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        api?.container?.style.removeProperty("--sp-menu-max-height");
         stateUnsubscribe?.();
         stateUnsubscribe = null;
         errorUnsubscribe?.();
@@ -36455,11 +39733,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.container.removeEventListener("click", handleInteraction);
         }
         document.removeEventListener("keydown", handleKeyDown);
-        document.removeEventListener("fullscreenchange", scheduleUpdate);
         controlRegistryUnsubscribe?.();
         controlRegistryUnsubscribe = null;
         controls.forEach((c) => c.destroy());
         controls = [];
+        entries = [];
+        timeEntry = null;
+        tray = null;
         progressBar?.destroy();
         progressBar = null;
         errorOverlay?.destroy();
@@ -36511,19 +39791,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
   }
-  var DEFAULT_LAYOUT, DEFAULT_HIDE_DELAY, src_default;
-  var init_src = __esm({
+  var DEFAULT_LAYOUT, DEFAULT_HIDE_DELAY, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
+  var init_src2 = __esm({
     "packages/plugins/ui/src/index.ts"() {
       "use strict";
+      init_src();
+      init_fit();
       init_styles();
       init_icons();
       init_controls();
       init_control_registry();
-      init_version();
+      init_version2();
       init_control_registry();
       init_icons();
       init_styles();
       init_utils();
+      init_fit();
       DEFAULT_LAYOUT = [
         "play",
         "skip-backward",
@@ -36541,2468 +39824,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "fullscreen"
       ];
       DEFAULT_HIDE_DELAY = 3e3;
+      UNMEASURED_CONTROL_WIDTH = 48;
+      FALLBACK_VOLUME_SLIDER_WIDTH = 64;
+      OVERFLOW_BUTTON_WIDTH = 44;
+      FALLBACK_BAR_PADDING_X = 24;
+      FALLBACK_BAR_GAP = 4;
+      MENU_HEIGHT_RESERVE = 16;
+      FALLBACK_BAR_HEIGHT = 56;
+      MIN_MENU_HEIGHT = 120;
       src_default = uiPlugin;
     }
   });
 
-  // packages/core/src/state/effect.ts
-  var currentEffect = null;
-  var effectCleanups = /* @__PURE__ */ new WeakMap();
-  function trackEffectSubscription(effectFn, unsubscribe) {
-    let cleanups = effectCleanups.get(effectFn);
-    if (!cleanups) {
-      cleanups = /* @__PURE__ */ new Set();
-      effectCleanups.set(effectFn, cleanups);
-    }
-    cleanups.add(unsubscribe);
-  }
-
-  // packages/core/src/state/signal.ts
-  var Signal = class {
-    constructor(initialValue) {
-      this.subscribers = /* @__PURE__ */ new Set();
-      this.value = initialValue;
-    }
-    /**
-     * Get the current value and track dependency if called within an effect.
-     *
-     * @returns Current value
-     */
-    get() {
-      if (currentEffect) {
-        const effect2 = currentEffect;
-        this.subscribers.add(effect2);
-        trackEffectSubscription(effect2, () => this.subscribers.delete(effect2));
-      }
-      return this.value;
-    }
-    /**
-     * Set a new value and notify subscribers if changed.
-     *
-     * @param newValue - New value to set
-     */
-    set(newValue) {
-      if (Object.is(this.value, newValue)) {
-        return;
-      }
-      this.value = newValue;
-      this.notify();
-    }
-    /**
-     * Update the value using a function.
-     *
-     * @param updater - Function that receives current value and returns new value
-     *
-     * @example
-     * ```ts
-     * const count = new Signal(0);
-     * count.update(n => n + 1); // Increments by 1
-     * ```
-     */
-    update(updater) {
-      this.set(updater(this.value));
-    }
-    /**
-     * Subscribe to changes without automatic dependency tracking.
-     *
-     * @param callback - Function to call when value changes
-     * @returns Unsubscribe function
-     */
-    subscribe(callback) {
-      this.subscribers.add(callback);
-      return () => this.subscribers.delete(callback);
-    }
-    /**
-     * Notify all subscribers of a change.
-     * @internal
-     */
-    notify() {
-      this.subscribers.forEach((subscriber) => {
-        try {
-          subscriber();
-        } catch (error) {
-          console.error("[Scarlett Player] Error in signal subscriber:", error);
-        }
-      });
-    }
-    /**
-     * Clean up all subscriptions.
-     * Call this when destroying the signal.
-     */
-    destroy() {
-      this.subscribers.clear();
-    }
-    /**
-     * Get the current number of subscribers (for debugging).
-     * @internal
-     */
-    getSubscriberCount() {
-      return this.subscribers.size;
-    }
-  };
-  function signal(initialValue) {
-    return new Signal(initialValue);
-  }
-
-  // packages/core/src/state/state-manager.ts
-  var DEFAULT_STATE = {
-    // Core Playback State
-    playbackState: "idle",
-    playing: false,
-    paused: true,
-    ended: false,
-    buffering: false,
-    waiting: false,
-    seeking: false,
-    // Time & Duration
-    currentTime: 0,
-    duration: NaN,
-    buffered: null,
-    bufferedAmount: 0,
-    // Media Info
-    mediaType: "unknown",
-    source: null,
-    title: "",
-    poster: "",
-    // Volume & Audio
-    volume: 1,
-    muted: false,
-    // Playback Controls
-    playbackRate: 1,
-    fullscreen: false,
-    pip: false,
-    controlsVisible: true,
-    // Quality & Tracks
-    qualities: [],
-    currentQuality: null,
-    audioTracks: [],
-    currentAudioTrack: null,
-    textTracks: [],
-    currentTextTrack: null,
-    // Live/DVR State (TSP features)
-    live: false,
-    liveEdge: true,
-    seekableRange: null,
-    liveLatency: 0,
-    lowLatencyMode: false,
-    // Chapters (TSP features)
-    chapters: [],
-    currentChapter: null,
-    // Error State
-    error: null,
-    // Network & Performance
-    bandwidth: 0,
-    autoplay: false,
-    loop: false,
-    // Casting State
-    airplayAvailable: false,
-    airplayActive: false,
-    chromecastAvailable: false,
-    chromecastActive: false,
-    // Thumbnail Preview
-    thumbnails: null,
-    // UI State
-    interacting: false,
-    hovering: false,
-    focused: false
-  };
-  var StateManager = class {
-    /**
-     * Create a new StateManager with default initial state.
-     *
-     * @param initialState - Optional partial initial state (merged with defaults)
-     */
-    constructor(initialState) {
-      /** Internal map of state signals */
-      this.signals = /* @__PURE__ */ new Map();
-      /** Global state change subscribers */
-      this.changeSubscribers = /* @__PURE__ */ new Set();
-      /** Initial values for keys registered via define(), for reset support */
-      this.definedDefaults = /* @__PURE__ */ new Map();
-      /**
-       * Set by destroy(). Kept so a read after teardown reports a lifecycle
-       * problem instead of masquerading as an unknown-key typo.
-       */
-      this.destroyed = false;
-      this.initializeSignals(initialState);
-    }
-    /**
-     * Initialize all state signals with default or provided values.
-     * @private
-     */
-    initializeSignals(overrides) {
-      const initialState = { ...DEFAULT_STATE, ...overrides };
-      for (const [key, value] of Object.entries(initialState)) {
-        this.createSignal(key, value);
-      }
-    }
-    /**
-     * Create and register a signal, wired to the global change subscribers.
-     *
-     * Shared by initializeSignals() and define() so a plugin-defined key behaves
-     * exactly like a built-in one and the two paths cannot drift apart.
-     *
-     * @private
-     */
-    createSignal(key, value) {
-      const stateSignal = signal(value);
-      stateSignal.subscribe(() => {
-        this.notifyChangeSubscribers(key);
-      });
-      this.signals.set(key, stateSignal);
-    }
-    /**
-     * Register a state key at runtime, for state a plugin owns.
-     *
-     * Core cannot know every plugin's keys, and {@link get} deliberately throws
-     * for unregistered ones - that throw is a useful typo-catcher and is worth
-     * keeping - so a plugin declares its keys before first use.
-     *
-     * Idempotent by design: re-defining an existing key leaves the current value
-     * untouched. Plugins commonly re-run setup after a source change, and that
-     * must not reset state that is already live.
-     *
-     * Namespace plugin keys with the plugin's own name to avoid collisions.
-     *
-     * @param key - State property key
-     * @param initialValue - Value used only when the key is new
-     *
-     * @example
-     * ```ts
-     * state.define('highlightSelection', null);
-     * ```
-     */
-    define(key, initialValue) {
-      if (this.signals.has(key)) {
-        return;
-      }
-      this.definedDefaults.set(key, initialValue);
-      this.createSignal(key, initialValue);
-    }
-    /**
-     * Get the signal for a state property.
-     *
-     * @param key - State property key
-     * @returns Signal for the property
-     * @throws If the manager has been destroyed, or the key was never registered
-     *
-     * @example
-     * ```ts
-     * const playingSignal = state.get('playing');
-     * playingSignal.get(); // false
-     * playingSignal.set(true);
-     * ```
-     */
-    get(key) {
-      if (this.destroyed) {
-        throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
-      }
-      const stateSignal = this.signals.get(key);
-      if (!stateSignal) {
-        throw new Error(`[StateManager] Unknown state key: ${key}`);
-      }
-      return stateSignal;
-    }
-    /**
-     * Get the current value of a state property (convenience method).
-     *
-     * @param key - State property key
-     * @returns Current value
-     * @throws If the manager has been destroyed, or the key was never registered
-     *
-     * @example
-     * ```ts
-     * state.getValue('playing'); // false
-     * ```
-     */
-    getValue(key) {
-      return this.get(key).get();
-    }
-    /**
-     * Set the value of a state property.
-     *
-     * @param key - State property key
-     * @param value - New value
-     *
-     * @example
-     * ```ts
-     * state.set('playing', true);
-     * state.set('currentTime', 10.5);
-     * ```
-     */
-    set(key, value) {
-      this.get(key).set(value);
-    }
-    /**
-     * Update multiple state properties at once (batch update).
-     *
-     * More efficient than calling set() multiple times.
-     *
-     * @param updates - Partial state object with updates
-     *
-     * @example
-     * ```ts
-     * state.update({
-     *   playing: true,
-     *   currentTime: 0,
-     *   volume: 1.0,
-     * });
-     * ```
-     */
-    update(updates) {
-      for (const [key, value] of Object.entries(updates)) {
-        const stateKey = key;
-        if (this.signals.has(stateKey)) {
-          this.set(stateKey, value);
-        }
-      }
-    }
-    /**
-     * Subscribe to changes on a specific state property.
-     *
-     * @param key - State property key
-     * @param callback - Callback function receiving new value
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * const unsub = state.subscribe('playing', (value) => {
-     *   console.log('Playing:', value);
-     * });
-     * ```
-     */
-    subscribeToKey(key, callback) {
-      const stateSignal = this.get(key);
-      return stateSignal.subscribe(() => {
-        callback(stateSignal.get());
-      });
-    }
-    /**
-     * Subscribe to all state changes.
-     *
-     * Receives a StateChangeEvent for every state property change.
-     *
-     * @param callback - Callback function receiving change events
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * const unsub = state.subscribe((event) => {
-     *   console.log(`${event.key} changed:`, event.value);
-     * });
-     * ```
-     */
-    subscribe(callback) {
-      this.changeSubscribers.add(callback);
-      return () => this.changeSubscribers.delete(callback);
-    }
-    /**
-     * Notify all global change subscribers.
-     * @private
-     */
-    notifyChangeSubscribers(key) {
-      const stateSignal = this.get(key);
-      const value = stateSignal.get();
-      const event = {
-        key,
-        value,
-        previousValue: value
-        // Note: We don't track previous values in this simple impl
-      };
-      this.changeSubscribers.forEach((subscriber) => {
-        try {
-          subscriber(event);
-        } catch (error) {
-          console.error("[StateManager] Error in change subscriber:", error);
-        }
-      });
-    }
-    /**
-     * Reset all state to default values.
-     *
-     * @example
-     * ```ts
-     * state.reset();
-     * ```
-     */
-    reset() {
-      this.update({
-        ...DEFAULT_STATE,
-        ...Object.fromEntries(this.definedDefaults)
-      });
-    }
-    /**
-     * Reset a specific state property to its default value.
-     *
-     * @param key - State property key
-     *
-     * @example
-     * ```ts
-     * state.resetKey('playing');
-     * ```
-     */
-    resetKey(key) {
-      const defaultValue = key in DEFAULT_STATE ? DEFAULT_STATE[key] : this.definedDefaults.get(key);
-      this.set(key, defaultValue);
-    }
-    /**
-     * Get a snapshot of all current state values.
-     *
-     * @returns Frozen snapshot of current state
-     *
-     * @example
-     * ```ts
-     * const snapshot = state.snapshot();
-     * console.log(snapshot.playing, snapshot.currentTime);
-     * ```
-     */
-    snapshot() {
-      const snapshot = {};
-      for (const [key, stateSignal] of this.signals) {
-        snapshot[key] = stateSignal.get();
-      }
-      return Object.freeze(snapshot);
-    }
-    /**
-     * Get the number of subscribers for a state property (for debugging).
-     *
-     * @param key - State property key
-     * @returns Number of subscribers
-     * @internal
-     */
-    getSubscriberCount(key) {
-      return this.signals.get(key)?.getSubscriberCount() ?? 0;
-    }
-    /**
-     * Destroy the state manager and cleanup all signals.
-     *
-     * After this, every read or write ({@link get}, {@link getValue},
-     * {@link set}) throws a destroyed-specific error. Returning last-known
-     * values instead was considered and rejected: it silently masks the
-     * lifecycle bugs this throw exposes.
-     *
-     * @example
-     * ```ts
-     * state.destroy();
-     * ```
-     */
-    destroy() {
-      this.signals.forEach((stateSignal) => stateSignal.destroy());
-      this.signals.clear();
-      this.changeSubscribers.clear();
-      this.destroyed = true;
-    }
-  };
-
-  // packages/core/src/events/event-bus.ts
-  var DEFAULT_OPTIONS = {
-    maxListeners: 100,
-    async: false,
-    interceptors: true
-  };
-  var EventBus = class {
-    /**
-     * Create a new EventBus.
-     *
-     * @param options - Optional configuration
-     */
-    constructor(options) {
-      /** Event listeners map */
-      this.listeners = /* @__PURE__ */ new Map();
-      /** One-time listeners (removed after first call) */
-      this.onceListeners = /* @__PURE__ */ new Map();
-      /** Event interceptors map */
-      this.interceptors = /* @__PURE__ */ new Map();
-      this.options = { ...DEFAULT_OPTIONS, ...options };
-    }
-    /**
-     * Subscribe to an event.
-     *
-     * @param event - Event name
-     * @param handler - Event handler function
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * const unsub = events.on('playback:play', () => {
-     *   console.log('Playing!');
-     * });
-     *
-     * // Later: unsubscribe
-     * unsub();
-     * ```
-     */
-    on(event, handler) {
-      if (!this.listeners.has(event)) {
-        this.listeners.set(event, /* @__PURE__ */ new Set());
-      }
-      const handlers = this.listeners.get(event);
-      handlers.add(handler);
-      this.checkMaxListeners(event);
-      return () => this.off(event, handler);
-    }
-    /**
-     * Subscribe to an event once (auto-unsubscribe after first call).
-     *
-     * @param event - Event name
-     * @param handler - Event handler function
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * events.once('player:ready', () => {
-     *   console.log('Player ready!');
-     * });
-     * ```
-     */
-    once(event, handler) {
-      if (!this.onceListeners.has(event)) {
-        this.onceListeners.set(event, /* @__PURE__ */ new Set());
-      }
-      const handlers = this.onceListeners.get(event);
-      handlers.add(handler);
-      if (!this.listeners.has(event)) {
-        this.listeners.set(event, /* @__PURE__ */ new Set());
-      }
-      return () => {
-        handlers.delete(handler);
-      };
-    }
-    /**
-     * Unsubscribe from an event.
-     *
-     * @param event - Event name
-     * @param handler - Event handler function to remove
-     *
-     * @example
-     * ```ts
-     * const handler = () => console.log('Playing!');
-     * events.on('playback:play', handler);
-     * events.off('playback:play', handler);
-     * ```
-     */
-    off(event, handler) {
-      const handlers = this.listeners.get(event);
-      if (handlers) {
-        handlers.delete(handler);
-        if (handlers.size === 0) {
-          this.listeners.delete(event);
-        }
-      }
-      const onceHandlers = this.onceListeners.get(event);
-      if (onceHandlers) {
-        onceHandlers.delete(handler);
-        if (onceHandlers.size === 0) {
-          this.onceListeners.delete(event);
-        }
-      }
-    }
-    /**
-     * Emit an event synchronously.
-     *
-     * Runs interceptors first, then calls all handlers.
-     *
-     * @param event - Event name
-     * @param payload - Event payload
-     *
-     * @example
-     * ```ts
-     * events.emit('playback:play', undefined);
-     * events.emit('playback:timeupdate', { currentTime: 10.5 });
-     * ```
-     */
-    emit(event, payload) {
-      const interceptedPayload = this.runInterceptors(event, payload);
-      if (interceptedPayload === null) {
-        return;
-      }
-      const handlers = this.listeners.get(event);
-      if (handlers) {
-        const handlersArray = Array.from(handlers);
-        handlersArray.forEach((handler) => {
-          this.safeCallHandler(handler, interceptedPayload);
-        });
-      }
-      const onceHandlers = this.onceListeners.get(event);
-      if (onceHandlers) {
-        const handlersArray = Array.from(onceHandlers);
-        handlersArray.forEach((handler) => {
-          this.safeCallHandler(handler, interceptedPayload);
-        });
-        this.onceListeners.delete(event);
-      }
-    }
-    /**
-     * Emit an event asynchronously (next tick).
-     *
-     * @param event - Event name
-     * @param payload - Event payload
-     * @returns Promise that resolves when all handlers complete
-     *
-     * @example
-     * ```ts
-     * await events.emitAsync('media:loaded', { src: 'video.mp4', type: 'video/mp4' });
-     * ```
-     */
-    async emitAsync(event, payload) {
-      const interceptedPayload = await this.runInterceptorsAsync(event, payload);
-      if (interceptedPayload === null) {
-        return;
-      }
-      const handlers = this.listeners.get(event);
-      if (handlers) {
-        const promises = Array.from(handlers).map(
-          (handler) => this.safeCallHandlerAsync(handler, interceptedPayload)
-        );
-        await Promise.all(promises);
-      }
-      const onceHandlers = this.onceListeners.get(event);
-      if (onceHandlers) {
-        const handlersArray = Array.from(onceHandlers);
-        const promises = handlersArray.map(
-          (handler) => this.safeCallHandlerAsync(handler, interceptedPayload)
-        );
-        await Promise.all(promises);
-        this.onceListeners.delete(event);
-      }
-    }
-    /**
-     * Add an event interceptor.
-     *
-     * Interceptors run before handlers and can modify or cancel events.
-     *
-     * @param event - Event name
-     * @param interceptor - Interceptor function
-     * @returns Remove interceptor function
-     *
-     * @example
-     * ```ts
-     * events.intercept('playback:timeupdate', (payload) => {
-     *   // Round time to 2 decimals
-     *   return { currentTime: Math.round(payload.currentTime * 100) / 100 };
-     * });
-     *
-     * // Cancel events
-     * events.intercept('playback:play', (payload) => {
-     *   if (notReady) return null; // Cancel event
-     *   return payload;
-     * });
-     * ```
-     */
-    intercept(event, interceptor) {
-      if (!this.options.interceptors) {
-        return () => {
-        };
-      }
-      if (!this.interceptors.has(event)) {
-        this.interceptors.set(event, /* @__PURE__ */ new Set());
-      }
-      const interceptorsSet = this.interceptors.get(event);
-      interceptorsSet.add(interceptor);
-      return () => {
-        interceptorsSet.delete(interceptor);
-        if (interceptorsSet.size === 0) {
-          this.interceptors.delete(event);
-        }
-      };
-    }
-    /**
-     * Remove all listeners for an event (or all events if no event specified).
-     *
-     * @param event - Optional event name
-     *
-     * @example
-     * ```ts
-     * events.removeAllListeners('playback:play'); // Remove all playback:play listeners
-     * events.removeAllListeners(); // Remove ALL listeners
-     * ```
-     */
-    removeAllListeners(event) {
-      if (event) {
-        this.listeners.delete(event);
-        this.onceListeners.delete(event);
-      } else {
-        this.listeners.clear();
-        this.onceListeners.clear();
-      }
-    }
-    /**
-     * Get the number of listeners for an event.
-     *
-     * @param event - Event name
-     * @returns Number of listeners
-     *
-     * @example
-     * ```ts
-     * events.listenerCount('playback:play'); // 3
-     * ```
-     */
-    listenerCount(event) {
-      const regularCount = this.listeners.get(event)?.size ?? 0;
-      const onceCount = this.onceListeners.get(event)?.size ?? 0;
-      return regularCount + onceCount;
-    }
-    /**
-     * Destroy event bus and cleanup all listeners/interceptors.
-     *
-     * @example
-     * ```ts
-     * events.destroy();
-     * ```
-     */
-    destroy() {
-      this.listeners.clear();
-      this.onceListeners.clear();
-      this.interceptors.clear();
-    }
-    /**
-     * Run interceptors synchronously.
-     * @private
-     */
-    runInterceptors(event, payload) {
-      if (!this.options.interceptors) {
-        return payload;
-      }
-      const interceptorsSet = this.interceptors.get(event);
-      if (!interceptorsSet || interceptorsSet.size === 0) {
-        return payload;
-      }
-      let currentPayload = payload;
-      for (const interceptor of interceptorsSet) {
-        try {
-          currentPayload = interceptor(currentPayload);
-          if (currentPayload === null) {
-            return null;
-          }
-        } catch (error) {
-          console.error("[EventBus] Error in interceptor:", error);
-        }
-      }
-      return currentPayload;
-    }
-    /**
-     * Run interceptors asynchronously.
-     * @private
-     */
-    async runInterceptorsAsync(event, payload) {
-      if (!this.options.interceptors) {
-        return payload;
-      }
-      const interceptorsSet = this.interceptors.get(event);
-      if (!interceptorsSet || interceptorsSet.size === 0) {
-        return payload;
-      }
-      let currentPayload = payload;
-      for (const interceptor of interceptorsSet) {
-        try {
-          const result = interceptor(currentPayload);
-          currentPayload = result instanceof Promise ? await result : result;
-          if (currentPayload === null) {
-            return null;
-          }
-        } catch (error) {
-          console.error("[EventBus] Error in interceptor:", error);
-        }
-      }
-      return currentPayload;
-    }
-    /**
-     * Safely call a handler with error handling.
-     * @private
-     */
-    safeCallHandler(handler, payload) {
-      try {
-        handler(payload);
-      } catch (error) {
-        console.error("[EventBus] Error in event handler:", error);
-      }
-    }
-    /**
-     * Safely call a handler asynchronously with error handling.
-     * @private
-     */
-    async safeCallHandlerAsync(handler, payload) {
-      try {
-        const result = handler(payload);
-        if (result instanceof Promise) {
-          await result;
-        }
-      } catch (error) {
-        console.error("[EventBus] Error in event handler:", error);
-      }
-    }
-    /**
-     * Check if max listeners exceeded and warn.
-     * @private
-     */
-    checkMaxListeners(event) {
-      const count = this.listenerCount(event);
-      if (count > this.options.maxListeners) {
-        console.warn(
-          `[EventBus] Max listeners (${this.options.maxListeners}) exceeded for event: ${event}. Current count: ${count}. This may indicate a memory leak.`
-        );
-      }
-    }
-  };
-
-  // packages/core/src/logger.ts
-  var LOG_LEVELS = ["debug", "info", "warn", "error"];
-  var defaultConsoleHandler = (entry) => {
-    const prefix = entry.scope ? `[${entry.scope}]` : "[ScarlettPlayer]";
-    const message = `${prefix} ${entry.message}`;
-    const metadata = entry.metadata ?? "";
-    switch (entry.level) {
-      case "debug":
-        console.debug(message, metadata);
-        break;
-      case "info":
-        console.info(message, metadata);
-        break;
-      case "warn":
-        console.warn(message, metadata);
-        break;
-      case "error":
-        console.error(message, metadata);
-        break;
-    }
-  };
-  var Logger = class _Logger {
-    /**
-     * Create a new Logger.
-     *
-     * @param options - Logger configuration
-     */
-    constructor(options) {
-      this.level = options?.level ?? "warn";
-      this.scope = options?.scope;
-      this.enabled = options?.enabled ?? true;
-      this.handlers = options?.handlers ?? [defaultConsoleHandler];
-    }
-    /**
-     * Create a child logger with a scope.
-     *
-     * Child loggers inherit parent settings and chain scopes.
-     *
-     * @param scope - Child logger scope
-     * @returns New child logger
-     *
-     * @example
-     * ```ts
-     * const logger = new Logger();
-     * const hlsLogger = logger.child('hls-plugin');
-     * hlsLogger.info('Loading manifest');
-     * // Output: [ScarlettPlayer:hls-plugin] Loading manifest
-     * ```
-     */
-    child(scope) {
-      return new _Logger({
-        level: this.level,
-        scope: this.scope ? `${this.scope}:${scope}` : scope,
-        enabled: this.enabled,
-        handlers: this.handlers
-      });
-    }
-    /**
-     * Log a debug message.
-     *
-     * @param message - Log message
-     * @param metadata - Optional structured metadata
-     *
-     * @example
-     * ```ts
-     * logger.debug('Request sent', { url: '/api/video' });
-     * ```
-     */
-    debug(message, metadata) {
-      this.log("debug", message, metadata);
-    }
-    /**
-     * Log an info message.
-     *
-     * @param message - Log message
-     * @param metadata - Optional structured metadata
-     *
-     * @example
-     * ```ts
-     * logger.info('Player ready');
-     * ```
-     */
-    info(message, metadata) {
-      this.log("info", message, metadata);
-    }
-    /**
-     * Log a warning message.
-     *
-     * @param message - Log message
-     * @param metadata - Optional structured metadata
-     *
-     * @example
-     * ```ts
-     * logger.warn('Low buffer', { buffered: 2.5 });
-     * ```
-     */
-    warn(message, metadata) {
-      this.log("warn", message, metadata);
-    }
-    /**
-     * Log an error message.
-     *
-     * @param message - Log message
-     * @param metadata - Optional structured metadata
-     *
-     * @example
-     * ```ts
-     * logger.error('Playback failed', { code: 'MEDIA_ERR_DECODE' });
-     * ```
-     */
-    error(message, metadata) {
-      this.log("error", message, metadata);
-    }
-    /**
-     * Set the minimum log level threshold.
-     *
-     * @param level - New log level
-     *
-     * @example
-     * ```ts
-     * logger.setLevel('debug'); // Show all logs
-     * logger.setLevel('error'); // Show only errors
-     * ```
-     */
-    setLevel(level) {
-      this.level = level;
-    }
-    /**
-     * Enable or disable logging.
-     *
-     * @param enabled - Enable flag
-     *
-     * @example
-     * ```ts
-     * logger.setEnabled(false); // Disable all logging
-     * ```
-     */
-    setEnabled(enabled) {
-      this.enabled = enabled;
-    }
-    /**
-     * Add a custom log handler.
-     *
-     * @param handler - Log handler function
-     *
-     * @example
-     * ```ts
-     * logger.addHandler((entry) => {
-     *   if (entry.level === 'error') {
-     *     sendToAnalytics(entry);
-     *   }
-     * });
-     * ```
-     */
-    addHandler(handler) {
-      this.handlers.push(handler);
-    }
-    /**
-     * Remove a custom log handler.
-     *
-     * @param handler - Log handler function to remove
-     *
-     * @example
-     * ```ts
-     * logger.removeHandler(myHandler);
-     * ```
-     */
-    removeHandler(handler) {
-      const index = this.handlers.indexOf(handler);
-      if (index !== -1) {
-        this.handlers.splice(index, 1);
-      }
-    }
-    /**
-     * Core logging implementation.
-     * @private
-     */
-    log(level, message, metadata) {
-      if (!this.enabled || !this.shouldLog(level)) {
-        return;
-      }
-      const entry = {
-        level,
-        message,
-        timestamp: Date.now(),
-        scope: this.scope,
-        metadata
-      };
-      for (const handler of this.handlers) {
-        try {
-          handler(entry);
-        } catch (error) {
-          console.error("[Logger] Handler error:", error);
-        }
-      }
-    }
-    /**
-     * Check if a log level should be output.
-     * @private
-     */
-    shouldLog(level) {
-      return LOG_LEVELS.indexOf(level) >= LOG_LEVELS.indexOf(this.level);
-    }
-  };
-
-  // packages/core/src/error-handler.ts
-  var ErrorHandler = class {
-    /**
-     * Create a new ErrorHandler.
-     *
-     * @param eventBus - Event bus for error emission
-     * @param logger - Logger for error logging
-     * @param options - Optional configuration
-     */
-    constructor(eventBus, logger2, options) {
-      /** Error history */
-      this.errors = [];
-      this.eventBus = eventBus;
-      this.logger = logger2;
-      this.maxHistory = options?.maxHistory ?? 10;
-    }
-    /**
-     * Handle an error.
-     *
-     * Normalizes, logs, emits, and tracks the error.
-     *
-     * @param error - Error to handle (native or PlayerError)
-     * @param context - Optional context (what was happening)
-     * @returns Normalized PlayerError
-     *
-     * @example
-     * ```ts
-     * try {
-     *   loadVideo();
-     * } catch (error) {
-     *   errorHandler.handle(error as Error, { src: 'video.mp4' });
-     * }
-     * ```
-     */
-    handle(error, context) {
-      const playerError = this.normalizeError(error, context);
-      this.addToHistory(playerError);
-      this.logError(playerError);
-      this.eventBus.emit("error", playerError);
-      return playerError;
-    }
-    /**
-     * Record an error into history and logs WITHOUT emitting an `error` event.
-     *
-     * Used for advisory channels (e.g. media element errors that a provider's
-     * recovery path is already handling) that should be visible in
-     * getHistory() for diagnostics but must not flip the player's error state.
-     *
-     * @param error - Error to record (native or PlayerError)
-     * @param context - Optional context (what was happening)
-     * @returns Normalized PlayerError
-     */
-    record(error, context) {
-      const playerError = this.normalizeError(error, context);
-      this.addToHistory(playerError);
-      this.logError(playerError);
-      return playerError;
-    }
-    /**
-     * Create and handle an error from code.
-     *
-     * @param code - Error code
-     * @param message - Error message
-     * @param options - Optional error options
-     * @returns Created PlayerError
-     *
-     * @example
-     * ```ts
-     * errorHandler.throw(
-     *   ErrorCode.SOURCE_NOT_SUPPORTED,
-     *   'MP4 not supported',
-     *   { fatal: true, context: { type: 'video/mp4' } }
-     * );
-     * ```
-     */
-    throw(code, message, options) {
-      const error = {
-        code,
-        message,
-        fatal: options?.fatal ?? this.isFatalCode(code),
-        timestamp: Date.now(),
-        context: options?.context,
-        originalError: options?.originalError
-      };
-      return this.handle(error, options?.context);
-    }
-    /**
-     * Get error history.
-     *
-     * @returns Readonly copy of error history
-     *
-     * @example
-     * ```ts
-     * const history = errorHandler.getHistory();
-     * console.log(`${history.length} errors occurred`);
-     * ```
-     */
-    getHistory() {
-      return [...this.errors];
-    }
-    /**
-     * Get last error that occurred.
-     *
-     * @returns Last error or null if none
-     *
-     * @example
-     * ```ts
-     * const lastError = errorHandler.getLastError();
-     * if (lastError?.fatal) {
-     *   showErrorMessage(lastError.message);
-     * }
-     * ```
-     */
-    getLastError() {
-      return this.errors[this.errors.length - 1] ?? null;
-    }
-    /**
-     * Clear error history.
-     *
-     * @example
-     * ```ts
-     * errorHandler.clearHistory();
-     * ```
-     */
-    clearHistory() {
-      this.errors = [];
-    }
-    /**
-     * Check if any fatal errors occurred.
-     *
-     * @returns True if any fatal error in history
-     *
-     * @example
-     * ```ts
-     * if (errorHandler.hasFatalError()) {
-     *   player.reset();
-     * }
-     * ```
-     */
-    hasFatalError() {
-      return this.errors.some((e) => e.fatal);
-    }
-    /**
-     * Normalize error to PlayerError.
-     * @private
-     */
-    normalizeError(error, context) {
-      if (this.isPlayerError(error)) {
-        return {
-          ...error,
-          context: { ...error.context, ...context }
-        };
-      }
-      return {
-        code: this.getErrorCode(error),
-        message: error.message,
-        fatal: this.isFatal(error),
-        timestamp: Date.now(),
-        context,
-        originalError: error
-      };
-    }
-    /**
-     * Determine error code from native Error.
-     * @private
-     */
-    getErrorCode(error) {
-      const message = error.message.toLowerCase();
-      if (message.includes("quota")) {
-        return "MEDIA_BUFFER_FULL" /* MEDIA_BUFFER_FULL */;
-      }
-      if (message.includes("append") || message.includes("sourcebuffer") || message.includes("arraybuffer")) {
-        return "MEDIA_APPEND_ERROR" /* MEDIA_APPEND_ERROR */;
-      }
-      if (message.includes("network")) {
-        return "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */;
-      }
-      if (message.includes("decode")) {
-        return "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */;
-      }
-      if (message.includes("source")) {
-        return "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */;
-      }
-      if (message.includes("plugin")) {
-        return "PLUGIN_SETUP_FAILED" /* PLUGIN_SETUP_FAILED */;
-      }
-      if (message.includes("provider")) {
-        return "PROVIDER_SETUP_FAILED" /* PROVIDER_SETUP_FAILED */;
-      }
-      return "UNKNOWN_ERROR" /* UNKNOWN_ERROR */;
-    }
-    /**
-     * Determine if error is fatal.
-     * @private
-     */
-    isFatal(error) {
-      return this.isFatalCode(this.getErrorCode(error));
-    }
-    /**
-     * Determine if error code is fatal.
-     * @private
-     */
-    isFatalCode(code) {
-      const fatalCodes = [
-        "SOURCE_NOT_SUPPORTED" /* SOURCE_NOT_SUPPORTED */,
-        "PROVIDER_NOT_FOUND" /* PROVIDER_NOT_FOUND */,
-        "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */
-      ];
-      return fatalCodes.includes(code);
-    }
-    /**
-     * Type guard for PlayerError.
-     * @private
-     */
-    isPlayerError(error) {
-      return typeof error === "object" && error !== null && "code" in error && "message" in error && "fatal" in error && "timestamp" in error;
-    }
-    /**
-     * Add error to history.
-     * @private
-     */
-    addToHistory(error) {
-      this.errors.push(error);
-      if (this.errors.length > this.maxHistory) {
-        this.errors.shift();
-      }
-    }
-    /**
-     * Log error with appropriate level.
-     * @private
-     */
-    logError(error) {
-      const logMessage = `[${error.code}] ${error.message}`;
-      if (error.fatal) {
-        this.logger.error(logMessage, {
-          code: error.code,
-          context: error.context
-        });
-      } else {
-        this.logger.warn(logMessage, {
-          code: error.code,
-          context: error.context
-        });
-      }
-    }
-  };
-
-  // packages/core/src/plugin-api.ts
-  var PluginAPI = class {
-    /**
-     * Create a new PluginAPI.
-     *
-     * @param pluginId - ID of the plugin this API belongs to
-     * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin)
-     */
-    constructor(pluginId, deps) {
-      /** Cleanup functions registered by this plugin */
-      this.cleanupFns = [];
-      this.pluginId = pluginId;
-      this.stateManager = deps.stateManager;
-      this.eventBus = deps.eventBus;
-      this.container = deps.container;
-      this.getPluginFn = deps.getPlugin;
-      this.logger = {
-        debug: (msg, metadata) => deps.logger.debug(`[${pluginId}] ${msg}`, metadata),
-        info: (msg, metadata) => deps.logger.info(`[${pluginId}] ${msg}`, metadata),
-        warn: (msg, metadata) => deps.logger.warn(`[${pluginId}] ${msg}`, metadata),
-        error: (msg, metadata) => deps.logger.error(`[${pluginId}] ${msg}`, metadata)
-      };
-    }
-    /**
-     * Get a state value.
-     *
-     * @param key - State property key
-     * @returns Current state value
-     */
-    getState(key) {
-      return this.stateManager.getValue(key);
-    }
-    /**
-     * Set a state value.
-     *
-     * @param key - State property key
-     * @param value - New state value
-     */
-    setState(key, value) {
-      this.stateManager.set(key, value);
-    }
-    /**
-     * Register a state key this plugin owns, before first use.
-     *
-     * Idempotent - re-defining an existing key keeps its current value.
-     * See {@link IPluginAPI.defineState}.
-     *
-     * @param key - State property key
-     * @param initialValue - Value used only when the key is new
-     */
-    defineState(key, initialValue) {
-      this.stateManager.define(key, initialValue);
-    }
-    /**
-     * Subscribe to an event.
-     *
-     * @param event - Event name
-     * @param handler - Event handler
-     * @returns Unsubscribe function
-     */
-    on(event, handler) {
-      return this.eventBus.on(event, handler);
-    }
-    /**
-     * Unsubscribe from an event.
-     *
-     * @param event - Event name
-     * @param handler - Event handler to remove
-     */
-    off(event, handler) {
-      this.eventBus.off(event, handler);
-    }
-    /**
-     * Emit an event.
-     *
-     * @param event - Event name
-     * @param payload - Event payload
-     */
-    emit(event, payload) {
-      this.eventBus.emit(event, payload);
-    }
-    /**
-     * Get another plugin by ID (if ready).
-     *
-     * @param id - Plugin ID
-     * @returns Plugin instance or null if not found/ready
-     */
-    getPlugin(id) {
-      return this.getPluginFn(id);
-    }
-    /**
-     * Register a cleanup function to run when plugin is destroyed.
-     *
-     * @param cleanup - Cleanup function
-     */
-    onDestroy(cleanup) {
-      this.cleanupFns.push(cleanup);
-    }
-    /**
-     * Subscribe to state changes.
-     *
-     * @param callback - Callback function called on any state change
-     * @returns Unsubscribe function
-     */
-    subscribeToState(callback) {
-      return this.stateManager.subscribe(callback);
-    }
-    /**
-     * Run all registered cleanup functions.
-     * Called by PluginManager when destroying the plugin.
-     *
-     * @internal
-     */
-    runCleanups() {
-      for (const cleanup of this.cleanupFns) {
-        try {
-          cleanup();
-        } catch (error) {
-          this.logger.error("Cleanup function failed", { error });
-        }
-      }
-      this.cleanupFns = [];
-    }
-    /**
-     * Get all registered cleanup functions.
-     *
-     * @returns Array of cleanup functions
-     * @internal
-     */
-    getCleanupFns() {
-      return this.cleanupFns;
-    }
-  };
-
-  // packages/core/src/plugin-manager.ts
-  var PluginManager = class {
-    constructor(eventBus, stateManager, logger2, options) {
-      this.plugins = /* @__PURE__ */ new Map();
-      this.eventBus = eventBus;
-      this.stateManager = stateManager;
-      this.logger = logger2;
-      this.container = options.container;
-    }
-    /** Register a plugin with optional configuration. */
-    register(plugin, config) {
-      if (this.plugins.has(plugin.id)) {
-        throw new Error(`Plugin "${plugin.id}" is already registered`);
-      }
-      this.validatePlugin(plugin);
-      const api = new PluginAPI(plugin.id, {
-        stateManager: this.stateManager,
-        eventBus: this.eventBus,
-        logger: this.logger,
-        container: this.container,
-        getPlugin: (id) => this.getReadyPlugin(id)
-      });
-      this.plugins.set(plugin.id, {
-        plugin,
-        state: "registered",
-        config,
-        cleanupFns: [],
-        api
-      });
-      this.logger.info(`Plugin registered: ${plugin.id}`);
-      this.eventBus.emit("plugin:registered", { name: plugin.id, type: plugin.type });
-    }
-    /** Unregister a plugin. Destroys it first if active. */
-    async unregister(id) {
-      const record = this.plugins.get(id);
-      if (!record) return;
-      if (record.state === "ready") {
-        await this.destroyPlugin(id);
-      }
-      this.plugins.delete(id);
-      this.logger.info(`Plugin unregistered: ${id}`);
-    }
-    /** Initialize all registered plugins in dependency order. */
-    async initAll() {
-      const order = this.resolveDependencyOrder();
-      for (const id of order) {
-        await this.initPlugin(id);
-      }
-    }
-    /** Initialize a specific plugin. */
-    async initPlugin(id) {
-      const record = this.plugins.get(id);
-      if (!record) {
-        throw new Error(`Plugin "${id}" not found`);
-      }
-      if (record.state === "ready") return;
-      if (record.state === "initializing") {
-        throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
-      }
-      for (const depId of record.plugin.dependencies || []) {
-        const dep = this.plugins.get(depId);
-        if (!dep) {
-          throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
-        }
-        if (dep.state !== "ready") {
-          await this.initPlugin(depId);
-        }
-      }
-      try {
-        record.state = "initializing";
-        if (record.plugin.onStateChange) {
-          const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
-          record.api.onDestroy(unsub);
-        }
-        if (record.plugin.onError) {
-          const unsub = this.eventBus.on("error", (err) => {
-            record.plugin.onError?.(err.originalError || new Error(err.message));
-          });
-          record.api.onDestroy(unsub);
-        }
-        await record.plugin.init(record.api, record.config);
-        record.state = "ready";
-        this.logger.info(`Plugin ready: ${id}`);
-        this.eventBus.emit("plugin:active", { name: id });
-      } catch (error) {
-        record.state = "error";
-        record.error = error;
-        this.logger.error(`Plugin init failed: ${id}`, { error });
-        this.eventBus.emit("plugin:error", { name: id, error });
-        throw error;
-      }
-    }
-    /** Destroy all plugins in reverse dependency order. */
-    async destroyAll() {
-      const order = this.resolveDependencyOrder().reverse();
-      for (const id of order) {
-        await this.destroyPlugin(id);
-      }
-    }
-    /** Destroy a specific plugin. */
-    async destroyPlugin(id) {
-      const record = this.plugins.get(id);
-      if (!record || record.state !== "ready") return;
-      try {
-        await record.plugin.destroy();
-        record.api.runCleanups();
-        record.state = "registered";
-        this.logger.info(`Plugin destroyed: ${id}`);
-        this.eventBus.emit("plugin:destroyed", { name: id });
-      } catch (error) {
-        this.logger.error(`Plugin destroy failed: ${id}`, { error });
-        record.state = "registered";
-      }
-    }
-    /** Get a plugin by ID (returns any registered plugin). */
-    getPlugin(id) {
-      const record = this.plugins.get(id);
-      return record ? record.plugin : null;
-    }
-    /** Get a plugin by ID only if ready (used by PluginAPI). */
-    getReadyPlugin(id) {
-      const record = this.plugins.get(id);
-      return record?.state === "ready" ? record.plugin : null;
-    }
-    /** Check if a plugin is registered. */
-    hasPlugin(id) {
-      return this.plugins.has(id);
-    }
-    /** Get plugin state. */
-    getPluginState(id) {
-      return this.plugins.get(id)?.state ?? null;
-    }
-    /** Get all registered plugin IDs. */
-    getPluginIds() {
-      return Array.from(this.plugins.keys());
-    }
-    /** Get all ready plugins. */
-    getReadyPlugins() {
-      return Array.from(this.plugins.values()).filter((r) => r.state === "ready").map((r) => r.plugin);
-    }
-    /** Get plugins by type. */
-    getPluginsByType(type) {
-      return Array.from(this.plugins.values()).filter((r) => r.plugin.type === type).map((r) => r.plugin);
-    }
-    /** Select a provider plugin that can play a source. */
-    selectProvider(source) {
-      const providers = this.getPluginsByType("provider");
-      for (const provider of providers) {
-        const canPlay = provider.canPlay;
-        if (typeof canPlay === "function" && canPlay(source)) {
-          return provider;
-        }
-      }
-      return null;
-    }
-    /** Resolve plugin initialization order using topological sort. */
-    resolveDependencyOrder() {
-      const visited = /* @__PURE__ */ new Set();
-      const visiting = /* @__PURE__ */ new Set();
-      const sorted = [];
-      const visit = (id, path = []) => {
-        if (visited.has(id)) return;
-        if (visiting.has(id)) {
-          const cycle = [...path, id].join(" -> ");
-          throw new Error(`Circular dependency detected: ${cycle}`);
-        }
-        const record = this.plugins.get(id);
-        if (!record) return;
-        visiting.add(id);
-        for (const depId of record.plugin.dependencies || []) {
-          if (this.plugins.has(depId)) {
-            visit(depId, [...path, id]);
-          }
-        }
-        visiting.delete(id);
-        visited.add(id);
-        sorted.push(id);
-      };
-      for (const id of this.plugins.keys()) {
-        visit(id);
-      }
-      return sorted;
-    }
-    /** Validate plugin has required properties. */
-    validatePlugin(plugin) {
-      if (!plugin.id || typeof plugin.id !== "string") {
-        throw new Error("Plugin must have a valid id");
-      }
-      if (!plugin.name || typeof plugin.name !== "string") {
-        throw new Error(`Plugin "${plugin.id}" must have a valid name`);
-      }
-      if (!plugin.version || typeof plugin.version !== "string") {
-        throw new Error(`Plugin "${plugin.id}" must have a valid version`);
-      }
-      if (!plugin.type || typeof plugin.type !== "string") {
-        throw new Error(`Plugin "${plugin.id}" must have a valid type`);
-      }
-      if (typeof plugin.init !== "function") {
-        throw new Error(`Plugin "${plugin.id}" must have an init() method`);
-      }
-      if (typeof plugin.destroy !== "function") {
-        throw new Error(`Plugin "${plugin.id}" must have a destroy() method`);
-      }
-    }
-  };
-
-  // packages/core/src/scarlett-player.ts
-  var ScarlettPlayer = class {
-    /**
-     * Create a new ScarlettPlayer.
-     *
-     * @param options - Player configuration
-     */
-    constructor(options) {
-      /** Current media provider plugin */
-      this._currentProvider = null;
-      /** Player destroyed flag */
-      this.destroyed = false;
-      /** Seeking while playing flag */
-      this.seekingWhilePlaying = false;
-      /** Seek resume timeout */
-      this.seekResumeTimeout = null;
-      /** Counter to detect stale load() calls */
-      this.loadGeneration = 0;
-      /** True once the lifecycle listeners have been wired (they are wired once) */
-      this.listenersWired = false;
-      /** True once `player:ready` has been emitted (it is emitted once) */
-      this.readyEmitted = false;
-      /**
-       * In-flight initialisation pass, shared by concurrent callers.
-       *
-       * `load()` is called from inside the `media:load-request` handler, so a
-       * second initialisation pass can start while the first is still awaiting a
-       * plugin's `init()`. Without this, `PluginManager.initPlugin()` would see
-       * the plugin in the `initializing` state and throw "possible circular
-       * dependency". Cleared when the pass settles so a plugin registered later
-       * is still picked up by the next call.
-       */
-      this.initializing = null;
-      if (typeof options.container === "string") {
-        const el = document.querySelector(options.container);
-        if (!el || !(el instanceof HTMLElement)) {
-          throw new Error(`ScarlettPlayer: container not found: ${options.container}`);
-        }
-        this.container = el;
-      } else if (options.container instanceof HTMLElement) {
-        this.container = options.container;
-      } else {
-        throw new Error("ScarlettPlayer requires a valid HTMLElement container or CSS selector");
-      }
-      this.initialSrc = options.src;
-      this.eventBus = new EventBus();
-      this.stateManager = new StateManager({
-        autoplay: options.autoplay ?? false,
-        loop: options.loop ?? false,
-        volume: options.volume ?? 1,
-        muted: options.muted ?? false,
-        poster: options.poster ?? ""
-      });
-      this.logger = new Logger({
-        level: options.logLevel ?? "warn",
-        scope: "ScarlettPlayer"
-      });
-      this.errorHandler = new ErrorHandler(this.eventBus, this.logger);
-      this.pluginManager = new PluginManager(
-        this.eventBus,
-        this.stateManager,
-        this.logger,
-        { container: this.container }
-      );
-      this.eventBus.on("error", (err) => {
-        this.stateManager.set("error", err);
-      });
-      this.eventBus.on("media:loaded", () => {
-        this.stateManager.set("error", null);
-      });
-      this.eventBus.on("media:error", ({ error }) => {
-        this.errorHandler.record(error, { channel: "media:error" });
-      });
-      if (options.plugins) {
-        for (const plugin of options.plugins) {
-          this.pluginManager.register(plugin);
-        }
-      }
-      this.logger.info("ScarlettPlayer constructed", {
-        autoplay: options.autoplay,
-        plugins: options.plugins?.length ?? 0
-      });
-    }
-    /**
-     * Initialise every registered non-provider plugin and wire the player's
-     * own lifecycle listeners. Idempotent, and safe to call re-entrantly.
-     *
-     * This exists because `new ScarlettPlayer(...)` followed by `load()` used
-     * to leave the player with a provider and nothing else: the READMEs and 12
-     * plugin `@example` blocks show exactly that shape, and every one of them
-     * produced a dead UI (no controls, no overlay, no playlist). `load()` now
-     * calls this first, so the trap cannot be reached.
-     *
-     * The `media:load-request` and `error:retry` listeners live here rather
-     * than in the constructor because they are part of initialisation, not
-     * construction: without them the playlist plugin cannot load a track and
-     * the error overlay's "Try Again" button does nothing.
-     *
-     * Provider plugins are excluded: they are initialised lazily, per source,
-     * by `load()` once `selectProvider()` has picked one.
-     *
-     * @returns Promise resolving when the pass (or the in-flight one) completes
-     */
-    ensureInitialized() {
-      if (this.initializing) return this.initializing;
-      this.initializing = this.runInitialization().finally(() => {
-        this.initializing = null;
-      });
-      return this.initializing;
-    }
-    /**
-     * One initialisation pass. Never call directly; go through
-     * `ensureInitialized()`, which owns the re-entrancy guard.
-     *
-     * @returns Promise resolving when the pass completes
-     */
-    async runInitialization() {
-      for (const id of this.pluginManager.getPluginIds()) {
-        if (this.destroyed) return;
-        const plugin = this.pluginManager.getPlugin(id);
-        if (!plugin || plugin.type === "provider") continue;
-        if (this.pluginManager.getPluginState(id) !== "registered") continue;
-        await this.pluginManager.initPlugin(id);
-      }
-      if (this.destroyed) return;
-      this.wireLifecycleListeners();
-      if (!this.readyEmitted) {
-        this.readyEmitted = true;
-        this.eventBus.emit("player:ready", void 0);
-      }
-    }
-    /**
-     * Wire the two listeners the player owns, exactly once.
-     *
-     * Guarded by a flag rather than by "init() runs once" because
-     * `ensureInitialized()` runs on every `load()`: wiring them twice would
-     * load and play each requested source twice.
-     */
-    wireLifecycleListeners() {
-      if (this.listenersWired) return;
-      this.listenersWired = true;
-      this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
-        if (this.stateManager.getValue("chromecastActive")) return;
-        await this.load(src);
-        if (this.destroyed) return;
-        if (autoplay !== false) {
-          await this.play();
-        }
-      });
-      this.eventBus.on("error:retry", async ({ src }) => {
-        const was_live = this.stateManager.getValue("live");
-        const resume_at = this.stateManager.getValue("currentTime");
-        await this.load(src);
-        if (this.destroyed) return;
-        if (this.stateManager.getValue("error")) return;
-        if (was_live) {
-          this.seekToLive();
-        } else if (resume_at > 0) {
-          this.seek(resume_at);
-        }
-        if (this.destroyed) return;
-        await this.play();
-      });
-    }
-    /**
-     * Initialize the player asynchronously.
-     *
-     * Initialises non-provider plugins, wires the lifecycle listeners and loads
-     * `initialSrc` when one was given. Idempotent: calling it twice, or calling
-     * it after a `load()` has already initialised the player, wires nothing a
-     * second time and re-emits nothing.
-     *
-     * @returns Promise resolving when initialisation (and any initial load) is done
-     */
-    async init() {
-      this.checkDestroyed();
-      await this.ensureInitialized();
-      if (this.initialSrc) {
-        await this.load(this.initialSrc);
-      }
-    }
-    /**
-     * Load a media source.
-     *
-     * Initialises the player if that has not happened yet (see
-     * `ensureInitialized()`), then selects the provider plugin for the source
-     * and loads it. The auto-initialisation is what makes the widely copied
-     * `new ScarlettPlayer(...)` plus `load()` shape work: before it, that shape
-     * produced a player with a provider and no UI, no error overlay and no
-     * working playlist.
-     *
-     * Resets playback state, and deliberately does NOT touch `poster`. The
-     * poster is metadata owned by whoever set it (the consumer through
-     * `PlayerOptions.poster` or `setPoster()`, or the playlist plugin on a track
-     * change), not playback state, and it is written BEFORE the load that goes
-     * with it: clearing it here would blank the image over exactly the gap it
-     * exists to cover, while the next source loads.
-     *
-     * @param source - Media source URL
-     * @returns Promise that resolves when source is loaded
-     *
-     * @example
-     * ```ts
-     * await player.load('video.m3u8');
-     * ```
-     */
-    async load(source) {
-      this.checkDestroyed();
-      const generation = ++this.loadGeneration;
-      try {
-        this.logger.info("Loading source", { source });
-        this.stateManager.update({
-          playing: false,
-          paused: true,
-          ended: false,
-          buffering: true,
-          currentTime: 0,
-          duration: 0,
-          bufferedAmount: 0,
-          playbackState: "loading",
-          error: null
-        });
-        if (this._currentProvider) {
-          const previousProviderId = this._currentProvider.id;
-          this.logger.info("Destroying previous provider", { provider: previousProviderId });
-          await this.pluginManager.destroyPlugin(previousProviderId);
-          this._currentProvider = null;
-        }
-        await this.ensureInitialized();
-        if (generation !== this.loadGeneration) {
-          this.logger.info("Load superseded by newer load call", { source });
-          return;
-        }
-        const provider = this.pluginManager.selectProvider(source);
-        if (!provider) {
-          this.errorHandler.throw(
-            "PROVIDER_NOT_FOUND" /* PROVIDER_NOT_FOUND */,
-            `No provider found for source: ${source}`,
-            {
-              fatal: true,
-              context: { source }
-            }
-          );
-          return;
-        }
-        this._currentProvider = provider;
-        this.logger.info("Provider selected", { provider: provider.id });
-        await this.pluginManager.initPlugin(provider.id);
-        if (generation !== this.loadGeneration) {
-          this.logger.info("Load superseded by newer load call", { source });
-          return;
-        }
-        this.stateManager.set("source", { src: source, type: this.detectMimeType(source) });
-        if (typeof provider.loadSource === "function") {
-          await provider.loadSource(source);
-        }
-        if (generation !== this.loadGeneration) {
-          this.logger.info("Load superseded by newer load call", { source });
-          return;
-        }
-        if (this.stateManager.getValue("autoplay")) {
-          await this.play();
-        }
-      } catch (error) {
-        if (generation === this.loadGeneration) {
-          if (this.stateManager.getValue("error")) {
-            this.logger.error("Load failed", {
-              source,
-              error: error.message
-            });
-          } else {
-            this.errorHandler.handle(error, {
-              operation: "load",
-              source
-            });
-          }
-        }
-      }
-    }
-    /**
-     * Start playback.
-     *
-     * @returns Promise that resolves when playback starts
-     *
-     * @example
-     * ```ts
-     * await player.play();
-     * ```
-     */
-    async play() {
-      this.checkDestroyed();
-      try {
-        this.logger.debug("Play requested");
-        this.eventBus.emit("playback:play", void 0);
-      } catch (error) {
-        this.errorHandler.handle(error, { operation: "play" });
-      }
-    }
-    /**
-     * Pause playback.
-     *
-     * @example
-     * ```ts
-     * player.pause();
-     * ```
-     */
-    pause() {
-      this.checkDestroyed();
-      try {
-        this.logger.debug("Pause requested");
-        this.seekingWhilePlaying = false;
-        if (this.seekResumeTimeout !== null) {
-          clearTimeout(this.seekResumeTimeout);
-          this.seekResumeTimeout = null;
-        }
-        this.eventBus.emit("playback:pause", void 0);
-      } catch (error) {
-        this.errorHandler.handle(error, { operation: "pause" });
-      }
-    }
-    /**
-     * Seek to a specific time.
-     *
-     * @param time - Time in seconds
-     *
-     * @example
-     * ```ts
-     * player.seek(30); // Seek to 30 seconds
-     * ```
-     */
-    seek(time) {
-      this.checkDestroyed();
-      try {
-        this.logger.debug("Seek requested", { time });
-        const wasPlaying = this.stateManager.getValue("playing");
-        if (wasPlaying) {
-          this.seekingWhilePlaying = true;
-        }
-        if (this.seekResumeTimeout !== null) {
-          clearTimeout(this.seekResumeTimeout);
-          this.seekResumeTimeout = null;
-        }
-        this.eventBus.emit("playback:seeking", { time });
-        this.stateManager.set("currentTime", time);
-        if (this.seekingWhilePlaying) {
-          this.seekResumeTimeout = setTimeout(() => {
-            if (this.seekingWhilePlaying && this.stateManager.getValue("playing")) {
-              this.logger.debug("Resuming playback after seek");
-              this.seekingWhilePlaying = false;
-              this.eventBus.emit("playback:play", void 0);
-            }
-            this.seekResumeTimeout = null;
-          }, 300);
-        }
-      } catch (error) {
-        this.errorHandler.handle(error, { operation: "seek", time });
-      }
-    }
-    /**
-     * Set volume.
-     *
-     * @param volume - Volume 0-1
-     *
-     * @example
-     * ```ts
-     * player.setVolume(0.5); // 50% volume
-     * ```
-     */
-    setVolume(volume) {
-      this.checkDestroyed();
-      const clampedVolume = Math.max(0, Math.min(1, volume));
-      this.stateManager.set("volume", clampedVolume);
-      this.eventBus.emit("volume:change", {
-        volume: clampedVolume,
-        muted: this.stateManager.getValue("muted")
-      });
-    }
-    /**
-     * Set muted state.
-     *
-     * @param muted - Mute flag
-     *
-     * @example
-     * ```ts
-     * player.setMuted(true);
-     * ```
-     */
-    setMuted(muted) {
-      this.checkDestroyed();
-      this.stateManager.set("muted", muted);
-      this.eventBus.emit("volume:mute", { muted });
-    }
-    /**
-     * Set playback rate.
-     *
-     * @param rate - Playback rate (e.g., 1.0 = normal, 2.0 = 2x speed)
-     *
-     * @example
-     * ```ts
-     * player.setPlaybackRate(1.5); // 1.5x speed
-     * ```
-     */
-    setPlaybackRate(rate) {
-      this.checkDestroyed();
-      const clampedRate = Math.max(0.0625, Math.min(16, rate));
-      this.stateManager.set("playbackRate", clampedRate);
-      this.eventBus.emit("playback:ratechange", { rate: clampedRate });
-    }
-    /**
-     * Set autoplay state.
-     *
-     * When enabled, videos will automatically play after loading.
-     *
-     * @param autoplay - Autoplay flag
-     *
-     * @example
-     * ```ts
-     * player.setAutoplay(true);
-     * await player.load('video.mp4'); // Will auto-play
-     * ```
-     */
-    setAutoplay(autoplay) {
-      this.checkDestroyed();
-      this.stateManager.set("autoplay", autoplay);
-      this.logger.debug("Autoplay set", { autoplay });
-    }
-    /**
-     * Set the poster image shown until the first frame renders.
-     *
-     * Writes the `poster` state key; the provider plugins subscribe to it and
-     * mirror it onto the media element, so this takes effect on a player that
-     * is already running. Before this method existed the poster could only be
-     * chosen at construction, which left a playlist showing the previous
-     * track's art (and a Vue `poster` prop change doing nothing at all).
-     *
-     * An empty string clears the poster, which is how a consumer takes the
-     * image away rather than replacing it.
-     *
-     * @param url - Poster image URL, or '' to clear it
-     *
-     * @example
-     * ```ts
-     * player.setPoster('https://example.com/art.jpg');
-     * player.setPoster(''); // back to the bare video surface
-     * ```
-     */
-    setPoster(url) {
-      this.checkDestroyed();
-      this.stateManager.set("poster", url);
-      this.logger.debug("Poster set", { poster: url });
-    }
-    /**
-     * Subscribe to an event.
-     *
-     * @param event - Event name
-     * @param handler - Event handler
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * const unsub = player.on('playback:play', () => {
-     *   console.log('Playing!');
-     * });
-     *
-     * // Later: unsubscribe
-     * unsub();
-     * ```
-     */
-    on(event, handler) {
-      this.checkDestroyed();
-      return this.eventBus.on(event, handler);
-    }
-    /**
-     * Subscribe to an event once.
-     *
-     * @param event - Event name
-     * @param handler - Event handler
-     * @returns Unsubscribe function
-     *
-     * @example
-     * ```ts
-     * // player:ready fires once, at the end of the first initialisation, so a
-     * // one-shot listener has to be attached before init() or load() runs.
-     * const player = new ScarlettPlayer({ container });
-     * player.once('player:ready', () => {
-     *   console.log('Player ready!');
-     * });
-     * await player.init();
-     * ```
-     */
-    once(event, handler) {
-      this.checkDestroyed();
-      return this.eventBus.once(event, handler);
-    }
-    /**
-     * Get a plugin by name.
-     *
-     * @param name - Plugin name
-     * @returns Plugin instance or null
-     *
-     * @example
-     * ```ts
-     * const hls = player.getPlugin('hls-plugin');
-     * ```
-     */
-    getPlugin(name) {
-      this.checkDestroyed();
-      return this.pluginManager.getPlugin(name);
-    }
-    /**
-     * Register a plugin.
-     *
-     * @param plugin - Plugin to register
-     *
-     * @example
-     * ```ts
-     * player.registerPlugin(myPlugin);
-     * ```
-     */
-    registerPlugin(plugin) {
-      this.checkDestroyed();
-      this.pluginManager.register(plugin);
-    }
-    /**
-     * Get current state snapshot.
-     *
-     * @returns Readonly state snapshot
-     *
-     * @example
-     * ```ts
-     * const state = player.getState();
-     * console.log(state.playing, state.currentTime);
-     * ```
-     */
-    getState() {
-      this.checkDestroyed();
-      return this.stateManager.snapshot();
-    }
-    // ===== Quality Methods (proxied to provider) =====
-    /**
-     * Get available quality levels from the current provider.
-     * @returns Array of quality levels or empty array if not available
-     */
-    getQualities() {
-      this.checkDestroyed();
-      if (!this._currentProvider) return [];
-      const provider = this._currentProvider;
-      if (typeof provider.getLevels === "function") {
-        return provider.getLevels();
-      }
-      return [];
-    }
-    /**
-     * Set quality level (-1 for auto).
-     * @param index - Quality level index
-     */
-    setQuality(index) {
-      this.checkDestroyed();
-      if (!this._currentProvider) {
-        this.logger.warn("No provider available for quality change");
-        return;
-      }
-      const provider = this._currentProvider;
-      if (typeof provider.setLevel === "function") {
-        if (index !== -1) {
-          const levels = this.getQualities();
-          if (levels.length > 0 && (index < 0 || index >= levels.length)) {
-            this.logger.warn(`Invalid quality index: ${index} (available: ${levels.length})`);
-            return;
-          }
-        }
-        provider.setLevel(index);
-        this.eventBus.emit("quality:change", {
-          quality: index === -1 ? "auto" : `level-${index}`,
-          auto: index === -1
-        });
-      }
-    }
-    /**
-     * Get current quality level index (-1 = auto).
-     */
-    getCurrentQuality() {
-      this.checkDestroyed();
-      if (!this._currentProvider) return -1;
-      const provider = this._currentProvider;
-      if (typeof provider.getCurrentLevel === "function") {
-        return provider.getCurrentLevel();
-      }
-      return -1;
-    }
-    // ===== Fullscreen Methods =====
-    /**
-     * Request fullscreen mode.
-     */
-    async requestFullscreen() {
-      this.checkDestroyed();
-      try {
-        if (this.container.requestFullscreen) {
-          await this.container.requestFullscreen();
-        } else if (this.container.webkitRequestFullscreen) {
-          await this.container.webkitRequestFullscreen();
-        }
-        this.stateManager.set("fullscreen", true);
-        this.eventBus.emit("fullscreen:change", { fullscreen: true });
-      } catch (error) {
-        this.logger.error("Fullscreen request failed", { error });
-      }
-    }
-    /**
-     * Exit fullscreen mode.
-     */
-    async exitFullscreen() {
-      this.checkDestroyed();
-      try {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          await document.webkitExitFullscreen();
-        }
-        this.stateManager.set("fullscreen", false);
-        this.eventBus.emit("fullscreen:change", { fullscreen: false });
-      } catch (error) {
-        this.logger.error("Exit fullscreen failed", { error });
-      }
-    }
-    /**
-     * Toggle fullscreen mode.
-     */
-    async toggleFullscreen() {
-      if (this.fullscreen) {
-        await this.exitFullscreen();
-      } else {
-        await this.requestFullscreen();
-      }
-    }
-    // ===== Casting Methods (proxied to plugins) =====
-    /**
-     * Request AirPlay (proxied to airplay plugin).
-     */
-    requestAirPlay() {
-      this.checkDestroyed();
-      const airplay = this.pluginManager.getPlugin("airplay");
-      if (airplay && typeof airplay.showPicker === "function") {
-        airplay.showPicker();
-      } else {
-        this.logger.warn("AirPlay plugin not available");
-      }
-    }
-    /**
-     * Request Chromecast session (proxied to chromecast plugin).
-     */
-    async requestChromecast() {
-      this.checkDestroyed();
-      const chromecast = this.pluginManager.getPlugin("chromecast");
-      if (chromecast && typeof chromecast.requestSession === "function") {
-        await chromecast.requestSession();
-      } else {
-        this.logger.warn("Chromecast plugin not available");
-      }
-    }
-    /**
-     * Stop casting (AirPlay or Chromecast).
-     */
-    stopCasting() {
-      this.checkDestroyed();
-      const airplay = this.pluginManager.getPlugin("airplay");
-      if (airplay && typeof airplay.stop === "function") {
-        airplay.stop();
-      }
-      const chromecast = this.pluginManager.getPlugin("chromecast");
-      if (chromecast && typeof chromecast.stopSession === "function") {
-        chromecast.stopSession();
-      }
-    }
-    // ===== Live Stream Methods =====
-    /**
-     * Seek to live edge (for live streams).
-     */
-    seekToLive() {
-      this.checkDestroyed();
-      const isLive = this.stateManager.getValue("live");
-      if (!isLive) {
-        this.logger.warn("Not a live stream");
-        return;
-      }
-      if (this._currentProvider) {
-        const provider = this._currentProvider;
-        if (typeof provider.getLiveInfo === "function") {
-          const liveInfo = provider.getLiveInfo();
-          if (liveInfo?.liveSyncPosition !== void 0) {
-            this.seek(liveInfo.liveSyncPosition);
-            return;
-          }
-        }
-      }
-      const duration = this.stateManager.getValue("duration");
-      if (duration > 0) {
-        this.seek(duration);
-      }
-    }
-    /**
-     * Destroy the player and cleanup all resources.
-     *
-     * @example
-     * ```ts
-     * player.destroy();
-     * ```
-     */
-    destroy() {
-      if (this.destroyed) {
-        return;
-      }
-      this.logger.info("Destroying player");
-      this.loadGeneration++;
-      if (this.seekResumeTimeout !== null) {
-        clearTimeout(this.seekResumeTimeout);
-        this.seekResumeTimeout = null;
-      }
-      this.eventBus.emit("player:destroy", void 0);
-      this.pluginManager.destroyAll();
-      this.eventBus.destroy();
-      this.stateManager.destroy();
-      this.destroyed = true;
-      this.logger.info("Player destroyed");
-    }
-    // ===== State Getters =====
-    /**
-     * Get playing state.
-     */
-    get playing() {
-      return this.stateManager.getValue("playing");
-    }
-    /**
-     * Get paused state.
-     */
-    get paused() {
-      return this.stateManager.getValue("paused");
-    }
-    /**
-     * Get current time in seconds.
-     */
-    get currentTime() {
-      return this.stateManager.getValue("currentTime");
-    }
-    /**
-     * Get duration in seconds.
-     */
-    get duration() {
-      return this.stateManager.getValue("duration");
-    }
-    /**
-     * Get volume (0-1).
-     */
-    get volume() {
-      return this.stateManager.getValue("volume");
-    }
-    /**
-     * Get muted state.
-     */
-    get muted() {
-      return this.stateManager.getValue("muted");
-    }
-    /**
-     * Get playback rate.
-     */
-    get playbackRate() {
-      return this.stateManager.getValue("playbackRate");
-    }
-    /**
-     * Get buffered amount (0-1).
-     */
-    get bufferedAmount() {
-      return this.stateManager.getValue("bufferedAmount");
-    }
-    /**
-     * Get current provider plugin.
-     */
-    get currentProvider() {
-      return this._currentProvider;
-    }
-    /**
-     * Get fullscreen state.
-     */
-    get fullscreen() {
-      return this.stateManager.getValue("fullscreen");
-    }
-    /**
-     * Get live stream state.
-     */
-    get live() {
-      return this.stateManager.getValue("live");
-    }
-    /**
-     * Get autoplay state.
-     */
-    get autoplay() {
-      return this.stateManager.getValue("autoplay");
-    }
-    /**
-     * Get the current poster URL ('' when there is none).
-     *
-     * Reads state rather than the media element: the element only exists once a
-     * provider has been initialised, and for an audio source it never carries
-     * the attribute at all.
-     */
-    get poster() {
-      return this.stateManager.getValue("poster");
-    }
-    /**
-     * Check if player is destroyed.
-     * @private
-     */
-    checkDestroyed() {
-      if (this.destroyed) {
-        throw new Error("Cannot call methods on destroyed player");
-      }
-    }
-    /**
-     * Detect MIME type from source URL.
-     * @private
-     */
-    detectMimeType(source) {
-      let path = source;
-      try {
-        path = new URL(source).pathname;
-      } catch {
-        const noQuery = source.split("?")[0] ?? source;
-        path = noQuery.split("#")[0] ?? noQuery;
-      }
-      const ext = path.split(".").pop()?.toLowerCase() ?? "";
-      switch (ext) {
-        case "m3u8":
-          return "application/x-mpegURL";
-        case "mpd":
-          return "application/dash+xml";
-        case "mp4":
-        case "m4v":
-          return "video/mp4";
-        case "webm":
-          return "video/webm";
-        case "ogg":
-        case "ogv":
-          return "video/ogg";
-        case "mov":
-          return "video/quicktime";
-        case "mkv":
-          return "video/x-matroska";
-        case "mp3":
-          return "audio/mpeg";
-        case "wav":
-          return "audio/wav";
-        case "flac":
-          return "audio/flac";
-        case "aac":
-        case "m4a":
-          return "audio/mp4";
-        default:
-          return "video/mp4";
-      }
-    }
-  };
-  async function createPlayer(options) {
-    const player = new ScarlettPlayer(options);
-    await player.init();
-    return player;
-  }
+  // demo/demo.ts
+  init_src();
 
   // packages/plugins/hls/src/hls-loader.ts
   var hls_loader_exports = {};
@@ -39077,6 +39912,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     hlsConstructor = null;
     loadingPromise = null;
   }
+
+  // packages/plugins/hls/src/create-hls-plugin.ts
+  init_src();
 
   // packages/plugins/hls/src/quality.ts
   function formatLevel(level) {
@@ -40369,6 +41207,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     );
   }
 
+  // packages/plugins/native/src/index.ts
+  init_src();
+
   // packages/plugins/native/src/version.ts
   var PKG_VERSION3 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
@@ -40753,7 +41594,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  init_src();
+  init_src2();
 
   // packages/plugins/airplay/src/version.ts
   var PKG_VERSION5 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
@@ -41679,7 +42520,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         });
         injectStyles();
-        void Promise.resolve().then(() => (init_src(), src_exports)).then(({ registerControl: registerControl2 }) => {
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
           const self2 = plugin;
           registerControl2(
             "playlist-previous",
@@ -42965,8 +43806,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles4 = positionStyles[position];
-      styles4.split(";").filter(Boolean).forEach((rule) => {
+      const styles5 = positionStyles[position];
+      styles5.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
         const prop = rule.slice(0, colonIdx).trim();
@@ -43886,7 +44727,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("share:closed", void 0);
           }
         });
-        void Promise.resolve().then(() => (init_src(), src_exports)).then(({ registerControl: registerControl2 }) => {
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
           registerControl2(
             "share",
             (controlApi) => new ShareButton(controlApi, () => void activate(), {
@@ -43935,8 +44776,503 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/gestures/src/recognizer.ts
+  var ZONE_HYSTERESIS = 0.05;
+  var DEFAULT_RECOGNIZER_OPTIONS = {
+    doubleTapWindowMs: 275,
+    accumulationWindowMs: 650,
+    leftZone: 0.33,
+    rightZone: 0.33,
+    slopPx: 10
+  };
+  function zoneFor(fraction, options) {
+    if (fraction <= options.leftZone) return "left";
+    if (fraction >= 1 - options.rightZone) return "right";
+    return "middle";
+  }
+  function createRecognizer(options = {}) {
+    const config = { ...DEFAULT_RECOGNIZER_OPTIONS, ...options };
+    let pending = null;
+    let lastTapZone = null;
+    let lastTapAt = 0;
+    let accumulatingZone = null;
+    let accumulatedCount = 0;
+    let lastAccumulateAt = 0;
+    let activePointers = 0;
+    const resetSequence = () => {
+      lastTapZone = null;
+      lastTapAt = 0;
+      accumulatingZone = null;
+      accumulatedCount = 0;
+      lastAccumulateAt = 0;
+    };
+    const resolveZone = (fraction) => {
+      const raw = zoneFor(fraction, config);
+      const active = accumulatingZone ?? lastTapZone;
+      if (!active || raw === active) return raw;
+      if (active === "left" && fraction <= config.leftZone + ZONE_HYSTERESIS) return "left";
+      if (active === "right" && fraction >= 1 - config.rightZone - ZONE_HYSTERESIS) return "right";
+      return raw;
+    };
+    const expire = (now2) => {
+      if (accumulatingZone && now2 - lastAccumulateAt > config.accumulationWindowMs) {
+        resetSequence();
+      } else if (!accumulatingZone && lastTapZone && now2 - lastTapAt > config.doubleTapWindowMs) {
+        lastTapZone = null;
+        lastTapAt = 0;
+      }
+      return [];
+    };
+    return {
+      handle(record) {
+        const events = [];
+        switch (record.type) {
+          case "down": {
+            activePointers += 1;
+            if (activePointers > 1) {
+              if (pending) pending.invalid = true;
+              if (accumulatingZone || lastTapZone) {
+                resetSequence();
+                events.push({ type: "cancel" });
+              }
+              return events;
+            }
+            expire(record.timeStamp);
+            pending = {
+              pointerId: record.pointerId,
+              x: record.x,
+              y: record.y,
+              fraction: record.fraction,
+              timeStamp: record.timeStamp,
+              invalid: false
+            };
+            return events;
+          }
+          case "move": {
+            if (!pending || pending.pointerId !== record.pointerId || pending.invalid) {
+              return events;
+            }
+            const dx = record.x - pending.x;
+            const dy = record.y - pending.y;
+            if (Math.hypot(dx, dy) > config.slopPx) {
+              pending.invalid = true;
+              if (accumulatingZone || lastTapZone) {
+                resetSequence();
+                events.push({ type: "cancel" });
+              }
+            }
+            return events;
+          }
+          case "up": {
+            activePointers = Math.max(0, activePointers - 1);
+            const candidate = pending;
+            pending = null;
+            if (!candidate || candidate.pointerId !== record.pointerId || candidate.invalid) {
+              return events;
+            }
+            expire(record.timeStamp);
+            const zone = resolveZone(record.fraction);
+            if (accumulatingZone) {
+              if (zone === accumulatingZone) {
+                accumulatedCount += 1;
+                lastAccumulateAt = record.timeStamp;
+                events.push({ type: "accumulate", zone, count: accumulatedCount });
+              } else {
+                resetSequence();
+                events.push({ type: "cancel" });
+              }
+              return events;
+            }
+            if (lastTapZone && zone === lastTapZone && record.timeStamp - lastTapAt <= config.doubleTapWindowMs) {
+              accumulatingZone = zone;
+              accumulatedCount = 1;
+              lastAccumulateAt = record.timeStamp;
+              lastTapZone = null;
+              lastTapAt = 0;
+              events.push({ type: "double-tap", zone, count: 1 });
+              return events;
+            }
+            lastTapZone = zone;
+            lastTapAt = record.timeStamp;
+            events.push({ type: "tap", zone });
+            return events;
+          }
+          case "cancel": {
+            activePointers = Math.max(0, activePointers - 1);
+            pending = null;
+            if (accumulatingZone || lastTapZone) {
+              resetSequence();
+              events.push({ type: "cancel" });
+            }
+            return events;
+          }
+          default:
+            return events;
+        }
+      },
+      tick(now2) {
+        return expire(now2);
+      },
+      reset() {
+        pending = null;
+        activePointers = 0;
+        resetSequence();
+      },
+      isAccumulating() {
+        return accumulatingZone !== null;
+      }
+    };
+  }
+
+  // packages/plugins/gestures/src/overlay.ts
+  var STYLE_ID3 = "sp-gestures-styles";
+  var styles4 = `
+.sp-gestures {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* The bottom strip belongs to the progress bar and control bar. */
+  bottom: 64px;
+  z-index: 6;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sp-gestures__zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  color: #fff;
+  transition: opacity 0.25s ease;
+}
+
+.sp-gestures__zone--left {
+  left: 0;
+  border-radius: 0 50% 50% 0;
+}
+
+.sp-gestures__zone--right {
+  right: 0;
+  border-radius: 50% 0 0 50%;
+}
+
+.sp-gestures__zone--active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sp-gestures__label {
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.sp-gestures__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-gestures__zone {
+    transition: none;
+  }
+}
+`;
+  var GestureOverlay = class {
+    constructor(container, options) {
+      this.container = container;
+      this.options = options;
+      this.styleEl = null;
+      this.hideTimer = null;
+      this.pointerHandler = (event) => {
+        if (event.pointerType !== "touch") return;
+        const rect = this.el.getBoundingClientRect();
+        const width = rect.width || 1;
+        this.options.onPointer({
+          type: event.type === "pointerdown" ? "down" : event.type === "pointermove" ? "move" : event.type === "pointerup" ? "up" : "cancel",
+          x: event.clientX,
+          y: event.clientY,
+          fraction: Math.max(0, Math.min(1, (event.clientX - rect.left) / width)),
+          pointerId: event.pointerId,
+          timeStamp: event.timeStamp
+        });
+      };
+      this.injectStyles();
+      this.el = document.createElement("div");
+      this.el.className = "sp-gestures";
+      const left = this.createZone("left");
+      const right = this.createZone("right");
+      this.zones = { left: left.zone, right: right.zone };
+      this.labels = { left: left.label, right: right.label };
+      this.live = document.createElement("div");
+      this.live.className = "sp-gestures__live";
+      this.live.setAttribute("aria-live", "polite");
+      this.live.setAttribute("role", "status");
+      this.el.appendChild(left.zone);
+      this.el.appendChild(right.zone);
+      this.el.appendChild(this.live);
+      this.el.addEventListener("pointerdown", this.pointerHandler);
+      this.el.addEventListener("pointermove", this.pointerHandler);
+      this.el.addEventListener("pointerup", this.pointerHandler);
+      this.el.addEventListener("pointercancel", this.pointerHandler);
+      container.appendChild(this.el);
+    }
+    /** Size the zones to match the recognizer's split. */
+    setZoneWidths(left, right) {
+      this.zones.left.style.width = `${left * 100}%`;
+      this.zones.right.style.width = `${right * 100}%`;
+    }
+    /**
+     * Show the cumulative seek for a zone.
+     *
+     * @param zone - Which side was tapped
+     * @param seconds - Total seconds this sequence has moved
+     */
+    showSeek(zone, seconds) {
+      if (zone === "middle") return;
+      const direction = zone === "right" ? "forward" : "back";
+      this.live.textContent = `${seconds} seconds ${direction}`;
+      if (!this.options.feedback) return;
+      const target = this.zones[zone];
+      this.labels[zone].textContent = `${seconds} seconds`;
+      target.classList.add("sp-gestures__zone--active");
+      if (this.hideTimer) clearTimeout(this.hideTimer);
+      this.hideTimer = setTimeout(() => {
+        this.zones.left.classList.remove("sp-gestures__zone--active");
+        this.zones.right.classList.remove("sp-gestures__zone--active");
+        this.hideTimer = null;
+      }, 600);
+    }
+    /** Announce that a forward seek was refused because the viewer is at the live edge. */
+    announceLiveEdge() {
+      this.live.textContent = "Already at the live edge";
+    }
+    destroy() {
+      if (this.hideTimer) {
+        clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+      }
+      this.el.removeEventListener("pointerdown", this.pointerHandler);
+      this.el.removeEventListener("pointermove", this.pointerHandler);
+      this.el.removeEventListener("pointerup", this.pointerHandler);
+      this.el.removeEventListener("pointercancel", this.pointerHandler);
+      this.el.remove();
+      this.styleEl?.remove();
+      this.styleEl = null;
+    }
+    /** Exposed for tests and for hosts that want to inspect the surface. */
+    getElement() {
+      return this.el;
+    }
+    createZone(side) {
+      const zone = document.createElement("div");
+      zone.className = `sp-gestures__zone sp-gestures__zone--${side}`;
+      zone.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "sp-gestures__label";
+      zone.appendChild(label);
+      return { zone, label };
+    }
+    injectStyles() {
+      if (document.getElementById(STYLE_ID3)) return;
+      this.styleEl = document.createElement("style");
+      this.styleEl.id = STYLE_ID3;
+      this.styleEl.textContent = styles4;
+      document.head.appendChild(this.styleEl);
+    }
+  };
+
+  // packages/plugins/gestures/src/version.ts
+  var PKG_VERSION12 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/gestures/src/index.ts
+  function hasCoarsePointer() {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    try {
+      return window.matchMedia("(any-pointer: coarse)").matches;
+    } catch {
+      return false;
+    }
+  }
+  function createGesturesPlugin(config = {}) {
+    let api = null;
+    let overlay = null;
+    let recognizer = null;
+    let active = false;
+    let runSeconds = 0;
+    let pendingHide = null;
+    const seekSeconds = config.seekSeconds ?? 10;
+    const doubleTapWindowMs = config.doubleTapWindowMs ?? DEFAULT_RECOGNIZER_OPTIONS.doubleTapWindowMs;
+    const leftZone = config.zones?.left ?? DEFAULT_RECOGNIZER_OPTIONS.leftZone;
+    const rightZone = config.zones?.right ?? DEFAULT_RECOGNIZER_OPTIONS.rightZone;
+    const feedback = config.feedback !== false;
+    const haptics = config.haptics !== false;
+    const tapToToggleControls = config.tapToToggleControls !== false;
+    const canSeek = () => {
+      if (!api) return false;
+      if (api.getState("chromecastActive") || api.getState("airplayActive")) return false;
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
+      if (live && !seekableRange) return false;
+      const duration = api.getState("duration");
+      if (!live && (!duration || !Number.isFinite(duration))) return false;
+      return true;
+    };
+    const applySeek = (zone) => {
+      if (!api || zone === "middle") return false;
+      const video = api.container.querySelector("video");
+      if (!video) return false;
+      const delta = zone === "right" ? seekSeconds : -seekSeconds;
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
+      const current = video.currentTime;
+      let target;
+      if (live && seekableRange) {
+        target = Math.max(seekableRange.start, Math.min(seekableRange.end, current + delta));
+        if (zone === "right" && target <= current) {
+          overlay?.announceLiveEdge();
+          return false;
+        }
+      } else {
+        const duration = video.duration;
+        const max = Number.isFinite(duration) && duration > 0 ? duration - 0.25 : current;
+        target = Math.max(0, Math.min(max, current + delta));
+      }
+      video.currentTime = target;
+      api.emit("playback:seeking", { time: target });
+      if (haptics && typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+        navigator.vibrate(10);
+      }
+      return true;
+    };
+    const ui = () => api?.getPlugin("ui-controls") ?? null;
+    const clearPendingHide = () => {
+      if (pendingHide) {
+        clearTimeout(pendingHide);
+        pendingHide = null;
+      }
+    };
+    const handleTap = () => {
+      if (!tapToToggleControls || !api) return;
+      const controls = ui();
+      if (!controls) return;
+      const visible = Boolean(api.getState("controlsVisible"));
+      const paused = Boolean(api.getState("paused"));
+      if (!visible) {
+        controls.show();
+        return;
+      }
+      if (paused) return;
+      clearPendingHide();
+      pendingHide = setTimeout(() => {
+        pendingHide = null;
+        controls.hide();
+      }, doubleTapWindowMs);
+    };
+    const handleSeekStep = (zone) => {
+      clearPendingHide();
+      if (!canSeek()) return;
+      const moved = applySeek(zone);
+      if (!moved) return;
+      runSeconds += seekSeconds;
+      overlay?.showSeek(zone, runSeconds);
+      api?.emit("gesture:seek", {
+        direction: zone === "right" ? "forward" : "backward",
+        seconds: seekSeconds,
+        cumulative: runSeconds
+      });
+    };
+    const onPointer = (record) => {
+      if (!recognizer) return;
+      for (const event of recognizer.handle(record)) {
+        switch (event.type) {
+          case "tap":
+            api?.emit("gesture:tap", { zone: event.zone });
+            handleTap();
+            break;
+          case "double-tap":
+            runSeconds = 0;
+            handleSeekStep(event.zone);
+            break;
+          case "accumulate":
+            handleSeekStep(event.zone);
+            break;
+          case "cancel":
+            runSeconds = 0;
+            clearPendingHide();
+            break;
+        }
+      }
+    };
+    return {
+      id: "gestures",
+      name: "Gestures",
+      version: PKG_VERSION12,
+      type: "feature",
+      init(pluginApi) {
+        api = pluginApi;
+        const enabled = config.enabled ?? "auto";
+        active = enabled === "auto" ? hasCoarsePointer() : Boolean(enabled);
+        if (!active) {
+          api.logger.debug("[gestures] no coarse pointer, gesture surface not installed");
+          return;
+        }
+        if (api.getState("mediaType") === "audio") {
+          active = false;
+          return;
+        }
+        recognizer = createRecognizer({
+          doubleTapWindowMs,
+          accumulationWindowMs: config.accumulationWindowMs,
+          leftZone,
+          rightZone,
+          slopPx: config.slopPx
+        });
+        overlay = new GestureOverlay(api.container, { onPointer, feedback });
+        overlay.setZoneWidths(leftZone, rightZone);
+        api.onDestroy(() => {
+          clearPendingHide();
+          overlay?.destroy();
+          overlay = null;
+          recognizer?.reset();
+          recognizer = null;
+        });
+      },
+      destroy() {
+        clearPendingHide();
+        overlay?.destroy();
+        overlay = null;
+        recognizer?.reset();
+        recognizer = null;
+        active = false;
+        runSeconds = 0;
+        api = null;
+      },
+      ownsTapInteraction() {
+        return active && tapToToggleControls;
+      }
+    };
+  }
+
   // demo/demo.ts
-  var VERSION = true ? "1.7.1" : "dev";
+  var VERSION = true ? "1.8.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
@@ -43997,7 +45333,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         // documents - not anything under /packages, which the site does not serve.
         createSharePlugin({
           embedBaseUrl: "https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html"
-        })
+        }),
+        // Touch only, and it arms itself: `enabled` defaults to 'auto', gated on
+        // matchMedia('(any-pointer: coarse)'). It matters most here, where the
+        // responsive control bar moves the skip buttons into the overflow tray
+        // on a phone and double-tap seeking is what replaces them.
+        createGesturesPlugin()
       ].filter(Boolean)
     });
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
