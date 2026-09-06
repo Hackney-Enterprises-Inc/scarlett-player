@@ -29,7 +29,7 @@ const player = await createPlayer({
 
 ```typescript
 const player = await createPlayer({
-  container: HTMLElement,      // Required: container element
+  container: HTMLElement | string, // Required: container element or CSS selector
   src?: string,                // Initial source URL
   poster?: string,             // Poster image URL
   autoplay?: boolean,          // Auto-play on load (default: false)
@@ -53,8 +53,22 @@ player.setVolume(0-1)          // Set volume
 player.setMuted(boolean)       // Mute/unmute
 player.setPoster(url)          // Change the poster ('' clears it); load() never touches it
 player.setPlaybackRate(rate)   // Set playback speed
+player.setAutoplay(boolean)    // Change autoplay after construction
 player.requestFullscreen()     // Enter fullscreen
 player.exitFullscreen()        // Exit fullscreen
+player.toggleFullscreen()      // Toggle fullscreen
+player.seekToLive()            // Jump to the live edge (live streams)
+player.getQualities()          // QualityLevel[] from the active provider
+player.setQuality(index)       // Select a level (-1 for auto)
+player.getCurrentQuality()     // Current level index (-1 when auto)
+player.requestAirPlay()        // Show the AirPlay picker (needs the airplay plugin)
+player.requestChromecast()     // Start a Cast session (needs the chromecast plugin)
+player.stopCasting()           // End the active cast session
+player.getState()              // Read-only snapshot of the state store
+player.getPlugin(id)           // Registered plugin instance, or null
+player.registerPlugin(plugin)  // Register a plugin after construction
+player.on(event, handler)      // Subscribe; returns an unsubscribe function
+player.once(event, handler)    // Subscribe for one emission
 player.destroy()               // Cleanup and destroy
 ```
 
@@ -69,8 +83,11 @@ player.volume                  // 0-1
 player.muted                   // boolean
 player.poster                  // Current poster URL, '' when there is none
 player.playbackRate            // number
+player.bufferedAmount          // seconds buffered ahead
+player.autoplay                // boolean
 player.fullscreen              // boolean
 player.live                    // boolean
+player.currentProvider         // Active provider plugin, or null
 ```
 
 The poster is state, not an element attribute: the provider plugins mirror it
@@ -107,10 +124,22 @@ redundant.
 The core package provides the foundation. Add plugins for functionality:
 
 - `@scarlett-player/hls` - HLS streaming
-- `@scarlett-player/native` - MP4, WebM, MOV, MKV
+- `@scarlett-player/native` - MP4, WebM, MOV, MKV, and progressive audio
 - `@scarlett-player/ui` - Player controls
+- `@scarlett-player/audio-ui` - Compact audio player UI
 - `@scarlett-player/airplay` - AirPlay casting
 - `@scarlett-player/chromecast` - Chromecast casting
+- `@scarlett-player/playlist` - Playlist management
+- `@scarlett-player/analytics` - QoE metrics and beacons
+- `@scarlett-player/media-session` - Lock screen and media key controls
+- `@scarlett-player/captions` - WebVTT captions
+- `@scarlett-player/chapters` - Chapter markers
+- `@scarlett-player/gestures` - Touch gestures
+- `@scarlett-player/watermark` - Anti-piracy overlay
+- `@scarlett-player/share` - Share sheet and embed codes
+
+Framework and drop-in wrappers: `@scarlett-player/vue` and
+`@scarlett-player/embed`.
 
 ## License
 

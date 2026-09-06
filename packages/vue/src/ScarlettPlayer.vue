@@ -6,7 +6,7 @@
 // `defineExpose` is a compiler macro, not a runtime export: importing it made
 // the SFC compiler warn on every build and every test run.
 import { ref, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
-import type { ScarlettPlayer, PlayerOptions, Plugin } from '@scarlett-player/core';
+import type { ScarlettPlayer, PlayerOptions, Plugin, PlayerEventMap } from '@scarlett-player/core';
 
 // Props
 const props = defineProps({
@@ -95,15 +95,17 @@ const emit = defineEmits<{
   pause: [];
   seeking: [payload: { time: number }];
   seeked: [];
-  timeupdate: [payload: { currentTime: number; duration: number }];
+  // Forwarded from core's `playback:timeupdate` unchanged, which carries only
+  // the time. Read `duration` off the exposed `player` instead.
+  timeupdate: [payload: { currentTime: number }];
   volumechange: [payload: { volume: number; muted: boolean }];
   ratechange: [payload: { rate: number }];
   ended: [];
-  error: [error: any];
-  loaded: [payload: any];
-  loadedmetadata: [payload: any];
+  error: [error: PlayerEventMap['error'] | Error];
+  loaded: [payload: PlayerEventMap['media:loaded']];
+  loadedmetadata: [payload: PlayerEventMap['media:loadedmetadata']];
   qualitychange: [payload: { quality: string; auto: boolean }];
-  qualitylevels: [payload: any];
+  qualitylevels: [payload: PlayerEventMap['quality:levels']];
   fullscreenchange: [payload: { fullscreen: boolean }];
   destroy: [];
 }>();
@@ -150,7 +152,7 @@ onMounted(async () => {
     emit('ready', playerInstance.value);
   } catch (error) {
     console.error('Failed to initialize ScarlettPlayer:', error);
-    emit('error', error);
+    emit('error', error instanceof Error ? error : new Error(String(error)));
   }
 });
 

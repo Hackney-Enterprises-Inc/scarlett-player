@@ -118,9 +118,9 @@ function onPause() {
   playerStatus.value = 'Paused';
 }
 
-function onTimeUpdate(payload: { currentTime: number; duration: number }) {
+function onTimeUpdate(payload: { currentTime: number }) {
   currentTime.value = payload.currentTime;
-  duration.value = payload.duration;
+  duration.value = playerRef.value?.player?.duration ?? 0;
 }
 
 function onError(error: any) {

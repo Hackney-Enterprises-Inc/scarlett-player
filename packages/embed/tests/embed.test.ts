@@ -15,6 +15,7 @@ const mockAnalyticsPlugin = { id: 'analytics', name: 'Analytics Plugin' };
 const mockPlaylistPlugin = { id: 'playlist', name: 'Playlist Plugin' };
 const mockMediaSessionPlugin = { id: 'media-session', name: 'Media Session Plugin' };
 const mockGesturesPlugin = { id: 'gestures', name: 'Gestures Plugin' };
+const mockSharePlugin = { id: 'share', name: 'Share Plugin' };
 
 // Mock plugin creators
 const fullPluginCreators: PluginCreators = {
@@ -26,6 +27,7 @@ const fullPluginCreators: PluginCreators = {
   playlist: vi.fn(() => mockPlaylistPlugin),
   mediaSession: vi.fn(() => mockMediaSessionPlugin),
   gestures: vi.fn(() => mockGesturesPlugin),
+  share: vi.fn(() => mockSharePlugin),
 };
 
 const videoOnlyPluginCreators: PluginCreators = {
@@ -33,6 +35,17 @@ const videoOnlyPluginCreators: PluginCreators = {
   native: vi.fn(() => mockNativePlugin),
   videoUI: vi.fn(() => mockVideoUIPlugin),
   gestures: vi.fn(() => mockGesturesPlugin),
+  share: vi.fn(() => mockSharePlugin),
+};
+
+// A build with a video UI but no share plugin: the audio build is one, and so
+// is any bundle published before sharing reached the embed. The slot is
+// optional, so such a build must still assemble and must not pin a layout with
+// a share slot nothing can fill.
+const noSharePluginCreators: PluginCreators = {
+  hls: vi.fn(() => mockHLSPlugin),
+  native: vi.fn(() => mockNativePlugin),
+  videoUI: vi.fn(() => mockVideoUIPlugin),
 };
 
 // A build that supplies no native provider. Kept to prove the slot is optional
@@ -58,7 +71,7 @@ const pluginsOf = (player: unknown): unknown[] =>
   (player as { config?: { plugins?: unknown[] } } | null)?.config?.plugins ?? [];
 
 /**
- * Read the config object a mocked UI plugin creator was called with.
+ * Read the config object a mocked plugin creator was called with.
  *
  * `toHaveBeenCalledWith` can only assert what IS in that object; proving a key
  * is absent needs the object itself. `vi.clearAllMocks()` in beforeEach makes
@@ -333,6 +346,166 @@ describe('createEmbedPlayer', () => {
     expect(pluginsOf(player)).not.toContain(mockGesturesPlugin);
   });
 
+  // Sharing is opt in through shareUrl. The button is a visible change to the
+  // control bar, and the plugin has nothing to share without a page URL: it
+  // refuses to fall back to the media src, which is frequently signed.
+  it('should add the share plugin when a share URL is given', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.share).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/watch/abc' })
+    );
+    expect(pluginsOf(player)).toContain(mockSharePlugin);
+  });
+
+  it('should not add the share plugin without a share URL', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.share).not.toHaveBeenCalled();
+    expect(pluginsOf(player)).not.toContain(mockSharePlugin);
+  });
+
+  it('should put the share control in the video UI layout when sharing is on', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // registerControl() alone places nothing: the button exists only in a
+    // player whose layout lists the slot, and the UI plugin's own default
+    // layout has none.
+    const controls = uiConfigOf(fullPluginCreators.videoUI).controls as string[];
+    expect(controls).toContain('share');
+    expect(controls).toContain('fullscreen');
+  });
+
+  it('should leave the video UI layout alone when sharing is off', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // Absent, not an explicit copy of the default: the UI plugin owns its own
+    // layout, so an embed that never asked for sharing cannot drift from it.
+    expect(uiConfigOf(fullPluginCreators.videoUI)).not.toHaveProperty('controls');
+  });
+
+  it('should forward the embed base URL to the share plugin', async () => {
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'video.m3u8',
+        shareUrl: 'https://example.com/watch/abc',
+        embedBaseUrl: 'https://cdn.example.com/iframe.html',
+      },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.share).toHaveBeenCalledWith(
+      expect.objectContaining({ embedBaseUrl: 'https://cdn.example.com/iframe.html' })
+    );
+  });
+
+  it('should omit the embed base URL from the share config when it is unset', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The key has to be absent: the plugin drops the `embed` target when there
+    // is no base URL, rather than copying a snippet that points nowhere.
+    expect(uiConfigOf(fullPluginCreators.share)).not.toHaveProperty('embedBaseUrl');
+  });
+
+  it('should forward the media title to the share plugin', async () => {
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'video.m3u8',
+        shareUrl: 'https://example.com/watch/abc',
+        title: 'Bout 13: Main Event',
+      },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // Otherwise the native sheet is offered document.title, which inside
+    // iframe.html is the embed page's title rather than the media's.
+    expect(fullPluginCreators.share).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Bout 13: Main Event' })
+    );
+  });
+
+  it('should not add the share plugin to an audio player', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.mp3', type: 'audio', shareUrl: 'https://example.com/watch/abc' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The audio UIs render a fixed template with no control registry, so there
+    // is nowhere to put the button.
+    expect(fullPluginCreators.share).not.toHaveBeenCalled();
+    expect(uiConfigOf(fullPluginCreators.audioUI)).not.toHaveProperty('controls');
+  });
+
+  it('should not add the share plugin when controls are off', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc', controls: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // The button in the control bar is the only way into the sheet.
+    expect(fullPluginCreators.share).not.toHaveBeenCalled();
+    expect(pluginsOf(player)).not.toContain(mockSharePlugin);
+  });
+
+  it('should build without a share creator', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc' },
+      noSharePluginCreators,
+      videoOnlyTypes
+    );
+
+    expect(player).not.toBeNull();
+    expect(pluginsOf(player)).not.toContain(mockSharePlugin);
+    // And no share slot in the layout: nothing could fill it.
+    expect(uiConfigOf(noSharePluginCreators.videoUI)).not.toHaveProperty('controls');
+  });
+
+  it('should share from the video build', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', shareUrl: 'https://example.com/watch/abc' },
+      videoOnlyPluginCreators,
+      videoOnlyTypes
+    );
+
+    expect(videoOnlyPluginCreators.share).toHaveBeenCalled();
+    expect(pluginsOf(player)).toContain(mockSharePlugin);
+  });
+
   it('should always include HLS plugin', async () => {
     await createEmbedPlayer(
       container,
@@ -465,6 +638,17 @@ describe('initElement', () => {
 
     expect(player).not.toBeNull();
     expect(fullPluginCreators.audioUI).toHaveBeenCalled();
+  });
+
+  it('should parse the share URL attribute through to the share plugin', async () => {
+    element.setAttribute('data-share-url', 'https://example.com/watch/abc');
+
+    const player = await initElement(element, fullPluginCreators, fullAvailableTypes);
+
+    expect(player).not.toBeNull();
+    expect(fullPluginCreators.share).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/watch/abc' })
+    );
   });
 });
 

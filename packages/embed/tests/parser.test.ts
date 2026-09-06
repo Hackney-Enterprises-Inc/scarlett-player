@@ -216,6 +216,41 @@ describe('parseDataAttributes', () => {
     });
   });
 
+  describe('share attributes parsing', () => {
+    it('should parse share-url attribute', () => {
+      element.setAttribute('data-share-url', 'https://example.com/watch/abc');
+      const config = parseDataAttributes(element);
+      expect(config.shareUrl).toBe('https://example.com/watch/abc');
+    });
+
+    it('should parse share-url without the data prefix', () => {
+      element.setAttribute('share-url', 'https://example.com/watch/abc');
+      const config = parseDataAttributes(element);
+      expect(config.shareUrl).toBe('https://example.com/watch/abc');
+    });
+
+    it('should leave share URL out of the config when the attribute is absent', () => {
+      const config = parseDataAttributes(element);
+      // Absent, not `undefined`: createEmbedPlayer() adds the share plugin and
+      // the share slot in the layout only when a share URL was given, so an
+      // existing embed keeps the control bar it has always had.
+      expect('shareUrl' in config).toBe(false);
+    });
+
+    it('should parse embed-base-url attribute', () => {
+      element.setAttribute('data-embed-base-url', 'https://cdn.example.com/iframe.html');
+      const config = parseDataAttributes(element);
+      expect(config.embedBaseUrl).toBe('https://cdn.example.com/iframe.html');
+    });
+
+    it('should leave embed base URL out of the config when the attribute is absent', () => {
+      const config = parseDataAttributes(element);
+      // The `embed` share target removes itself when this is missing, rather
+      // than offering a snippet that points nowhere.
+      expect('embedBaseUrl' in config).toBe(false);
+    });
+  });
+
   describe('number attributes parsing', () => {
     it('should parse hide-delay attribute', () => {
       element.setAttribute('data-hide-delay', '3000');
@@ -253,10 +288,12 @@ describe('parseDataAttributes', () => {
       element.setAttribute('data-brand-color', '#ff5733');
       element.setAttribute('data-width', '100%');
       element.setAttribute('data-aspect-ratio', '16:9');
+      element.setAttribute('data-share-url', 'https://example.com/watch/abc');
 
       const config = parseDataAttributes(element);
 
       expect(config.src).toBe('https://example.com/video.m3u8');
+      expect(config.shareUrl).toBe('https://example.com/watch/abc');
       expect(config.autoplay).toBe(true);
       expect(config.muted).toBe(true);
       expect(config.poster).toBe('poster.jpg');

@@ -47,7 +47,7 @@ export interface AnalyticsConfig {
   /** Your API endpoint for receiving analytics beacons */
   beaconUrl: string;
 
-  /** Optional API key for authentication */
+  /** Optional API key for authentication (only sent on HTTPS fetch fallbacks) */
   apiKey?: string;
 
   // === Video Metadata ===

@@ -43,7 +43,7 @@ pnpm add @scarlett-player/analytics
 
 ```typescript
 import { createPlayer } from '@scarlett-player/core';
-import { hlsPlugin } from '@scarlett-player/hls';
+import { createHLSPlugin } from '@scarlett-player/hls';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
 import { uiPlugin } from '@scarlett-player/ui';
 
@@ -51,7 +51,7 @@ const player = await createPlayer({
   container: '#player',
   src: 'https://example.com/stream.m3u8',
   plugins: [
-    hlsPlugin(),
+    createHLSPlugin(),
     createAnalyticsPlugin({
       beaconUrl: 'https://api.example.com/analytics/beacon',
       videoId: 'event-123',
@@ -88,20 +88,17 @@ const player = await createPlayer({
 
   // Viewer information
   viewerId?: string;              // Auto-generated if not provided
-  viewerPlan?: string;            // 'free', 'ppv', 'subscriber', etc.
+  viewerPlan?: string;            // 'free', 'ppv', 'subscriber', 'premium', or your own
 
-  // Custom dimensions
-  customDimensions?: {
-    promoter?: string;
-    eventType?: string;
-    [key: string]: any;
-  };
+  // Custom dimensions (string, number or boolean values; merged into every beacon without redaction)
+  customDimensions?: Record<string, string | number | boolean>;
 
   // Behavior
   heartbeatInterval?: number;     // Default: 10000ms (10 seconds)
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
-  apiKey?: string;                // Optional API key for authentication
+  apiKey?: string;                // Sent as an X-API-Key header on HTTPS fetch fallbacks
+  customBeacon?: (url: string, payload: BeaconPayload) => void; // Replace the transport (see Testing)
 }
 ```
 
@@ -134,10 +131,13 @@ The plugin automatically tracks these events:
 
 ## Custom Event Tracking
 
-Track custom business events:
+Track custom business events. Event data is merged into the beacon without redaction;
+only send necessary data after applying the [privacy guidance](#privacy-considerations) below.
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+import type { IAnalyticsPlugin } from '@scarlett-player/analytics';
+
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 
 // Track PPV purchase
 analytics.trackEvent('ppv_purchase', {
@@ -227,7 +227,7 @@ The plugin calculates a QoE score (0-100) based on:
 Access the score:
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 const qoeScore = analytics.getQoEScore(); // 0-100
 ```
 
@@ -236,15 +236,15 @@ const qoeScore = analytics.getQoEScore(); // 0-100
 Get current session metrics:
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 const metrics = analytics.getMetrics();
 
 console.log({
-  viewId: metrics.viewId,
+  viewId: analytics.getViewId(),
+  sessionId: analytics.getSessionId(),
   watchTime: metrics.watchTime,
   playTime: metrics.playTime,
   rebufferCount: metrics.rebufferCount,
-  startupTime: metrics.startupTime,
   qoeScore: analytics.getQoEScore(),
 });
 ```
@@ -314,7 +314,7 @@ const player = await createPlayer({
   container: '#player',
   src: event.streamUrl,
   plugins: [
-    hlsPlugin({
+    createHLSPlugin({
       lowLatencyMode: true,
     }),
     createAnalyticsPlugin({
@@ -350,7 +350,7 @@ const player = await createPlayer({
 
 // Track PPV purchase
 if (purchaseSuccessful) {
-  const analytics = player.plugins.get('analytics');
+  const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
   analytics.trackEvent('ppv_purchase', {
     price: event.price,
     currency: 'USD',
@@ -362,14 +362,14 @@ if (purchaseSuccessful) {
 
 ## Privacy Considerations
 
-The plugin respects user privacy:
+The plugin does not guarantee that analytics data is free of personally identifiable information (PII).
 
-- **Anonymous Tracking**: If no `viewerId` is provided, generates anonymous IDs stored in localStorage
-- **No PII**: Doesn't collect personally identifiable information
-- **User Agent Only**: Uses standard browser APIs for environment detection
-- **Opt-out Support**: Can disable with `disableInDev` or custom logic
+- **Viewer Identification**: Beacon payloads contain `viewerId`. If not provided, the plugin generates an ID stored in localStorage (with sessionStorage or ephemeral fallback). A persistent ID is not a guarantee of anonymity.
+- **Data Minimization and Redaction**: Callers must limit collected data to what is necessary and remove or redact personal or sensitive information before supplying `customDimensions`, custom event data, or other metadata. Custom dimensions and event data are merged into payloads without automatic PII filtering or redaction.
+- **Consent and Opt-out**: Callers are responsible for obtaining any required consent before initializing analytics and for honoring opt-out or consent withdrawal. `disableInDev` only suppresses beacons in development; it is not a production consent control.
+- **Environment Data**: The plugin also collects browser, OS, device, screen/player size, and connection information using browser APIs.
 
-### GDPR Compliance Example
+### Consent-Gated Initialization Example
 
 ```typescript
 const hasAnalyticsConsent = cookieConsent.analytics;
@@ -377,7 +377,7 @@ const hasAnalyticsConsent = cookieConsent.analytics;
 const player = await createPlayer({
   container: '#player',
   plugins: [
-    hlsPlugin(),
+    createHLSPlugin(),
     // Only load analytics if user consented
     ...(hasAnalyticsConsent ? [
       createAnalyticsPlugin({
@@ -395,13 +395,13 @@ const player = await createPlayer({
 The plugin includes comprehensive tests. Run them:
 
 ```bash
-npm test
+pnpm test
 ```
 
 For coverage:
 
 ```bash
-npm run test:coverage
+pnpm test:coverage
 ```
 
 ### Mock Beacon for Testing
@@ -468,6 +468,6 @@ For issues and questions:
 
 ## Related Packages
 
-- [@scarlett-player/core](../core) - Core player
+- [@scarlett-player/core](../../core) - Core player
 - [@scarlett-player/hls](../hls) - HLS provider
 - [@scarlett-player/ui](../ui) - UI components

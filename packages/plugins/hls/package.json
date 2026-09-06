@@ -30,7 +30,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.7.0",
+    "@scarlett-player/core": "^1.8.0",
     "hls.js": "^1.6.0"
   },
   "peerDependenciesMeta": {

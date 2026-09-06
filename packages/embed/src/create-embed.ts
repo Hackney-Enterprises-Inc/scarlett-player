@@ -46,7 +46,49 @@ export interface PluginCreators {
    * gesture surface on a pure-mouse desktop with no touch to serve.
    */
   gestures?: (config: any) => Plugin;
+  /**
+   * Share sheet, copy link and embed codes.
+   *
+   * Video builds only, and only when the embed was given a share URL. The
+   * plugin contributes a control through `registerControl('share')` in
+   * `@scarlett-player/ui`, and the audio UIs render a fixed template with no
+   * control registry, so an audio player has nowhere to put the button.
+   */
+  share?: (config: any) => Plugin;
 }
+
+/**
+ * Control bar layout used when the embed adds the share button.
+ *
+ * `registerControl` never places anything on its own: a registered control
+ * appears only in players whose layout lists its id, and `uiPlugin`'s own
+ * default layout has no `share` slot. So the embed has to hand the UI plugin a
+ * layout, and this is that default with `share` inserted at the head of the
+ * right-hand group.
+ *
+ * It is a copy of `DEFAULT_LAYOUT` in `@scarlett-player/ui`, which that package
+ * does not export. Keep the two in step: a slot added there and missed here
+ * would silently go missing from every embed that turns sharing on. The embed
+ * only uses this layout when `shareUrl` is set, so an embed without sharing
+ * still gets the UI plugin's own default and cannot drift at all.
+ */
+const SHARE_CONTROL_LAYOUT = [
+  'play',
+  'skip-backward',
+  'skip-forward',
+  'volume',
+  'time',
+  'live-indicator',
+  'bandwidth-indicator',
+  'spacer',
+  'share',
+  'settings',
+  'captions',
+  'chromecast',
+  'airplay',
+  'pip',
+  'fullscreen',
+];
 
 /**
  * Create an embed player with the given plugins
@@ -139,6 +181,28 @@ export async function createEmbedPlayer(
       plugins.push(pluginCreators.gestures({}));
     }
 
+    // Add sharing, but only when the embed was given a page URL to share.
+    //
+    // Opt-in on purpose: the button is a visible change to the control bar, so
+    // an embed that has never heard of `shareUrl` must look exactly as it did.
+    // The plugin also has nothing to offer without one - it refuses to fall
+    // back to the media `src`, because playback URLs are frequently signed.
+    // Video only (the audio UIs have no control registry to register into) and
+    // pointless with the controls off, since the button is the only way in.
+    const shareEnabled =
+      type === 'video' && Boolean(config.shareUrl) && config.controls !== false;
+
+    if (shareEnabled && pluginCreators.share) {
+      const shareConfig: Record<string, unknown> = { url: config.shareUrl };
+      // Otherwise the native sheet is offered `document.title`, which inside
+      // iframe.html is the embed page's own title rather than the media's.
+      if (config.title) shareConfig.title = config.title;
+      // Absent is meaningful: the `embed` target removes itself rather than
+      // copying a snippet that points nowhere.
+      if (config.embedBaseUrl) shareConfig.embedBaseUrl = config.embedBaseUrl;
+      plugins.push(pluginCreators.share(shareConfig));
+    }
+
     // Add analytics plugin if available and configured
     if (pluginCreators.analytics && config.analytics?.beaconUrl) {
       plugins.push(pluginCreators.analytics({
@@ -160,6 +224,10 @@ export async function createEmbedPlayer(
         // default is not duplicated in two packages. The audio UIs below have
         // no big play button, which is why this sits in the video branch.
         if (config.bigPlayButton !== undefined) uiConfig.bigPlayButton = config.bigPlayButton;
+        // The share control has to be in the layout to be built at all, and
+        // only a build that ships the plugin can build it. Without both, leave
+        // `controls` unset so the UI plugin keeps its own default layout.
+        if (shareEnabled && pluginCreators.share) uiConfig.controls = SHARE_CONTROL_LAYOUT;
         plugins.push(pluginCreators.videoUI(uiConfig));
       } else if ((type === 'audio' || type === 'audio-mini') && pluginCreators.audioUI) {
         plugins.push(pluginCreators.audioUI({

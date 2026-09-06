@@ -101,6 +101,21 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.album = album;
   }
 
+  // Sharing. Setting a share URL is what adds the share button: absent means
+  // the control bar keeps the layout it has always had. The value is the page
+  // the viewer should be sent to, never the media src.
+  const shareUrl = getAttr(element, 'data-share-url', 'share-url');
+  if (shareUrl) {
+    config.shareUrl = shareUrl;
+  }
+
+  // Only does anything alongside data-share-url: it enables the `embed` target
+  // inside the share sheet.
+  const embedBaseUrl = getAttr(element, 'data-embed-base-url', 'embed-base-url');
+  if (embedBaseUrl) {
+    config.embedBaseUrl = embedBaseUrl;
+  }
+
   // Theme colors
   const brandColor = getAttr(element, 'data-brand-color', 'data-color', 'color');
   if (brandColor) {

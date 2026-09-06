@@ -25,7 +25,7 @@ const player = await createPlayer({
 
 Video:
 
-- **MP4** - H.264/AAC (most common)
+- **MP4 / M4V** - H.264/AAC (most common)
 - **WebM** - VP8/VP9/Opus
 - **MOV** - QuickTime (H.264/AAC)
 - **MKV** - Matroska (browser support varies)
@@ -33,15 +33,20 @@ Video:
 
 Audio:
 
-- **MP3**, **WAV**, **OGG**, **FLAC**, **AAC**, **M4A**, **Opus** (pairs with
-  `@scarlett-player/audio-ui` and `@scarlett-player/media-session` for a full
-  audio player)
+- **MP3**, **WAV**, **OGG**, **FLAC**, **AAC**, **M4A**, **Opus**, **WebA**
+  (pairs with `@scarlett-player/audio-ui` and `@scarlett-player/media-session`
+  for a full audio player)
+
+The plugin claims a source by extension, then asks the browser whether it can
+play that MIME type, so an `.mkv` in a browser without Matroska support is
+declined rather than played into a black frame.
 
 ## Configuration
 
 ```typescript
 createNativePlugin({
-  preload: 'metadata', // 'none' | 'metadata' | 'auto'
+  preload: 'metadata',  // 'none' | 'metadata' | 'auto'
+  loadTimeoutMs: 30000, // Load watchdog; 0 disables
 });
 ```
 
