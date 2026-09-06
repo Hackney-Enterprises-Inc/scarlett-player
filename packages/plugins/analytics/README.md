@@ -43,7 +43,7 @@ pnpm add @scarlett-player/analytics
 
 ```typescript
 import { createPlayer } from '@scarlett-player/core';
-import { hlsPlugin } from '@scarlett-player/hls';
+import { createHLSPlugin } from '@scarlett-player/hls';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
 import { uiPlugin } from '@scarlett-player/ui';
 
@@ -51,7 +51,7 @@ const player = await createPlayer({
   container: '#player',
   src: 'https://example.com/stream.m3u8',
   plugins: [
-    hlsPlugin(),
+    createHLSPlugin(),
     createAnalyticsPlugin({
       beaconUrl: 'https://api.example.com/analytics/beacon',
       videoId: 'event-123',
@@ -88,20 +88,17 @@ const player = await createPlayer({
 
   // Viewer information
   viewerId?: string;              // Auto-generated if not provided
-  viewerPlan?: string;            // 'free', 'ppv', 'subscriber', etc.
+  viewerPlan?: string;            // 'free', 'ppv', 'subscriber', 'premium', or your own
 
-  // Custom dimensions
-  customDimensions?: {
-    promoter?: string;
-    eventType?: string;
-    [key: string]: any;
-  };
+  // Custom dimensions (string, number or boolean values; merged into every beacon)
+  customDimensions?: Record<string, string | number | boolean>;
 
   // Behavior
   heartbeatInterval?: number;     // Default: 10000ms (10 seconds)
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
-  apiKey?: string;                // Optional API key for authentication
+  apiKey?: string;                // Sent as an X-API-Key header on fetch fallbacks
+  customBeacon?: (url: string, payload: BeaconPayload) => void; // Replace the transport (see Testing)
 }
 ```
 
@@ -137,7 +134,9 @@ The plugin automatically tracks these events:
 Track custom business events:
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+import type { IAnalyticsPlugin } from '@scarlett-player/analytics';
+
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 
 // Track PPV purchase
 analytics.trackEvent('ppv_purchase', {
@@ -227,7 +226,7 @@ The plugin calculates a QoE score (0-100) based on:
 Access the score:
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 const qoeScore = analytics.getQoEScore(); // 0-100
 ```
 
@@ -236,15 +235,15 @@ const qoeScore = analytics.getQoEScore(); // 0-100
 Get current session metrics:
 
 ```typescript
-const analytics = player.plugins.get('analytics');
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
 const metrics = analytics.getMetrics();
 
 console.log({
-  viewId: metrics.viewId,
+  viewId: analytics.getViewId(),
+  sessionId: analytics.getSessionId(),
   watchTime: metrics.watchTime,
   playTime: metrics.playTime,
   rebufferCount: metrics.rebufferCount,
-  startupTime: metrics.startupTime,
   qoeScore: analytics.getQoEScore(),
 });
 ```
@@ -314,7 +313,7 @@ const player = await createPlayer({
   container: '#player',
   src: event.streamUrl,
   plugins: [
-    hlsPlugin({
+    createHLSPlugin({
       lowLatencyMode: true,
     }),
     createAnalyticsPlugin({
@@ -350,7 +349,7 @@ const player = await createPlayer({
 
 // Track PPV purchase
 if (purchaseSuccessful) {
-  const analytics = player.plugins.get('analytics');
+  const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
   analytics.trackEvent('ppv_purchase', {
     price: event.price,
     currency: 'USD',
@@ -377,7 +376,7 @@ const hasAnalyticsConsent = cookieConsent.analytics;
 const player = await createPlayer({
   container: '#player',
   plugins: [
-    hlsPlugin(),
+    createHLSPlugin(),
     // Only load analytics if user consented
     ...(hasAnalyticsConsent ? [
       createAnalyticsPlugin({
@@ -395,13 +394,13 @@ const player = await createPlayer({
 The plugin includes comprehensive tests. Run them:
 
 ```bash
-npm test
+pnpm test
 ```
 
 For coverage:
 
 ```bash
-npm run test:coverage
+pnpm test:coverage
 ```
 
 ### Mock Beacon for Testing
@@ -468,6 +467,6 @@ For issues and questions:
 
 ## Related Packages
 
-- [@scarlett-player/core](../core) - Core player
+- [@scarlett-player/core](../../core) - Core player
 - [@scarlett-player/hls](../hls) - HLS provider
 - [@scarlett-player/ui](../ui) - UI components

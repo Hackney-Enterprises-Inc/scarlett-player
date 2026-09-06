@@ -50,7 +50,13 @@ This is the case the override exists for. Inside `iframe.html`, `window.location
 <iframe src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=...&shareUrl=https%3A%2F%2Fexample.com%2Fwatch%2Fabc"></iframe>
 ```
 
-The `embed` target generates snippets with `shareUrl` already set.
+`iframe.html` in `@scarlett-player/embed` reads that parameter (`shareUrl` or `share-url`) and hands it to this plugin as `url`. The parameter is also the switch: with no share URL there is no button, so an existing embed does not grow a control it never asked for. It works the same way through the data attributes and the programmatic API, as `data-share-url` / `shareUrl`.
+
+Two things follow from where the button lives. It is a registered control in `@scarlett-player/ui`, so it is **video only** - the audio UIs render a fixed template with no control registry - and it needs the controls to be on.
+
+The `embed` target works in there too: `iframe.html` passes its own URL, query string and all, as `embedBaseUrl`, so the snippet the sheet copies is a complete embed of the video being watched. Snippets always carry `shareUrl`, so a share from inside a copied embed still points at the real page.
+
+Check your embed bundle is new enough: up to and including `@scarlett-player/embed` 1.8.0 the parameter was ignored, because no embed build shipped this plugin.
 
 ## Mobile behaviour
 
@@ -72,6 +78,8 @@ Mobile is the primary path, not an adaptation of the desktop one.
 | `timestampParam` | `string` | `'t'` | Query parameter name |
 | `roundTimestamp` | `boolean` | `true` | Round to whole seconds |
 | `targets` | `Array<string \| ShareTarget>` | `['native', 'copy', 'embed']` | Targets, in order |
+| `buttonIcon` | `string` | three-node share glyph | Inline SVG for the control-bar button. `SHARE_ICONS.upload` is the iOS-style tray-and-arrow |
+| `buttonLabel` | `string` | `'Share'` | Accessible label for the control-bar button |
 | `embedBaseUrl` | `string` | - | Enables the `embed` target |
 | `embedSnippet` | `(ctx) => string` | - | Override the generated snippet |
 | `onShare` | `(targetId, url) => void` | - | Analytics hook |

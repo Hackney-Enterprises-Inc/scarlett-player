@@ -11,6 +11,7 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 - **Multi-tenant Ready** - Brand customization via data attributes
 - **Unified API** - Single API for video, audio, and compact audio players
 - **iframe Support** - Helper page for URL-based iframe embeds
+- **Sharing** - Opt-in share button on video: OS share sheet, copy link, embed code
 
 ## Installation
 
@@ -136,7 +137,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-controls` | boolean | `true` | Show/hide UI controls |
 | `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
 | `data-gestures` | boolean | `true` | Touch gestures on the picture (video only): double-tap the sides to seek, tap to toggle the controls. Touch only, by input type, so a mouse never triggers them. Set `false` if your page owns those gestures |
-| `data-brand-color` | string | - | Accent color (e.g., `#e50914`) |
+| `data-brand-color` | string | - | Accent color (e.g., `#e50914`). `data-color` is accepted as an alias |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |
 | `data-hide-delay` | number | `3000` | Auto-hide delay (ms) |
@@ -148,6 +149,8 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-playback-rate` | number | `1.0` | Playback speed |
 | `data-start-time` | number | `0` | Start position (seconds) |
 | `data-class` | string | - | Custom CSS class(es) |
+| `data-share-url` | string | - | Page URL to share. Setting it adds a share button to the video control bar; leaving it out changes nothing. Never the media `src`, see [Sharing](#sharing) |
+| `data-embed-base-url` | string | - | URL of your `iframe.html` deployment. Only read alongside `data-share-url`, and only to enable the `embed` target in the share sheet |
 
 #### Audio-specific Attributes
 
@@ -157,6 +160,17 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-artist` | string | Artist/creator name |
 | `data-album` | string | Album name |
 | `data-artwork` | string | Album art / cover image URL |
+| `data-playlist` | JSON | Array of `{ src, title?, artist?, poster?, artwork?, duration? }` (Full and Audio builds) |
+
+#### Analytics Attributes (Full build)
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `data-analytics-beacon-url` | string | Beacon endpoint. Setting it enables the analytics plugin |
+| `data-analytics-video-id` | string | Video identifier sent with every beacon |
+| `data-analytics-api-key` | string | Optional API key |
+
+The auto-initializer also accepts `data-sp` in place of `data-scarlett-player`.
 
 ### 2. Programmatic API
 
@@ -254,15 +268,6 @@ For secure, sandboxed embeds:
   allow="autoplay; fullscreen; picture-in-picture"
 ></iframe>
 
-<!-- Audio player iframe -->
-<iframe
-  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/audio.m3u8&type=audio"
-  width="100%"
-  height="120"
-  frameborder="0"
-  allow="autoplay"
-></iframe>
-
 <!-- With customization -->
 <iframe
   src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https://example.com/stream.m3u8&autoplay=true&muted=true&brand-color=%23e50914"
@@ -276,13 +281,27 @@ For secure, sandboxed embeds:
 
 #### iframe URL Parameters
 
-All data attributes work as URL parameters (use kebab-case):
+`iframe.html` loads the Full build and reads these URL parameters (kebab-case
+or camelCase):
 - `src` (required)
-- `type` - `video`, `audio`, or `audio-mini`
-- `autoplay`, `muted`, `loop`
+- `autoplay`, `muted`, `loop` - `true` or `1` to enable
+- `controls` - `false` or `0` to hide the control bar
 - `poster`
 - `brand-color`, `primary-color`, `background-color`
 - `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
+- `hide-delay`, `playback-rate`, `start-time`
+- `share-url` - the page the viewer should be sent to. Setting it adds the share button; omitting it leaves the control bar unchanged. See [Sharing](#sharing)
+
+`share-url` is the one parameter the player cannot work out for itself. Inside
+the iframe, `window.location.href` is the player page rather than your page, and
+cross-origin rules stop anything reading the parent, so a share would otherwise
+offer a link to the bare embed. There is no `embed-base-url` parameter: the page
+uses its own URL, query string and all, so the sheet's **Embed** option copies a
+working `<iframe>` snippet for the video the viewer is watching.
+
+The iframe page always creates a video player: it does not read a `type`
+parameter in this version. For an audio or compact audio embed use the data
+attributes or the programmatic API on your own page.
 
 ## Player Types
 
@@ -298,7 +317,7 @@ Takes an HLS manifest or a progressive video file.
 
 ### Audio Player
 
-Full-sized audio player with waveform, track info, and media session integration.
+Full-sized audio player with album artwork, track info, and media session integration.
 Takes an HLS manifest or a progressive audio file.
 
 ```html
@@ -313,6 +332,53 @@ Minimal audio player for space-constrained layouts (64px height).
 ```html
 <div data-scarlett-player data-src="audio.m3u8" data-type="audio-mini"></div>
 ```
+
+## Sharing
+
+Off unless you ask for it. Give the embed the page URL and a share button
+appears in the video control bar; leave it out and the control bar is exactly
+what it has always been.
+
+```html
+<div
+  data-scarlett-player
+  data-src="https://example.com/stream.m3u8"
+  data-share-url="https://example.com/watch/abc"
+></div>
+```
+
+```html
+<iframe
+  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=https%3A%2F%2Fexample.com%2Fstream.m3u8&share-url=https%3A%2F%2Fexample.com%2Fwatch%2Fabc"
+  width="640" height="360" frameborder="0" allowfullscreen
+  allow="autoplay; fullscreen; picture-in-picture"
+></iframe>
+```
+
+The button opens the OS share sheet on a phone and an in-player sheet
+everywhere else, offering copy link and, where a base URL is known, an embed
+code. Everything it shares carries the current playback position.
+
+**What gets shared is `data-share-url`, never `data-src`.** There is no
+fallback, because playback URLs are frequently signed: sharing one would leak a
+credential and hand the recipient a link that expires. That is also why the
+embed cannot supply a default and the button stays off until you pass one.
+
+A few limits worth knowing:
+
+- **Video only.** The button is a registered control in the video control bar,
+  and the audio UIs render a fixed template with no control registry, so
+  `data-type="audio"` and `audio-mini` ignore `data-share-url`. The Audio build
+  ships no share plugin at all.
+- **Needs the controls.** `data-controls="false"` removes the only way in, so
+  sharing is skipped along with the rest of the UI.
+- **The embed code is opt-in separately.** The sheet's **Embed** option needs to
+  know where your `iframe.html` lives: pass `data-embed-base-url`, or use
+  `iframe.html` itself, which knows its own URL. Without it the option is left
+  out rather than shown broken.
+
+Full configuration (custom targets, icon, analytics hooks) lives in
+[`@scarlett-player/share`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/share).
 
 ## Multi-Tenant Branding
 
@@ -342,9 +408,9 @@ All builds are available at `https://assets.thestreamplatform.com/scarlett-playe
 
 | Build | Files | Features |
 |-------|-------|----------|
-| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session |
-| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight) |
-| **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session, on `hls.js/light` (no ID3) |
+| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session + Sharing |
+| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight), Sharing |
+| **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session, on `hls.js/light` (no ID3, no sharing) |
 
 **Which build should I use?**
 
@@ -394,12 +460,13 @@ const options: EmbedPlayerOptions = {
 
 ## Browser Support
 
-- Modern browsers (ES2020+)
-- Chrome/Edge 90+
-- Firefox 88+
+- Chrome / Edge 80+
+- Firefox 78+
 - Safari 14+
 - iOS Safari 14+
 - Android Chrome 90+
+
+All three bundles are built for ES2020.
 
 ## Keyboard Shortcuts
 
@@ -480,8 +547,9 @@ MIT
 
 ## Documentation
 
-For detailed implementation docs including Laravel integration, see:
-- [Embed Implementation Guide](../../.claude/docs/embed-implementation.md)
+- [Architecture](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/architecture.md)
+- [Plugin authoring](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/plugin-authoring.md)
+- Live demo: https://scarlettplayer.com
 
 ## Support
 

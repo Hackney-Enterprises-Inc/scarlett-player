@@ -32,15 +32,20 @@ AirPlay is only supported in **Safari** on macOS and iOS.
 ## API
 
 ```typescript
+import { isAirPlaySupported, type IAirPlayPlugin } from '@scarlett-player/airplay';
+
+// Feature-detect before registering the plugin (optional)
+isAirPlaySupported();  // true when the browser exposes the WebKit AirPlay API
+
 // Check if AirPlay is available
-const plugin = player.getPlugin('airplay');
-plugin.isAvailable();  // true if AirPlay devices detected
+const plugin = player.getPlugin<IAirPlayPlugin>('airplay');
+plugin?.isAvailable();  // true if AirPlay devices detected
 
 // Check if currently casting
-plugin.isActive();     // true if casting to AirPlay
+plugin?.isActive();     // true if casting to AirPlay
 
 // Show device picker
-plugin.showPicker();
+await plugin?.showPicker();
 ```
 
 ## Events
@@ -48,6 +53,10 @@ plugin.showPicker();
 ```typescript
 player.on('airplay:available', () => {
   // AirPlay devices detected
+});
+
+player.on('airplay:unavailable', () => {
+  // No AirPlay devices reachable
 });
 
 player.on('airplay:connected', () => {

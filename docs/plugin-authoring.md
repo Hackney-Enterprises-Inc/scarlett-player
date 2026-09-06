@@ -1,6 +1,6 @@
 # Writing a Scarlett Player Plugin
 
-**Last Updated**: September 2, 2026 (player 1.7.0)
+**Last Updated**: September 6, 2026 (player 1.8.0)
 
 A plugin can add three things to the player: **events**, **state**, and **control-bar controls**. All three are open - a plugin package extends them without editing `@scarlett-player/core` or `@scarlett-player/ui`.
 
@@ -171,6 +171,10 @@ Three consequences for a control that owns a popover:
 
 The built-in controls meet WCAG 2.5.5 - 44x44px minimum touch targets, real ARIA labels, keyboard navigation with a focus trap on menus, and visible focus states. Match that. `SettingsMenu` is the reference implementation for a popover control.
 
+### Fullscreen
+
+A control that offers fullscreen goes through core's `enterFullscreen(api.container)`, `exitFullscreen(api.container)` and `isFullscreen(api.container)` (runtime exports of `@scarlett-player/core` since 1.8.0), the way `FullscreenButton` and the `f` shortcut do. Do not call `requestFullscreen()` on the DOM yourself: the helpers carry the iPhone fallback, and the player's `fullscreen` state key and `fullscreen:change` event are driven by the browser's own events, so they stay correct whichever path was taken. `enterFullscreen()` rejects where no fullscreen API exists; catch and ignore it as the built-ins do.
+
 ## Testing
 
 Plugins are tested against a mock `IPluginAPI` - see `packages/plugins/captions/tests/captions.test.ts` for the pattern. Two things to know:
@@ -180,7 +184,7 @@ Plugins are tested against a mock `IPluginAPI` - see `packages/plugins/captions/
 
 ## Checklist for a new plugin package
 
-- [ ] Mirrors `packages/plugins/captions/` layout - `package.json`, `tsconfig.json`, `tsconfig.typecheck.json`, `vitest.config.ts`, `src/`, `tests/`
+- [ ] Mirrors `packages/plugins/captions/` layout - `package.json`, `tsconfig.json`, `tsconfig.typecheck.json`, `tsup.config.ts` (entries, `dts: true`, and the `__PKG_VERSION__` define that `src/version.ts` reads so the plugin descriptor reports the published version), `vitest.config.ts`, `src/`, `tests/`
 - [ ] `package.json` declares both a `typecheck` and a `test` script (`scripts/check-package-scripts.mjs` fails CI otherwise, because pnpm's recursive run silently skips a package that has neither)
 - [ ] `files: ["dist"]`, so only build output is published
 - [ ] `@scarlett-player/core` as a peer dependency; `@scarlett-player/ui` peer *and optional* if it registers a control

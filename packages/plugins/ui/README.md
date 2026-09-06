@@ -108,6 +108,24 @@ that, the Speed sub-panel is 253px tall against a 211px portrait phone player
 and loses its Back header and its first three speeds to the host's
 `overflow: hidden`.
 
+## Layout
+
+`controls` is the order of slots in the bar. The default is:
+
+```typescript
+uiPlugin({
+  controls: [
+    'play', 'skip-backward', 'skip-forward', 'volume', 'time',
+    'live-indicator', 'bandwidth-indicator', 'spacer', 'settings',
+    'captions', 'chromecast', 'airplay', 'pip', 'fullscreen',
+  ],
+});
+```
+
+Any id a plugin registers through the control registry (`share`, `chapters`,
+`playlist-previous`, `playlist-next`, ...) can be placed in the same list. A
+control whose plugin is not loaded is skipped.
+
 ## Keyboard Shortcuts
 
 | Key | Action |

@@ -44,6 +44,9 @@ const pluginCreators: PluginCreators = {
   mediaSession: createMediaSessionPlugin,
   // Video UI not available in this build
   // Analytics not available in this build
+  // Share not available in this build: the share button is a registered
+  // control in @scarlett-player/ui, and the audio UIs render a fixed template
+  // with no control registry, so there is nowhere to put it.
 };
 
 // Create and expose global API

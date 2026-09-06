@@ -42,6 +42,8 @@ All options are optional; defaults shown.
 
 ```typescript
 createHLSPlugin({
+  debug: false,                 // hls.js debug logging
+
   // Buffering
   maxBufferLength: 30,          // Forward buffer target (seconds)
   maxMaxBufferLength: 600,      // Hard forward buffer cap (seconds)
@@ -94,15 +96,15 @@ import { createHLSPlugin } from '@scarlett-player/hls/light';
 ## Quality Selection
 
 ```typescript
-// Get available qualities
+// Get available qualities (HLSQualityLevel[], empty on native Safari HLS)
 const qualities = player.getQualities();
-// [{ index: 0, height: 1080, bitrate: 5000000 }, ...]
+// [{ index: 0, width: 1920, height: 1080, bitrate: 5000000, label: '1080p', codec: 'avc1,mp4a' }, ...]
 
-// Set quality (use -1 for auto)
-player.setQuality(0);  // Highest quality
+// Set quality by index (use -1 for auto)
+player.setQuality(0);
 player.setQuality(-1); // Auto/ABR
 
-// Get current quality
+// Get current quality index (-1 while auto)
 const current = player.getCurrentQuality();
 ```
 

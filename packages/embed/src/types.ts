@@ -42,6 +42,30 @@ export interface EmbedConfig {
    * Set it to `false` on a third-party page that owns those gestures itself.
    */
   gestures?: boolean;
+  /**
+   * Canonical page URL to share, which also turns the share button on (video
+   * only).
+   *
+   * There is no default and no fallback to the media `src`: playback URLs are
+   * frequently signed, so sharing one leaks a credential and produces a link
+   * that expires. Leaving this unset leaves the control bar exactly as it was,
+   * which is why an existing embed never grows a button it did not ask for.
+   *
+   * Inside an iframe embed this is the parameter that makes sharing correct at
+   * all. `window.location.href` there is the player page, not the page the
+   * viewer is on, and cross-origin rules stop the plugin reading the parent, so
+   * the host has to pass the real page in.
+   */
+  shareUrl?: string;
+  /**
+   * Base URL of the iframe embed page, which enables the `embed` share target.
+   *
+   * Only meaningful alongside {@link EmbedConfig.shareUrl}. The share sheet
+   * drops the `embed` target rather than offering a broken snippet when this is
+   * absent, so a share button without it still offers the OS sheet and copy
+   * link. `iframe.html` sets it to its own URL automatically.
+   */
+  embedBaseUrl?: string;
   /** Brand/accent color for the player UI */
   brandColor?: string;
   /** Primary color for UI elements */

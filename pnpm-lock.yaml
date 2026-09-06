@@ -107,6 +107,9 @@ importers:
       '@scarlett-player/playlist':
         specifier: workspace:*
         version: link:../plugins/playlist
+      '@scarlett-player/share':
+        specifier: workspace:*
+        version: link:../plugins/share
       '@scarlett-player/ui':
         specifier: workspace:*
         version: link:../plugins/ui

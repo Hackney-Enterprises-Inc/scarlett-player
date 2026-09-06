@@ -1,7 +1,7 @@
 # Scarlett Player - Architecture
 
-**Version**: 1.7.0 (fixed versioning: every package in the workspace ships this number)
-**Last Updated**: September 2, 2026
+**Version**: 1.8.0 (fixed versioning: every package in the workspace ships this number)
+**Last Updated**: September 6, 2026
 
 This describes the player as it is built, not as it was planned. Every class,
 method and event named here exists in `packages/*/src`. Where a name in an
@@ -90,9 +90,11 @@ Seventeen packages, all published at one version by a fixed Changesets group.
 | `packages/plugins/chromecast` | `@scarlett-player/chromecast` |
 | `packages/plugins/analytics` | `@scarlett-player/analytics` |
 
-There is no React package and no presets package. `packages/plugins/*` also
-contains directories that hold no source; a name under `packages/plugins/`
-means a package only when it has a `package.json`.
+There is no React package and no presets package. Every directory under
+`packages/plugins/` is one of the fourteen plugin packages above; the empty
+placeholder directories that used to sit beside them were deleted on
+2026-09-02. A name under `packages/plugins/` means a package only when it has a
+`package.json`.
 
 ## Lifecycle
 
@@ -103,8 +105,10 @@ selector, throwing when neither resolves), builds the `EventBus`,
 `StateManager`, `Logger`, `ErrorHandler` and `PluginManager`, wires the three
 listeners that keep the `error` state key in sync (`error` sets it,
 `media:loaded` clears it, `media:error` is recorded through
-`ErrorHandler.record()` without flipping the state), and calls
-`PluginManager.register()` for each plugin in `options.plugins`.
+`ErrorHandler.record()` without flipping the state), wires the four fullscreen
+listeners through the private `wireFullscreenListeners()` (see Fullscreen
+below), and calls `PluginManager.register()` for each plugin in
+`options.plugins`.
 
 Registration is all the constructor does to plugins. No plugin's `init()` runs
 yet, and no source is loaded.
@@ -194,8 +198,8 @@ a generic one.
 
 `destroy()` increments `loadGeneration` so in-flight loads self-cancel through
 the mechanism `load()` already trusts, clears the pending seek-resume timeout,
-emits `player:destroy`, then `PluginManager.destroyAll()`, `EventBus.destroy()`
-and `StateManager.destroy()`. Every public method calls the private
+removes the four fullscreen listeners, emits `player:destroy`, then
+`PluginManager.destroyAll()`, `EventBus.destroy()` and `StateManager.destroy()`. Every public method calls the private
 `checkDestroyed()` first and throws on a destroyed player. The state getters do
 not: they read through `StateManager`, which raises its own destroyed-specific
 error rather than the misleading unknown-key one.
@@ -425,6 +429,45 @@ The UI plugin's `ErrorOverlay` renders viewer-facing copy per `ErrorCode`, shows
 the reconnecting state while the provider self-heals, and emits `error:retry`
 when Try Again is pressed, which core's own listener turns back into a `load()`.
 
+## Fullscreen
+
+Core owns fullscreen since 1.8.0. `packages/core/src/fullscreen.ts` exports
+`enterFullscreen(container)`, `exitFullscreen(container)` and
+`isFullscreen(container)` as runtime exports, and every way in goes through
+them: `ScarlettPlayer.requestFullscreen()`, `exitFullscreen()` and
+`toggleFullscreen()`, the UI package's `FullscreenButton` and its `f` shortcut.
+Before that there were three implementations, and only the button carried the
+iPhone fallback, so `player.requestFullscreen()` (what the Vue wrapper and the
+`useScarlettPlayer` composable call) did nothing at all on an iPhone.
+
+- `enterFullscreen()` tries `Element.requestFullscreen`, then
+  `webkitRequestFullscreen`, then the iPhone's `video.webkitEnterFullscreen()`
+  on the container's video element, looked up on every call because a provider
+  creates that element per source. Exhausting all three throws rather than
+  resolving: a silent no-op would arm the optimistic write below and announce a
+  transition that never happened.
+- `exitFullscreen()` checks the video's `webkitDisplayingFullscreen` FIRST and
+  calls `webkitExitFullscreen()` there, because a WebKit that exposes
+  `document.exitFullscreen` while the native player is up has no fullscreen
+  element and would reject. Then `document.exitFullscreen`, then
+  `webkitExitFullscreen`.
+- `isFullscreen()` reads the browser (`fullscreenElement`,
+  `webkitFullscreenElement`, `webkitDisplayingFullscreen`), never the state
+  key, so a stale key cannot invert a toggle.
+
+The `fullscreen` state key is written from real browser events. The player
+listens for `fullscreenchange` and `webkitfullscreenchange` on the document,
+and for `webkitbeginfullscreen` and `webkitendfullscreen` in the capture phase
+on its container, because those two are dispatched on the video element and do
+not bubble. Each one calls the private `setFullscreenState()`, which writes the
+key and emits `fullscreen:change` only when the value actually changed. The
+spec fires `fullscreenchange` before `requestFullscreen()` resolves, so the
+optimistic write that follows the await in `requestFullscreen()` and
+`exitFullscreen()` runs only where the browser stayed silent (the private
+`fullscreenAnnounced` flag): jsdom never fires the event, and neither does the
+iPhone's native player until it has finished opening. All four listeners are
+removed in `destroy()`.
+
 ## Data flow
 
 ```
@@ -460,8 +503,13 @@ caused state to drift from the element.
 
 - `@scarlett-player/core`, `@scarlett-player/vue` and `@scarlett-player/embed`
   build with Vite; every plugin builds with tsup and emits its own declarations
-  through `--dts`. Core's build runs `tsc` first and Vite second into the same
-  `dist`, which is why emptying that directory is wrong for it.
+  through `dts: true` in its `tsup.config.ts`, which also `define`s the
+  package's own version for `src/version.ts`. Core's build is
+  `rimraf dist tsconfig.tsbuildinfo && tsc && vite build`: `tsc` emits
+  declarations only (`emitDeclarationOnly`) and Vite writes the runtime bundles
+  into the same `dist`, so the Vite config pins `emptyOutDir: false`. Emptying
+  `dist` between the two steps would delete the declarations that `types` and
+  every plugin's tsconfig `paths` point at.
 - Every package restricts `files` to its build output, so nothing but `dist`
   is published (embed also ships its `iframe.html`).
 - hls.js is loaded lazily by `loadHlsJs()` through a dynamic `import`, so a page

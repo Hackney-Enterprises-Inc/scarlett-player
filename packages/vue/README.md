@@ -30,7 +30,7 @@ npm install @scarlett-player/vue @scarlett-player/core
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ScarlettPlayerComponent } from '@scarlett-player/vue';
+import { ScarlettPlayerComponent as ScarlettPlayer } from '@scarlett-player/vue';
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
@@ -60,7 +60,8 @@ function onPause() {
   console.log('Paused');
 }
 
-function onTimeUpdate({ currentTime, duration }) {
+function onTimeUpdate({ currentTime }) {
+  const duration = playerRef.value?.player?.duration ?? 0;
   console.log(`Time: ${currentTime}s / ${duration}s`);
 }
 
@@ -218,15 +219,15 @@ component to rebuild the player with new options.
 | `pause` | - | Playback paused |
 | `seeking` | `{ time: number }` | Seeking to new time |
 | `seeked` | - | Seek completed |
-| `timeupdate` | `{ currentTime: number, duration: number }` | Time updated |
+| `timeupdate` | `{ currentTime: number }` | Time updated |
 | `volumechange` | `{ volume: number, muted: boolean }` | Volume/mute changed |
 | `ratechange` | `{ rate: number }` | Playback rate changed |
 | `ended` | - | Playback ended |
-| `error` | `Error` | Error occurred |
-| `loaded` | `any` | Media loaded |
-| `loadedmetadata` | `any` | Metadata loaded |
+| `error` | `PlayerError` (from the player) or `Error` (init failed) | Error occurred |
+| `loaded` | `{ src: string, type: string }` | Media loaded |
+| `loadedmetadata` | `{ duration: number }` | Metadata loaded |
 | `qualitychange` | `{ quality: string, auto: boolean }` | Quality level changed |
-| `qualitylevels` | `any` | Quality levels available |
+| `qualitylevels` | `{ levels: Array<{ id: string, label: string }> }` | Quality levels available |
 | `fullscreenchange` | `{ fullscreen: boolean }` | Fullscreen state changed |
 | `destroy` | - | Player destroyed |
 
@@ -241,6 +242,9 @@ Access player methods via template ref:
 
 <script setup>
 const playerRef = ref();
+
+// The underlying ScarlettPlayer instance, for anything not proxied below
+playerRef.value.player;
 
 // Access methods
 playerRef.value.play();
@@ -403,7 +407,7 @@ import type {
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { ScarlettPlayerComponent } from '@scarlett-player/vue';
+import { ScarlettPlayerComponent as ScarlettPlayer } from '@scarlett-player/vue';
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { uiPlugin } from '@scarlett-player/ui';
 
@@ -424,9 +428,9 @@ const progressPercent = computed(() => {
   return (currentTime.value / duration.value) * 100;
 });
 
-function onTimeUpdate({ currentTime: ct, duration: d }) {
+function onTimeUpdate({ currentTime: ct }) {
   currentTime.value = ct;
-  duration.value = d;
+  duration.value = playerRef.value?.player?.duration ?? 0;
 }
 
 function playPause() {
@@ -477,7 +481,7 @@ function loadQualities() {
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ScarlettPlayerComponent } from '@scarlett-player/vue';
+import { ScarlettPlayerComponent as ScarlettPlayer } from '@scarlett-player/vue';
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { uiPlugin } from '@scarlett-player/ui';
 
@@ -490,8 +494,9 @@ const plugins = [
   uiPlugin(),
 ];
 
-function onMetadataLoaded(payload) {
-  isLive.value = payload.live ?? false;
+function onMetadataLoaded() {
+  // The payload is { duration }; the live flag lives on the player instance.
+  isLive.value = playerRef.value?.player?.live ?? false;
 }
 
 function goToLive() {

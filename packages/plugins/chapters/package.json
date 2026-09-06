@@ -30,8 +30,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.7.0",
-    "@scarlett-player/ui": "^1.7.0"
+    "@scarlett-player/core": "^1.8.0",
+    "@scarlett-player/ui": "^1.8.0"
   },
   "peerDependenciesMeta": {
     "@scarlett-player/ui": {

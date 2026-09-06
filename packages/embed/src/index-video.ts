@@ -5,6 +5,7 @@
  * - Video UI (full video player controls)
  * - HLS streaming
  * - Native progressive playback (MP4, WebM, MOV, ...)
+ * - Sharing (opt in via `shareUrl`)
  *
  * Does NOT include: Audio UI, Analytics, Playlist, Media Session
  * Use embed.js for full features or embed.audio.js for audio.
@@ -18,6 +19,7 @@ import { uiPlugin } from '@scarlett-player/ui';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
 import { createGesturesPlugin } from '@scarlett-player/gestures';
+import { createSharePlugin } from '@scarlett-player/share';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 import { PKG_VERSION } from './version';
@@ -37,6 +39,7 @@ const pluginCreators: PluginCreators = {
   watermark: createWatermarkPlugin,
   captions: createCaptionsPlugin,
   gestures: createGesturesPlugin,
+  share: createSharePlugin,
   // Audio UI not available in this build
   // Analytics not available in this build
   // Playlist not available in this build

@@ -28,7 +28,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,700+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **1,800+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -178,10 +178,11 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
 ## CDN Embed (No Bundler)
 
 ```html
-<!-- Full build (video + audio + HLS + analytics + playlist) -->
+<!-- Full build: video UI + audio UI, HLS, native, analytics, playlist,
+     media session, captions, gestures, watermark, share -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Or pin a version: .../scarlett-player/v1.5.0/embed.umd.cjs -->
+<!-- Or pin a version: .../scarlett-player/v1.8.0/embed.umd.cjs -->
 
 <!-- Video player via data attributes -->
 <div data-scarlett-player
@@ -308,14 +309,26 @@ controls, testing, and the checklist for a new package.
 
 ## Development
 
+### Requirements
+
+Node `>=18` and pnpm `>=8`, per `engines` in the root `package.json`. pnpm
+`10.25.0` is pinned by `packageManager`, and CI installs pnpm from that field
+rather than from a version pin of its own.
+
+CI runs on Node 24 and sets `NODE_OPTIONS=--no-experimental-require-module`
+for `pnpm test`. That is a workaround for a teardown crash, not a test
+failure: vitest 1.x predates Node 24's `require(esm)` and the two race when
+vitest tears down its worker threads, aborting the process after every test
+has already passed. It goes away once vitest moves to 3.x.
+
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all tests (1,700+)
+pnpm test             # Run all tests (1,800+)
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
-pnpm validate         # lint + typecheck + test + build (CI check)
+pnpm validate         # package-script check + lint + typecheck + test + build
 node demo/build.cjs   # Rebuild demo site
 ```
 
@@ -384,6 +397,9 @@ scripts/            # Browser verification harness + HLS fixture generator
 - iOS Safari 14+
 - Android Chrome 90+
 
+The published bundles target ES2020 (`build.target` in the core and embed Vite
+configs), so no transpilation below that is applied.
+
 ## Roadmap
 
 - [x] Core player engine
@@ -410,7 +426,7 @@ scripts/            # Browser verification harness + HLS fixture generator
 - [ ] DRM support - Sprint 2
 - [ ] Low-latency HLS (LL-HLS) - Sprint 2
 - [ ] Internationalization (i18n) - Sprint 2
-- [ ] React component wrapper - Sprint 3
+- [ ] React component wrapper
 - [ ] Web Component wrapper - Sprint 3
 
 ## License

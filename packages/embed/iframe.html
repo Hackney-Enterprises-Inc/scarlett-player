@@ -54,6 +54,21 @@
       config.bigPlayButton = bigPlayButton !== 'false' && bigPlayButton !== '0';
     }
 
+    // Share button. This is the parameter the share plugin's iframe story is
+    // built on: in here window.location.href is the PLAYER page, and
+    // cross-origin rules stop anything reading the parent, so the real page
+    // has to be handed in. Absent means no button at all - an embed that has
+    // never passed it keeps the control bar it has always had.
+    const shareUrl = params.get('shareUrl') ?? params.get('share-url');
+    if (shareUrl) {
+      config.shareUrl = shareUrl;
+      // This page IS the embed page, so its own URL is exactly the base an
+      // embed snippet needs - query string included, which is what carries
+      // src, poster and the branding into the copied iframe. The plugin
+      // rewrites startTime and shareUrl on top of it.
+      config.embedBaseUrl = window.location.href;
+    }
+
     // Parse numeric params
     const hideDelay = params.get('hideDelay') || params.get('hide-delay');
     if (hideDelay) {

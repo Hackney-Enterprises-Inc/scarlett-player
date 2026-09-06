@@ -70,6 +70,7 @@
     "@scarlett-player/watermark": "workspace:*",
     "@scarlett-player/captions": "workspace:*",
     "@scarlett-player/gestures": "workspace:*",
+    "@scarlett-player/share": "workspace:*",
     "hls.js": "^1.6.0"
   },
   "devDependencies": {
