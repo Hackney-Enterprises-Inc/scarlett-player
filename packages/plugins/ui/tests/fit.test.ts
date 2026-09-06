@@ -94,12 +94,17 @@ describe('DEFAULT_PRIORITY', () => {
     }
   });
 
-  it('hides only the two items that convey status rather than an action', () => {
+  it('hides the items a tray cannot serve', () => {
+    // Two of the three are status rather than action (a bandwidth glyph and a
+    // readout say nothing from inside a tray). `quality` is there for a
+    // different reason: it owns a popover, and the popover's height bound is
+    // sized for a menu anchored in the bar, so a built-in that owns one must
+    // not overflow into the tray, which sits above the bar.
     const hides = Object.entries(DEFAULT_PRIORITY)
       .filter(([, rule]) => rule.exit === 'hide')
       .map(([slot]) => slot);
 
-    expect(hides.sort()).toEqual(['bandwidth-indicator', 'time']);
+    expect(hides.sort()).toEqual(['bandwidth-indicator', 'quality', 'time']);
   });
 });
 

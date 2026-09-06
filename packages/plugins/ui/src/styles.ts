@@ -641,8 +641,11 @@ export const styles = `
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  /* Bounded to the player's height, written by the UI plugin's ResizeObserver
-     as max(120px, container height - 72px). The Speed sub-panel is 253px (a
+  /* Bounded to the room above the control bar, written by the UI plugin's
+     ResizeObserver as max(120px, container height - the bar's measured height
+     - 16px). The bar is measured rather than assumed because its
+     padding-bottom carries the safe-area inset in fullscreen, which moves the
+     anchor these menus hang from. The Speed sub-panel is 253px (a
      37px header plus six 36px rows) against a 211px portrait phone player, so
      without this the host's overflow: hidden cuts off the Back header and the
      first three speeds and playback speed is unreachable (measured at 375x211

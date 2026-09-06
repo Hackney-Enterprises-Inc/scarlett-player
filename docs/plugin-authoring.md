@@ -147,13 +147,22 @@ when it does not fit. Every registered control defaults to rank 3, which puts it
 ahead of the cast buttons and behind PiP, and sends it to the tray rather than
 off screen.
 
-Two consequences for a control that owns a popover:
+Three consequences for a control that owns a popover:
 
 - Position the popover relative to your own wrapper element (as `SettingsMenu`
   does), or mount it on `api.container` (as the share plugin's sheet does).
   Anything positioned against the control bar will follow your button into the
   tray. The tray keeps `overflow: visible`, so a popover anchored to your own
   wrapper still opens upward out of it.
+- `--sp-menu-max-height`, the height bound the built-in menus read, is sized for
+  a menu anchored in the control bar: it is the container's height less the
+  bar's own height and a small margin. The tray strip sits above the bar, so a
+  popover opened from the tray starts higher than that bound assumes and can run
+  off the top of the player. If your control owns a popover and wants the bound,
+  either ask the host to pin the control
+  (`uiPlugin({ priority: { yourId: 'never' } })`) or size the popover from your
+  own anchor. It is why the built-in `quality` control hides rather than moving
+  to the tray.
 - A host can pin your control with `uiPlugin({ priority: { yourId: 'never' } })`,
   or re-rank it with a number. Nothing in your plugin needs to change either
   way.

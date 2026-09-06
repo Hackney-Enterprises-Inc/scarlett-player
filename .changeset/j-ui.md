@@ -29,6 +29,12 @@ clipping edge at any width where the collapsed bar only just fits.
 the previous behaviour exactly: no measuring, no observer, no tray, no extra
 DOM.
 
+The `quality` control hides rather than moving to the tray, which the other
+low-priority controls do. Its menu is bounded by `--sp-menu-max-height`, and
+that bound is sized for a menu anchored in the bar, so a quality menu opened
+from the tray (which sits above the bar) would run off the top of the player.
+The settings menu carries a Quality row whenever there are qualities to choose.
+
 The tray is a horizontal wrapping strip, not a vertical menu: eight 44px rows
 would be over 350px tall against a 211px portrait phone player, and a scrolling
 panel would clip the popovers registered controls own. Controls are moved, never

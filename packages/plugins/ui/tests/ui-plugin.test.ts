@@ -711,6 +711,8 @@ describe('UI Plugin', () => {
     let disconnect: ReturnType<typeof vi.fn>;
     /** Whether the stubbed volume control is rendering its expanded slider. */
     let volumeExpanded = false;
+    /** Height the stubbed control bar reports; 0 leaves the plugin's own fallback in play. */
+    let barHeight = 0;
 
     /**
      * Width the stub reports for one element.
@@ -778,6 +780,7 @@ describe('UI Plugin', () => {
       observed = null;
       disconnect = vi.fn();
       volumeExpanded = false;
+      barHeight = 0;
 
       // jsdom has no layout engine, so the bar reports its configured width
       // and every control reports what stubWidth() says it measures.
@@ -785,6 +788,12 @@ describe('UI Plugin', () => {
         configurable: true,
         get(this: HTMLElement) {
           return this.classList.contains('sp-controls') ? barWidth : 0;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.classList.contains('sp-controls') ? barHeight : 0;
         },
       });
       Element.prototype.getBoundingClientRect = function (this: HTMLElement) {
@@ -827,6 +836,7 @@ describe('UI Plugin', () => {
     afterEach(() => {
       vi.unstubAllGlobals();
       delete (HTMLElement.prototype as any).clientWidth;
+      delete (HTMLElement.prototype as any).offsetHeight;
       delete (Element.prototype as any).getBoundingClientRect;
       delete (HTMLVideoElement.prototype as any).webkitShowPlaybackTargetPicker;
       resetControlRegistry();
@@ -1120,6 +1130,71 @@ describe('UI Plugin', () => {
       await plugin.init(api);
 
       expect(inTray('.sp-volume')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('re-reads the bar metrics on every fit', async () => {
+      // A host is free to restyle the bar at a breakpoint, and the fit must not
+      // keep planning against the numbers it read at init. The gap stands in
+      // for all three: an undercount clips a control at the width the host just
+      // crossed.
+      let gap = '4px';
+      const computed = window.getComputedStyle.bind(window);
+      vi.stubGlobal('getComputedStyle', (el: Element) => {
+        const real = computed(el);
+
+        return {
+          position: real.position,
+          paddingLeft: real.paddingLeft,
+          paddingRight: real.paddingRight,
+          columnGap: gap,
+          gap,
+          getPropertyValue: (property: string) => real.getPropertyValue(property),
+        };
+      });
+
+      // play 44 + volume 44 with 64 reserved + fullscreen 44, two 4px gaps:
+      // 204 against 232 - 24 of padding - 4 for the spacer's gap.
+      barWidth = 232;
+      const plugin = uiPlugin({
+        controls: ['play', 'spacer', 'volume', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      expect(inBar('.sp-volume')).toBe(true);
+
+      // At a 24px gap the same row needs 244 against 184 of inner width.
+      gap = '24px';
+      observed?.([{ contentRect: { height: 400 } }] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+      flushFrame();
+
+      expect(inTray('.sp-volume')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('bounds the menus from the bar height it measures', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      // A bar taller than the 56px this stylesheet renders inline is what
+      // fullscreen produces: padding-bottom carries the safe-area inset, and
+      // the menus hang from the top of the bar, so the bound has to come down
+      // with it. Measured against a 400px player rather than the 211 of the
+      // other bound tests, so the 120px floor does not mask the arithmetic.
+      barHeight = 90;
+      observed?.([{ contentRect: { height: 400 } }] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+
+      expect(api.container.style.getPropertyValue('--sp-menu-max-height')).toBe('294px');
+
+      // A bar that cannot be measured (detached, display: none) falls back to
+      // the 56px the stylesheet renders, rather than handing the menus the
+      // bar's own strip of the player to overlap.
+      barHeight = 0;
+      observed?.([{ contentRect: { height: 400 } }] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+
+      expect(api.container.style.getPropertyValue('--sp-menu-max-height')).toBe('328px');
 
       await plugin.destroy();
     });

@@ -3,6 +3,12 @@
  *
  * Consolidated gear menu with sub-menus for Quality and Speed.
  * Replaces standalone QualityMenu with a unified settings panel.
+ *
+ * The panel is bounded to the player through `--sp-menu-max-height`, which is
+ * sized for a menu anchored in the control bar. This control is pinned in the
+ * bar at every width (`DEFAULT_PRIORITY` in fit.ts), so that assumption always
+ * holds here, and pinning it is also what keeps speed, captions and quality
+ * reachable once the other controls have left.
  */
 
 import type { IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';

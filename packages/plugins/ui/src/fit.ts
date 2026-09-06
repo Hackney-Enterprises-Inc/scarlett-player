@@ -109,7 +109,15 @@ const UNKNOWN_RANK = 3;
  * - `volume` (5) is close to inert on iOS, where `video.volume` is read only
  *   and the hardware buttons own it.
  * - `captions` and `quality` (6) are the last actions to leave, and both are
- *   also reachable inside the settings menu, which never moves.
+ *   also reachable inside the settings menu, which never moves. They part
+ *   company on the way out: `captions` goes to the tray, `quality` hides.
+ *   `quality` owns a popover, and the bound that keeps a popover inside the
+ *   player (`--sp-menu-max-height`) is sized for a menu anchored in the bar.
+ *   The tray strip sits above the bar (60px tall for a single row of buttons,
+ *   and taller once they wrap), so a quality menu opened from the tray starts
+ *   that much higher than its bound assumes and runs off the top of the player
+ *   wherever the bound binds. Nothing is lost by hiding it: the settings menu carries a
+ *   Quality row whenever there are qualities to choose.
  * - `time` (7) hides rather than relocating: a time readout inside a tray tells
  *   the viewer nothing, and the scrub tooltip still reports position.
  * - `play`, `live-indicator`, `settings`, `fullscreen` and `spacer` are pinned.
@@ -125,7 +133,7 @@ export const DEFAULT_PRIORITY: Readonly<Record<string, FitRule>> = {
   airplay: { rank: 4, exit: 'overflow' },
   volume: { rank: 5, exit: 'overflow' },
   captions: { rank: 6, exit: 'overflow' },
-  quality: { rank: 6, exit: 'overflow' },
+  quality: { rank: 6, exit: 'hide' },
   time: { rank: 7, exit: 'hide' },
   play: { rank: 'never', exit: 'overflow' },
   'live-indicator': { rank: 'never', exit: 'overflow' },

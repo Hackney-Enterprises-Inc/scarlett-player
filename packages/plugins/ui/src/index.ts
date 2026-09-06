@@ -124,18 +124,28 @@ const FALLBACK_BAR_PADDING_X = 24;
 const FALLBACK_BAR_GAP = 4;
 
 /**
- * Vertical room a popover menu gives up to the control bar.
+ * Room a popover menu gives up on top of the control bar's own height.
  *
- * 56 for the bar (a 44px button plus its 12px bottom padding), 8 for the gap
- * the menus already sit above it by, and 8 of margin so a bounded menu does not
- * touch the top edge of the player.
+ * 8 for the gap the menus already sit above the bar by (`bottom: calc(100% +
+ * 8px)`), and 8 of margin so a bounded menu does not touch the top edge of the
+ * player. The bar's height is measured rather than counted here, see
+ * {@link FALLBACK_BAR_HEIGHT}.
  *
  * The arithmetic only holds because both menus are `box-sizing: border-box`
  * (styles.ts): `max-height` bounds the content box, and each menu carries its
  * own vertical padding, so a content-box bound rendered taller than the room
  * reserved here and the host clipped the difference.
  */
-const MENU_HEIGHT_RESERVE = 72;
+const MENU_HEIGHT_RESERVE = 16;
+
+/**
+ * Bar height assumed when the bar cannot be measured.
+ *
+ * 56 is what this stylesheet renders inline: a 44px button plus 12px of bottom
+ * padding. A detached or `display: none` bar answers 0 for `offsetHeight`, and
+ * a 0 would hand the menus the bar's own strip of the player to overlap.
+ */
+const FALLBACK_BAR_HEIGHT = 56;
 
 /** Floor for the bounded menu height, so a very short player still shows a scrollable menu. */
 const MIN_MENU_HEIGHT = 120;
@@ -506,6 +516,44 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     entry.slot === 'volume' ? volumeSliderWidth : 0;
 
   /**
+   * Read the three numbers the fit takes from the bar's own computed style.
+   *
+   * Re-read on every fit rather than cached at init, because a host is free to
+   * restyle the bar's padding, its gap or the volume slider's width in a media
+   * query: the numbers read at init would then plan the bar against a layout
+   * the browser is no longer using, and an undercount clips a control at the
+   * breakpoint the host just crossed. Per fit is the cheap place for that.
+   * fitControls() is the only geometry read in the plugin, it runs only when
+   * the container resized or the visibility signature moved, and one computed
+   * style is nothing next to the getBoundingClientRect() loop below it.
+   *
+   * The constants are this stylesheet's own values, for environments that
+   * cannot resolve a computed style. The stylesheet declares
+   * --sp-volume-slider-width on this element precisely so the reserve and the
+   * rule that expands the slider cannot disagree.
+   *
+   * @param bar - The control bar, already in the document
+   */
+  const readBarMetrics = (bar: HTMLElement): void => {
+    const barStyle = getComputedStyle(bar);
+    const paddingLeft = parseFloat(barStyle.paddingLeft);
+    const paddingRight = parseFloat(barStyle.paddingRight);
+    const gap = parseFloat(barStyle.columnGap || barStyle.gap);
+    const sliderWidth = parseFloat(
+      barStyle.getPropertyValue('--sp-volume-slider-width')
+    );
+
+    barPaddingX =
+      Number.isFinite(paddingLeft) && Number.isFinite(paddingRight)
+        ? paddingLeft + paddingRight
+        : FALLBACK_BAR_PADDING_X;
+    barGap = Number.isFinite(gap) ? gap : FALLBACK_BAR_GAP;
+    volumeSliderWidth = Number.isFinite(sliderWidth)
+      ? sliderWidth
+      : FALLBACK_VOLUME_SLIDER_WIDTH;
+  };
+
+  /**
    * Measure the bar and apply the resulting plan.
    *
    * The only geometry read in the plugin. Widths are cached per control so a
@@ -523,6 +571,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     if (controlBar.clientWidth === 0) {
       return;
     }
+
+    readBarMetrics(controlBar);
 
     // The spacer is excluded from the items below, but it is still a flex child
     // of the bar at zero width, so the row lays out one more gap than needed()
@@ -598,7 +648,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   };
 
   /**
-   * Bound the popover menus to the player's height.
+   * Bound the popover menus to the room above the control bar.
    *
    * The settings menu's Speed sub-panel is 253px tall against a 211px portrait
    * phone player, so the host's `overflow: hidden` cut off its Back header and
@@ -606,12 +656,29 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
    * (measured at 375x211 on 2026-09-05). The menus read this variable through
    * `max-height`, and behave exactly as before wherever it is unset.
    *
+   * The bar's height is measured, not assumed, because the menus are anchored
+   * to the top of the bar and the bar is not always 56px tall. In fullscreen
+   * its `padding-bottom` is `calc(12px + env(safe-area-inset-bottom))`, so on a
+   * 34px inset the anchor rises 34px while a constant reserve would not, and a
+   * menu sitting exactly at its bound started 26px above the top edge of the
+   * player. `offsetHeight` includes that padding, and it is read here, inside
+   * the observer callback, where layout has already settled.
+   *
+   * Nothing else changes the bar's height today: `--sp-control-height` is
+   * declared on `:root` but nothing in the stylesheet reads it, and the
+   * buttons' 44px `min-height` is a literal. Measuring covers both anyway.
+   *
+   * At 375x211 inline this still resolves to 211 - 56 - 16 = 139px, which is
+   * the number the browser harness asserts.
+   *
    * @param height - Current container height in px
    */
   const applyMenuBounds = (height: number): void => {
+    const barHeight = controlBar?.offsetHeight || FALLBACK_BAR_HEIGHT;
+
     api?.container?.style.setProperty(
       '--sp-menu-max-height',
-      `${Math.max(MIN_MENU_HEIGHT, Math.round(height) - MENU_HEIGHT_RESERVE)}px`
+      `${Math.max(MIN_MENU_HEIGHT, Math.round(height) - barHeight - MENU_HEIGHT_RESERVE)}px`
     );
   };
 
@@ -973,30 +1040,6 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       populateControlBar();
 
       container.appendChild(controlBar);
-
-      // Read the bar's own box once, now that it is in the document: the fit
-      // needs the padding to know the inner width, the gap to know what each
-      // item really costs, and the volume slider's expanded width to reserve
-      // room for it, and a host is free to restyle all three. The stylesheet
-      // declares --sp-volume-slider-width on this element precisely so the
-      // reserve and the rule that expands the slider cannot disagree. The
-      // constants are this stylesheet's own values, for environments that
-      // cannot resolve a computed style.
-      const barStyle = getComputedStyle(controlBar);
-      const paddingLeft = parseFloat(barStyle.paddingLeft);
-      const paddingRight = parseFloat(barStyle.paddingRight);
-      const gap = parseFloat(barStyle.columnGap || barStyle.gap);
-      const sliderWidth = parseFloat(
-        barStyle.getPropertyValue('--sp-volume-slider-width')
-      );
-      barPaddingX =
-        Number.isFinite(paddingLeft) && Number.isFinite(paddingRight)
-          ? paddingLeft + paddingRight
-          : FALLBACK_BAR_PADDING_X;
-      barGap = Number.isFinite(gap) ? gap : FALLBACK_BAR_GAP;
-      volumeSliderWidth = Number.isFinite(sliderWidth)
-        ? sliderWidth
-        : FALLBACK_VOLUME_SLIDER_WIDTH;
 
       // One observer for both jobs: refitting the bar and bounding the menus.
       // Guarded because jsdom has no ResizeObserver; without it the fit still

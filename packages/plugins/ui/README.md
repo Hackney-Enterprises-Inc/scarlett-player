@@ -80,7 +80,8 @@ Lower ranks leave first. Ties go to the control that is later in the layout.
 | any registered control (`share`, `chapters`, the playlist buttons, ...) | 3 | tray |
 | `chromecast`, `airplay` | 4 | tray (AirPlay is how an iPhone reaches a television, so it is never hidden) |
 | `volume` | 5 | tray (iOS `video.volume` is read only) |
-| `captions`, `quality` | 6 | tray (both also live inside the settings menu) |
+| `captions` | 6 | tray (also lives inside the settings menu) |
+| `quality` | 6 | hidden (its menu is anchored in the bar, and the settings menu carries a Quality row) |
 | `time` | 7 | hidden (a readout in a tray says nothing; the scrub tooltip still shows position) |
 | `play`, `live-indicator`, `settings`, `fullscreen`, `spacer` | never | stays |
 
