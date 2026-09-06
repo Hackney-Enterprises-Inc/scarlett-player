@@ -117,7 +117,9 @@ const UNKNOWN_RANK = 3;
  *   and taller once they wrap), so a quality menu opened from the tray starts
  *   that much higher than its bound assumes and runs off the top of the player
  *   wherever the bound binds. Nothing is lost by hiding it: the settings menu carries a
- *   Quality row whenever there are qualities to choose.
+ *   Quality row whenever there are qualities to choose. That is a promise about
+ *   the layout, not the control, so {@link assertFitLayout} refuses a layout
+ *   that has `quality` without `settings` before the bar is ever fitted.
  * - `time` (7) hides rather than relocating: a time readout inside a tray tells
  *   the viewer nothing, and the scrub tooltip still reports position.
  * - `play`, `live-indicator`, `settings`, `fullscreen` and `spacer` are pinned.
@@ -159,6 +161,44 @@ export function resolveFitItems(
 
     return { id, rank, exit: rule?.exit ?? 'overflow' };
   });
+}
+
+/**
+ * Refuse a layout the fit would strip of its only quality control.
+ *
+ * `quality` hides when the bar runs out of room, on the strength of the
+ * settings menu carrying a Quality row (see {@link DEFAULT_PRIORITY}). A
+ * layout with `quality` and no `settings` has nowhere for that row to live, so
+ * below the width where the bar fits the viewer would have no way to pick a
+ * rendition at all. The host hears about it from the `uiPlugin()` call rather
+ * than from a viewer on a phone.
+ *
+ * A pinned `quality` (`priority: { quality: 'never' }`) never leaves the bar,
+ * so that layout is accepted.
+ *
+ * @param layout - Control slot ids, exactly as the host configured them
+ * @param priority - Per slot rank overrides, as passed to {@link resolveFitItems}
+ * @throws Error when the layout has `quality` without `settings` and does not pin it
+ */
+export function assertFitLayout(
+  layout: readonly string[],
+  priority?: Record<string, FitRank>
+): void {
+  if (!layout.includes('quality') || layout.includes('settings')) {
+    return;
+  }
+
+  const [quality] = resolveFitItems(['quality'], priority);
+  if (quality.rank === 'never') {
+    return;
+  }
+
+  throw new Error(
+    'uiPlugin: a layout with "quality" needs "settings" as well. The quality ' +
+      'control hides when the bar does not fit, and the settings menu is where ' +
+      'its Quality row lives. Add "settings" to controls, pin quality with ' +
+      "priority: { quality: 'never' }, or set responsive: false."
+  );
 }
 
 /**

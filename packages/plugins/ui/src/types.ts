@@ -46,7 +46,14 @@ export type ControlFactory = (api: IPluginAPI) => Control;
  * Layout configuration for the control bar.
  */
 export interface LayoutConfig {
-  /** Order of controls in the control bar */
+  /**
+   * Order of controls in the control bar.
+   *
+   * A layout with `quality` must also have `settings`: `quality` hides when
+   * the bar does not fit, and the settings menu is where its Quality row
+   * lives. `uiPlugin()` throws otherwise, unless `quality` is pinned through
+   * `priority` or `responsive` is off.
+   */
   controls?: ControlSlot[];
   /** Delay in ms before hiding controls (default: 3000) */
   hideDelay?: number;

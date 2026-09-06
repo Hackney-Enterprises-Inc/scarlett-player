@@ -34,6 +34,9 @@ low-priority controls do. Its menu is bounded by `--sp-menu-max-height`, and
 that bound is sized for a menu anchored in the bar, so a quality menu opened
 from the tray (which sits above the bar) would run off the top of the player.
 The settings menu carries a Quality row whenever there are qualities to choose.
+That is a promise about the layout rather than the control, so `uiPlugin()`
+throws on a layout that has `quality` without `settings`, unless `quality` is
+pinned or `responsive` is off.
 
 The tray is a horizontal wrapping strip, not a vertical menu: eight 44px rows
 would be over 350px tall against a 211px portrait phone player, and a scrolling

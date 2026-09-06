@@ -17,7 +17,7 @@ import type {
 } from './types';
 import type { Control } from './controls';
 import type { FitExit, FitItem, FitPlan, FitRank } from './fit';
-import { planFit, resolveFitItems } from './fit';
+import { assertFitLayout, planFit, resolveFitItems } from './fit';
 import { styles } from './styles';
 import { icons } from './icons';
 import {
@@ -61,7 +61,7 @@ export {
 export { icons } from './icons';
 export { styles } from './styles';
 export { formatTime, formatLiveTime } from './utils';
-export { DEFAULT_PRIORITY, planFit, resolveFitItems } from './fit';
+export { DEFAULT_PRIORITY, assertFitLayout, planFit, resolveFitItems } from './fit';
 export type {
   FitExit,
   FitItem,
@@ -186,6 +186,11 @@ interface ControlEntry {
  *   ],
  * });
  * ```
+ *
+ * @param config - Layout, theme and fit options
+ * @returns The plugin, ready to be handed to `createPlayer()`
+ * @throws Error when `controls` has `quality` without `settings` while
+ *   `responsive` is on and `quality` is not pinned, see {@link assertFitLayout}
  */
 export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let api: IPluginAPI;
@@ -221,6 +226,12 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
   const showBigPlayButton = config.bigPlayButton !== false;
   const responsive = config.responsive !== false;
+
+  // Before anything is built. With the fit off nothing ever hides, so the
+  // layout is whatever the host wrote, exactly as it was before 1.8.
+  if (responsive) {
+    assertFitLayout(layout, config.priority);
+  }
 
   /**
    * Create a control instance for a given slot.

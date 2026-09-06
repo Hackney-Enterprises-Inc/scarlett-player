@@ -81,12 +81,17 @@ Lower ranks leave first. Ties go to the control that is later in the layout.
 | `chromecast`, `airplay` | 4 | tray (AirPlay is how an iPhone reaches a television, so it is never hidden) |
 | `volume` | 5 | tray (iOS `video.volume` is read only) |
 | `captions` | 6 | tray (also lives inside the settings menu) |
-| `quality` | 6 | hidden (its menu is anchored in the bar, and the settings menu carries a Quality row) |
+| `quality` | 6 | hidden (its menu is anchored in the bar, and the settings menu carries a Quality row, so `quality` needs `settings` in the layout) |
 | `time` | 7 | hidden (a readout in a tray says nothing; the scrub tooltip still shows position) |
 | `play`, `live-indicator`, `settings`, `fullscreen`, `spacer` | never | stays |
 
 Settings never moves, so playback speed and captions are at most two taps away
 at every width.
+
+Because `quality` hides, a layout with `quality` and no `settings` would lose
+quality selection entirely below the width where the bar fits. `uiPlugin()`
+throws on that layout unless `quality` is pinned
+(`priority: { quality: 'never' }`) or `responsive` is off.
 
 ### The floor
 

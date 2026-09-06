@@ -1063,6 +1063,47 @@ describe('UI Plugin', () => {
       await plugin.destroy();
     });
 
+    it('hides quality rather than putting it in the tray when settings carries it', async () => {
+      // play, quality, settings and fullscreen are 188px with gaps against
+      // 200 - 24 of bar padding - 4 for the spacer's gap = 172 of inner width.
+      // Quality is the only control that can leave, and it collapses in place:
+      // the settings menu's Quality row is where the viewer picks a rendition.
+      barWidth = 200;
+      api.setState(
+        'qualities' as never,
+        [{ id: '720', label: '720p', width: 1280, height: 720, bitrate: 3_000_000 }] as never
+      );
+      const plugin = uiPlugin({
+        controls: ['play', 'quality', 'spacer', 'settings', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      const quality = api.container.querySelector('.sp-quality') as HTMLElement;
+      expect(quality.classList.contains('sp-control--collapsed')).toBe(true);
+      expect(inBar('.sp-quality')).toBe(true);
+      expect(inBar('.sp-settings')).toBe(true);
+      expect(tray()?.children.length).toBe(0);
+
+      await plugin.destroy();
+    });
+
+    it('refuses a layout that has quality without settings', () => {
+      // With nothing to carry the Quality row, the fit would take rendition
+      // selection away entirely on a narrow player, so the host hears it here.
+      expect(() => uiPlugin({ controls: ['play', 'quality', 'fullscreen'] })).toThrow(
+        /"quality" needs "settings"/
+      );
+    });
+
+    it('accepts quality without settings when it is pinned or the fit is off', () => {
+      expect(() =>
+        uiPlugin({ controls: ['play', 'quality', 'fullscreen'], priority: { quality: 'never' } })
+      ).not.toThrow();
+      expect(() =>
+        uiPlugin({ controls: ['play', 'quality', 'fullscreen'], responsive: false })
+      ).not.toThrow();
+    });
+
     it('reserves the width the volume slider expands to', async () => {
       // play 44 + volume 44 + fullscreen 44 with two 4px gaps is 140 collapsed
       // and 204 with the slider open, against 231 - 24 of bar padding - 4 for

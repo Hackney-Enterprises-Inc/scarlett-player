@@ -8,7 +8,9 @@
  * bound is sized for a menu anchored in the control bar. It is why this control
  * hides rather than moving to the overflow tray when the bar runs out of room
  * (`DEFAULT_PRIORITY` in fit.ts): the tray strip sits above the bar, so a menu
- * opened from there would start higher than the bound accounts for.
+ * opened from there would start higher than the bound accounts for. Hiding is
+ * only safe because the settings menu carries a Quality row of its own, so
+ * `assertFitLayout()` refuses a layout that has this control without `settings`.
  */
 
 import type { IPluginAPI, QualityLevel } from '@scarlett-player/core';

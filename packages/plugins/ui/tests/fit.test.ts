@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_PRIORITY, planFit, resolveFitItems } from '../src/fit';
+import { DEFAULT_PRIORITY, assertFitLayout, planFit, resolveFitItems } from '../src/fit';
 import type { FitItem, FitRank } from '../src/fit';
 
 /** Widths measured in Chrome 152 on scarlettplayer.com/demo, 2026-09-05. */
@@ -105,6 +105,33 @@ describe('DEFAULT_PRIORITY', () => {
       .map(([slot]) => slot);
 
     expect(hides.sort()).toEqual(['bandwidth-indicator', 'quality', 'time']);
+  });
+});
+
+describe('assertFitLayout', () => {
+  it('refuses a layout that has quality without settings', () => {
+    // Quality hides when the bar does not fit, and only the settings menu
+    // carries a Quality row, so this layout would lose rendition selection
+    // entirely below the width where it fits.
+    expect(() => assertFitLayout(['play', 'quality', 'fullscreen'])).toThrow(
+      /"quality" needs "settings"/
+    );
+  });
+
+  it('accepts quality when settings is in the layout', () => {
+    expect(() => assertFitLayout(['play', 'quality', 'settings', 'fullscreen'])).not.toThrow();
+  });
+
+  it('accepts quality without settings when the host pins it', () => {
+    // A pinned control never leaves the bar, so there is nothing for the
+    // settings menu to stand in for.
+    expect(() =>
+      assertFitLayout(['play', 'quality', 'fullscreen'], { quality: 'never' })
+    ).not.toThrow();
+  });
+
+  it('accepts a layout with no quality at all', () => {
+    expect(() => assertFitLayout(['play', 'time', 'fullscreen'])).not.toThrow();
   });
 });
 
@@ -233,6 +260,19 @@ describe('planFit', () => {
 
     expect(plan.hidden).toEqual(['time', 'bandwidth-indicator']);
     expect(plan.overflow).toEqual([]);
+  });
+
+  it('hides quality and leaves settings to carry its Quality row', () => {
+    // Four buttons and three gaps are 188px against 150. Quality is the only
+    // control that can leave, and it hides rather than joining a tray, so the
+    // tray button is never counted and the three pinned controls fit at 140.
+    const items = [item('play'), item('quality'), item('settings'), item('fullscreen')];
+
+    const plan = planFit(items, 150, GAP, BUTTON);
+
+    expect(plan.hidden).toEqual(['quality']);
+    expect(plan.overflow).toEqual([]);
+    expect(plan.inBar).toEqual(['play', 'settings', 'fullscreen']);
   });
 
   it('respects a priority override that pins a registered control', () => {
