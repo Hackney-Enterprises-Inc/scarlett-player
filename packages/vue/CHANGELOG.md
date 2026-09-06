@@ -1,5 +1,7 @@
 # @scarlett-player/vue
 
+## 1.8.0
+
 ## 1.7.1
 
 ### Patch Changes

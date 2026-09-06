@@ -1,5 +1,7 @@
 # @scarlett-player/media-session
 
+## 1.8.0
+
 ## 1.7.1
 
 ### Patch Changes

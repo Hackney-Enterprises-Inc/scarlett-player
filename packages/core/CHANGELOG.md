@@ -1,5 +1,47 @@
 # @scarlett-player/core
 
+## 1.8.0
+
+### Minor Changes
+
+- [#76](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/76) [`443b52b`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/443b52be734250f3b461709c38f6959b0a78c608) Thanks [@alexhackney](https://github.com/alexhackney)! - Fullscreen is owned by core, and its state is tracked for real.
+
+  `enterFullscreen()`, `exitFullscreen()` and `isFullscreen()` are new exports.
+  There were three separate implementations before: the player's own
+  `requestFullscreen()` (container only), the UI package's fullscreen button (the
+  only one carrying the iPhone `video.webkitEnterFullscreen()` fallback) and the
+  `f` keyboard shortcut (container only). A host calling
+  `player.requestFullscreen()`, which is what the Vue wrapper and the
+  `useScarlettPlayer` composable both do, therefore did nothing at all on an
+  iPhone, where `Element.requestFullscreen` does not exist.
+
+  The `fullscreen` state key was written only by those two player methods, and
+  nothing listened for a change the player did not initiate. Entering fullscreen
+  through the button or the `f` key never flipped the icon to "Exit fullscreen",
+  `player.fullscreen` stayed false and `fullscreen:change` never fired; and after
+  a programmatic `requestFullscreen()`, an Escape exit left the state stuck at
+  true. The player now listens for `fullscreenchange` and
+  `webkitfullscreenchange` on the document, and for `webkitbeginfullscreen` and
+  `webkitendfullscreen` in the capture phase on its container, because those two
+  are dispatched on the video element, do not bubble, and the element is created
+  later by whichever provider wins the source. All four are removed in
+  `destroy()`.
+
+  A transition is announced once. The spec fires `fullscreenchange` before
+  `requestFullscreen()` resolves, so the optimistic write that follows the await
+  now runs only where the browser stayed silent, which is where it is still
+  needed: jsdom never fires the event.
+
+  `enterFullscreen()` rejects when the environment offers no fullscreen API at
+  all, rather than resolving after doing nothing. Silence is how the optimistic
+  write is armed, so a helper that resolved on that path had the player write
+  `fullscreen: true` and emit `fullscreen:change` when nothing had happened: an
+  iPhone asked before the provider had created the video element, or any browser
+  with neither `Element.requestFullscreen` nor `webkitRequestFullscreen`. Every
+  caller already swallows a rejection (the player logs it, the UI package's
+  button and `f` shortcut catch it), so the state key and the button's icon now
+  stay where they were.
+
 ## 1.7.1
 
 ### Patch Changes
