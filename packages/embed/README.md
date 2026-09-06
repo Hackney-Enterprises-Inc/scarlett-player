@@ -135,6 +135,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-poster` | string | - | Poster/artwork image URL |
 | `data-controls` | boolean | `true` | Show/hide UI controls |
 | `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
+| `data-gestures` | boolean | `true` | Touch gestures on the picture (video only): double-tap the sides to seek, tap to toggle the controls. Touch only, by input type, so a mouse never triggers them. Set `false` if your page owns those gestures |
 | `data-brand-color` | string | - | Accent color (e.g., `#e50914`) |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |

@@ -17,6 +17,7 @@ import { createNativePlugin } from '@scarlett-player/native';
 import { uiPlugin } from '@scarlett-player/ui';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
+import { createGesturesPlugin } from '@scarlett-player/gestures';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 import { PKG_VERSION } from './version';
@@ -35,6 +36,7 @@ const pluginCreators: PluginCreators = {
   videoUI: uiPlugin,
   watermark: createWatermarkPlugin,
   captions: createCaptionsPlugin,
+  gestures: createGesturesPlugin,
   // Audio UI not available in this build
   // Analytics not available in this build
   // Playlist not available in this build

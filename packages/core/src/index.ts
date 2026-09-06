@@ -57,6 +57,11 @@ export { PluginAPI, type PluginAPIDeps } from './plugin-api';
 // Re-export ScarlettPlayer
 export { ScarlettPlayer, createPlayer, type PlayerOptions, type QualityLevel } from './scarlett-player';
 
+// Re-export the fullscreen helpers. Runtime exports, not just types: the UI
+// package's fullscreen button and its 'f' shortcut go through these so that
+// every way into fullscreen behaves the same, the iPhone fallback included.
+export { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
+
 // Re-export all type definitions
 export type {
   // Plugin Types

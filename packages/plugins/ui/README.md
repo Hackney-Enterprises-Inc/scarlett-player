@@ -29,6 +29,8 @@ const player = await createPlayer({
 
 ## Features
 
+- Responsive control bar: measures itself and moves low-priority controls into
+  an overflow tray rather than rendering them past a narrow player's edge
 - Play/pause, seek, volume controls
 - Big play button over the poster, shown until playback first starts and again
   as Replay when it ends (`bigPlayButton: false` turns it off)
@@ -44,6 +46,61 @@ const player = await createPlayer({
 - Keyboard shortcuts
 - Customizable theming
 - Auto-hide controls
+
+## Responsive control bar
+
+The bar is a single non-wrapping row of fixed-width controls, and both known
+hosts clip what does not fit. On a 390px phone with a 17-slot layout that meant
+the whole right-hand group (settings, captions, cast, PiP, fullscreen) rendered
+off canvas: captions and playback speed were not broken, they were unreachable.
+
+The bar now measures itself and moves the least important controls into a tray
+behind a "More controls" button. It runs at first paint, whenever the player is
+resized, and whenever a control shows or hides itself.
+
+```typescript
+uiPlugin({
+  responsive: true,                 // Default: true
+  priority: { share: 'never' },     // Pin a control, or re-rank one
+});
+```
+
+`responsive: false` restores the pre-1.8 behaviour exactly: no measuring, no
+observer, no tray button, no extra DOM.
+
+### Priority
+
+Lower ranks leave first. Ties go to the control that is later in the layout.
+
+| Slot | Rank | Leaves to |
+|---|---|---|
+| `bandwidth-indicator` | 0 | hidden (a status glyph, not an action) |
+| `skip-backward`, `skip-forward` | 1 | tray (gestures cover the same seek on touch) |
+| `pip` | 2 | tray |
+| any registered control (`share`, `chapters`, the playlist buttons, ...) | 3 | tray |
+| `chromecast`, `airplay` | 4 | tray (AirPlay is how an iPhone reaches a television, so it is never hidden) |
+| `volume` | 5 | tray (iOS `video.volume` is read only) |
+| `captions`, `quality` | 6 | tray (both also live inside the settings menu) |
+| `time` | 7 | hidden (a readout in a tray says nothing; the scrub tooltip still shows position) |
+| `play`, `live-indicator`, `settings`, `fullscreen`, `spacer` | never | stays |
+
+Settings never moves, so playback speed and captions are at most two taps away
+at every width.
+
+### The floor
+
+The controls that never move (play, settings, the tray button and fullscreen)
+need 188px of inner width, which is about 212px of player width, or about 280px
+on a live stream where the live indicator also stays. Below that the bar clips
+again, exactly as it did before.
+
+### Menus
+
+The settings and quality menus are bounded to the player's height
+(`--sp-menu-max-height`, written by the plugin) and scroll inside it. Without
+that, the Speed sub-panel is 253px tall against a 211px portrait phone player
+and loses its Back header and its first three speeds to the host's
+`overflow: hidden`.
 
 ## Keyboard Shortcuts
 

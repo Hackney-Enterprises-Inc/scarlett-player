@@ -13,6 +13,7 @@ import { createMediaSessionPlugin } from '../packages/plugins/media-session/src/
 import { createAudioUIPlugin } from '../packages/plugins/audio-ui/src/index';
 import { createWatermarkPlugin } from '../packages/plugins/watermark/src/index';
 import { createSharePlugin } from '../packages/plugins/share/src/index';
+import { createGesturesPlugin } from '../packages/plugins/gestures/src/index';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -88,6 +89,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       createSharePlugin({
         embedBaseUrl: 'https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html',
       }),
+      // Touch only, and it arms itself: `enabled` defaults to 'auto', gated on
+      // matchMedia('(pointer: coarse)'). It matters most here, where the
+      // responsive control bar moves the skip buttons into the overflow tray
+      // on a phone and double-tap seeking is what replaces them.
+      createGesturesPlugin(),
     ].filter(Boolean),
   });
 

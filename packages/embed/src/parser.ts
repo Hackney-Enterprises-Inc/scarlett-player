@@ -56,6 +56,13 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.bigPlayButton = bigPlayButton !== 'false';
   }
 
+  // Same shape as data-big-play-button: absent means "not asked for", and only
+  // the exact string "false" turns it off.
+  const gestures = getAttr(element, 'data-gestures', 'gestures');
+  if (gestures !== null) {
+    config.gestures = gestures !== 'false';
+  }
+
   const keyboard = getAttr(element, 'data-keyboard', 'keyboard');
   if (keyboard !== null) {
     config.keyboard = keyboard !== 'false';

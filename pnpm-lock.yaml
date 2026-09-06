@@ -92,6 +92,9 @@ importers:
       '@scarlett-player/core':
         specifier: workspace:*
         version: link:../core
+      '@scarlett-player/gestures':
+        specifier: workspace:*
+        version: link:../plugins/gestures
       '@scarlett-player/hls':
         specifier: workspace:*
         version: link:../plugins/hls

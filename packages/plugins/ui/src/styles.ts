@@ -65,6 +65,9 @@ export const styles = `
   display: flex;
   align-items: center;
   padding: 0 12px 12px;
+  /* Composed through a variable so the fullscreen rule below can add the
+     device's own inset without restating the 12px. */
+  padding-bottom: calc(12px + var(--sp-inset-bottom, 0px));
   gap: 4px;
   opacity: 0;
   transform: translateY(4px);
@@ -84,11 +87,36 @@ export const styles = `
 }
 
 /* ============================================
+   Safe Area (fullscreen only)
+
+   Scoped to :fullscreen on purpose. Applied unconditionally, the inset would
+   push an inline player's controls up on any page whose viewport meta says
+   viewport-fit=cover, where there is no notch or home indicator over the
+   player at all. Both the bar and the progress wrapper are direct children of
+   the container, which is the element that goes fullscreen.
+
+   The :-webkit-full-screen twin is a separate rule because an unknown
+   pseudo-class anywhere in a selector list invalidates the whole rule.
+
+   Nothing is needed in packages/embed/iframe.html: viewport-fit has no effect
+   inside an iframe.
+   ============================================ */
+:fullscreen > .sp-controls,
+:fullscreen > .sp-progress-wrapper {
+  --sp-inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:-webkit-full-screen > .sp-controls,
+:-webkit-full-screen > .sp-progress-wrapper {
+  --sp-inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ============================================
    Progress Bar (Above Controls)
    ============================================ */
 .sp-progress-wrapper {
   position: absolute;
-  bottom: 48px;
+  bottom: calc(48px + var(--sp-inset-bottom, 0px));
   left: 12px;
   right: 12px;
   height: 20px;
@@ -102,6 +130,24 @@ export const styles = `
 
 .sp-progress-wrapper--visible {
   opacity: 1;
+}
+
+/* Touch: a 20px wrapper is not a 20px target. The control bar is a later
+   sibling at the same z-index and spans 0..56px from the bottom, so it wins
+   hit-testing in the 48..56 overlap and the exclusive region for scrubbing is
+   12px. The wrapper grows UPWARD to 44px (48..92) because growing downward
+   would be swallowed by the bar; the 3px bar itself stays exactly where it was
+   (centred 8.5px above the wrapper's bottom edge, which is what
+   align-items: center gave it inside 20px). The handle and tooltip
+   enlargements are gated behind (hover: hover) and never match a finger, but
+   .sp-progress--dragging is not, so the handle still appears mid-drag. */
+@media (pointer: coarse) {
+  .sp-progress-wrapper {
+    height: 44px;
+    align-items: flex-end;
+    padding-bottom: 8.5px;
+    box-sizing: border-box;
+  }
 }
 
 .sp-progress {
@@ -312,6 +358,61 @@ export const styles = `
 }
 
 /* ============================================
+   Overflow Tray
+
+   The wrapper is deliberately unpositioned: the strip is absolutely
+   positioned against .sp-controls (the nearest positioned ancestor), so it
+   spans the bar's width and sits directly above it instead of hanging off a
+   44px button.
+
+   The strip wraps horizontally and keeps overflow visible. A vertical menu of
+   44px rows would be taller than a portrait phone player (211px at 375px wide,
+   measured 2026-09-05) and a scrolling one would clip the popovers registered
+   controls own.
+   ============================================ */
+.sp-overflow {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.sp-overflow-tray {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  overflow: visible;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  z-index: 20;
+}
+
+.sp-overflow-tray--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Beats a control's own inline style.display = '' on its next update(), so a
+   control the fit took off screen stays off screen until the fit says
+   otherwise. */
+.sp-control--collapsed {
+  display: none !important;
+}
+
+/* ============================================
    Time Display
    ============================================ */
 .sp-time {
@@ -446,6 +547,10 @@ export const styles = `
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
+  /* Bounded to the player, see .sp-settings-panel. */
+  max-height: var(--sp-menu-max-height, none);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(20, 20, 20, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -514,6 +619,19 @@ export const styles = `
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
+  /* Bounded to the player's height, written by the UI plugin's ResizeObserver
+     as max(120px, container height - 72px). The Speed sub-panel is 253px (a
+     37px header plus six 36px rows) against a 211px portrait phone player, so
+     without this the host's overflow: hidden cuts off the Back header and the
+     first three speeds and playback speed is unreachable (measured at 375x211
+     on 2026-09-05). With the variable unset the panel behaves exactly as it
+     did before.
+
+     Not applied to .sp-overflow-tray: that one has to keep overflow visible so
+     the popovers its adopted controls own are not clipped. */
+  max-height: var(--sp-menu-max-height, none);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(20, 20, 20, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -525,7 +643,6 @@ export const styles = `
   transform: translateY(8px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
   z-index: 20;
-  overflow: hidden;
 }
 
 .sp-settings-panel--open {
@@ -910,6 +1027,7 @@ export const styles = `
   .sp-control,
   .sp-volume__slider-wrap,
   .sp-quality-menu,
+  .sp-overflow-tray,
   .sp-settings-panel,
   .sp-settings-panel__row,
   .sp-settings-panel__item,

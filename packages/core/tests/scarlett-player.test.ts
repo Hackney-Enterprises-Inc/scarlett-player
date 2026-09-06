@@ -1137,6 +1137,161 @@ describe('ScarlettPlayer', () => {
 
       expect((container as any).webkitRequestFullscreen).toHaveBeenCalled();
     });
+
+    it('should close the iPhone native player before asking the document', async () => {
+      // A WebKit that exposes document.exitFullscreen while the native video
+      // player is what is open has no fullscreen element, so the document call
+      // rejects and the swallowed rejection would strand the viewer in a
+      // fullscreen player the button cannot close.
+      const player = new ScarlettPlayer({ container });
+      const video = document.createElement('video');
+      (video as any).webkitDisplayingFullscreen = true;
+      (video as any).webkitExitFullscreen = vi.fn();
+      container.appendChild(video);
+      document.exitFullscreen = vi.fn().mockRejectedValue(new Error('Document not active'));
+
+      await expect(player.exitFullscreen()).resolves.toBeUndefined();
+
+      expect((video as any).webkitExitFullscreen).toHaveBeenCalled();
+      expect(document.exitFullscreen).not.toHaveBeenCalled();
+
+      delete (document as any).exitFullscreen;
+    });
+
+    it('should fall back to the video element on an iPhone', async () => {
+      // Element.requestFullscreen does not exist there, and the only full
+      // screen available is the video element's own native player.
+      const player = new ScarlettPlayer({ container });
+      const video = document.createElement('video');
+      (video as any).webkitEnterFullscreen = vi.fn();
+      container.appendChild(video);
+      (container as any).requestFullscreen = undefined;
+      (container as any).webkitRequestFullscreen = undefined;
+
+      await player.requestFullscreen();
+
+      expect((video as any).webkitEnterFullscreen).toHaveBeenCalled();
+    });
+  });
+
+  // Nothing used to listen for a fullscreen change the player did not
+  // initiate, so the button, the 'f' shortcut and the Escape key all left the
+  // state key lying: the icon never flipped, `player.fullscreen` was wrong and
+  // `fullscreen:change` never fired.
+  describe('fullscreen state tracking', () => {
+    afterEach(() => {
+      delete (document as any).fullscreenElement;
+    });
+
+    /** Put the document into fullscreen the way a browser reports it. */
+    const setFullscreenElement = (el: Element | null): void => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: el,
+        configurable: true,
+      });
+    };
+
+    it('follows an exit the player did not ask for', async () => {
+      const player = new ScarlettPlayer({ container });
+      container.requestFullscreen = vi.fn().mockResolvedValue(undefined);
+      await player.requestFullscreen();
+      const fsSpy = vi.fn();
+      player.on('fullscreen:change', fsSpy);
+
+      // Escape, or the browser's own exit affordance.
+      setFullscreenElement(null);
+      document.dispatchEvent(new Event('fullscreenchange'));
+
+      expect(player.fullscreen).toBe(false);
+      expect(fsSpy).toHaveBeenCalledTimes(1);
+      expect(fsSpy).toHaveBeenCalledWith({ fullscreen: false });
+    });
+
+    it('follows an entry the player did not ask for', () => {
+      const player = new ScarlettPlayer({ container });
+      const fsSpy = vi.fn();
+      player.on('fullscreen:change', fsSpy);
+
+      setFullscreenElement(container);
+      document.dispatchEvent(new Event('fullscreenchange'));
+
+      expect(player.fullscreen).toBe(true);
+      expect(fsSpy).toHaveBeenCalledWith({ fullscreen: true });
+    });
+
+    it('follows the webkit-prefixed change event', () => {
+      const player = new ScarlettPlayer({ container });
+
+      setFullscreenElement(container);
+      document.dispatchEvent(new Event('webkitfullscreenchange'));
+
+      expect(player.fullscreen).toBe(true);
+    });
+
+    it('follows the iPhone native player opening', () => {
+      // webkitbeginfullscreen is dispatched on the video element, does not
+      // bubble, and the element is created by a provider plugin long after the
+      // player is constructed: only a capture-phase listener on the container
+      // can see it.
+      const player = new ScarlettPlayer({ container });
+      const video = document.createElement('video');
+      container.appendChild(video);
+      (video as any).webkitDisplayingFullscreen = true;
+
+      video.dispatchEvent(new Event('webkitbeginfullscreen'));
+
+      expect(player.fullscreen).toBe(true);
+    });
+
+    it('follows the iPhone native player closing', () => {
+      const player = new ScarlettPlayer({ container });
+      const video = document.createElement('video');
+      container.appendChild(video);
+      (video as any).webkitDisplayingFullscreen = true;
+      video.dispatchEvent(new Event('webkitbeginfullscreen'));
+
+      (video as any).webkitDisplayingFullscreen = false;
+      video.dispatchEvent(new Event('webkitendfullscreen'));
+
+      expect(player.fullscreen).toBe(false);
+    });
+
+    it('announces a change once when the browser reports it before resolving', async () => {
+      // The spec fires fullscreenchange before requestFullscreen() resolves, so
+      // both paths run for one transition.
+      const player = new ScarlettPlayer({ container });
+      const fsSpy = vi.fn();
+      player.on('fullscreen:change', fsSpy);
+      container.requestFullscreen = vi.fn().mockImplementation(async () => {
+        setFullscreenElement(container);
+        document.dispatchEvent(new Event('fullscreenchange'));
+      });
+
+      await player.requestFullscreen();
+
+      expect(player.fullscreen).toBe(true);
+      expect(fsSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops listening after destroy', () => {
+      const removeSpy = vi.spyOn(document, 'removeEventListener');
+      const player = new ScarlettPlayer({ container });
+
+      player.destroy();
+
+      expect(removeSpy).toHaveBeenCalledWith('fullscreenchange', expect.any(Function));
+      expect(removeSpy).toHaveBeenCalledWith('webkitfullscreenchange', expect.any(Function));
+    });
+
+    it('does not react to a fullscreen change after destroy', () => {
+      const player = new ScarlettPlayer({ container });
+      player.destroy();
+
+      setFullscreenElement(container);
+
+      // A torn-down state manager would throw here if the listener survived.
+      expect(() => document.dispatchEvent(new Event('fullscreenchange'))).not.toThrow();
+    });
   });
 
   describe('casting methods', () => {

@@ -140,6 +140,24 @@ init(api) { registerControl('example', factory); } // or during init
 
 A factory that throws is caught and logged; the rest of the control bar still builds.
 
+### The control bar can move your control
+
+The bar measures itself and moves low-priority controls into an overflow tray
+when it does not fit. Every registered control defaults to rank 3, which puts it
+ahead of the cast buttons and behind PiP, and sends it to the tray rather than
+off screen.
+
+Two consequences for a control that owns a popover:
+
+- Position the popover relative to your own wrapper element (as `SettingsMenu`
+  does), or mount it on `api.container` (as the share plugin's sheet does).
+  Anything positioned against the control bar will follow your button into the
+  tray. The tray keeps `overflow: visible`, so a popover anchored to your own
+  wrapper still opens upward out of it.
+- A host can pin your control with `uiPlugin({ priority: { yourId: 'never' } })`,
+  or re-rank it with a number. Nothing in your plugin needs to change either
+  way.
+
 ### Accessibility
 
 The built-in controls meet WCAG 2.5.5 - 44x44px minimum touch targets, real ARIA labels, keyboard navigation with a focus trap on menus, and visible focus states. Match that. `SettingsMenu` is the reference implementation for a popover control.

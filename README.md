@@ -322,7 +322,8 @@ node demo/build.cjs   # Rebuild demo site
 ### Browser verification harness
 
 Real-browser checks that jsdom cannot cover (error recovery, reconnects,
-destroy-mid-append races, malformed live playlist refreshes). Requires a local
+destroy-mid-append races, malformed live playlist refreshes, and narrow-viewport
+control reachability, which needs a layout engine and a coarse pointer). Requires a local
 Chrome and ffmpeg on PATH; the HLS fixture is generated on first run into the
 gitignored `scripts/fixtures/`.
 
@@ -334,7 +335,7 @@ fails because that version is where `setPoster()` was added.
 ```bash
 pnpm build && node demo/build.cjs
 python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
-node scripts/verify-browser.mjs                # 30 checks, exits non-zero on failure
+node scripts/verify-browser.mjs                # 38 checks, exits non-zero on failure
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
 ```
 

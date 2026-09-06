@@ -1,13 +1,16 @@
 /**
  * Fullscreen Button Control
  *
- * Toggles fullscreen mode with webkit fallback for iOS.
+ * Toggles fullscreen mode through the core helpers, so the button, the `f`
+ * keyboard shortcut and a host calling `player.requestFullscreen()` all behave
+ * identically, iPhone fallback included.
  */
 
 import type { IPluginAPI } from '@scarlett-player/core';
+import { enterFullscreen, exitFullscreen, isFullscreen } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
-import { createButton, getVideo, setHTML, setAttr } from '../utils';
+import { createButton, setHTML, setAttr } from '../utils';
 
 export class FullscreenButton implements Control {
   private el: HTMLButtonElement;
@@ -39,21 +42,23 @@ export class FullscreenButton implements Control {
     }
   }
 
+  /**
+   * Enter or leave fullscreen.
+   *
+   * The direction comes from the browser rather than from the `fullscreen`
+   * state key: state is a report of what happened, and a stale one would invert
+   * the button. Rejections are swallowed because the browser refuses these
+   * routinely (no user gesture, denied by permission policy) and an unhandled
+   * rejection helps nobody.
+   */
   private async toggle(): Promise<void> {
     const container = this.api.container;
-    const video = getVideo(container) as HTMLVideoElement & {
-      webkitEnterFullscreen?: () => void;
-      webkitExitFullscreen?: () => void;
-    };
 
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (container.requestFullscreen) {
-        await container.requestFullscreen();
-      } else if (video?.webkitEnterFullscreen) {
-        // iOS Safari fallback
-        video.webkitEnterFullscreen();
+      if (isFullscreen(container)) {
+        await exitFullscreen(container);
+      } else {
+        await enterFullscreen(container);
       }
     } catch {
       // Fullscreen may not be available

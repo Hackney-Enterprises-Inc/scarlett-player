@@ -31,6 +31,17 @@ export interface EmbedConfig {
    * have no such control and ignore it.
    */
   bigPlayButton?: boolean;
+  /**
+   * Touch gestures on the video surface (video only, default: true).
+   *
+   * Double-tap the right of the picture to jump forward, the left to jump
+   * back, and tap once to toggle the controls. Touch only, decided by input
+   * type rather than user agent, so a mouse or pen never triggers any of it,
+   * and seeking is suppressed while casting and on live without a DVR window.
+   *
+   * Set it to `false` on a third-party page that owns those gestures itself.
+   */
+  gestures?: boolean;
   /** Brand/accent color for the player UI */
   brandColor?: string;
   /** Primary color for UI elements */
