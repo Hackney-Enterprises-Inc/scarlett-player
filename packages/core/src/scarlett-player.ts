@@ -12,6 +12,7 @@ import { StateManager } from './state/state-manager';
 import { Logger } from './logger';
 import { ErrorHandler, ErrorCode } from './error-handler';
 import { PluginManager } from './plugin-manager';
+import { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 import type { Plugin } from './types/plugin';
 import type { EventName, EventHandler as EventHandlerFn } from './types/events';
 import type { StateStore } from './types/state';
@@ -138,6 +139,22 @@ export class ScarlettPlayer {
   private readyEmitted = false;
 
   /**
+   * Set when the browser announced a fullscreen change during the current
+   * `requestFullscreen()` / `exitFullscreen()` call.
+   *
+   * The spec fires `fullscreenchange` BEFORE the request's promise resolves, so
+   * in a real browser the listener below has already written and announced the
+   * new state by the time the awaited call returns. Without this flag the
+   * optimistic write that follows would announce the same transition a second
+   * time. jsdom never fires the event, which is why the optimistic write cannot
+   * simply be deleted.
+   */
+  private fullscreenAnnounced = false;
+
+  /** Removes the four fullscreen listeners; assigned in the constructor. */
+  private unwireFullscreen: (() => void) | null = null;
+
+  /**
    * In-flight initialisation pass, shared by concurrent callers.
    *
    * `load()` is called from inside the `media:load-request` handler, so a
@@ -208,6 +225,8 @@ export class ScarlettPlayer {
     this.eventBus.on('media:error', ({ error }) => {
       this.errorHandler.record(error, { channel: 'media:error' });
     });
+
+    this.wireFullscreenListeners();
 
     // Register plugins if provided
     if (options.plugins) {
@@ -876,19 +895,75 @@ export class ScarlettPlayer {
   // ===== Fullscreen Methods =====
 
   /**
+   * Listen for fullscreen changes the player did not initiate.
+   *
+   * Nothing used to: the `fullscreen` state key was written only by this
+   * class's own `requestFullscreen()` and `exitFullscreen()`. Everything else
+   * left it lying. Entering fullscreen through the UI button or the `f`
+   * shortcut never flipped the icon to "Exit fullscreen", `player.fullscreen`
+   * stayed false and `fullscreen:change` never fired; and after a programmatic
+   * `requestFullscreen()` an Escape exit left the state stuck at true.
+   *
+   * `webkitbeginfullscreen` and `webkitendfullscreen` are the iPhone's native
+   * player announcing itself. They are dispatched on the video element, they do
+   * not bubble, and the element does not exist yet when this runs (a provider
+   * plugin creates it, per source), so they are bound to the container in the
+   * CAPTURE phase, which is the one phase that sees a non-bubbling event on a
+   * descendant.
+   */
+  private wireFullscreenListeners(): void {
+    const onChange = (): void => {
+      this.fullscreenAnnounced = true;
+      this.setFullscreenState(isFullscreen(this.container));
+    };
+
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    this.container.addEventListener('webkitbeginfullscreen', onChange, true);
+    this.container.addEventListener('webkitendfullscreen', onChange, true);
+
+    this.unwireFullscreen = () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+      this.container.removeEventListener('webkitbeginfullscreen', onChange, true);
+      this.container.removeEventListener('webkitendfullscreen', onChange, true);
+    };
+  }
+
+  /**
+   * Record a fullscreen transition, once.
+   *
+   * @param next - The state the browser is now in
+   */
+  private setFullscreenState(next: boolean): void {
+    if (this.stateManager.getValue('fullscreen') === next) {
+      return;
+    }
+
+    this.stateManager.set('fullscreen', next);
+    this.eventBus.emit('fullscreen:change', { fullscreen: next });
+  }
+
+  /**
    * Request fullscreen mode.
+   *
+   * @returns Promise resolving once the browser has accepted or refused
    */
   async requestFullscreen(): Promise<void> {
     this.checkDestroyed();
 
+    this.fullscreenAnnounced = false;
+
     try {
-      if (this.container.requestFullscreen) {
-        await this.container.requestFullscreen();
-      } else if ((this.container as any).webkitRequestFullscreen) {
-        await (this.container as any).webkitRequestFullscreen();
+      await enterFullscreen(this.container);
+
+      // Optimistic, and only where the browser stayed silent: no `fullscreenchange`
+      // reaches jsdom, and none reaches anyone from the iPhone's native player
+      // until it has finished opening.
+      if (!this.fullscreenAnnounced) {
+        this.stateManager.set('fullscreen', true);
+        this.eventBus.emit('fullscreen:change', { fullscreen: true });
       }
-      this.stateManager.set('fullscreen', true);
-      this.eventBus.emit('fullscreen:change', { fullscreen: true });
     } catch (error) {
       this.logger.error('Fullscreen request failed', { error });
     }
@@ -896,18 +971,21 @@ export class ScarlettPlayer {
 
   /**
    * Exit fullscreen mode.
+   *
+   * @returns Promise resolving once the browser has accepted or refused
    */
   async exitFullscreen(): Promise<void> {
     this.checkDestroyed();
 
+    this.fullscreenAnnounced = false;
+
     try {
-      if (document.exitFullscreen) {
-        await document.exitFullscreen();
-      } else if ((document as any).webkitExitFullscreen) {
-        await (document as any).webkitExitFullscreen();
+      await exitFullscreen(this.container);
+
+      if (!this.fullscreenAnnounced) {
+        this.stateManager.set('fullscreen', false);
+        this.eventBus.emit('fullscreen:change', { fullscreen: false });
       }
-      this.stateManager.set('fullscreen', false);
-      this.eventBus.emit('fullscreen:change', { fullscreen: false });
     } catch (error) {
       this.logger.error('Exit fullscreen failed', { error });
     }
@@ -1030,6 +1108,9 @@ export class ScarlettPlayer {
       clearTimeout(this.seekResumeTimeout);
       this.seekResumeTimeout = null;
     }
+
+    this.unwireFullscreen?.();
+    this.unwireFullscreen = null;
 
     // Emit destroy event
     this.eventBus.emit('player:destroy', undefined);

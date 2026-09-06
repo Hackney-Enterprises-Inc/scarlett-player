@@ -20,3 +20,4 @@ export { SkipButton } from './SkipButton';
 export { CaptionsButton } from './CaptionsButton';
 export { ThumbnailPreview } from './ThumbnailPreview';
 export { BandwidthIndicator } from './BandwidthIndicator';
+export { OverflowTray } from './OverflowTray';

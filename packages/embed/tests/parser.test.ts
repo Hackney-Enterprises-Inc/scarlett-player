@@ -115,6 +115,25 @@ describe('parseDataAttributes', () => {
       expect('bigPlayButton' in config).toBe(false);
     });
 
+    it('should parse gestures attribute as false', () => {
+      element.setAttribute('data-gestures', 'false');
+      const config = parseDataAttributes(element);
+      expect(config.gestures).toBe(false);
+    });
+
+    it('should parse gestures attribute as true', () => {
+      element.setAttribute('data-gestures', 'true');
+      const config = parseDataAttributes(element);
+      expect(config.gestures).toBe(true);
+    });
+
+    it('should leave gestures out of the config when the attribute is absent', () => {
+      const config = parseDataAttributes(element);
+      // Absent, not `undefined`: createEmbedPlayer() reads
+      // `config.gestures !== false`, so an absent attribute keeps the default.
+      expect('gestures' in config).toBe(false);
+    });
+
     it('should parse keyboard attribute', () => {
       element.setAttribute('data-keyboard', 'true');
       const config = parseDataAttributes(element);

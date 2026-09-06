@@ -35,6 +35,17 @@ export interface PluginCreators {
   mediaSession?: (config: any) => Plugin;
   watermark?: (config: any) => Plugin;
   captions?: (config: any) => Plugin;
+  /**
+   * Touch gestures: double-tap the sides to seek, tap to toggle the controls.
+   *
+   * Video builds only. The embed passes no config at all, because the plugin
+   * decides for itself whether to arm: its `enabled` default is `'auto'`,
+   * gated on `matchMedia('(any-pointer: coarse)')`, so it installs wherever a
+   * coarse pointer exists (a touchscreen laptop included) and a mouse still
+   * never triggers any of it. Forcing `enabled: true` here would instead put a
+   * gesture surface on a pure-mouse desktop with no touch to serve.
+   */
+  gestures?: (config: any) => Plugin;
 }
 
 /**
@@ -119,6 +130,13 @@ export async function createEmbedPlayer(
     // Add captions plugin if available
     if (pluginCreators.captions) {
       plugins.push(pluginCreators.captions(config.captions || {}));
+    }
+
+    // Add gestures on video, where the bar is narrowest and the skip buttons
+    // are the first controls the fit moves into the overflow tray. The plugin
+    // self-disables for audio, but the audio builds do not ship it at all.
+    if (type === 'video' && pluginCreators.gestures && config.gestures !== false) {
+      plugins.push(pluginCreators.gestures({}));
     }
 
     // Add analytics plugin if available and configured

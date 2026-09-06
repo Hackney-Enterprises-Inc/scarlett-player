@@ -25,6 +25,13 @@
  *      mixed-exports warning but could just as easily have moved the API
  *      behind window.ScarlettPlayer.default and broken every embed on the
  *      web without a single test noticing.
+ *   7. Narrow-viewport reachability (live demo stream, like 1-3): on a 320px
+ *      touch viewport both coarse-pointer queries match, the controls
+ *      that must never move are still in the bar and inside the player, the
+ *      skip buttons are in the overflow tray, the tray's adopted skip button
+ *      still seeks the video, the progress bar is a 44px touch target, and the
+ *      settings speed panel fits inside its bound and scrolls inside a 375x211
+ *      player rather than overflowing it. Repeated at 375 and 414.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -234,9 +241,15 @@ const state = (page) => page.evaluate(() => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('button.sp-play', { timeout: 30000 });
-    await page.locator('button.sp-play').scrollIntoViewIfNeeded();
     await page.waitForSelector('video', { timeout: 30000 });
     await page.waitForTimeout(1200);
+    // Scrolled AFTER the settle wait, not before it. The share plugin
+    // registers its control roughly 150ms after the bar first renders, and
+    // the UI plugin rebuilds the bar in response, so a locator taken at the
+    // first paint was detached under scrollIntoViewIfNeeded and the whole
+    // harness threw. Measured on 2026-09-05: 3 of 6 runs against main's own
+    // demo bundle, and 0 of 6 with this order.
+    await page.locator('button.sp-play').scrollIntoViewIfNeeded();
     const b = await page.locator('button.sp-play').boundingBox();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await page.mouse.down();
@@ -456,6 +469,270 @@ const state = (page) => page.evaluate(() => {
   );
 
   await page.close();
+}
+
+// ============================================================ SCENARIO 7
+// Narrow-viewport reachability. The control bar is a single non-wrapping row of
+// fixed-width items inside a host that clips, so before the responsive fit a
+// 320px player rendered settings, share, cast, PiP and fullscreen past the
+// clipping edge: captions and playback speed were not broken, they were
+// unreachable. jsdom cannot answer any of this, because it has no layout.
+{
+  console.log('\n--- Scenario 7: narrow viewport reachability ---');
+
+  /** Measure what a viewer can actually reach in the bar. */
+  const reachability = (page) => page.evaluate(() => {
+    const player = document.getElementById('player');
+    const bar = document.querySelector('.sp-controls');
+    const tray = document.querySelector('.sp-overflow-tray');
+    const box = player.getBoundingClientRect();
+
+    const inBar = (sel) => document.querySelector(sel)?.parentElement === bar;
+    const insidePlayer = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+
+      return r.width > 0 && r.right <= box.right + 0.5 && r.left >= box.left - 0.5;
+    };
+
+    return {
+      playerWidth: Math.round(box.width),
+      settings: inBar('.sp-settings') && insidePlayer('.sp-settings'),
+      fullscreen: inBar('.sp-fullscreen') && insidePlayer('.sp-fullscreen'),
+      play: inBar('.sp-play') && insidePlayer('.sp-play'),
+      trayHasSkip: !!tray?.querySelector('.sp-skip'),
+      trayButtonShown: document.querySelector('.sp-overflow')?.style.display !== 'none',
+      progressHeight: Math.round(
+        document.querySelector('.sp-progress-wrapper')?.getBoundingClientRect().height ?? 0
+      ),
+      coarse: window.matchMedia('(pointer: coarse)').matches,
+      anyCoarse: window.matchMedia('(any-pointer: coarse)').matches,
+    };
+  });
+
+  /**
+   * Open the demo on a touch viewport with the source actually loaded.
+   *
+   * The wait is load-bearing, not politeness: the skip buttons hide themselves
+   * while `duration` is 0, and the fit never moves a control that is hiding.
+   * Measuring before the manifest lands measures a bar that is not yet full,
+   * and the tray assertion below then passes or fails on network timing.
+   */
+  const openDemo = async (width, height) => {
+    const p = await browser.newPage({
+      viewport: { width, height },
+      hasTouch: true,
+      isMobile: true,
+    });
+    await p.goto(URL, { waitUntil: 'domcontentloaded' });
+    await p.waitForSelector('.sp-controls', { timeout: 15000 });
+    await p.waitForFunction(
+      () => (document.querySelector('video')?.duration ?? 0) > 0,
+      null,
+      { timeout: 30000 }
+    );
+
+    return p;
+  };
+
+  const page = await openDemo(320, 568);
+
+  const narrow = await reachability(page);
+
+  // A gate, not a nicety: without coarse-pointer emulation every touch
+  // assertion below would pass or fail for the wrong reason. Both queries are
+  // recorded because the two are not the same test and the player now reads
+  // each of them: the 44px progress rule keys off `(any-pointer: coarse)`, and
+  // so does the gestures plugin's 'auto' default, while `(pointer: coarse)`
+  // is what says this viewport's PRIMARY pointer is a finger.
+  record(
+    'touch emulation reports a coarse pointer',
+    narrow.coarse === true && narrow.anyCoarse === true,
+    `matchMedia (pointer: coarse)=${narrow.coarse}, (any-pointer: coarse)=${narrow.anyCoarse}`
+  );
+  record(
+    'settings and fullscreen stay reachable at 320px',
+    narrow.settings && narrow.fullscreen && narrow.play,
+    JSON.stringify(narrow)
+  );
+  record(
+    'the skip buttons moved into the overflow tray at 320px',
+    narrow.trayHasSkip && narrow.trayButtonShown,
+    `tray skip=${narrow.trayHasSkip}, button shown=${narrow.trayButtonShown}`
+  );
+  record(
+    'the progress bar is a 44px touch target on a coarse pointer',
+    narrow.progressHeight === 44,
+    `${narrow.progressHeight}px`
+  );
+
+  // The moved elements keep their own handlers: they are relocated, never
+  // re-rendered or wrapped.
+  //
+  // Asserted through a skip button, which the check above has just proved is in
+  // the tray, and through the effect it must have on the video element. The
+  // control this used to click was `.sp-pip`, behind an optional chain, and
+  // that could not see the defect it was written for: the check passed when no
+  // PiP button was in the tray at all, PipButton catches its own request
+  // failures, and clicking a control whose handler was lost raises nothing
+  // either, so "no exception escaped" was true in every case.
+  //
+  // Either skip button is accepted. They share a fit rank, ties go to the later
+  // item in layout order, so which one leaves the bar first is the fit's
+  // business and not this check's.
+  const SKIP_SECONDS = 10; // SkipButton's DEFAULT_SKIP_SECONDS; the demo does not override it
+  const SEEK_FROM = 40;
+
+  const trayUse = await page.evaluate(
+    async ({ step, from }) => {
+      const video = document.querySelector('video');
+
+      /**
+       * Wait for the playhead to reach a position, bounded the way the speed
+       * panel's wait below is: a seek on an HLS source is not instant, and an
+       * unbounded wait would hang the run instead of failing it.
+       */
+      const settleAt = async (target) => {
+        for (let i = 0; i < 50; i++) {
+          if (Math.abs(video.currentTime - target) < 1) return true;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+
+        return false;
+      };
+
+      try {
+        document.querySelector('.sp-overflow__btn').click();
+        const open = document
+          .querySelector('.sp-overflow-tray')
+          .classList.contains('sp-overflow-tray--open');
+
+        // A known start, so a step in either direction has somewhere to land
+        // whatever the demo stream happened to be doing.
+        video.currentTime = from;
+        const seeded = await settleAt(from);
+
+        // No optional chain: a control missing from the tray has to fail this
+        // check rather than skip it.
+        const skip = document.querySelector('.sp-overflow-tray .sp-skip');
+        if (!skip) {
+          return { open, seeded, found: false, landed: false, threw: null };
+        }
+
+        const back = skip.classList.contains('sp-skip--backward');
+        skip.click();
+        const landed = await settleAt(back ? from - step : from + step);
+
+        return {
+          open,
+          seeded,
+          found: true,
+          direction: back ? 'backward' : 'forward',
+          landed,
+          at: +video.currentTime.toFixed(2),
+          threw: null,
+        };
+      } catch (e) {
+        return { open: false, seeded: false, found: false, landed: false, threw: String(e) };
+      }
+    },
+    { step: SKIP_SECONDS, from: SEEK_FROM }
+  );
+  record(
+    'the tray opens and its adopted skip button still seeks the video',
+    trayUse.open === true &&
+      trayUse.seeded === true &&
+      trayUse.found === true &&
+      trayUse.landed === true &&
+      trayUse.threw === null,
+    trayUse.threw ?? JSON.stringify(trayUse)
+  );
+
+  // The speed panel is 253px (a 37px header and six 36px rows) against a 211px
+  // portrait phone player, so before it was bounded the host's overflow:hidden
+  // cut off its Back header and its first three speeds.
+  const speed = await page.evaluate(async () => {
+    const player = document.getElementById('player');
+    player.style.aspectRatio = 'auto';
+    player.style.width = '375px';
+    player.style.height = '211px';
+
+    // Let the plugin's ResizeObserver deliver and its coalescing frame run.
+    // 100ms was not always enough for the observer's first delivery, which left
+    // the variable at its pre-resize value and the check passing for the wrong
+    // reason.
+    await new Promise((r) => setTimeout(r, 300));
+
+    document.querySelector('.sp-settings__btn').click();
+    const rows = Array.from(document.querySelectorAll('.sp-settings-panel__row'));
+    rows.find((row) => row.textContent.includes('Speed'))?.click();
+
+    const panel = document.querySelector('.sp-settings-panel');
+    const panelBox = panel.getBoundingClientRect();
+    const playerBox = player.getBoundingClientRect();
+    const quality = document.querySelector('.sp-quality-menu');
+
+    return {
+      playerHeight: Math.round(playerBox.height),
+      maxHeight: getComputedStyle(player).getPropertyValue('--sp-menu-max-height').trim(),
+      clientHeight: panel.clientHeight,
+      scrollHeight: panel.scrollHeight,
+      // Border box, which is the only height the host's overflow: hidden can
+      // see. A max-height resolved against the content box leaves a padded
+      // panel taller than its bound, so scrollHeight > clientHeight is true
+      // either way and cannot tell the two apart.
+      panelHeight: Math.round(panelBox.height),
+      panelTop: Math.round(panelBox.top),
+      playerTop: Math.round(playerBox.top),
+      // Read directly, because the bounded-height assertion above cannot see a
+      // content-box max-height in this demo. The sub-views set `padding: 0` and
+      // are exact either way; the main view is the same element with
+      // `padding: 4px 0`, and here it is at most three rows (quality, captions,
+      // speed) of the 36px the stylesheet records, so it never grows past the
+      // 120px floor the bound cannot go below and the 8px is never clipped.
+      // border-box is what makes --sp-menu-max-height the height the host's
+      // overflow: hidden actually sees.
+      panelBoxSizing: getComputedStyle(panel).boxSizing,
+      // Absent from this demo's layout, which asks for 'settings' and not
+      // 'quality', so the check below reports that rather than failing on it.
+      qualityBoxSizing: quality ? getComputedStyle(quality).boxSizing : null,
+    };
+  });
+  record(
+    'the speed panel scrolls inside a 375x211 player instead of overflowing it',
+    speed.playerHeight === 211 &&
+      speed.maxHeight === '139px' &&
+      speed.scrollHeight > speed.clientHeight &&
+      speed.clientHeight > 0 &&
+      speed.panelHeight <= parseFloat(speed.maxHeight) &&
+      speed.panelTop >= speed.playerTop,
+    JSON.stringify(speed)
+  );
+  record(
+    'the bounded menus resolve --sp-menu-max-height against the border box',
+    speed.panelBoxSizing === 'border-box' &&
+      (speed.qualityBoxSizing === null || speed.qualityBoxSizing === 'border-box'),
+    speed.qualityBoxSizing === null
+      ? `settings panel=${speed.panelBoxSizing}; no .sp-quality-menu in this demo layout, not checked`
+      : `settings panel=${speed.panelBoxSizing}, quality menu=${speed.qualityBoxSizing}`
+  );
+
+  await page.close();
+
+  // The same reachability at the two other phone widths that matter.
+  for (const width of [375, 414]) {
+    const p = await openDemo(width, 812);
+
+    const state = await reachability(p);
+    record(
+      `settings and fullscreen stay reachable at ${width}px`,
+      state.settings && state.fullscreen && state.play && state.trayHasSkip,
+      JSON.stringify(state)
+    );
+
+    await p.close();
+  }
 }
 
 // ============================================================ SUMMARY

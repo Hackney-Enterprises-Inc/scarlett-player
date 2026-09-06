@@ -22,6 +22,7 @@ import { createPlaylistPlugin } from '@scarlett-player/playlist';
 import { createMediaSessionPlugin } from '@scarlett-player/media-session';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
+import { createGesturesPlugin } from '@scarlett-player/gestures';
 import type { ScarlettPlayerGlobal, PlayerType } from './types';
 import { createScarlettPlayerAPI, setupAutoInit, type PluginCreators } from './create-embed';
 import { PKG_VERSION } from './version';
@@ -44,6 +45,7 @@ const pluginCreators: PluginCreators = {
   mediaSession: createMediaSessionPlugin,
   watermark: createWatermarkPlugin,
   captions: createCaptionsPlugin,
+  gestures: createGesturesPlugin,
 };
 
 // Create and expose global API

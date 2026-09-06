@@ -14,6 +14,7 @@ const mockAudioUIPlugin = { id: 'audio-ui', name: 'Audio UI Plugin' };
 const mockAnalyticsPlugin = { id: 'analytics', name: 'Analytics Plugin' };
 const mockPlaylistPlugin = { id: 'playlist', name: 'Playlist Plugin' };
 const mockMediaSessionPlugin = { id: 'media-session', name: 'Media Session Plugin' };
+const mockGesturesPlugin = { id: 'gestures', name: 'Gestures Plugin' };
 
 // Mock plugin creators
 const fullPluginCreators: PluginCreators = {
@@ -24,12 +25,14 @@ const fullPluginCreators: PluginCreators = {
   analytics: vi.fn(() => mockAnalyticsPlugin),
   playlist: vi.fn(() => mockPlaylistPlugin),
   mediaSession: vi.fn(() => mockMediaSessionPlugin),
+  gestures: vi.fn(() => mockGesturesPlugin),
 };
 
 const videoOnlyPluginCreators: PluginCreators = {
   hls: vi.fn(() => mockHLSPlugin),
   native: vi.fn(() => mockNativePlugin),
   videoUI: vi.fn(() => mockVideoUIPlugin),
+  gestures: vi.fn(() => mockGesturesPlugin),
 };
 
 // A build that supplies no native provider. Kept to prove the slot is optional
@@ -266,6 +269,68 @@ describe('createEmbedPlayer', () => {
     // The audio UIs have no big play button; the option is video only.
     expect(uiConfigOf(fullPluginCreators.audioUI)).not.toHaveProperty('bigPlayButton');
     expect(fullPluginCreators.videoUI).not.toHaveBeenCalled();
+  });
+
+  // Double-tap seek and tap to toggle the controls, on by default for video.
+  // The skip buttons are the first controls the responsive bar moves into the
+  // overflow tray on a phone, and this is what replaces them there.
+  it('should add gestures to a video player by default', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.gestures).toHaveBeenCalled();
+    expect(pluginsOf(player)).toContain(mockGesturesPlugin);
+  });
+
+  it('should not add gestures when the embed asked for none', async () => {
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', gestures: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.gestures).not.toHaveBeenCalled();
+    expect(pluginsOf(player)).not.toContain(mockGesturesPlugin);
+  });
+
+  it('should not add gestures to an audio player', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.mp3', type: 'audio' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.gestures).not.toHaveBeenCalled();
+  });
+
+  it('should not add gestures to a mini audio player', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.mp3', type: 'audio-mini' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.gestures).not.toHaveBeenCalled();
+  });
+
+  it('should build without a gestures creator', async () => {
+    // The slot is optional, so a build that omits it must still assemble.
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      hlsOnlyPluginCreators,
+      videoOnlyTypes
+    );
+
+    expect(player).not.toBeNull();
+    expect(pluginsOf(player)).not.toContain(mockGesturesPlugin);
   });
 
   it('should always include HLS plugin', async () => {

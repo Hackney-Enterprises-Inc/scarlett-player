@@ -46,12 +46,24 @@ export interface GesturesPlugin extends Plugin {
 }
 
 /**
- * Does this device have a coarse pointer?
+ * Does this device have a coarse pointer at all?
  *
- * Used only for the `'auto'` default. Per-gesture filtering still checks
- * `pointerType`, so a hybrid laptop behaves correctly with either input.
+ * `(any-pointer: coarse)`, not `(pointer: coarse)`, and the difference is the
+ * whole hybrid case: `pointer` describes the PRIMARY pointer only, so a
+ * touchscreen laptop being driven by its trackpad answered false and the
+ * `'auto'` default installed no gesture surface for the finger that is also on
+ * the glass. That contradicted what `enabled` promises.
  *
- * @returns true when the primary pointer is coarse
+ * Arming there costs the mouse nothing. The surface's only listeners are the
+ * four pointer events in GestureOverlay, all of which return before doing
+ * anything unless `pointerType === 'touch'`, and it never calls
+ * `preventDefault` or `stopPropagation`, so a mouse click still bubbles to the
+ * UI package's container listeners. The controls (z-index 10) and the big play
+ * button (12) sit above the surface (6) and keep their own clicks.
+ *
+ * Used only for the `'auto'` default.
+ *
+ * @returns true when any pointer the device has is coarse
  */
 function hasCoarsePointer(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -59,7 +71,7 @@ function hasCoarsePointer(): boolean {
   }
 
   try {
-    return window.matchMedia('(pointer: coarse)').matches;
+    return window.matchMedia('(any-pointer: coarse)').matches;
   } catch {
     return false;
   }

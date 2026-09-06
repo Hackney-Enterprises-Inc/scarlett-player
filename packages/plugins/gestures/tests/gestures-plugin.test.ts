@@ -8,10 +8,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createGesturesPlugin } from '../src/index';
 
-/** Pretend the device has a coarse pointer, which is what enables 'auto'. */
-function stubCoarsePointer(matches: boolean): void {
+/**
+ * Pretend the device has a coarse pointer, which is what enables 'auto'.
+ *
+ * Query-aware on purpose. `'auto'` is gated on `(any-pointer: coarse)` rather
+ * than the primary-pointer `(pointer: coarse)`, and a mock that answered every
+ * query the same way could not tell the two apart, so the hybrid case below
+ * would pass whichever query the plugin asked. `primary` defaults to `any`, so
+ * the cases that just mean "a phone" read unchanged.
+ *
+ * @param any - What `(any-pointer: coarse)` reports
+ * @param primary - What `(pointer: coarse)` reports
+ */
+function stubCoarsePointer(any: boolean, primary: boolean = any): void {
   Object.defineProperty(window, 'matchMedia', {
-    value: vi.fn(() => ({ matches, media: '', addListener: vi.fn(), removeListener: vi.fn() })),
+    value: vi.fn((query: string) => ({
+      matches: query.includes('any-pointer') ? any : primary,
+      media: query,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    })),
     configurable: true,
     writable: true,
   });
@@ -117,6 +133,45 @@ describe('createGesturesPlugin', () => {
     createGesturesPlugin().init(api as never);
 
     expect(api.container.querySelector('.sp-gestures')).toBeNull();
+  });
+
+  it('arms on a hybrid laptop, where only the secondary pointer is coarse', () => {
+    // `(pointer: coarse)` describes the PRIMARY pointer only, so gating on it
+    // left a touchscreen laptop being driven by its trackpad with no gesture
+    // surface at all for the finger that is also on the glass.
+    stubCoarsePointer(true, false);
+    const api = createMockApi();
+    createGesturesPlugin().init(api as never);
+
+    expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+  });
+
+  it('leaves the mouse alone on the hybrid laptop it now arms on', () => {
+    // Arming for the finger must cost the trackpad nothing: no listener may act
+    // on a mouse pointer, and none may stop the event reaching the UI package's
+    // own container listeners.
+    stubCoarsePointer(true, false);
+    const api = createMockApi({ controlsVisible: false });
+    createGesturesPlugin().init(api as never);
+    const surface = api.container.querySelector('.sp-gestures') as HTMLElement;
+    measureSurface(surface);
+
+    const reachedContainer: string[] = [];
+    api.container.addEventListener('pointerdown', (e) => reachedContainer.push(e.type));
+
+    const down = new MouseEvent('pointerdown', { clientX: 850, bubbles: true });
+    Object.defineProperty(down, 'pointerType', { value: 'mouse' });
+    const up = new MouseEvent('pointerup', { clientX: 850, bubbles: true });
+    Object.defineProperty(up, 'pointerType', { value: 'mouse' });
+
+    surface.dispatchEvent(down);
+    surface.dispatchEvent(up);
+    surface.dispatchEvent(down);
+    surface.dispatchEvent(up);
+
+    expect(api.video.currentTime).toBe(100);
+    expect(api.uiPlugin.show).not.toHaveBeenCalled();
+    expect(reachedContainer).toEqual(['pointerdown', 'pointerdown']);
   });
 
   it('can be forced on regardless of the pointer type', () => {

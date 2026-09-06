@@ -3,6 +3,7 @@
  */
 
 import type { Plugin, IPluginAPI } from '@scarlett-player/core';
+import type { FitRank } from './fit';
 
 /**
  * Control slots this package implements itself.
@@ -45,7 +46,14 @@ export type ControlFactory = (api: IPluginAPI) => Control;
  * Layout configuration for the control bar.
  */
 export interface LayoutConfig {
-  /** Order of controls in the control bar */
+  /**
+   * Order of controls in the control bar.
+   *
+   * A layout with `quality` must also have `settings`: `quality` hides when
+   * the bar does not fit, and the settings menu is where its Quality row
+   * lives. `uiPlugin()` throws otherwise, unless `quality` is pinned through
+   * `priority` or `responsive` is off.
+   */
   controls?: ControlSlot[];
   /** Delay in ms before hiding controls (default: 3000) */
   hideDelay?: number;
@@ -83,6 +91,38 @@ export interface UIPluginConfig extends LayoutConfig {
    * host page draws its own play affordance over the player.
    */
   bigPlayButton?: boolean;
+  /**
+   * Let the bar move low-priority controls into a tray when it does not fit
+   * (default: true).
+   *
+   * The bar is a single non-wrapping row of fixed-width items inside a host
+   * that clips, so without this a narrow player simply renders its right-hand
+   * controls past the edge: on a 390px phone with tsp-web's 17-slot layout that
+   * is settings, captions, cast, PiP and fullscreen, all of them off canvas
+   * (measured 2026-09-05). With it on, the bar measures itself and relocates
+   * the least important controls into a tray behind a "More controls" button.
+   *
+   * `false` restores the pre-1.8 behaviour exactly: no measuring, no observer,
+   * no tray button and no extra DOM. It is the escape hatch for a host that
+   * pins its own layout and would rather clip.
+   */
+  responsive?: boolean;
+  /**
+   * Override how eagerly individual controls leave the bar.
+   *
+   * Keyed by control slot id; lower ranks leave first and `'never'` pins a
+   * control in the bar at every width. Unlisted slots keep their default
+   * ({@link DEFAULT_PRIORITY}), and any id that is not a built-in defaults to
+   * rank 3. Use it to pin a registered control that owns an overlay positioned
+   * against its own button, or to make a control the host cares about outlive
+   * the rest.
+   *
+   * @example
+   * ```ts
+   * uiPlugin({ priority: { share: 'never', 'skip-forward': 6 } });
+   * ```
+   */
+  priority?: Record<string, FitRank>;
 }
 
 /**

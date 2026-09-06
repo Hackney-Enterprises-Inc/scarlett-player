@@ -52,10 +52,11 @@ export interface GesturesPluginConfig {
   /**
    * Whether gestures are active.
    *
-   * `'auto'` enables them when the device reports a coarse pointer, and every
-   * individual gesture is additionally checked for `pointerType === 'touch'`,
-   * so a touchscreen laptop works with a finger and is untouched by the mouse.
-   * Never UA sniffing.
+   * `'auto'` enables them wherever the device has a coarse pointer at all
+   * (`matchMedia('(any-pointer: coarse)')`, not the primary-pointer
+   * `(pointer: coarse)`), and every individual gesture is additionally checked
+   * for `pointerType === 'touch'`, so a touchscreen laptop works with a finger
+   * and is untouched by the mouse. Never UA sniffing.
    *
    * @defaultValue 'auto'
    */
