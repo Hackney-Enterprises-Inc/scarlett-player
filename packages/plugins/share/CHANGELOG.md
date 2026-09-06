@@ -1,5 +1,36 @@
 # @scarlett-player/share
 
+## 1.8.1
+
+### Patch Changes
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - Peer dependency ranges now name the current major line: `@scarlett-player/core`
+  and `@scarlett-player/ui` move from `^1.7.0` to `^1.8.0` in the Vue wrapper and
+  in every plugin that had not already been bumped, leaving the whole fixed
+  version group asking for one range. Nothing was resolving wrongly before, since
+  `^1.7.0` already admits 1.8.0, but the declared floor now matches the version
+  these packages are actually built and tested against rather than trailing a
+  release behind it.
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - Avoid using window.location.href as embedBaseUrl in iframe.html to prevent leaking signed or credentialed playback URLs in shared embed snippets.
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - The embed can share the page it is on.
+
+  `@scarlett-player/share` now ships in the Full and Video embed builds, and a new
+  `data-share-url` attribute, `shareUrl` option and `share-url` iframe parameter
+  carry the page URL through to it. The share plugin's `embed` target has been
+  writing `shareUrl` into the snippets it generates since it landed, but
+  `iframe.html` never read the parameter and no embed build contained the plugin,
+  so a snippet copied out of one player produced an iframe with no share button
+  and a URL nobody looked at.
+
+  Opt in, and video only. With no share URL the control bar is unchanged, because
+  the button has nothing to offer: the plugin will not fall back to the media
+  `src`, which is frequently signed. The audio builds are unaffected, since the
+  audio UIs have no control registry to register a button into. Inside
+  `iframe.html` the page also passes its own URL as `embedBaseUrl`, so the
+  sheet's embed code is a working copy of the player the viewer is watching.
+
 ## 1.8.0
 
 ## 1.7.1
