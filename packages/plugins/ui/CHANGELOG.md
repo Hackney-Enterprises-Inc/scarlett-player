@@ -1,5 +1,134 @@
 # @scarlett-player/ui
 
+## 1.8.0
+
+### Minor Changes
+
+- [#76](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/76) [`443b52b`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/443b52be734250f3b461709c38f6959b0a78c608) Thanks [@alexhackney](https://github.com/alexhackney)! - The control bar fits itself, and the menus fit the player.
+
+  The bar was a single non-wrapping row of fixed-width flex items inside a host
+  that clips, with no strategy for not fitting. Measured in Chrome 152 on the
+  demo: the visible set is 519px, so the bar clips below 543px of player width,
+  and at 375px the share, cast, PiP and fullscreen buttons render past the edge.
+  Derived for tsp-web's 17-slot layout on a 390px iPhone, the left group alone is
+  375px against 366px of inner width, so the entire right group (chapters,
+  settings, captions, cast, PiP, fullscreen) is off canvas. Captions and playback
+  speed were never broken; they were unreachable.
+
+  `responsive` (default true) makes the bar measure itself and move the
+  least important controls into a new overflow tray behind a "More controls"
+  button. The arithmetic is a pure `planFit()` in `src/fit.ts` so it can be unit
+  tested, which a CSS answer could not be: jsdom has no layout engine, and a width
+  tier cannot guarantee a fit anyway, because the time readout is 87px or ~130px
+  depending on the duration, every control hides itself on state, and hosts
+  register controls of their own. The tray button's own width is part of the
+  arithmetic, which is what makes the plan deterministic and stops it
+  oscillating. The volume control is planned at its expanded width, because its
+  slider grows from 0 to 64px on hover and on focus without the container
+  resizing, which would otherwise push the pinned right-hand controls past the
+  clipping edge at any width where the collapsed bar only just fits.
+  `priority` re-ranks or pins individual slots, and `responsive: false` restores
+  the previous behaviour exactly: no measuring, no observer, no tray, no extra
+  DOM.
+
+  The `quality` control hides rather than moving to the tray, which the other
+  low-priority controls do. Its menu is bounded by `--sp-menu-max-height`, and
+  that bound is sized for a menu anchored in the bar, so a quality menu opened
+  from the tray (which sits above the bar) would run off the top of the player.
+  The settings menu carries a Quality row whenever there are qualities to choose.
+  That is a promise about the layout rather than the control, so `uiPlugin()`
+  throws on a layout that has `quality` without `settings`, unless `quality` is
+  pinned or `responsive` is off.
+
+  The tray is a horizontal wrapping strip, not a vertical menu: eight 44px rows
+  would be over 350px tall against a 211px portrait phone player, and a scrolling
+  panel would clip the popovers registered controls own. Controls are moved, never
+  re-rendered or wrapped, so a captions button in the tray still emits
+  `track:text`.
+
+  The settings and quality menus are now bounded to the player's height through
+  `--sp-menu-max-height`, written by the same ResizeObserver, and are
+  `box-sizing: border-box` so that bound is the height they actually render:
+  `max-height` bounds the content box, and the quality menu's 8px and the settings
+  main menu's 4px of vertical padding rendered past it. The speed sub-panel
+  is 253px against a 211px player, so without that it lost its Back header and its
+  first three speeds to the host's `overflow: hidden`, which kept playback speed
+  unreachable even once the bar fitted.
+
+  Wherever a coarse pointer is available (`any-pointer: coarse`, which is also
+  true of a touchscreen laptop driven by a mouse, unlike the primary-pointer
+  `pointer: coarse`) the progress wrapper grows upward to 44px. The control bar is
+  a later sibling at the same z-index and covers 48..56px from the bottom, so the
+  exclusive scrub region was 12px, not the 20px the wrapper suggested. The visible
+  3px bar does not move.
+
+  The fullscreen button and the `f` shortcut now go through the core fullscreen
+  helpers, so they behave the same as `player.requestFullscreen()`, iPhone
+  fallback included, and the button decides its direction from the browser rather
+  than from a state key that could be stale. `env(safe-area-inset-bottom)` is
+  composed in through `--sp-inset-bottom`, scoped to `:fullscreen` (and
+  `:-webkit-full-screen`): applied unconditionally it would push an inline
+  player's controls up on any `viewport-fit=cover` page.
+
+  The `@scarlett-player/core` peer range moves to `^1.8.0`, which is the version
+  that exports those helpers.
+
+### Patch Changes
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Reports its real version, and requires `@scarlett-player/core@^1.7.0`.
+
+  The descriptor's `version` was the hand-written literal '1.0.0' while the
+  package published at 1.7.0, so anything that read a version off the plugin
+  reported a number that had not been true since the descriptor was written
+  (measured 2026-09-02). It comes from the package's own package.json now:
+  `src/version.ts` reads a `__PKG_VERSION__` define set by the new
+  `tsup.config.ts`, with a '0.0.0-dev' fallback for test runs. The `build` and
+  `dev` scripts call plain `tsup`, so the entry points, formats and `--dts` flag
+  are written down once in the config instead of twice in package.json. The
+  move does not change what tsup emits: the md5 of `dist/index.d.ts` and
+  `dist/index.d.cts` is unchanged across it (compared 2026-09-02).
+
+  The `@scarlett-player/core` peer range moves from `^1.0.3` to `^1.7.0`.
+  The old ranges were
+  wrong across the workspace, not merely inconsistent: three of the packages
+  declaring `^1.0.3` (audio-ui, media-session, ui) call `defineState`, which core
+  gained in 1.4.0. Changesets is configured with
+  `onlyUpdatePeerDependentsWhenOutOfRange`, so future minors of core will not
+  cascade this into a major.
+
+  The `@example` docblock shows `createPlayer()`. The `new ScarlettPlayer(...)`
+  shape it used to show left the player with a provider and nothing else before
+  core 1.7.1, so anyone copying the example got no controls and no working
+  "Try Again".
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Big play button over the poster, on by default.
+
+  A poster with no visible play affordance is worse for the viewer than no
+  poster: on desktop a click on the picture only revealed the control bar
+  (touch taps belong to `@scarlett-player/gestures`), so the only way to start a
+  video was the small button in the bar. `BigPlayButton` is a real `<button>`
+  with an `aria-label`, rendered into the container like the error overlay,
+  sized past the control bar's 44 px minimum target and coloured with
+  `--sp-accent`.
+
+  It is visible before playback starts and again as Replay when playback ends,
+  hidden from the first `playing` onward, hidden while the source is loading
+  (the spinner owns that state) and while an error is set or the error overlay
+  is showing. It updates from the same `scheduleUpdate()` pass as every other
+  control, and its z-index puts it above the gestures plugin's tap surface, so a
+  tap starts playback rather than toggling the controls, exactly as the control
+  bar's play button already behaved.
+
+  `UIPluginConfig.bigPlayButton: false` turns it off for a host page that draws
+  its own affordance.
+
+  It reads `video.ended` rather than the `ended` state key. Measured in Chrome
+  on 2026-09-02: neither provider clears that key on a replay (only `load()`
+  does), so it stays true for the rest of the session, and a control trusting it
+  would sit over playing video. The control bar's play button has the same
+  source and does show "Replay" while a replayed video plays; that is a separate
+  provider defect, untouched here.
+
 ## 1.7.0
 
 ### Patch Changes
