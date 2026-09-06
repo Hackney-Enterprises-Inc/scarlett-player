@@ -16,5 +16,6 @@ On by default for `type="video"`, with `data-gestures="false"` (or
 `gestures: false`) as the kill switch for a page that owns those gestures
 itself. The audio builds do not ship it, and the plugin self-disables for audio
 anyway. It arms itself by input type, not by user agent: `enabled` defaults to
-`'auto'`, gated on `matchMedia('(pointer: coarse)')`, so a mouse never triggers
-any of it.
+`'auto'`, gated on `matchMedia('(any-pointer: coarse)')`, so it installs
+wherever a coarse pointer exists, a touchscreen laptop included, and a mouse
+still never triggers any of it.

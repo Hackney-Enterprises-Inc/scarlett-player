@@ -357,6 +357,89 @@ describe('UI Plugin', () => {
     });
   });
 
+  describe('fullscreen transitions', () => {
+    /** The plugin's state subscriber, captured so a change can be pushed in. */
+    let notify: (() => void) | null;
+    /** Frame callbacks the plugin has queued but not yet run. */
+    let frames: Array<(t: number) => void>;
+
+    /**
+     * Run the queued frame.
+     *
+     * Deliberately not a synchronous requestAnimationFrame stub, for the
+     * reason the big play button suite gives: the plugin assigns the handle
+     * after the call returns.
+     */
+    const flushFrame = (): void => {
+      const queued = frames;
+      frames = [];
+      queued.forEach((cb) => cb(0));
+    };
+
+    /** Push a state change through the plugin's own scheduleUpdate() pass. */
+    const setState = (key: string, value: unknown): void => {
+      api.setState(key as never, value as never);
+      notify?.();
+      flushFrame();
+    };
+
+    beforeEach(() => {
+      notify = null;
+      frames = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+      (api.subscribeToState as any).mockImplementation((cb: () => void) => {
+        notify = cb;
+        return vi.fn();
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('registers no fullscreenchange listener of its own', async () => {
+      // Core owns the fullscreen listeners (all four of them, prefixed events
+      // included) and reports through the `fullscreen` state key. A second
+      // listener here would render on an event no control reads.
+      const spy = vi.spyOn(document, 'addEventListener');
+      const plugin = uiPlugin();
+      await plugin.init(api);
+      const types = spy.mock.calls.map((call) => call[0]);
+      // Restored before the assertions, so a failure cannot leak the spy into
+      // the rest of the file.
+      spy.mockRestore();
+
+      expect(types).not.toContain('fullscreenchange');
+      // The plugin does wire the document for keyboard shortcuts, which is
+      // what proves the spy was watching the right object.
+      expect(types).toContain('keydown');
+
+      await plugin.destroy();
+    });
+
+    it('flips the fullscreen button when the fullscreen state key changes', async () => {
+      // The contract that replaces the removed listener: core writes the key,
+      // the state subscription renders, the button reads the key.
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      const button = api.container.querySelector('.sp-fullscreen') as HTMLElement;
+      expect(button.getAttribute('aria-label')).toBe('Fullscreen');
+
+      setState('fullscreen', true);
+      expect(button.getAttribute('aria-label')).toBe('Exit fullscreen');
+
+      setState('fullscreen', false);
+      expect(button.getAttribute('aria-label')).toBe('Fullscreen');
+
+      await plugin.destroy();
+    });
+  });
+
   describe('interaction handling', () => {
     it('should add tabindex to container', async () => {
       const plugin = uiPlugin();
@@ -626,6 +709,41 @@ describe('UI Plugin', () => {
     let observed: ResizeObserverCallback | null;
     /** disconnect() spy on the stubbed observer. */
     let disconnect: ReturnType<typeof vi.fn>;
+    /** Whether the stubbed volume control is rendering its expanded slider. */
+    let volumeExpanded = false;
+
+    /**
+     * Width the stub reports for one element.
+     *
+     * jsdom has no layout engine, so these are the widths measured in Chrome
+     * on scarlettplayer.com/demo (2026-09-05): every .sp-control is 44px, the
+     * time readout is 87px, and anything hidden is zero. The volume control is
+     * the one item that changes width without changing visibility, so it is
+     * modelled properly: `.sp-volume__slider-wrap` is 0 collapsed and 64px
+     * (--sp-volume-slider-width) while the pointer rests on the control or the
+     * mute button holds focus, and `.sp-volume` measures the sum.
+     *
+     * @param el - The element being measured
+     * @returns Its stubbed border box width in px
+     */
+    const stubWidth = (el: HTMLElement): number => {
+      if (
+        el.style?.display === 'none' ||
+        el.classList.contains('sp-control--collapsed')
+      ) {
+        return 0;
+      }
+
+      if (el.classList.contains('sp-volume__slider-wrap')) {
+        return volumeExpanded ? 64 : 0;
+      }
+
+      if (el.classList.contains('sp-volume')) {
+        return volumeExpanded ? 44 + 64 : 44;
+      }
+
+      return el.classList.contains('sp-time') ? 87 : 44;
+    };
 
     const bar = (): HTMLElement =>
       api.container.querySelector('.sp-controls') as HTMLElement;
@@ -659,11 +777,10 @@ describe('UI Plugin', () => {
       frames = [];
       observed = null;
       disconnect = vi.fn();
+      volumeExpanded = false;
 
-      // jsdom has no layout engine. These stubs stand in for the widths
-      // measured in Chrome on scarlettplayer.com/demo (2026-09-05): every
-      // .sp-control is 44px, the time readout is 87px, and anything hidden is
-      // zero.
+      // jsdom has no layout engine, so the bar reports its configured width
+      // and every control reports what stubWidth() says it measures.
       Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
         configurable: true,
         get(this: HTMLElement) {
@@ -671,10 +788,7 @@ describe('UI Plugin', () => {
         },
       });
       Element.prototype.getBoundingClientRect = function (this: HTMLElement) {
-        const hidden =
-          this.style?.display === 'none' ||
-          this.classList.contains('sp-control--collapsed');
-        const width = hidden ? 0 : this.classList.contains('sp-time') ? 87 : 44;
+        const width = stubWidth(this);
 
         return { width, height: 44, top: 0, left: 0, right: width, bottom: 44, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
       } as typeof Element.prototype.getBoundingClientRect;
@@ -722,7 +836,9 @@ describe('UI Plugin', () => {
       const plugin = uiPlugin();
       await plugin.init(api);
 
-      // 471px of visible controls against 936px of inner width.
+      // 535px of demand (471 of visible controls, plus the 64 the volume
+      // slider expands to) against 960 - 24 of bar padding - 4 for the
+      // spacer's gap = 932px of inner width.
       expect(inBar('.sp-play')).toBe(true);
       expect(inBar('.sp-skip--backward')).toBe(true);
       expect(inBar('.sp-volume')).toBe(true);
@@ -933,6 +1049,97 @@ describe('UI Plugin', () => {
       const time = api.container.querySelector('.sp-time') as HTMLElement;
       expect(time.classList.contains('sp-control--collapsed')).toBe(true);
       expect(inBar('.sp-time')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('reserves the width the volume slider expands to', async () => {
+      // play 44 + volume 44 + fullscreen 44 with two 4px gaps is 140 collapsed
+      // and 204 with the slider open, against 231 - 24 of bar padding - 4 for
+      // the spacer's gap = 203 of inner width. Nothing tells the fit that a
+      // pointer has arrived (the container did not resize and no display flag
+      // moved), so it has to plan for the open slider or the pinned fullscreen
+      // button is pushed past the host's clipping edge on hover.
+      barWidth = 231;
+      const plugin = uiPlugin({
+        controls: ['play', 'spacer', 'volume', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      expect(inTray('.sp-volume')).toBe(true);
+      expect(inBar('.sp-play')).toBe(true);
+      expect(inBar('.sp-fullscreen')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('does not count the volume slider twice when the fit runs mid-hover', async () => {
+      // One pixel wider, so the reserve fits exactly: 204 of demand against
+      // 204 of inner width. A fit can run while the pointer is resting on the
+      // control (a timeupdate refit), and getBoundingClientRect() on an
+      // expanded volume already includes the slider, so charging the reserve
+      // on top of the measurement would evict a control the bar has room for.
+      volumeExpanded = true;
+      barWidth = 232;
+      const plugin = uiPlugin({
+        controls: ['play', 'spacer', 'volume', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      expect(inBar('.sp-volume')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('takes the volume reserve from the stylesheet own custom property', async () => {
+      // The reserve and the rule that expands the slider read one declaration,
+      // --sp-volume-slider-width on the control bar, so a host that restyles
+      // it moves the fit with it: at 80px the same bar demands 220 against the
+      // 204 that fits the stylesheet's own 64.
+      const computed = window.getComputedStyle.bind(window);
+      vi.stubGlobal('getComputedStyle', (el: Element) => {
+        const real = computed(el);
+
+        return {
+          position: real.position,
+          paddingLeft: real.paddingLeft,
+          paddingRight: real.paddingRight,
+          columnGap: real.columnGap,
+          gap: real.gap,
+          getPropertyValue: (property: string) =>
+            property === '--sp-volume-slider-width'
+              ? '80px'
+              : real.getPropertyValue(property),
+        };
+      });
+
+      barWidth = 232;
+      const plugin = uiPlugin({
+        controls: ['play', 'spacer', 'volume', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      expect(inTray('.sp-volume')).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('counts the spacer own gap against the available width', async () => {
+      // The spacer is not one of the planned items, but it is still a flex
+      // child of the row, so the bar lays out one gap more than the items
+      // imply: play 44 + time 87 + fullscreen 44 with two gaps is 183, and
+      // 207 - 24 of bar padding is 183 exactly. Without the spacer's own gap
+      // the row measures as fitting and the host clips the last control.
+      barWidth = 207;
+      const plugin = uiPlugin({
+        controls: ['play', 'spacer', 'time', 'fullscreen'],
+      });
+      await plugin.init(api);
+
+      const bounded = api.container.querySelector('.sp-time') as HTMLElement;
+      expect(bounded.classList.contains('sp-control--collapsed')).toBe(true);
+      expect(inBar('.sp-play')).toBe(true);
+      expect(inBar('.sp-fullscreen')).toBe(true);
 
       await plugin.destroy();
     });

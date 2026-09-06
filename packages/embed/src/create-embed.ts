@@ -38,9 +38,12 @@ export interface PluginCreators {
   /**
    * Touch gestures: double-tap the sides to seek, tap to toggle the controls.
    *
-   * Video builds only. The plugin decides for itself whether to arm: its
-   * `enabled` default is `'auto'`, gated on `matchMedia('(pointer: coarse)')`,
-   * so a mouse never triggers any of it.
+   * Video builds only. The embed passes no config at all, because the plugin
+   * decides for itself whether to arm: its `enabled` default is `'auto'`,
+   * gated on `matchMedia('(any-pointer: coarse)')`, so it installs wherever a
+   * coarse pointer exists (a touchscreen laptop included) and a mouse still
+   * never triggers any of it. Forcing `enabled: true` here would instead put a
+   * gesture surface on a pure-mouse desktop with no touch to serve.
    */
   gestures?: (config: any) => Plugin;
 }

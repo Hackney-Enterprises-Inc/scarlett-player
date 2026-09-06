@@ -26,12 +26,12 @@
  *      behind window.ScarlettPlayer.default and broken every embed on the
  *      web without a single test noticing.
  *   7. Narrow-viewport reachability (live demo stream, like 1-3): on a 320px
- *      touch viewport the controls
+ *      touch viewport both coarse-pointer queries match, the controls
  *      that must never move are still in the bar and inside the player, the
- *      skip buttons are in the overflow tray, an adopted control still works,
- *      the progress bar is a 44px touch target, and the settings speed panel
- *      scrolls inside a 375x211 player rather than overflowing it. Repeated at
- *      375 and 414.
+ *      skip buttons are in the overflow tray, the tray's adopted skip button
+ *      still seeks the video, the progress bar is a 44px touch target, and the
+ *      settings speed panel fits inside its bound and scrolls inside a 375x211
+ *      player rather than overflowing it. Repeated at 375 and 414.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -507,6 +507,7 @@ const state = (page) => page.evaluate(() => {
         document.querySelector('.sp-progress-wrapper')?.getBoundingClientRect().height ?? 0
       ),
       coarse: window.matchMedia('(pointer: coarse)').matches,
+      anyCoarse: window.matchMedia('(any-pointer: coarse)').matches,
     };
   });
 
@@ -540,11 +541,15 @@ const state = (page) => page.evaluate(() => {
   const narrow = await reachability(page);
 
   // A gate, not a nicety: without coarse-pointer emulation every touch
-  // assertion below would pass or fail for the wrong reason.
+  // assertion below would pass or fail for the wrong reason. Both queries are
+  // recorded because the two are not the same test and the player now reads
+  // each of them: the 44px progress rule keys off `(any-pointer: coarse)`, and
+  // so does the gestures plugin's 'auto' default, while `(pointer: coarse)`
+  // is what says this viewport's PRIMARY pointer is a finger.
   record(
     'touch emulation reports a coarse pointer',
-    narrow.coarse === true,
-    `matchMedia coarse=${narrow.coarse}`
+    narrow.coarse === true && narrow.anyCoarse === true,
+    `matchMedia (pointer: coarse)=${narrow.coarse}, (any-pointer: coarse)=${narrow.anyCoarse}`
   );
   record(
     'settings and fullscreen stay reachable at 320px',
@@ -564,23 +569,84 @@ const state = (page) => page.evaluate(() => {
 
   // The moved elements keep their own handlers: they are relocated, never
   // re-rendered or wrapped.
-  const trayUse = await page.evaluate(() => {
-    try {
-      document.querySelector('.sp-overflow__btn').click();
-      const open = document
-        .querySelector('.sp-overflow-tray')
-        .classList.contains('sp-overflow-tray--open');
-      document.querySelector('.sp-overflow-tray .sp-pip')?.click();
+  //
+  // Asserted through a skip button, which the check above has just proved is in
+  // the tray, and through the effect it must have on the video element. The
+  // control this used to click was `.sp-pip`, behind an optional chain, and
+  // that could not see the defect it was written for: the check passed when no
+  // PiP button was in the tray at all, PipButton catches its own request
+  // failures, and clicking a control whose handler was lost raises nothing
+  // either, so "no exception escaped" was true in every case.
+  //
+  // Either skip button is accepted. They share a fit rank, ties go to the later
+  // item in layout order, so which one leaves the bar first is the fit's
+  // business and not this check's.
+  const SKIP_SECONDS = 10; // SkipButton's DEFAULT_SKIP_SECONDS; the demo does not override it
+  const SEEK_FROM = 40;
 
-      return { open, threw: null };
-    } catch (e) {
-      return { open: false, threw: String(e) };
-    }
-  });
+  const trayUse = await page.evaluate(
+    async ({ step, from }) => {
+      const video = document.querySelector('video');
+
+      /**
+       * Wait for the playhead to reach a position, bounded the way the speed
+       * panel's wait below is: a seek on an HLS source is not instant, and an
+       * unbounded wait would hang the run instead of failing it.
+       */
+      const settleAt = async (target) => {
+        for (let i = 0; i < 50; i++) {
+          if (Math.abs(video.currentTime - target) < 1) return true;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+
+        return false;
+      };
+
+      try {
+        document.querySelector('.sp-overflow__btn').click();
+        const open = document
+          .querySelector('.sp-overflow-tray')
+          .classList.contains('sp-overflow-tray--open');
+
+        // A known start, so a step in either direction has somewhere to land
+        // whatever the demo stream happened to be doing.
+        video.currentTime = from;
+        const seeded = await settleAt(from);
+
+        // No optional chain: a control missing from the tray has to fail this
+        // check rather than skip it.
+        const skip = document.querySelector('.sp-overflow-tray .sp-skip');
+        if (!skip) {
+          return { open, seeded, found: false, landed: false, threw: null };
+        }
+
+        const back = skip.classList.contains('sp-skip--backward');
+        skip.click();
+        const landed = await settleAt(back ? from - step : from + step);
+
+        return {
+          open,
+          seeded,
+          found: true,
+          direction: back ? 'backward' : 'forward',
+          landed,
+          at: +video.currentTime.toFixed(2),
+          threw: null,
+        };
+      } catch (e) {
+        return { open: false, seeded: false, found: false, landed: false, threw: String(e) };
+      }
+    },
+    { step: SKIP_SECONDS, from: SEEK_FROM }
+  );
   record(
-    'the tray opens and an adopted control still works',
-    trayUse.open === true && trayUse.threw === null,
-    trayUse.threw ?? `open=${trayUse.open}`
+    'the tray opens and its adopted skip button still seeks the video',
+    trayUse.open === true &&
+      trayUse.seeded === true &&
+      trayUse.found === true &&
+      trayUse.landed === true &&
+      trayUse.threw === null,
+    trayUse.threw ?? JSON.stringify(trayUse)
   );
 
   // The speed panel is 253px (a 37px header and six 36px rows) against a 211px
@@ -603,12 +669,34 @@ const state = (page) => page.evaluate(() => {
     rows.find((row) => row.textContent.includes('Speed'))?.click();
 
     const panel = document.querySelector('.sp-settings-panel');
+    const panelBox = panel.getBoundingClientRect();
+    const playerBox = player.getBoundingClientRect();
+    const quality = document.querySelector('.sp-quality-menu');
 
     return {
-      playerHeight: Math.round(player.getBoundingClientRect().height),
+      playerHeight: Math.round(playerBox.height),
       maxHeight: getComputedStyle(player).getPropertyValue('--sp-menu-max-height').trim(),
       clientHeight: panel.clientHeight,
       scrollHeight: panel.scrollHeight,
+      // Border box, which is the only height the host's overflow: hidden can
+      // see. A max-height resolved against the content box leaves a padded
+      // panel taller than its bound, so scrollHeight > clientHeight is true
+      // either way and cannot tell the two apart.
+      panelHeight: Math.round(panelBox.height),
+      panelTop: Math.round(panelBox.top),
+      playerTop: Math.round(playerBox.top),
+      // Read directly, because the bounded-height assertion above cannot see a
+      // content-box max-height in this demo. The sub-views set `padding: 0` and
+      // are exact either way; the main view is the same element with
+      // `padding: 4px 0`, and here it is at most three rows (quality, captions,
+      // speed) of the 36px the stylesheet records, so it never grows past the
+      // 120px floor the bound cannot go below and the 8px is never clipped.
+      // border-box is what makes --sp-menu-max-height the height the host's
+      // overflow: hidden actually sees.
+      panelBoxSizing: getComputedStyle(panel).boxSizing,
+      // Absent from this demo's layout, which asks for 'settings' and not
+      // 'quality', so the check below reports that rather than failing on it.
+      qualityBoxSizing: quality ? getComputedStyle(quality).boxSizing : null,
     };
   });
   record(
@@ -616,8 +704,18 @@ const state = (page) => page.evaluate(() => {
     speed.playerHeight === 211 &&
       speed.maxHeight === '139px' &&
       speed.scrollHeight > speed.clientHeight &&
-      speed.clientHeight > 0,
+      speed.clientHeight > 0 &&
+      speed.panelHeight <= parseFloat(speed.maxHeight) &&
+      speed.panelTop >= speed.playerTop,
     JSON.stringify(speed)
+  );
+  record(
+    'the bounded menus resolve --sp-menu-max-height against the border box',
+    speed.panelBoxSizing === 'border-box' &&
+      (speed.qualityBoxSizing === null || speed.qualityBoxSizing === 'border-box'),
+    speed.qualityBoxSizing === null
+      ? `settings panel=${speed.panelBoxSizing}; no .sp-quality-menu in this demo layout, not checked`
+      : `settings panel=${speed.panelBoxSizing}, quality menu=${speed.qualityBoxSizing}`
   );
 
   await page.close();

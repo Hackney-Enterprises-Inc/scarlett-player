@@ -103,6 +103,17 @@ const DEFAULT_HIDE_DELAY = 3000;
  */
 const UNMEASURED_CONTROL_WIDTH = 48;
 
+/**
+ * Width the volume slider expands to, used when the environment cannot resolve
+ * the stylesheet's own `--sp-volume-slider-width`.
+ *
+ * The stylesheet declares that property on the control bar and both expansion
+ * rules read it, so the number the fit reserves and the number the slider
+ * actually grows by are the same one. This constant only stands in where a
+ * computed style answers nothing (jsdom, a host that dropped the stylesheet).
+ */
+const FALLBACK_VOLUME_SLIDER_WIDTH = 64;
+
 /** Width of the tray button when it is hidden and cannot be measured (44px, like every other button). */
 const OVERFLOW_BUTTON_WIDTH = 44;
 
@@ -118,6 +129,11 @@ const FALLBACK_BAR_GAP = 4;
  * 56 for the bar (a 44px button plus its 12px bottom padding), 8 for the gap
  * the menus already sit above it by, and 8 of margin so a bounded menu does not
  * touch the top edge of the player.
+ *
+ * The arithmetic only holds because both menus are `box-sizing: border-box`
+ * (styles.ts): `max-height` bounds the content box, and each menu carries its
+ * own vertical padding, so a content-box bound rendered taller than the room
+ * reserved here and the host clipped the difference.
  */
 const MENU_HEIGHT_RESERVE = 72;
 
@@ -185,6 +201,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let resizeObserver: ResizeObserver | null = null;
   let barPaddingX = FALLBACK_BAR_PADDING_X;
   let barGap = FALLBACK_BAR_GAP;
+  let volumeSliderWidth = FALLBACK_VOLUME_SLIDER_WIDTH;
   /** Visibility signature the last fit ran against; null until the first fit. */
   let lastFitSignature: string | null = null;
   /** Set when the container resized, or before the first fit, so the next update refits. */
@@ -341,9 +358,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
    * stream goes live), and each change moves the fit. Reading geometry on every
    * `updateControls()` would mean a forced layout several times a second,
    * because `timeupdate` alone drives one. This reads no geometry at all: the
-   * per-control display flags, plus the length of the time readout, which is
-   * the only bar item whose width changes without its visibility changing (it
-   * grows at 10:00 and again at 1:00:00).
+   * per-control display flags, plus the length of the time readout, which
+   * grows at 10:00 and again at 1:00:00.
+   *
+   * The time readout is not the only bar item that changes width without
+   * changing visibility: the volume slider expands on hover and on focus. That
+   * one is deliberately invisible to this signature and is handled by reserving
+   * its expanded width in the plan instead, see {@link interactionReserve}.
    *
    * @returns A signature that differs whenever a refit is worth the layout read
    */
@@ -430,6 +451,61 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   };
 
   /**
+   * Width the expanding part of a control is rendering at this instant.
+   *
+   * Only the volume control has one: `.sp-volume__slider-wrap` is 0 wide
+   * collapsed and `--sp-volume-slider-width` while the pointer rests on the
+   * control or something inside it holds focus. A fit can run mid-hover (a
+   * `timeupdate` refit while the viewer is holding the slider), and
+   * `getBoundingClientRect()` on an expanded volume already includes the
+   * slider, so the caller subtracts this before caching the width. Reading what
+   * is rendered rather than testing for hover is what makes that safe in both
+   * states: the cached width is always the collapsed one, and the reserve is
+   * never counted twice.
+   *
+   * @param entry - The control being measured
+   * @returns Px the expanding part currently occupies, 0 when it is collapsed
+   *   and 0 for every control that does not expand
+   */
+  const expandedWidth = (entry: ControlEntry): number => {
+    if (entry.slot !== 'volume') {
+      return 0;
+    }
+
+    const wrap = entry.el.querySelector('.sp-volume__slider-wrap');
+
+    return wrap ? wrap.getBoundingClientRect().width : 0;
+  };
+
+  /**
+   * Extra width the plan holds for a control that grows during interaction.
+   *
+   * The volume slider expands on `.sp-volume:hover` (behind `hover: hover`) and
+   * on `.sp-volume:focus-within`, which is not gated at all, so a tap on the
+   * mute button opens it on a phone too. Neither the container ResizeObserver
+   * (the container did not resize) nor {@link visibilitySignature} (no display
+   * flag moved, no time text changed) can see that, so at a width where the
+   * collapsed bar just fits, the expansion pushed the pinned right-hand
+   * controls past the host's clipping edge for as long as the pointer stayed
+   * there. Planning the control at its expanded width means the fit holds
+   * through the interaction instead.
+   *
+   * Reserving rather than observing is the point. A ResizeObserver on the
+   * control, or a refit on hover and focus, would move a control into the tray
+   * on every hover and back out on every leave, under the viewer's own pointer.
+   *
+   * The reserve is added to the planned item, never stored on the entry, so it
+   * cannot compound across fits. A control sitting in the tray is planned with
+   * it too: the tray strip wraps and does not care, but the reserve is what
+   * decides whether the control can come back to the bar.
+   *
+   * @param entry - The control being planned
+   * @returns Px to add to the entry's collapsed width, 0 for every other control
+   */
+  const interactionReserve = (entry: ControlEntry): number =>
+    entry.slot === 'volume' ? volumeSliderWidth : 0;
+
+  /**
    * Measure the bar and apply the resulting plan.
    *
    * The only geometry read in the plugin. Widths are cached per control so a
@@ -448,7 +524,21 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       return;
     }
 
-    const available = controlBar.clientWidth - barPaddingX;
+    // The spacer is excluded from the items below, but it is still a flex child
+    // of the bar at zero width, so the row lays out one more gap than needed()
+    // charges for: n counted items cost (n - 1) gaps in the arithmetic and n in
+    // the DOM. Deducting one gap per spacer up front is what keeps a bar that
+    // measures as exactly full from clipping its rightmost control. The 4px of
+    // slack in UNMEASURED_CONTROL_WIDTH is a different thing and does not cover
+    // this: that one only applies to controls that were never measured. Nothing
+    // else needs deducting, because both ways a control leaves the row take it
+    // out of the flex layout entirely (.sp-control--collapsed is
+    // `display: none !important`, and a control that hides itself sets
+    // `display: none` inline).
+    const spacerGaps = entries.filter(
+      (entry) => entry.slot === 'spacer' && entry.el.style.display !== 'none'
+    ).length;
+    const available = controlBar.clientWidth - barPaddingX - spacerGaps * barGap;
     const items: FitItem[] = [];
 
     for (const entry of entries) {
@@ -466,7 +556,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         !entry.el.classList.contains('sp-control--collapsed');
 
       if (measurable) {
-        entry.width = entry.el.getBoundingClientRect().width;
+        entry.width = entry.el.getBoundingClientRect().width - expandedWidth(entry);
       } else if (entry.width < 0) {
         entry.width = UNMEASURED_CONTROL_WIDTH;
       }
@@ -475,7 +565,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         id: entry.slot,
         rank: entry.rank,
         exit: entry.exit,
-        width: entry.width,
+        width: entry.width + interactionReserve(entry),
         visible,
       });
     }
@@ -885,19 +975,28 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       container.appendChild(controlBar);
 
       // Read the bar's own box once, now that it is in the document: the fit
-      // needs the padding to know the inner width and the gap to know what each
-      // item really costs, and a host is free to restyle both. The constants are
-      // this stylesheet's own values, for environments that cannot resolve a
-      // computed style.
+      // needs the padding to know the inner width, the gap to know what each
+      // item really costs, and the volume slider's expanded width to reserve
+      // room for it, and a host is free to restyle all three. The stylesheet
+      // declares --sp-volume-slider-width on this element precisely so the
+      // reserve and the rule that expands the slider cannot disagree. The
+      // constants are this stylesheet's own values, for environments that
+      // cannot resolve a computed style.
       const barStyle = getComputedStyle(controlBar);
       const paddingLeft = parseFloat(barStyle.paddingLeft);
       const paddingRight = parseFloat(barStyle.paddingRight);
       const gap = parseFloat(barStyle.columnGap || barStyle.gap);
+      const sliderWidth = parseFloat(
+        barStyle.getPropertyValue('--sp-volume-slider-width')
+      );
       barPaddingX =
         Number.isFinite(paddingLeft) && Number.isFinite(paddingRight)
           ? paddingLeft + paddingRight
           : FALLBACK_BAR_PADDING_X;
       barGap = Number.isFinite(gap) ? gap : FALLBACK_BAR_GAP;
+      volumeSliderWidth = Number.isFinite(sliderWidth)
+        ? sliderWidth
+        : FALLBACK_VOLUME_SLIDER_WIDTH;
 
       // One observer for both jobs: refitting the bar and bounding the menus.
       // Guarded because jsdom has no ResizeObserver; without it the fit still
@@ -936,11 +1035,18 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       container.addEventListener('click', handleInteraction);
       document.addEventListener('keydown', handleKeyDown);
 
-      // Subscribe to state changes (coalesced to one render per frame)
+      // Subscribe to state changes (coalesced to one render per frame). This
+      // is also how a fullscreen transition reaches the bar, and the plugin
+      // must not listen to the document for one as well. Core wires
+      // fullscreenchange, webkitfullscreenchange and the two iPhone video
+      // events itself and writes the `fullscreen` state key through an
+      // equality gate, and FullscreenButton.update() reads that key and
+      // nothing else. The plugin's own `fullscreenchange` listener predates
+      // that: it rendered on an event no control could see, so it bought a
+      // second render per transition and nothing at all when the key had not
+      // moved, and it covered only the unprefixed event, so it was never what
+      // made the webkit paths work.
       stateUnsubscribe = api.subscribeToState(scheduleUpdate);
-
-      // Listen for fullscreen changes
-      document.addEventListener('fullscreenchange', scheduleUpdate);
 
       // Initial update (synchronous so controls are correct on first paint)
       updateControls();
@@ -1006,7 +1112,6 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         api.container.removeEventListener('click', handleInteraction);
       }
       document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('fullscreenchange', scheduleUpdate);
 
       controlRegistryUnsubscribe?.();
       controlRegistryUnsubscribe = null;

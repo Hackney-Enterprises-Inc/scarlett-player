@@ -335,7 +335,7 @@ fails because that version is where `setPoster()` was added.
 ```bash
 pnpm build && node demo/build.cjs
 python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
-node scripts/verify-browser.mjs                # 38 checks, exits non-zero on failure
+node scripts/verify-browser.mjs                # 39 checks, exits non-zero on failure
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
 ```
 

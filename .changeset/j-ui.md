@@ -21,9 +21,13 @@ tier cannot guarantee a fit anyway, because the time readout is 87px or ~130px
 depending on the duration, every control hides itself on state, and hosts
 register controls of their own. The tray button's own width is part of the
 arithmetic, which is what makes the plan deterministic and stops it
-oscillating. `priority` re-ranks or pins individual slots, and
-`responsive: false` restores the previous behaviour exactly: no measuring, no
-observer, no tray, no extra DOM.
+oscillating. The volume control is planned at its expanded width, because its
+slider grows from 0 to 64px on hover and on focus without the container
+resizing, which would otherwise push the pinned right-hand controls past the
+clipping edge at any width where the collapsed bar only just fits.
+`priority` re-ranks or pins individual slots, and `responsive: false` restores
+the previous behaviour exactly: no measuring, no observer, no tray, no extra
+DOM.
 
 The tray is a horizontal wrapping strip, not a vertical menu: eight 44px rows
 would be over 350px tall against a 211px portrait phone player, and a scrolling
@@ -32,15 +36,20 @@ re-rendered or wrapped, so a captions button in the tray still emits
 `track:text`.
 
 The settings and quality menus are now bounded to the player's height through
-`--sp-menu-max-height`, written by the same ResizeObserver. The speed sub-panel
+`--sp-menu-max-height`, written by the same ResizeObserver, and are
+`box-sizing: border-box` so that bound is the height they actually render:
+`max-height` bounds the content box, and the quality menu's 8px and the settings
+main menu's 4px of vertical padding rendered past it. The speed sub-panel
 is 253px against a 211px player, so without that it lost its Back header and its
 first three speeds to the host's `overflow: hidden`, which kept playback speed
 unreachable even once the bar fitted.
 
-On a coarse pointer the progress wrapper grows upward to 44px. The control bar
-is a later sibling at the same z-index and covers 48..56px from the bottom, so
-the exclusive scrub region was 12px, not the 20px the wrapper suggested. The
-visible 3px bar does not move.
+Wherever a coarse pointer is available (`any-pointer: coarse`, which is also
+true of a touchscreen laptop driven by a mouse, unlike the primary-pointer
+`pointer: coarse`) the progress wrapper grows upward to 44px. The control bar is
+a later sibling at the same z-index and covers 48..56px from the bottom, so the
+exclusive scrub region was 12px, not the 20px the wrapper suggested. The visible
+3px bar does not move.
 
 The fullscreen button and the `f` shortcut now go through the core fullscreen
 helpers, so they behave the same as `player.requestFullscreen()`, iPhone

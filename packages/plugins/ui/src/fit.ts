@@ -191,8 +191,11 @@ function needed(
  *
  * @param items - Measured controls in layout order; exclude the spacer, whose
  *   rendered width is the bar's own slack and would make a fitting bar look
- *   exactly full
- * @param available - Inner width of the control bar in px (padding removed)
+ *   exactly full. An excluded spacer is still a flex child of the row, so the
+ *   caller has to deduct one gap per spacer from `available`: this charges
+ *   (n - 1) gaps for the n items it is handed, and the bar lays out one more
+ * @param available - Inner width of the control bar in px, with the bar's own
+ *   padding and one gap per excluded spacer already taken off
  * @param gap - Flex gap between bar items in px
  * @param overflowButtonWidth - Width of the tray button in px
  * @returns The target placement for every input id

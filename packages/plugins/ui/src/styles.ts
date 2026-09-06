@@ -69,6 +69,13 @@ export const styles = `
      device's own inset without restating the 12px. */
   padding-bottom: calc(12px + var(--sp-inset-bottom, 0px));
   gap: 4px;
+  /* Declared on the bar because the fit needs the same number the volume rules
+     below use: the slider expands mid-interaction and the plugin reserves the
+     room in advance (see interactionReserve() in index.ts, which reads this
+     property off this element at init). One declaration, so the stylesheet and
+     the arithmetic cannot drift. Both the bar and the overflow tray are inside
+     .sp-controls, so a volume control inherits it wherever the fit put it. */
+  --sp-volume-slider-width: 64px;
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 0.25s ease, transform 0.25s ease;
@@ -140,8 +147,15 @@ export const styles = `
    (centred 8.5px above the wrapper's bottom edge, which is what
    align-items: center gave it inside 20px). The handle and tooltip
    enlargements are gated behind (hover: hover) and never match a finger, but
-   .sp-progress--dragging is not, so the handle still appears mid-drag. */
-@media (pointer: coarse) {
+   .sp-progress--dragging is not, so the handle still appears mid-drag.
+
+   any-pointer, not pointer: (pointer: coarse) describes the PRIMARY pointer
+   only, so a hybrid laptop with a mouse and a touchscreen reports fine and kept
+   the 12px exclusive region under a finger. (any-pointer: coarse) is true
+   whenever a coarse pointer is available at all, which is the population that
+   needs the target. The cost on such a machine is 24px of extra hit area for
+   the mouse, over the player's own bottom edge. */
+@media (any-pointer: coarse) {
   .sp-progress-wrapper {
     height: 44px;
     align-items: flex-end;
@@ -439,14 +453,18 @@ export const styles = `
   transition: width 0.2s ease;
 }
 
+/* Both widths come from --sp-volume-slider-width on .sp-controls, which is also
+   what the fit reserves for this control. focus-within is deliberately not
+   gated on hover: a tap on the mute button focuses it, which is how the slider
+   opens on a phone. */
 @media (hover: hover) {
   .sp-volume:hover .sp-volume__slider-wrap {
-    width: 64px;
+    width: var(--sp-volume-slider-width);
   }
 }
 
 .sp-volume:focus-within .sp-volume__slider-wrap {
-  width: 64px;
+  width: var(--sp-volume-slider-width);
 }
 
 .sp-volume__slider {
@@ -547,7 +565,11 @@ export const styles = `
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  /* Bounded to the player, see .sp-settings-panel. */
+  /* Bounded to the player, see .sp-settings-panel. border-box because the
+     bound is a content-box height by default and this menu adds 8px of padding
+     top and bottom: at the 139px bound a 211px player gives, it rendered 155px
+     and the host clipped the last 16px of it. */
+  box-sizing: border-box;
   max-height: var(--sp-menu-max-height, none);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -628,7 +650,14 @@ export const styles = `
      did before.
 
      Not applied to .sp-overflow-tray: that one has to keep overflow visible so
-     the popovers its adopted controls own are not clipped. */
+     the popovers its adopted controls own are not clipped.
+
+     border-box because max-height bounds the content box: .sp-settings-panel--main
+     is this same element with 4px of padding top and bottom, so wherever the
+     bound binds the main menu, it rendered 8px past it and the host clipped the
+     difference. The --sub views set padding: 0 and were already exact, which is
+     why the browser harness's speed-panel check could not see this. */
+  box-sizing: border-box;
   max-height: var(--sp-menu-max-height, none);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;

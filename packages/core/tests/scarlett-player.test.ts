@@ -1172,6 +1172,39 @@ describe('ScarlettPlayer', () => {
 
       expect((video as any).webkitEnterFullscreen).toHaveBeenCalled();
     });
+
+    it('does not announce a fullscreen the environment cannot give it', async () => {
+      // The optimistic write only runs where the browser stayed silent, which
+      // is exactly this shape, so a helper that resolved without doing
+      // anything told every listener the player had gone full screen.
+      const player = new ScarlettPlayer({ container });
+      (container as any).requestFullscreen = undefined;
+      (container as any).webkitRequestFullscreen = undefined;
+      const fsSpy = vi.fn();
+      player.on('fullscreen:change', fsSpy);
+
+      await expect(player.requestFullscreen()).resolves.toBeUndefined();
+
+      expect(player.fullscreen).toBe(false);
+      expect(fsSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not announce one when the video has no native player either', async () => {
+      // An iPhone reaches the video branch, but the element is created by
+      // whichever provider wins the source: before that there is nothing to
+      // ask, and a video element anywhere else has no webkitEnterFullscreen.
+      const player = new ScarlettPlayer({ container });
+      container.appendChild(document.createElement('video'));
+      (container as any).requestFullscreen = undefined;
+      (container as any).webkitRequestFullscreen = undefined;
+      const fsSpy = vi.fn();
+      player.on('fullscreen:change', fsSpy);
+
+      await expect(player.requestFullscreen()).resolves.toBeUndefined();
+
+      expect(player.fullscreen).toBe(false);
+      expect(fsSpy).not.toHaveBeenCalled();
+    });
   });
 
   // Nothing used to listen for a fullscreen change the player did not

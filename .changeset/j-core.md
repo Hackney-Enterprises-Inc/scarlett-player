@@ -29,3 +29,13 @@ A transition is announced once. The spec fires `fullscreenchange` before
 `requestFullscreen()` resolves, so the optimistic write that follows the await
 now runs only where the browser stayed silent, which is where it is still
 needed: jsdom never fires the event.
+
+`enterFullscreen()` rejects when the environment offers no fullscreen API at
+all, rather than resolving after doing nothing. Silence is how the optimistic
+write is armed, so a helper that resolved on that path had the player write
+`fullscreen: true` and emit `fullscreen:change` when nothing had happened: an
+iPhone asked before the provider had created the video element, or any browser
+with neither `Element.requestFullscreen` nor `webkitRequestFullscreen`. Every
+caller already swallows a rejection (the player logs it, the UI package's
+button and `f` shortcut catch it), so the state key and the button's icon now
+stay where they were.

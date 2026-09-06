@@ -74,10 +74,20 @@ export function isFullscreen(container: HTMLElement): boolean {
  * The last is synchronous and returns no promise, which is why the fallback
  * chain is written out rather than expressed as a list of promises.
  *
+ * Exhausting all three throws rather than resolving, and that matters to the
+ * caller: `ScarlettPlayer.requestFullscreen()` writes `fullscreen: true` and
+ * emits `fullscreen:change` when this settles without the browser having
+ * announced anything, because jsdom and the iPhone's native player both stay
+ * silent. A silent no-op here therefore told every listener the player had
+ * gone full screen when nothing had happened at all, which is what an iPhone
+ * before the provider created the video element, and any browser with no
+ * fullscreen API, actually hit.
+ *
  * @param container - Player container element
  * @returns Promise that settles when the browser has accepted or refused
  * @throws Whatever the browser rejects the request with (denied by permission
- *   policy, not triggered by a user gesture, already exiting)
+ *   policy, not triggered by a user gesture, already exiting), or an Error when
+ *   this environment offers no fullscreen API at all
  */
 export async function enterFullscreen(container: HTMLElement): Promise<void> {
   const el = container as WebkitFullscreenElement;
@@ -94,7 +104,14 @@ export async function enterFullscreen(container: HTMLElement): Promise<void> {
 
   // iPhone: Element.requestFullscreen does not exist, and the only full screen
   // available is the video element's own native player.
-  videoIn(container)?.webkitEnterFullscreen?.();
+  const video = videoIn(container);
+
+  if (video?.webkitEnterFullscreen) {
+    video.webkitEnterFullscreen();
+    return;
+  }
+
+  throw new Error('Fullscreen is not supported');
 }
 
 /**

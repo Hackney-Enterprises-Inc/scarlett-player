@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         embedBaseUrl: 'https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html',
       }),
       // Touch only, and it arms itself: `enabled` defaults to 'auto', gated on
-      // matchMedia('(pointer: coarse)'). It matters most here, where the
+      // matchMedia('(any-pointer: coarse)'). It matters most here, where the
       // responsive control bar moves the skip buttons into the overflow tray
       // on a phone and double-tap seeking is what replaces them.
       createGesturesPlugin(),
