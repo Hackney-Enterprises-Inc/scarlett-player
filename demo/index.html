@@ -171,6 +171,71 @@
     .console-line.warn { color: #ffb74d; }
     .console-line.error { color: #ef5350; }
 
+    .analytics-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .analytics-header h2 {
+      margin-bottom: 0;
+    }
+
+    .analytics-clear-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+
+    .analytics-clear-btn:hover {
+      border-color: #e50914;
+    }
+
+    .analytics-log {
+      background: #0d0d0d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.7rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .analytics-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    .analytics-time {
+      color: #666;
+      flex: 0 0 auto;
+    }
+
+    .analytics-event {
+      color: #e50914;
+      flex: 0 0 110px;
+    }
+
+    .analytics-detail {
+      color: #888;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .analytics-empty {
+      color: #888;
+    }
+
     .url-bar {
       width: 100%;
       max-width: 960px;
@@ -700,6 +765,11 @@
         <span class="feature active">AirPlay</span>
         <span class="feature active">Chromecast</span>
         <span class="feature active">Watermark</span>
+        <span class="feature active">Share</span>
+        <span class="feature active">Gestures</span>
+        <span class="feature active">Captions</span>
+        <span class="feature active">Chapters</span>
+        <span class="feature active">Analytics</span>
       </div>
     </div>
 
@@ -960,6 +1030,17 @@ playlist.<span class="function">add</span>([
         <div class="stat-label">Buffered</div>
         <div class="stat-value" id="buffered">0%</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Analytics beacons, captured in the page by the plugin's customBeacon hook -->
+  <div class="info">
+    <div class="analytics-header">
+      <h2>Analytics Log</h2>
+      <button id="analytics-clear" class="analytics-clear-btn">Clear</button>
+    </div>
+    <div class="analytics-log" id="analytics-log">
+      <div class="analytics-empty">Beacons will appear here as you play the video...</div>
     </div>
   </div>
 

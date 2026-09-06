@@ -14,6 +14,11 @@ import { createAudioUIPlugin } from '../packages/plugins/audio-ui/src/index';
 import { createWatermarkPlugin } from '../packages/plugins/watermark/src/index';
 import { createSharePlugin } from '../packages/plugins/share/src/index';
 import { createGesturesPlugin } from '../packages/plugins/gestures/src/index';
+import { createCaptionsPlugin } from '../packages/plugins/captions/src/index';
+import { createChaptersPlugin } from '../packages/plugins/chapters/src/index';
+import { createAnalyticsPlugin } from '../packages/plugins/analytics/src/index';
+import type { Chapter } from '../packages/core/src/index';
+import type { BeaconPayload } from '../packages/plugins/analytics/src/index';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -24,6 +29,213 @@ const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev';
 
 // Demo video URL - supports both HLS (.m3u8) and native formats (.mp4, .webm, .mov, .mkv)
 const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8';
+
+// Big Buck Bunny runs about 10:34. Everything below is timed against that.
+const VIDEO_DURATION_SECONDS = 634;
+
+/**
+ * Demo English subtitles, as WebVTT source.
+ *
+ * Kept inline so the demo needs no hosted .vtt file: it is turned into a
+ * `blob:` URL at runtime, which the captions plugin hands to a `<track>`
+ * element like any other subtitle URL. The blob is same origin as the page, so
+ * no CORS headers and no `crossorigin` attribute are involved.
+ */
+const CAPTIONS_VTT_EN = `WEBVTT
+
+1
+00:00:03.000 --> 00:00:08.000
+Big Buck Bunny, a Blender Foundation open movie.
+
+2
+00:00:14.000 --> 00:00:19.000
+These subtitles are a demo, parsed from an inline WebVTT string.
+
+3
+00:00:36.000 --> 00:00:41.000
+Morning light spreads across the meadow.
+
+4
+00:01:02.000 --> 00:01:08.000
+A very large rabbit steps out of his burrow.
+
+5
+00:01:40.000 --> 00:01:46.000
+Three rodents decide the day needs a victim.
+
+6
+00:02:18.000 --> 00:02:24.000
+The first acorn finds its target.
+
+7
+00:02:58.000 --> 00:03:04.000
+Enough is enough.
+
+8
+00:03:44.000 --> 00:03:50.000
+The rabbit starts building.
+
+9
+00:04:26.000 --> 00:04:32.000
+Every trap gets tested exactly once.
+`;
+
+/** Demo Spanish subtitles, the same cues in the same slots. */
+const CAPTIONS_VTT_ES = `WEBVTT
+
+1
+00:00:03.000 --> 00:00:08.000
+Big Buck Bunny, una pelicula abierta de la Blender Foundation.
+
+2
+00:00:14.000 --> 00:00:19.000
+Estos subtitulos son una demostracion, leidos de un texto WebVTT incrustado.
+
+3
+00:00:36.000 --> 00:00:41.000
+La luz de la manana se extiende por el prado.
+
+4
+00:01:02.000 --> 00:01:08.000
+Un conejo enorme sale de su madriguera.
+
+5
+00:01:40.000 --> 00:01:46.000
+Tres roedores deciden que el dia necesita una victima.
+
+6
+00:02:18.000 --> 00:02:24.000
+La primera bellota da en el blanco.
+
+7
+00:02:58.000 --> 00:03:04.000
+Ya basta.
+
+8
+00:03:44.000 --> 00:03:50.000
+El conejo empieza a construir.
+
+9
+00:04:26.000 --> 00:04:32.000
+Cada trampa se prueba una sola vez.
+`;
+
+/**
+ * Publish an inline WebVTT string as a `blob:` URL.
+ *
+ * @param vtt - WebVTT source text
+ * @returns Object URL that resolves to that text as `text/vtt`
+ */
+function vttObjectUrl(vtt: string): string {
+  return URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+}
+
+/**
+ * Chapter list for the demo video, hard coded rather than fetched.
+ *
+ * The last chapter carries an explicit `endTime` so the progress bar stops its
+ * marker at the end of the film instead of running to a duration the manifest
+ * may report slightly differently.
+ */
+const VIDEO_CHAPTERS: Chapter[] = [
+  { time: 0, label: 'Opening', subtitle: 'Titles and sunrise' },
+  { time: 34, label: 'The Meadow', subtitle: 'Big Buck Bunny wakes up' },
+  { time: 96, label: 'The Bullies', subtitle: 'Frank, Rinky and Gamera' },
+  { time: 215, label: 'Preparations', subtitle: 'Building the traps' },
+  { time: 340, label: 'Payback', subtitle: 'One trap at a time' },
+  { time: 520, label: 'Credits', subtitle: 'Peach open movie', endTime: VIDEO_DURATION_SECONDS },
+];
+
+/** Rows kept in the Analytics Log panel before the oldest are dropped. */
+const ANALYTICS_LOG_LIMIT = 50;
+
+/**
+ * Beacon fields worth showing in the log, in the order they are rendered.
+ *
+ * A beacon carries roughly twenty environment fields that are identical on
+ * every row (browser, os, screen size), so the panel shows only the handful
+ * that change from event to event.
+ */
+const ANALYTICS_DETAIL_KEYS = [
+  'startupTime',
+  'currentTime',
+  'seekTo',
+  'duration',
+  'bitrate',
+  'height',
+  'watchTime',
+  'playTime',
+  'qoeScore',
+  'rebufferCount',
+  'errorMessage',
+  'exitType',
+  'completionRate',
+];
+
+/**
+ * Render the interesting part of a beacon as a short `key=value` string.
+ *
+ * @param payload - Beacon the analytics plugin was about to transmit
+ * @returns Up to three formatted fields, or an empty string when none apply
+ */
+function formatBeaconDetail(payload: BeaconPayload): string {
+  const parts: string[] = [];
+
+  for (const key of ANALYTICS_DETAIL_KEYS) {
+    if (parts.length >= 3) break;
+
+    const value = payload[key];
+    if (value === undefined || value === null || value === '') continue;
+
+    parts.push(`${key}=${typeof value === 'number' ? Math.round(value * 10) / 10 : String(value)}`);
+  }
+
+  return parts.join('  ');
+}
+
+/**
+ * Add one beacon to the Analytics Log panel, newest first.
+ *
+ * @param payload - Beacon the analytics plugin was about to transmit
+ */
+function appendAnalyticsRow(payload: BeaconPayload): void {
+  const log = document.getElementById('analytics-log');
+  if (!log) return;
+
+  log.querySelector('.analytics-empty')?.remove();
+
+  const row = document.createElement('div');
+  row.className = 'analytics-row';
+
+  const time = document.createElement('span');
+  time.className = 'analytics-time';
+  time.textContent = new Date(payload.timestamp).toLocaleTimeString();
+
+  const event = document.createElement('span');
+  event.className = 'analytics-event';
+  event.textContent = String(payload.event);
+
+  const detail = document.createElement('span');
+  detail.className = 'analytics-detail';
+  detail.textContent = formatBeaconDetail(payload);
+
+  row.append(time, event, detail);
+  log.prepend(row);
+
+  while (log.childElementCount > ANALYTICS_LOG_LIMIT) {
+    log.lastElementChild?.remove();
+  }
+}
+
+/**
+ * Empty the Analytics Log panel and put its placeholder line back.
+ */
+function clearAnalyticsLog(): void {
+  const log = document.getElementById('analytics-log');
+  if (!log) return;
+
+  log.innerHTML = '<div class="analytics-empty">Beacons will appear here as you play the video...</div>';
+}
 
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
@@ -51,9 +263,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         theme: {
           accentColor: '#e50914',
         },
-        // Spelled out because 'share' is not in the default layout - the share
-        // plugin registers the control, but a layout has to ask for it. This is
-        // the default order with 'share' inserted before the cast buttons.
+        // Spelled out because 'share' and 'chapters' are not in the default
+        // layout - those plugins register their controls, but a layout has to
+        // ask for them. This is the default order with 'chapters' inserted
+        // before the settings menu and 'share' before the cast buttons.
         controls: [
           'play',
           'skip-backward',
@@ -63,6 +276,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           'live-indicator',
           'bandwidth-indicator',
           'spacer',
+          'chapters',
           'settings',
           'captions',
           'share',
@@ -94,8 +308,45 @@ document.addEventListener('DOMContentLoaded', async () => {
       // responsive control bar moves the skip buttons into the overflow tray
       // on a phone and double-tap seeking is what replaces them.
       createGesturesPlugin(),
+      // Two demo subtitle tracks, served from blob: URLs built out of the
+      // strings above. The plugin appends a <track> per source on media:loaded
+      // and mirrors the video's TextTrackList into `textTracks` state, which is
+      // what lights up the captions button and the settings menu's Captions
+      // row. `autoSelect` is left off so captions start hidden, the way a
+      // viewer expects.
+      createCaptionsPlugin({
+        sources: [
+          { language: 'en', label: 'English', src: vttObjectUrl(CAPTIONS_VTT_EN) },
+          { language: 'es', label: 'Spanish', src: vttObjectUrl(CAPTIONS_VTT_ES) },
+        ],
+      }),
+      // An inline list, so no chapters file is fetched. The plugin writes
+      // `chapters` state (the progress bar paints a marker per boundary) and
+      // registers the 'chapters' control listed above.
+      createChaptersPlugin({
+        chapters: VIDEO_CHAPTERS,
+      }),
+      // Nothing leaves the page: `customBeacon` replaces the transport, so the
+      // plugin never calls navigator.sendBeacon or fetch, and `beaconUrl` -
+      // required by the factory, and passed to the custom beacon as its first
+      // argument - is a reserved .invalid host that cannot resolve.
+      createAnalyticsPlugin({
+        beaconUrl: 'https://beacon.example.invalid/scarlett-demo',
+        videoId: 'big-buck-bunny',
+        videoTitle: 'Big Buck Bunny',
+        videoDuration: VIDEO_DURATION_SECONDS,
+        isLive: false,
+        viewerPlan: 'free',
+        // Faster than the 10s default so the demo panel fills while someone is
+        // still looking at it.
+        heartbeatInterval: 5000,
+        customBeacon: (_url, payload) => appendAnalyticsRow(payload),
+      }),
     ].filter(Boolean),
   });
+
+  // Analytics Log panel controls
+  document.getElementById('analytics-clear')?.addEventListener('click', clearAnalyticsLog);
 
   // Log events for debugging
   player.on('playback:play', () => console.log('▶️ Playing'));
@@ -103,6 +354,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   player.on('media:loaded', (e) => console.log('📺 Media loaded:', e));
   player.on('media:loadedmetadata', (e) => console.log('📊 Metadata:', e));
   player.on('quality:levels', (e) => console.log('🎯 Quality levels:', e));
+  player.on('chapter:change', (e) => console.log('🔖 Chapter:', e.chapter?.label ?? 'none'));
+  player.on('track:text', (e) => console.log('💬 Text track:', e.trackId ?? 'off'));
   player.on('error', (e) => console.error('❌ Error:', e));
 
   // Expose player globally for debugging
