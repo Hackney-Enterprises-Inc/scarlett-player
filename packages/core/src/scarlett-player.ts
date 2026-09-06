@@ -13,6 +13,7 @@ import { Logger } from './logger';
 import { ErrorHandler, ErrorCode } from './error-handler';
 import { PluginManager } from './plugin-manager';
 import { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
+import { sanitizeUrl } from './utils/url';
 import type { Plugin } from './types/plugin';
 import type { EventName, EventHandler as EventHandlerFn } from './types/events';
 import type { StateStore } from './types/state';
@@ -516,13 +517,13 @@ export class ScarlettPlayer {
         // would overwrite the specific code with a generic one.
         if (this.stateManager.getValue('error')) {
           this.logger.error('Load failed', {
-            source,
+            source: sanitizeUrl(source),
             error: (error as Error).message,
           });
         } else {
           this.errorHandler.handle(error as Error, {
             operation: 'load',
-            source,
+            source: sanitizeUrl(source),
           });
         }
       }
@@ -594,6 +595,11 @@ export class ScarlettPlayer {
    */
   seek(time: number): void {
     this.checkDestroyed();
+
+    if (!Number.isFinite(time)) {
+      this.logger.warn('Invalid seek time', { time });
+      return;
+    }
 
     try {
       this.logger.debug('Seek requested', { time });
@@ -1074,9 +1080,16 @@ export class ScarlettPlayer {
       }
     }
 
-    // Fallback: seek to duration (edge)
+    // Fallback: seek to seekable range end
+    const seekableRange = this.stateManager.getValue('seekableRange');
+    if (seekableRange?.end !== undefined) {
+      this.seek(seekableRange.end);
+      return;
+    }
+
+    // Last resort: seek to duration only if it is a finite, positive number
     const duration = this.stateManager.getValue('duration');
-    if (duration > 0) {
+    if (Number.isFinite(duration) && duration > 0) {
       this.seek(duration);
     }
   }

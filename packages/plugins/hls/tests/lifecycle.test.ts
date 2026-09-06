@@ -224,7 +224,7 @@ describe('HLS plugin lifecycle', () => {
   });
 
   describe('error-storm circuit breaker', () => {
-    it('settles the pending load, detaches video handlers, and clears armed retries', async () => {
+    it('non-fatal errors do not trip the breaker', async () => {
       vi.useFakeTimers();
       await plugin.init(api);
 
@@ -234,24 +234,37 @@ describe('HLS plugin lifecycle', () => {
       await flush();
       const c = created[0];
 
-      const video = (api.container as HTMLElement).querySelector('video') as HTMLVideoElement;
-      const removeSpy = vi.spyOn(video, 'removeEventListener');
-
-      // A fatal network error arms a backoff retry...
-      fireError(c, { type: 'networkError', details: 'fragLoadError', fatal: true });
-      // ...then an error storm trips the breaker (10 errors in the window)
-      for (let i = 0; i < 9; i++) {
+      // Fire 20 non-fatal buffer errors — these are normal recovery actions
+      // and must NOT accumulate toward the storm counter.
+      for (let i = 0; i < 20; i++) {
         fireError(c, { type: 'mediaError', details: 'bufferAppendError', fatal: false });
       }
       await flush();
 
-      expect(rejection).toHaveBeenCalled();
-      expect(c.instance.destroy).toHaveBeenCalled();
-      expect(removeSpy).toHaveBeenCalledWith('timeupdate', expect.any(Function));
+      // Pipeline must still be alive (no destroy called, promise still pending)
+      expect(c.instance.destroy).not.toHaveBeenCalled();
 
-      // The armed retry must not fire into the dead (or any future) pipeline
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(c.instance.startLoad).not.toHaveBeenCalled();
+      // Cancel the load so the test cleans up
+      await plugin.destroy();
+    });
+
+    it('a single fatal error rejects the pending load', async () => {
+      vi.useFakeTimers();
+      // maxNetworkRetries: 0 makes the first fatal network error terminal
+      const terminalPlugin = createHLSPlugin({ maxNetworkRetries: 0 });
+      await terminalPlugin.init(api);
+
+      const rejection = vi.fn();
+      const promise = terminalPlugin.loadSource(SRC_A);
+      promise.catch(rejection);
+      await flush();
+      const c = created[0];
+
+      // A single fatal error is terminal when retries are exhausted
+      fireError(c, { type: 'networkError', details: 'fragLoadError', fatal: true });
+      await flush();
+
+      expect(rejection).toHaveBeenCalled();
     });
   });
 

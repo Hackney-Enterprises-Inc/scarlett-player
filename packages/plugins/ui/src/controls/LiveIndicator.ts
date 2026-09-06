@@ -8,7 +8,7 @@
 
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
-import { createElement, getVideo } from '../utils';
+import { createElement } from '../utils';
 
 export class LiveIndicator implements Control {
   private el: HTMLDivElement;
@@ -70,12 +70,9 @@ export class LiveIndicator implements Control {
   };
 
   private seekToLive(): void {
-    const video = getVideo(this.api.container);
-    if (!video) return;
-
     const seekableRange = this.api.getState('seekableRange');
     if (seekableRange) {
-      video.currentTime = seekableRange.end;
+      this.api.emit('playback:seeking', { time: seekableRange.end });
     }
   }
 

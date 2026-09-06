@@ -419,27 +419,26 @@ export function createHLSPluginWith(
     const Hls = loader.getHlsConstructor();
     if (!Hls || !hls) return false;
 
-    // Track all errors (fatal and non-fatal) to detect error storms
-    const now = Date.now();
-    if (now - errorWindowStart > ERROR_WINDOW_MS) {
-      // Reset window
-      errorCount = 1;
-      errorWindowStart = now;
-    } else {
-      errorCount++;
-    }
-
-    // If too many errors in the time window, treat as fatal
-    if (errorCount >= MAX_ERRORS_IN_WINDOW) {
-      api?.logger.error(`Too many errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
-      emitFatalError(error, true);
-
-      // Stop all activity from the dead pipeline (also settles a pending load)
-      teardownPipeline(new Error(error.details));
-      return true;
-    }
-
     if (error.fatal) {
+      // Only count fatal errors toward the storm counter. Non-fatal buffer
+      // nudges and fragment retries are normal recovery actions, not a sign
+      // the stream is dead — ten of them during an encoder discontinuity
+      // must not trip the kill switch.
+      const now = Date.now();
+      if (now - errorWindowStart > ERROR_WINDOW_MS) {
+        errorCount = 1;
+        errorWindowStart = now;
+      } else {
+        errorCount++;
+      }
+
+      if (errorCount >= MAX_ERRORS_IN_WINDOW) {
+        api?.logger.error(`Too many fatal errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
+        emitFatalError(error, true);
+        teardownPipeline(new Error(error.details));
+        return true;
+      }
+
       api?.logger.error('Fatal HLS error', { type: error.type, details: error.details });
 
       switch (error.type) {
@@ -872,12 +871,17 @@ export function createHLSPluginWith(
           if (resolved || session !== loadSession) return;
           resolved = true;
           releaseAbort();
-          api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src });
+          api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src: sanitizeUrl(src) });
 
-          // Stop all background activity from the abandoned attempt
+          const timeoutError: HLSError = {
+            type: 'network',
+            details: 'Video took too long to load (network timeout)',
+            fatal: true,
+          };
+          emitFatalError(timeoutError, true);
           teardownPipeline();
 
-          reject(new Error('Video took too long to load (network timeout)'));
+          reject(new Error(timeoutError.details));
         }, timeout_ms);
       }
 
@@ -1028,7 +1032,7 @@ export function createHLSPluginWith(
     // Position from the first failure, not the current (possibly reset) element
     const resume_position = reconnectResumePosition;
 
-    api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: saved_src });
+    api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: sanitizeUrl(saved_src) });
 
     try {
       // Tear down the dead instance but keep reconnect bookkeeping intact
@@ -1127,6 +1131,7 @@ export function createHLSPluginWith(
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
         if (!video) return;
+        if (!Number.isFinite(time)) return;
         const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
         video.currentTime = clampedTime;
       });
@@ -1246,7 +1251,7 @@ export function createHLSPluginWith(
     async loadSource(src: string): Promise<void> {
       if (!api) throw new Error('Plugin not initialized');
 
-      api.logger.info(`Loading HLS source${variant.logSuffix}`, { src });
+      api.logger.info(`Loading HLS source${variant.logSuffix}`, { src: sanitizeUrl(src) });
 
       // A user-initiated load supersedes any in-flight load or auto-reconnect
       const session = ++loadSession;
@@ -1323,16 +1328,32 @@ export function createHLSPluginWith(
     },
 
     getLiveInfo(): HLSLiveInfo | null {
-      if (isNative || !hls) return null;
-
       const live = api?.getState('live') || false;
       if (!live) return null;
+
+      if (isNative) {
+        return {
+          isLive: true,
+          latency: 0,
+          targetLatency: 3,
+          drift: 0,
+          liveSyncPosition: video?.seekable?.length
+            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3)
+            : undefined,
+        };
+      }
+
+      if (!hls) return null;
 
       return {
         isLive: true,
         latency: hls.latency || 0,
         targetLatency: hls.targetLatency || 3,
         drift: hls.drift || 0,
+        liveSyncPosition: hls.liveSyncPosition ??
+          (video?.seekable?.length
+            ? video.seekable.end(video.seekable.length - 1) - 3
+            : undefined),
       };
     },
 

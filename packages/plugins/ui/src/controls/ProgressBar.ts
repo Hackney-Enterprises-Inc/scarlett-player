@@ -264,7 +264,8 @@ export class ProgressBar implements Control {
     }
 
     const duration = this.api.getState('duration') || 0;
-    return percent * duration;
+    const time = percent * duration;
+    return Number.isFinite(time) ? time : 0;
   }
 
   private updateTooltip(clientX: number): void {
@@ -465,7 +466,9 @@ export class ProgressBar implements Control {
     this.lastSeekTime = now;
 
     const time = this.getTimeFromPosition(clientX);
-    video.currentTime = time;
+    if (Number.isFinite(time)) {
+      video.currentTime = time;
+    }
   }
 
   destroy(): void {

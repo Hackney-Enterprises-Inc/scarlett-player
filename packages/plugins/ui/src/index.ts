@@ -973,6 +973,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         container.style.position = 'relative';
       }
 
+      // Apply container class so the stylesheet's rules target it
+      container.classList.add('sp-container');
+
       // Check if video is already playing (autoplay case)
       const isPlaying = api.getState('playing');
 
@@ -1198,6 +1201,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       bufferingIndicator = null;
       styleEl?.remove();
       styleEl = null;
+
+      // Remove the container class we added at init
+      api?.container?.classList.remove('sp-container');
 
       api?.logger.debug('UI controls plugin destroyed');
     },

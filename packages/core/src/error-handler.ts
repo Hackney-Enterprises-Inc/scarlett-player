@@ -333,7 +333,7 @@ export class ErrorHandler {
     return {
       code: this.getErrorCode(error),
       message: error.message,
-      fatal: this.isFatal(error),
+      fatal: this.isFatal(error, context),
       timestamp: Date.now(),
       context,
       originalError: error,
@@ -382,7 +382,11 @@ export class ErrorHandler {
    * Determine if error is fatal.
    * @private
    */
-  private isFatal(error: Error): boolean {
+  private isFatal(error: Error, context?: Record<string, any>): boolean {
+    // Load timeouts must be fatal: the viewer is stranded on an endless
+    // spinner if the UI is told the error is non-fatal, because the
+    // ErrorOverlay ignores non-fatal errors.
+    if (context?.operation === 'load') return true;
     return this.isFatalCode(this.getErrorCode(error));
   }
 

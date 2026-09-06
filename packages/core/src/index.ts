@@ -62,6 +62,9 @@ export { ScarlettPlayer, createPlayer, type PlayerOptions, type QualityLevel } f
 // every way into fullscreen behaves the same, the iPhone fallback included.
 export { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 
+// Re-export URL sanitizer for telemetry-safe logging across packages
+export { sanitizeUrl } from './utils/url';
+
 // Re-export all type definitions
 export type {
   // Plugin Types
