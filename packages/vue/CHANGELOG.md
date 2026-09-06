@@ -1,5 +1,30 @@
 # @scarlett-player/vue
 
+## 1.8.1
+
+### Patch Changes
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - Peer dependency ranges now name the current major line: `@scarlett-player/core`
+  and `@scarlett-player/ui` move from `^1.7.0` to `^1.8.0` in the Vue wrapper and
+  in every plugin that had not already been bumped, leaving the whole fixed
+  version group asking for one range. Nothing was resolving wrongly before, since
+  `^1.7.0` already admits 1.8.0, but the declared floor now matches the version
+  these packages are actually built and tested against rather than trailing a
+  release behind it.
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - Use core payload types for Vue error, loaded, loadedmetadata, and qualitylevels
+  events, and normalize non-Error initialization failures to Error instances.
+  Correct the audio UI quick start to register a native playback provider and the
+  Chromecast quick start to end casting through the plugin's endSession method.
+
+- [#79](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/79) [`71863ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/71863ee8681a29d847da079218a6bfe410f722d1) Thanks [@alexhackney](https://github.com/alexhackney)! - `ScarlettPlayer.vue` now types its `timeupdate` event as `{ currentTime }`,
+  which is what it has always emitted: the handler forwards core's
+  `playback:timeupdate` payload unchanged, and that payload carries no
+  `duration`. The old typing promised one, so a TypeScript consumer reading
+  `payload.duration` got `undefined` at runtime with no compiler complaint. Read
+  the duration off the exposed `player` (`playerRef.value.player.duration`), as
+  the README examples do.
+
 ## 1.8.0
 
 ## 1.7.1
