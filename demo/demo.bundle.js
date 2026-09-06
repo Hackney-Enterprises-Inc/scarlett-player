@@ -33685,6 +33685,70 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ============================================
+   Big Play Button
+
+   z-index 12 puts it above the gradient (5) and above the gestures plugin's
+   tap surface (6), so a tap lands on the button and starts playback instead
+   of being read as a tap-to-toggle-controls gesture - exactly how the control
+   bar's play button (10) already behaves. It stays below the spinner (15) and
+   the error overlay (25), both of which own the middle of the picture when
+   they are up.
+
+   Hidden with visibility, not opacity alone, so it takes no pointer events
+   while it is away.
+   ============================================ */
+.sp-big-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Comfortably past the 44px minimum touch target the control bar uses. */
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.2s ease, visibility 0.2s, transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.sp-big-play--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sp-big-play svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
+  /* Optical centring: the play triangle's mass sits left of the glyph box. */
+  margin-left: 3px;
+}
+
+.sp-big-play:hover {
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+.sp-big-play:active {
+  transform: translate(-50%, -50%) scale(0.96);
+}
+
+.sp-big-play:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* ============================================
    Error Overlay
    ============================================ */
 .sp-error-overlay {
@@ -33863,10 +33927,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   .sp-settings-panel__item,
   .sp-settings-panel__header,
   .sp-buffering,
+  .sp-big-play,
   .sp-error-overlay,
   .sp-error-overlay__retry,
   .sp-error-overlay__dismiss {
     transition: none;
+  }
+
+  .sp-big-play:hover,
+  .sp-big-play:active {
+    transform: translate(-50%, -50%);
   }
 
   .sp-live__dot,
@@ -34068,6 +34138,120 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             video.play().catch(() => {
             });
           }
+        }
+        destroy() {
+          this.el.removeEventListener("click", this.clickHandler);
+          this.el.remove();
+        }
+      };
+    }
+  });
+
+  // packages/plugins/ui/src/controls/BigPlayButton.ts
+  var BigPlayButton;
+  var init_BigPlayButton = __esm({
+    "packages/plugins/ui/src/controls/BigPlayButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      BigPlayButton = class {
+        /**
+         * @param api - Plugin API for state and container access
+         * @param isOverlayVisible - Whether the error overlay is showing; the button
+         *   must not sit on top of it, and `error` state alone does not say (a
+         *   dismissed overlay leaves the error behind)
+         */
+        constructor(api, isOverlayVisible = () => false) {
+          /**
+           * Latched on the first `playing`.
+           *
+           * "Hidden from the first playing onward" cannot be read off `currentTime`
+           * alone: a viewer who pauses in the first fraction of a second is still
+           * mid-playback, and the button reappearing over live video would cover the
+           * picture.
+           */
+          this.hasStarted = false;
+          this.clickHandler = () => {
+            this.start();
+          };
+          this.api = api;
+          this.isOverlayVisible = isOverlayVisible;
+          const btn = document.createElement("button");
+          btn.className = "sp-big-play";
+          btn.setAttribute("type", "button");
+          btn.setAttribute("aria-label", "Play");
+          setHTML(btn, icons.play);
+          btn.addEventListener("click", this.clickHandler);
+          this.el = btn;
+        }
+        render() {
+          return this.el;
+        }
+        /**
+         * Show or hide the button, and swap in the replay glyph after `ended`.
+         *
+         * Driven by the same `scheduleUpdate()` pass as every other control, so the
+         * button cannot disagree with the control bar about what state playback is
+         * in.
+         */
+        update() {
+          const playing = this.api.getState("playing");
+          const ended = this.hasEnded();
+          const currentTime = this.api.getState("currentTime");
+          const playbackState = this.api.getState("playbackState");
+          const error = this.api.getState("error");
+          if (playing) {
+            this.hasStarted = true;
+          }
+          let visible;
+          if (error || this.isOverlayVisible()) {
+            visible = false;
+          } else if (playbackState === "loading") {
+            visible = false;
+          } else if (playing) {
+            visible = false;
+          } else if (ended) {
+            visible = true;
+          } else if (this.hasStarted || currentTime !== 0) {
+            visible = false;
+          } else {
+            visible = playbackState === "idle" || playbackState === "ready";
+          }
+          setHTML(this.el, ended ? icons.replay : icons.play);
+          setAttr(this.el, "aria-label", ended ? "Replay" : "Play");
+          this.el.classList.toggle("sp-big-play--visible", visible);
+        }
+        /**
+         * Whether playback has actually ended, asked of the media element.
+         *
+         * NOT the `ended` state key. Measured in Chrome on 2026-09-02: neither
+         * provider clears that key on a replay (only `load()` does), so after a
+         * viewer replays a video it stays true for the rest of the session, while
+         * `video.ended` correctly goes false the moment the position leaves the
+         * end. Trusting the key would leave this button sitting over playing video,
+         * and would make a later pause bring it back as Replay. The key is the
+         * fallback for the window before a provider has created an element.
+         */
+        hasEnded() {
+          const video = getVideo(this.api.container);
+          return video ? video.ended : Boolean(this.api.getState("ended"));
+        }
+        /**
+         * Start (or restart) playback.
+         *
+         * The same two branches as the control bar's play button: restart from zero
+         * after the video ended, otherwise just play. There is no pause branch,
+         * because this button is never on screen while playback is running. It reads
+         * `video.ended` for the same reason `hasEnded()` does.
+         */
+        start() {
+          const video = getVideo(this.api.container);
+          if (!video) return;
+          if (video.ended) {
+            video.currentTime = 0;
+          }
+          video.play().catch(() => {
+          });
         }
         destroy() {
           this.el.removeEventListener("click", this.clickHandler);
@@ -35863,6 +36047,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "packages/plugins/ui/src/controls/index.ts"() {
       "use strict";
       init_PlayButton();
+      init_BigPlayButton();
       init_ProgressBar();
       init_TimeDisplay();
       init_VolumeControl();
@@ -35913,6 +36098,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/version.ts
+  var PKG_VERSION4;
+  var init_version = __esm({
+    "packages/plugins/ui/src/version.ts"() {
+      "use strict";
+      PKG_VERSION4 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+    }
+  });
+
   // packages/plugins/ui/src/index.ts
   var src_exports = {};
   __export(src_exports, {
@@ -35934,6 +36128,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let progressBar = null;
     let bufferingIndicator = null;
     let errorOverlay = null;
+    let bigPlayButton = null;
     let styleEl = null;
     let controls = [];
     let hideTimeout = null;
@@ -35946,6 +36141,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let rafHandle = null;
     const layout = config.controls || DEFAULT_LAYOUT;
     const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
+    const showBigPlayButton = config.bigPlayButton !== false;
     const createControl = (slot) => {
       switch (slot) {
         case "play":
@@ -36027,6 +36223,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const showSpinner = waiting || seeking && !api?.getState("paused") || isLoading;
       bufferingIndicator?.classList.toggle("sp-buffering--visible", !!showSpinner);
       errorOverlay?.update();
+      bigPlayButton?.update();
     };
     const scheduleUpdate = () => {
       if (rafHandle !== null) return;
@@ -36147,7 +36344,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "ui-controls",
       name: "UI Controls",
       type: "ui",
-      version: "1.0.0",
+      version: PKG_VERSION4,
       async init(pluginApi) {
         api = pluginApi;
         styleEl = document.createElement("style");
@@ -36188,6 +36385,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         recoveredUnsubscribe = api.on("error:recovered", () => {
           errorOverlay?.hide();
         });
+        if (showBigPlayButton) {
+          bigPlayButton = new BigPlayButton(api, () => errorOverlay?.isVisible() ?? false);
+          container.appendChild(bigPlayButton.render());
+        }
         progressBar = new ProgressBar(api);
         container.appendChild(progressBar.render());
         if (!isPlaying) {
@@ -36263,6 +36464,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         progressBar = null;
         errorOverlay?.destroy();
         errorOverlay = null;
+        bigPlayButton?.destroy();
+        bigPlayButton = null;
         controlBar?.remove();
         controlBar = null;
         gradient?.remove();
@@ -36316,6 +36519,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_icons();
       init_controls();
       init_control_registry();
+      init_version();
       init_control_registry();
       init_icons();
       init_styles();
@@ -37951,6 +38155,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.seekResumeTimeout = null;
       /** Counter to detect stale load() calls */
       this.loadGeneration = 0;
+      /** True once the lifecycle listeners have been wired (they are wired once) */
+      this.listenersWired = false;
+      /** True once `player:ready` has been emitted (it is emitted once) */
+      this.readyEmitted = false;
+      /**
+       * In-flight initialisation pass, shared by concurrent callers.
+       *
+       * `load()` is called from inside the `media:load-request` handler, so a
+       * second initialisation pass can start while the first is still awaiting a
+       * plugin's `init()`. Without this, `PluginManager.initPlugin()` would see
+       * the plugin in the `initializing` state and throw "possible circular
+       * dependency". Cleared when the pass settles so a plugin registered later
+       * is still picked up by the next call.
+       */
+      this.initializing = null;
       if (typeof options.container === "string") {
         const el = document.querySelector(options.container);
         if (!el || !(el instanceof HTMLElement)) {
@@ -37996,23 +38215,69 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.pluginManager.register(plugin);
         }
       }
-      this.logger.info("ScarlettPlayer initialized", {
+      this.logger.info("ScarlettPlayer constructed", {
         autoplay: options.autoplay,
         plugins: options.plugins?.length ?? 0
       });
-      this.eventBus.emit("player:ready", void 0);
     }
     /**
-     * Initialize the player asynchronously.
-     * Initializes non-provider plugins and loads initial source if provided.
+     * Initialise every registered non-provider plugin and wire the player's
+     * own lifecycle listeners. Idempotent, and safe to call re-entrantly.
+     *
+     * This exists because `new ScarlettPlayer(...)` followed by `load()` used
+     * to leave the player with a provider and nothing else: the READMEs and 12
+     * plugin `@example` blocks show exactly that shape, and every one of them
+     * produced a dead UI (no controls, no overlay, no playlist). `load()` now
+     * calls this first, so the trap cannot be reached.
+     *
+     * The `media:load-request` and `error:retry` listeners live here rather
+     * than in the constructor because they are part of initialisation, not
+     * construction: without them the playlist plugin cannot load a track and
+     * the error overlay's "Try Again" button does nothing.
+     *
+     * Provider plugins are excluded: they are initialised lazily, per source,
+     * by `load()` once `selectProvider()` has picked one.
+     *
+     * @returns Promise resolving when the pass (or the in-flight one) completes
      */
-    async init() {
-      this.checkDestroyed();
-      for (const [id, record] of this.pluginManager.plugins) {
-        if (record.plugin.type !== "provider" && record.state === "registered") {
-          await this.pluginManager.initPlugin(id);
-        }
+    ensureInitialized() {
+      if (this.initializing) return this.initializing;
+      this.initializing = this.runInitialization().finally(() => {
+        this.initializing = null;
+      });
+      return this.initializing;
+    }
+    /**
+     * One initialisation pass. Never call directly; go through
+     * `ensureInitialized()`, which owns the re-entrancy guard.
+     *
+     * @returns Promise resolving when the pass completes
+     */
+    async runInitialization() {
+      for (const id of this.pluginManager.getPluginIds()) {
+        if (this.destroyed) return;
+        const plugin = this.pluginManager.getPlugin(id);
+        if (!plugin || plugin.type === "provider") continue;
+        if (this.pluginManager.getPluginState(id) !== "registered") continue;
+        await this.pluginManager.initPlugin(id);
       }
+      if (this.destroyed) return;
+      this.wireLifecycleListeners();
+      if (!this.readyEmitted) {
+        this.readyEmitted = true;
+        this.eventBus.emit("player:ready", void 0);
+      }
+    }
+    /**
+     * Wire the two listeners the player owns, exactly once.
+     *
+     * Guarded by a flag rather than by "init() runs once" because
+     * `ensureInitialized()` runs on every `load()`: wiring them twice would
+     * load and play each requested source twice.
+     */
+    wireLifecycleListeners() {
+      if (this.listenersWired) return;
+      this.listenersWired = true;
       this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
         if (this.stateManager.getValue("chromecastActive")) return;
         await this.load(src);
@@ -38035,15 +38300,40 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (this.destroyed) return;
         await this.play();
       });
+    }
+    /**
+     * Initialize the player asynchronously.
+     *
+     * Initialises non-provider plugins, wires the lifecycle listeners and loads
+     * `initialSrc` when one was given. Idempotent: calling it twice, or calling
+     * it after a `load()` has already initialised the player, wires nothing a
+     * second time and re-emits nothing.
+     *
+     * @returns Promise resolving when initialisation (and any initial load) is done
+     */
+    async init() {
+      this.checkDestroyed();
+      await this.ensureInitialized();
       if (this.initialSrc) {
         await this.load(this.initialSrc);
       }
-      return Promise.resolve();
     }
     /**
      * Load a media source.
      *
-     * Selects appropriate provider plugin and loads the source.
+     * Initialises the player if that has not happened yet (see
+     * `ensureInitialized()`), then selects the provider plugin for the source
+     * and loads it. The auto-initialisation is what makes the widely copied
+     * `new ScarlettPlayer(...)` plus `load()` shape work: before it, that shape
+     * produced a player with a provider and no UI, no error overlay and no
+     * working playlist.
+     *
+     * Resets playback state, and deliberately does NOT touch `poster`. The
+     * poster is metadata owned by whoever set it (the consumer through
+     * `PlayerOptions.poster` or `setPoster()`, or the playlist plugin on a track
+     * change), not playback state, and it is written BEFORE the load that goes
+     * with it: clearing it here would blank the image over exactly the gap it
+     * exists to cover, while the next source loads.
      *
      * @param source - Media source URL
      * @returns Promise that resolves when source is loaded
@@ -38075,6 +38365,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           await this.pluginManager.destroyPlugin(previousProviderId);
           this._currentProvider = null;
         }
+        await this.ensureInitialized();
         if (generation !== this.loadGeneration) {
           this.logger.info("Load superseded by newer load call", { source });
           return;
@@ -38273,6 +38564,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.logger.debug("Autoplay set", { autoplay });
     }
     /**
+     * Set the poster image shown until the first frame renders.
+     *
+     * Writes the `poster` state key; the provider plugins subscribe to it and
+     * mirror it onto the media element, so this takes effect on a player that
+     * is already running. Before this method existed the poster could only be
+     * chosen at construction, which left a playlist showing the previous
+     * track's art (and a Vue `poster` prop change doing nothing at all).
+     *
+     * An empty string clears the poster, which is how a consumer takes the
+     * image away rather than replacing it.
+     *
+     * @param url - Poster image URL, or '' to clear it
+     *
+     * @example
+     * ```ts
+     * player.setPoster('https://example.com/art.jpg');
+     * player.setPoster(''); // back to the bare video surface
+     * ```
+     */
+    setPoster(url) {
+      this.checkDestroyed();
+      this.stateManager.set("poster", url);
+      this.logger.debug("Poster set", { poster: url });
+    }
+    /**
      * Subscribe to an event.
      *
      * @param event - Event name
@@ -38302,9 +38618,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      *
      * @example
      * ```ts
+     * // player:ready fires once, at the end of the first initialisation, so a
+     * // one-shot listener has to be attached before init() or load() runs.
+     * const player = new ScarlettPlayer({ container });
      * player.once('player:ready', () => {
      *   console.log('Player ready!');
      * });
+     * await player.init();
      * ```
      */
     once(event, handler) {
@@ -38616,6 +38936,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return this.stateManager.getValue("autoplay");
     }
     /**
+     * Get the current poster URL ('' when there is none).
+     *
+     * Reads state rather than the media element: the element only exists once a
+     * provider has been initialised, and for an audio source it never carries
+     * the attribute at all.
+     */
+    get poster() {
+      return this.stateManager.getValue("poster");
+    }
+    /**
      * Check if player is destroyed.
      * @private
      */
@@ -38668,6 +38998,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
   };
+  async function createPlayer(options) {
+    const player = new ScarlettPlayer(options);
+    await player.init();
+    return player;
+  }
 
   // packages/plugins/hls/src/hls-loader.ts
   var hls_loader_exports = {};
@@ -38947,8 +39282,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.addEventListener(event, handler);
       handlers.push({ event, handler });
     };
+    const syncEndedFromElement = () => {
+      if (video.ended || !api.getState("ended")) return;
+      api.setState("ended", false);
+      api.setState("playbackState", video.paused ? "paused" : "playing");
+    };
     addHandler("play", () => {
       api.setState("paused", false);
+      syncEndedFromElement();
     });
     addHandler("playing", () => {
       api.setState("playing", true);
@@ -38956,6 +39297,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("waiting", false);
       api.setState("buffering", false);
       api.setState("playbackState", "playing");
+      syncEndedFromElement();
     });
     addHandler("pause", () => {
       api.setState("playing", false);
@@ -39010,6 +39352,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     });
     addHandler("seeking", () => {
       api.setState("seeking", true);
+      syncEndedFromElement();
     });
     addHandler("seeked", () => {
       api.setState("seeking", false);
@@ -39128,6 +39471,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   }
 
+  // packages/plugins/hls/src/version.ts
+  var PKG_VERSION2 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
   // packages/plugins/hls/src/create-hls-plugin.ts
   var DEFAULT_CONFIG = {
     debug: false,
@@ -39186,6 +39532,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let onlineListener = null;
     let reconnectTriggerError = null;
     let reconnectExhausted = false;
+    const applyPoster = () => {
+      if (!video) return;
+      video.poster = api?.getState("poster") || "";
+    };
     const getOrCreateVideo = () => {
       if (video) return video;
       const existing = api?.container.querySelector("video");
@@ -39198,10 +39548,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.preload = "metadata";
       video.controls = false;
       video.playsInline = true;
-      const poster = api?.getState("poster");
-      if (poster) {
-        video.poster = poster;
-      }
+      applyPoster();
       api?.container.appendChild(video);
       return video;
     };
@@ -39744,7 +40091,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "hls-provider",
       name: variant.name,
-      version: "1.0.0",
+      version: PKG_VERSION2,
       type: "provider",
       description: variant.description,
       canPlay(src) {
@@ -39835,6 +40182,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           };
           window.addEventListener("online", onlineListener);
         }
+        const unsubPoster = api.subscribeToState((event) => {
+          if (event.key === "poster") applyPoster();
+        });
         api.onDestroy(() => {
           unsubPlay();
           unsubPause();
@@ -39843,6 +40193,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubMute();
           unsubRate();
           unsubQuality();
+          unsubPoster();
         });
       },
       async destroy() {
@@ -39868,6 +40219,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         hasPlayedContent = false;
         cleanup(new Error("HLS load cancelled: superseded by a new load"));
         currentSrc = src;
+        applyPoster();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
         if (api.getState("airplayActive") && loader.supportsNativeHLS()) {
@@ -40017,6 +40369,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     );
   }
 
+  // packages/plugins/native/src/version.ts
+  var PKG_VERSION3 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
   // packages/plugins/native/src/index.ts
   var VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "mkv", "ogv", "m4v"];
   var AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus", "weba"];
@@ -40046,6 +40401,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let video = null;
     let cleanupEvents = null;
     let derived_title = null;
+    let is_audio_source = false;
     const getExtension = (src) => {
       try {
         const url = new URL(src, window.location.href);
@@ -40069,6 +40425,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const canPlay = testElement.canPlayType(mimeType);
       return canPlay === "probably" || canPlay === "maybe";
     };
+    const applyPoster = () => {
+      if (!video) return;
+      if (is_audio_source) {
+        video.poster = "";
+        return;
+      }
+      video.poster = api?.getState("poster") || "";
+    };
     const getOrCreateVideo = () => {
       if (video) return video;
       const existing = api?.container.querySelector("video");
@@ -40081,10 +40445,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       video.preload = preload;
       video.controls = false;
       video.playsInline = true;
-      const poster = api?.getState("poster");
-      if (poster) {
-        video.poster = poster;
-      }
+      applyPoster();
       api?.container.appendChild(video);
       return video;
     };
@@ -40094,22 +40455,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         videoEl.addEventListener(event, handler);
         handlers.push([event, handler]);
       };
+      const syncEndedFromElement = () => {
+        if (videoEl.ended || !api?.getState("ended")) return;
+        api?.setState("ended", false);
+        api?.setState("playbackState", videoEl.paused ? "paused" : "playing");
+      };
       on("play", () => {
         api?.setState("paused", false);
+        syncEndedFromElement();
       });
       on("playing", () => {
         api?.setState("playing", true);
         api?.setState("paused", false);
+        api?.setState("playbackState", "playing");
         api?.emit("playback:play", void 0);
+        syncEndedFromElement();
       });
       on("pause", () => {
         api?.setState("playing", false);
         api?.setState("paused", true);
+        api?.setState("playbackState", "paused");
         api?.emit("playback:pause", void 0);
       });
       on("ended", () => {
         api?.setState("playing", false);
         api?.setState("ended", true);
+        api?.setState("playbackState", "ended");
         api?.emit("playback:ended", void 0);
       });
       on("timeupdate", () => {
@@ -40145,6 +40516,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       on("seeking", () => {
         api?.setState("seeking", true);
+        syncEndedFromElement();
       });
       on("seeked", () => {
         api?.setState("seeking", false);
@@ -40239,7 +40611,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "native-provider",
       name: "Native Media Provider",
-      version: "1.0.0",
+      version: PKG_VERSION3,
       type: "provider",
       description: "Native HTML5 playback for video (MP4, WebM, MOV) and audio (MP3, WAV, FLAC, AAC)",
       canPlay(src) {
@@ -40281,6 +40653,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubRate = api.on("playback:ratechange", ({ rate }) => {
           if (video) video.playbackRate = rate;
         });
+        const unsubPoster = api.subscribeToState((event) => {
+          if (event.key === "poster") applyPoster();
+        });
         api.onDestroy(() => {
           unsubPlay();
           unsubPause();
@@ -40288,6 +40663,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubVolume();
           unsubMute();
           unsubRate();
+          unsubPoster();
         });
       },
       async destroy() {
@@ -40299,12 +40675,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         video = null;
         api = null;
         derived_title = null;
+        is_audio_source = false;
       },
       async loadSource(src) {
         if (!api) throw new Error("Plugin not initialized");
         const ext = getExtension(src);
         const mimeType = getMimeType(ext);
         const isAudio = isAudioExtension(ext);
+        is_audio_source = isAudio;
         api.logger.info("Loading native media source", { src, mimeType, isAudio });
         cleanup();
         api.setState("playbackState", "loading");
@@ -40328,16 +40706,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.setState("qualities", []);
         api.setState("currentQuality", null);
         const videoEl = getOrCreateVideo();
-        if (isAudio) {
-          videoEl.style.display = "none";
-          videoEl.poster = "";
-        } else {
-          videoEl.style.display = "block";
-          const poster = api.getState("poster");
-          if (poster) {
-            videoEl.poster = poster;
-          }
-        }
+        videoEl.style.display = isAudio ? "none" : "block";
+        applyPoster();
         cleanupEvents = setupEventListeners(videoEl);
         return new Promise((resolve2, reject) => {
           let watchdog = null;
@@ -40384,6 +40754,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // demo/demo.ts
   init_src();
+
+  // packages/plugins/airplay/src/version.ts
+  var PKG_VERSION5 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/airplay/src/index.ts
   function isAirPlaySupported2() {
@@ -40451,7 +40824,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "airplay",
       name: "AirPlay",
       type: "feature",
-      version: "1.0.0",
+      version: PKG_VERSION5,
       async init(pluginApi) {
         api = pluginApi;
         api.setState("airplayAvailable", false);
@@ -40561,6 +40934,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const isChromium = /Chromium/.test(ua);
     return isChrome || isChromium;
   }
+
+  // packages/plugins/chromecast/src/version.ts
+  var PKG_VERSION6 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/chromecast/src/index.ts
   function chromecastPlugin() {
@@ -40723,7 +41099,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "chromecast",
       name: "Chromecast",
       type: "feature",
-      version: "1.0.0",
+      version: PKG_VERSION6,
       async init(pluginApi) {
         api = pluginApi;
         api.setState("chromecastAvailable", false);
@@ -41111,6 +41487,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return el;
   }
 
+  // packages/plugins/playlist/src/version.ts
+  var PKG_VERSION7 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
   // packages/plugins/playlist/src/index.ts
   var DEFAULT_CONFIG2 = {
     autoAdvance: true,
@@ -41260,9 +41639,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       currentIndex = index;
       api?.logger.info("Track changed", { index, title: track.title, src: track.src });
       api?.setState("title", track.title || "");
-      if (track.artwork) {
-        api?.setState("poster", track.artwork);
-      }
+      api?.setState("poster", track.artwork || "");
       api?.setState("mediaType", track.type || "audio");
       emitChange();
       if (mergedConfig.autoLoad !== false && track.src) {
@@ -41272,7 +41649,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "playlist",
       name: "Playlist",
-      version: "1.0.0",
+      version: PKG_VERSION7,
       type: "feature",
       description: "Playlist management with shuffle, repeat, and gapless playback",
       async init(pluginApi) {
@@ -41529,6 +41906,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/plugins/media-session/src/version.ts
+  var PKG_VERSION8 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
   // packages/plugins/media-session/src/index.ts
   var DEFAULT_CONFIG3 = {
     enablePlayPause: true,
@@ -41677,7 +42057,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "media-session",
       name: "Media Session",
-      version: "1.0.0",
+      version: PKG_VERSION8,
       type: "feature",
       description: "Media Session API integration for system-level media controls",
       async init(pluginApi) {
@@ -41788,6 +42168,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     return plugin;
   }
+
+  // packages/plugins/audio-ui/src/version.ts
+  var PKG_VERSION9 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/audio-ui/src/index.ts
   var DEFAULT_THEME = {
@@ -42416,7 +42799,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "audio-ui",
       name: "Audio UI",
-      version: "1.0.0",
+      version: PKG_VERSION9,
       type: "ui",
       description: "Compact audio player interface",
       async init(pluginApi) {
@@ -42522,6 +42905,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     return plugin;
   }
+
+  // packages/plugins/watermark/src/version.ts
+  var PKG_VERSION10 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/watermark/src/index.ts
   var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
@@ -42633,7 +43019,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "watermark",
       name: "Watermark",
-      version: "1.0.0",
+      version: PKG_VERSION10,
       type: "feature",
       description: "Anti-piracy watermark overlay with text/image support and dynamic repositioning",
       init(pluginApi) {
@@ -43366,6 +43752,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 `;
 
+  // packages/plugins/share/src/version.ts
+  var PKG_VERSION11 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
   // packages/plugins/share/src/index.ts
   var STYLE_ID2 = "sp-share-styles";
   function createSharePlugin(config = {}) {
@@ -43473,7 +43862,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "share",
       name: "Share",
-      version: "1.0.0",
+      version: PKG_VERSION11,
       type: "feature",
       description: "Native share sheet, copy link, timestamps and embed codes",
       init(pluginApi) {
@@ -43547,7 +43936,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.7.0" : "dev";
+  var VERSION = true ? "1.7.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   document.addEventListener("DOMContentLoaded", async () => {
@@ -43556,7 +43945,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       console.error("Player container not found");
       return;
     }
-    const player = new ScarlettPlayer({
+    const player = await createPlayer({
       container,
       src: VIDEO_URL,
       poster: "https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg",
@@ -43611,7 +44000,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         })
       ].filter(Boolean)
     });
-    await player.init();
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
@@ -43633,7 +44021,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           artwork: "https://vod.thestreamplatform.com/demo/scarlett-player-sq-thumb.jpg"
         }
       ];
-      const audioPlayer = new ScarlettPlayer({
+      const audioPlayer = await createPlayer({
         container: audioContainer,
         logLevel: "debug",
         plugins: [
@@ -43658,7 +44046,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           })
         ].filter(Boolean)
       });
-      await audioPlayer.init();
       const playlist = audioPlayer.getPlugin("playlist");
       audioPlayer.on("playlist:change", async (e) => {
         if (e?.track?.src) {
@@ -43682,7 +44069,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     const miniContainer = document.getElementById("mini-player");
     if (miniContainer) {
-      const miniPlayer = new ScarlettPlayer({
+      const miniPlayer = await createPlayer({
         container: miniContainer,
         logLevel: "debug",
         plugins: [
@@ -43703,7 +44090,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           })
         ].filter(Boolean)
       });
-      await miniPlayer.init();
       await miniPlayer.load("https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3");
       window.miniPlayer = miniPlayer;
       console.log("\u{1F3B5} Mini Player Demo Ready");

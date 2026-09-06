@@ -1,5 +1,143 @@
 # Changelog
 
+## 1.7.1
+
+### Patch Changes
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - The embed plays what it advertises, ships every chunk, and ships its types again.
+
+  **Native provider.** No embed build registered one, so `selectProvider()` had
+  only the HLS provider to choose from and its `canPlay()` accepts nothing but
+  `.m3u8`. Every `.mp3` and `.mp4` source failed with `PROVIDER_NOT_FOUND`, in all
+  three builds, including the audio one. `PluginCreators` gains a `native` slot,
+  all three entries pass `createNativePlugin`, and it is registered after the HLS
+  provider so HLS keeps `.m3u8` (the native provider's extension list has no
+  `m3u8` entry, so it never competes for a manifest, not even in Safari).
+
+  **Light hls.js in the audio build.** `index-audio.ts` now imports from
+  `@scarlett-player/hls/light`. The light build drops in-stream subtitles, ID3 and
+  EME; the audio build ships no captions plugin and audio embeds are not DRM
+  sources, so ID3 timed metadata is the one capability lost, and the README says
+  so. `embed.audio.umd.cjs` went from 606,592 bytes (181,604 gzip) at 1.7.0 to
+  about 433,000 (130,000 gzip), a 29 percent drop, and the audio build's lazy ES
+  chunk from 1,115,611 bytes to 734,717. The native provider costs the video and
+  full builds about 6 kB each, which is why `embed.umd.cjs` grew slightly.
+
+  **Chunk naming.** `chunkFileNames` was the fixed string `'hls.js'`, which
+  assumed one chunk per build. The playlist plugin pulls its controls in through
+  `void import('@scarlett-player/ui')`, so the audio build produced a second
+  chunk that Rollup deduplicated to `hls2.js`, a name `scripts/upload-cdn.sh`
+  never uploaded: `embed.audio.js` on the CDN imported `./hls2.js` and got a 404,
+  and the playlist plugin swallowed the failed import with a log line, so the CDN
+  audio build had no prev/next controls and nothing went red. That shipped from
+  the v1.6.0 release on 2026-08-11, the first release containing the dynamic
+  import, and was still reproducible on 2026-09-02 against the v1.6.0, v1.7.0 and
+  latest CDN copies. Chunks are now named per build: `hls.js` for the full and
+  video builds (byte-identical, so one copy serves both), `hls.light.js` for the
+  audio build's light hls.js, and `<build>.<chunk>.js` for anything else, so two
+  builds sharing one `dist` cannot overwrite each other. The upload script takes
+  dist by glob instead of a hand list, and
+  `scripts/check-embed-chunks.mjs` fails the build if any bundle imports a chunk
+  that is not there.
+
+  **Declarations.** `package.json` promised `dist/index.d.ts`,
+  `dist/index-video.d.ts` and `dist/index-audio.d.ts`, and the 1.7.0 tarball
+  contained no `.d.ts` at all: the build runs `tsc` and then three Vite builds
+  into one directory, and the first Vite build had `emptyOutDir: true`, which
+  deleted the declarations `tsc` had just emitted. A consumer with
+  `noImplicitAny` on (the `strict` default) could not compile an import of the
+  package at all, error TS7016; with it off the module was typed `any` in
+  silence. `emptyOutDir` is now `false`
+  for all three builds, the package's `build` script does the cleaning with
+  `rimraf dist tsconfig.tsbuildinfo` (the buildinfo because a stale one makes a
+  composite project emit nothing), `tsc` emits declarations only so the raw
+  compiler output no longer lands in the tarball or on the CDN, and `types` comes
+  first in every `exports` condition. `scripts/check-package-artifacts.mjs` fails
+  the build if any workspace manifest points at a file that is not on disk.
+
+  **Mixed exports.** `output.exports: 'named'` silences Rollup's "named and
+  default exports together" warning for all three entries.
+  `scripts/verify-browser.mjs` now loads the built UMD in a real browser and
+  asserts `window.ScarlettPlayer.create` is a function, `availableTypes` is
+  present, and nothing moved behind `.default`.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - `window.ScarlettPlayer.version` is the version the embed was actually built
+  from.
+
+  The three entries carried the hand-written literals '0.5.3', '0.5.3-video' and
+  '0.5.3-audio' while the package published at 1.7.0, and the CDN's
+  `latest/embed.umd.cjs` still answered `window.ScarlettPlayer.version === '0.5.3'`
+  when loaded in Chrome (both measured 2026-09-02). That string is the only thing
+  support can read off a live page to tell which build a viewer is running, so it
+  was worse than useless: it named a release that never shipped.
+
+  The value comes from the package's own package.json now, through a
+  `__PKG_VERSION__` define in `vite.config.ts` read by `src/version.ts`, with a
+  '0.0.0-dev' fallback for test runs. The `-video` and `-audio` suffixes stay, as
+  `1.7.0-video` and `1.7.0-audio`. `scripts/verify-browser.mjs` loads the built
+  UMD in a real browser and asserts the global's `version` equals
+  `packages/embed/package.json`, because nothing short of a browser load can prove
+  the define survived the bundle.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - The iframe embed loads, the big play button is configurable, and the shared hls chunk is guarded.
+
+  **iframe embed.** `iframe.html` never worked, on two counts, both dating to the
+  initial release (2b8fd69, 2025-12-14). It called `module.create(config)` on the
+  imported bundle, but the ES build exports the API object as its default
+  (`ScarlettPlayerAPI as default`) alongside three named helpers, so
+  `module.create` was `undefined` and the page rendered its own "Error Loading
+  Player" screen; it now calls `module.default.create(config)` and awaits the
+  promise that returns. It also imported `./dist/embed.js`, which only matches the
+  npm tarball layout. `scripts/upload-cdn.sh` uploads the page BESIDE the bundles,
+  so on the CDN it is `latest/iframe.html` next to `latest/embed.js` and
+  `latest/dist/embed.js` is a 404: the hosted iframe embed has never loaded a
+  player. The import now tries `./embed.js` first and falls back to
+  `./dist/embed.js`, so both layouts work.
+
+  **`bigPlayButton`.** `@scarlett-player/ui` has had a `bigPlayButton` option
+  since the control landed, but nothing reached it from an embed: a page that
+  draws its own play affordance over the player had no way to turn the centred
+  one off short of dropping the whole UI plugin with `data-controls="false"`.
+  `EmbedConfig` gains the field, the parser reads `data-big-play-button` with
+  the same convention as the other booleans (only the exact string `"false"`
+  turns it off), `iframe.html` reads a `big-play-button` query parameter, and
+  the video branch forwards it to the UI plugin only when it is set, so an
+  embed that says nothing keeps the plugin's own default rather than pinning a
+  second copy of it. The audio UIs have no such control and are untouched.
+
+  **Shared chunk guard.** The three builds write into one `dist` with
+  `emptyOutDir: false`, and `chunkFileNames` leaves two names unprefixed,
+  `hls.js` and `hls.light.js`, on the strength of the full and video builds
+  emitting the same file. Nothing enforced that:
+  `scripts/check-embed-chunks.mjs` asserts only that a chunk a bundle imports
+  exists, and after a silent overwrite it still would. A Rollup hook in
+  `vite.config.ts` now reads whatever sits at a shared chunk's path before the
+  write and fails the build if the bytes differ, which is exactly the moment
+  the video build would overwrite the full build's copy. The check script also
+  asserts that the unprefixed names in `dist` are exactly those two, so a
+  `chunkFileNames` regression that drops a build prefix is caught before it can
+  collide.
+
+  **Dead `data-share-url` docs.** The README attribute row and the iframe
+  `shareUrl` / `share-url` parameter landed with the share plugin on 2026-08-10
+  (044114c) and were never wired up: no embed build registers
+  `@scarlett-player/share`, `EmbedConfig` has no `shareUrl`, and
+  `parseDataAttributes()` never read the attribute, so the value went nowhere.
+  Both are removed rather than left documenting a feature that does not exist.
+  Registering the share plugin in the embed builds is a tracked follow-up.
+
+- Updated dependencies [[`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8), [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8)]:
+  - @scarlett-player/core@1.7.1
+  - @scarlett-player/analytics@1.7.1
+  - @scarlett-player/audio-ui@1.7.1
+  - @scarlett-player/captions@1.7.1
+  - @scarlett-player/hls@1.7.1
+  - @scarlett-player/media-session@1.7.1
+  - @scarlett-player/native@1.7.1
+  - @scarlett-player/playlist@1.7.1
+  - @scarlett-player/ui@1.7.1
+  - @scarlett-player/watermark@1.7.1
+
 ## 1.7.0
 
 ### Patch Changes

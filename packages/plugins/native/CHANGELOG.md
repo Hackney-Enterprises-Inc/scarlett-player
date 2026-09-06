@@ -1,5 +1,89 @@
 # @scarlett-player/native
 
+## 1.7.1
+
+### Patch Changes
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Reports its real version, and requires `@scarlett-player/core@^1.7.0`.
+
+  The descriptor's `version` was the hand-written literal '1.0.0' while the
+  package published at 1.7.0, so anything that read a version off the plugin
+  reported a number that had not been true since the descriptor was written
+  (measured 2026-09-02). It comes from the package's own package.json now:
+  `src/version.ts` reads a `__PKG_VERSION__` define set by the new
+  `tsup.config.ts`, with a '0.0.0-dev' fallback for test runs. The `build` and
+  `dev` scripts call plain `tsup`, so the entry points, formats and `--dts` flag
+  are written down once in the config instead of twice in package.json. The
+  move does not change what tsup emits: the md5 of `dist/index.d.ts` and
+  `dist/index.d.cts` is unchanged across it (compared 2026-09-02).
+
+  The `@scarlett-player/core` peer range moves from `^1.0.3` to `^1.7.0`.
+  The old ranges were
+  wrong across the workspace, not merely inconsistent: three of the packages
+  declaring `^1.0.3` (audio-ui, media-session, ui) call `defineState`, which core
+  gained in 1.4.0. Changesets is configured with
+  `onlyUpdatePeerDependentsWhenOutOfRange`, so future minors of core will not
+  cascade this into a major.
+
+  The `@example` docblock shows `createPlayer()`. The `new ScarlettPlayer(...)`
+  shape it used to show left the player with a provider and nothing else before
+  core 1.7.1, so anyone copying the example got no controls and no working
+  "Try Again".
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Re-applies the poster whenever it changes.
+
+  The provider set `video.poster` when it created the element and on each
+  `loadSource()`, but nothing re-applied it in between, so `setPoster()`, a
+  playlist track change and a Vue prop change were all invisible to the viewer.
+  One `applyPoster()` now serves element creation, `loadSource()` and a
+  `subscribeToState()` subscription released through `api.onDestroy()`.
+
+  An empty poster clears the attribute rather than being skipped, so a track
+  without artwork can no longer inherit the previous one's image. The audio rule
+  is unchanged and now holds against state changes too: while the current source
+  is audio the attribute stays cleared whatever the poster says.
+
+  First tests to assert `video.poster` on this provider at all.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Clears the `ended` state key when playback leaves the end of the media.
+
+  The `ended` handler set the key true and nothing in the provider ever set it
+  back: the only writer that cleared it was core's `load()`. After one replay it
+  stayed true for the rest of the session while `HTMLMediaElement.ended` was
+  false, so the control bar's play button kept the Replay glyph over playing
+  video (the reason `@scarlett-player/ui`'s big play button reads `video.ended`
+  instead of the key).
+
+  The `play`, `playing` and `seeking` handlers now mirror the element's own flag
+  back onto the key, which covers the three ways the position can leave the end:
+  `play()` rewinds an ended element before firing `play`, the first frame fires
+  `playing`, and a paused viewer scrubbing back from the end fires neither. The
+  element is asked rather than assumed, so a seek that lands on the end leaves
+  the key set; writing it true stays the `ended` handler's job.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Writes `playbackState` during ordinary playback, the way the HLS provider does.
+
+  This provider only ever wrote `'loading'` and `'ready'`: `playing`, `pause` and
+  `ended` left the key at whatever the last load had set, so what a reader of
+  `playbackState` saw depended on which provider happened to be playing. The
+  three handlers now write `'playing'`, `'paused'` and `'ended'`, the values
+  `@scarlett-player/hls` has always written from the same events.
+
+  The handlers that clear the `ended` key (`play`, `playing` and `seeking`) also
+  re-derive `playbackState` from the element, `'paused'` or `'playing'` from
+  `video.paused`, so a paused scrub away from the end does not leave the key at
+  `'ended'`. Both writes are gated on the key having been set, so an ordinary
+  mid-video seek restates neither.
+
+  The shipped readers are almost unmoved by this: the error overlay only asks
+  whether the key is `'error'` or `'loading'`, and the big play button's
+  `'idle'`/`'ready'` test is reached only while nothing has played yet and the
+  position is 0, which the `'playing'` and `'ended'` writes and the two
+  scrub writes cannot be. The one case it does move is a `pause` in that same
+  window (a `play()` cancelled before the first frame), where the button now
+  stands down instead of staying up, which is what the HLS provider has always
+  done there.
+
 ## 1.7.0
 
 ## 1.6.0

@@ -1,5 +1,74 @@
 # @scarlett-player/core
 
+## 1.7.1
+
+### Patch Changes
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - `load()` now initialises the player, and `player:ready` can be observed.
+
+  `new ScarlettPlayer(...)` followed by `load()` (the shape shown in the
+  READMEs and in a dozen plugin `@example` blocks) used to leave the player
+  with a provider and nothing else: non-provider plugins were never
+  initialised and the `media:load-request` and `error:retry` listeners were
+  never wired, so the controls, the error overlay's "Try Again" and playlist
+  track loading were all dead. `init()` and `load()` now share one idempotent,
+  re-entrancy-safe initialisation pass: plugins still in the `registered`
+  state are initialised (so a `registerPlugin()` after start-up is picked up
+  by the next call), the two listeners are wired exactly once, and providers
+  keep their lazy per-source initialisation.
+
+  `player:ready` moved out of the constructor, where it was emitted before any
+  consumer or plugin could subscribe and therefore could never be observed. It
+  is emitted once, at the end of the first initialisation, to listeners
+  attached before `init()` or `load()`.
+
+  Also pins `emptyOutDir: false` in the Vite config: the build is
+  `tsc && vite build`, so emptying `dist` would delete the declarations that
+  `types` and every plugin's tsconfig `paths` point at.
+
+  One consequence worth knowing: because the pass now runs inside `load()`, a
+  non-provider plugin whose `init()` throws surfaces through `load()`'s error
+  path, reported through the `ErrorHandler` with `operation: 'load'` and
+  populating the `error` state key, rather than only as a rejected `init()` call.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Core's tarball carries only what its manifest points at.
+
+  `tsc` now emits declarations only (`emitDeclarationOnly`), so the compiled
+  per-module JavaScript that used to land in `dist` beside the Vite bundles
+  (`error-handler.js`, `plugin-api.js` and friends, 32 files nothing could
+  import because only `.` is exported) is gone: the tarball drops from 72 files
+  to 40. The build cleans `dist` and the composite buildinfo first, the same
+  guard embed and vue gained in this release, and `exports["."]` lists `types`
+  first, the order TypeScript documents for condition matching.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - Core exports the version it was built from, as `VERSION`.
+
+  Nothing in the workspace could read the running player version, so every
+  consumer that wanted one wrote its own constant and every one of them drifted:
+  the plugin descriptors said '1.0.0' and the embed builds said '0.5.3' while all
+  17 packages published at 1.7.0 (measured 2026-09-02). tsp-web tags Sentry with a
+  `__SCARLETT_VERSION__` define of its own for the same reason.
+
+  `VERSION` comes from core's own package.json through a `define` in
+  `vite.config.ts`, read by `src/version.ts` with a '0.0.0-dev' fallback for a
+  consumer that bundles core from source without it. The same `define` reaches
+  core's vitest run, so the test asserts the value against package.json rather
+  than against a literal that would have to be edited on every release.
+
+- [#74](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/74) [`170dba5`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/170dba59110517acdb214099414052c99a2d6ad8) Thanks [@alexhackney](https://github.com/alexhackney)! - `setPoster()` and a `poster` getter.
+
+  `PlayerOptions.poster` could seed the poster and nothing could change it
+  afterwards, so a playlist moving from one track to the next left the previous
+  track's artwork on the element and a Vue `poster` prop change did nothing at
+  all. `setPoster(url)` writes the `poster` state key (an empty string clears
+  it) and both providers now subscribe to that key, so it takes effect on a
+  player that is already running. `checkDestroyed()` like every other method.
+
+  `load()` deliberately leaves `poster` alone, and the docblock says why: the
+  poster is metadata whoever set it owns, and it is written BEFORE the load it
+  belongs to, so clearing it on load would blank the image over exactly the gap
+  it exists to cover.
+
 ## 1.7.0
 
 ### Minor Changes
