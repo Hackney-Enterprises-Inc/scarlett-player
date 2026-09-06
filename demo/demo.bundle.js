@@ -7876,10 +7876,10 @@ ${newDetails.m3u8}`);
       cue.id = generateCueId(cue.startTime, cue.endTime, cue.text);
       const region = regionElements[cueElement.getAttribute("region")];
       const style = styleElements[cueElement.getAttribute("style")];
-      const styles5 = getTtmlStyles(region, style, styleElements);
+      const styles6 = getTtmlStyles(region, style, styleElements);
       const {
         textAlign
-      } = styles5;
+      } = styles6;
       if (textAlign) {
         const lineAlign = textAlignToLineAlign[textAlign];
         if (lineAlign) {
@@ -7887,7 +7887,7 @@ ${newDetails.m3u8}`);
         }
         cue.align = textAlign;
       }
-      _extends(cue, styles5);
+      _extends(cue, styles6);
       return cue;
     }).filter((cue) => cue !== null);
   }
@@ -7942,12 +7942,12 @@ ${newDetails.m3u8}`);
     if (regionStyleName && styleElements.hasOwnProperty(regionStyleName)) {
       regionStyle = styleElements[regionStyleName];
     }
-    return styleAttributes.reduce((styles5, name) => {
+    return styleAttributes.reduce((styles6, name) => {
       const value = getAttributeNS(style, ttsNs, name) || getAttributeNS(region, ttsNs, name) || getAttributeNS(regionStyle, ttsNs, name);
       if (value) {
-        styles5[name] = value;
+        styles6[name] = value;
       }
-      return styles5;
+      return styles6;
     }, {});
   }
   function getAttributeNS(element, ns, name) {
@@ -28478,12 +28478,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.background = "black";
           this.flash = false;
         }
-        setStyles(styles5) {
+        setStyles(styles6) {
           const attribs = ["foreground", "underline", "italics", "background", "flash"];
           for (let i = 0; i < attribs.length; i++) {
             const style = attribs[i];
-            if (styles5.hasOwnProperty(style)) {
-              this[style] = styles5[style];
+            if (styles6.hasOwnProperty(style)) {
+              this[style] = styles6[style];
             }
           }
         }
@@ -28642,8 +28642,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             return chars.join("");
           }
         }
-        setPenStyles(styles5) {
-          this.currPenState.setStyles(styles5);
+        setPenStyles(styles6) {
+          this.currPenState.setStyles(styles6);
           const currChar = this.chars[this.pos];
           currChar.setPenState(this.currPenState);
         }
@@ -28706,9 +28706,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const row = this.rows[this.currRow];
           row.insertChar(char);
         }
-        setPen(styles5) {
+        setPen(styles6) {
           const row = this.rows[this.currRow];
-          row.setPenStyles(styles5);
+          row.setPenStyles(styles6);
         }
         moveCursor(relPos) {
           const row = this.rows[this.currRow];
@@ -28749,14 +28749,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             row.setCursor(pacData.indent);
             pacData.color = row.chars[prevPos].penState.foreground;
           }
-          const styles5 = {
+          const styles6 = {
             foreground: pacData.color,
             underline: pacData.underline,
             italics: pacData.italics,
             background: "black",
             flash: false
           };
-          this.setPen(styles5);
+          this.setPen(styles6);
         }
         /**
          * Set background/extra foreground, but first do back_space, and then insert space (backwards compatibility).
@@ -28969,20 +28969,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.writeScreen.moveCursor(nrCols);
         }
         ccMIDROW(secondByte) {
-          const styles5 = {
+          const styles6 = {
             flash: false
           };
-          styles5.underline = secondByte % 2 === 1;
-          styles5.italics = secondByte >= 46;
-          if (!styles5.italics) {
+          styles6.underline = secondByte % 2 === 1;
+          styles6.italics = secondByte >= 46;
+          if (!styles6.italics) {
             const colorIndex = Math.floor(secondByte / 2) - 16;
             const colors = ["white", "green", "blue", "cyan", "red", "yellow", "magenta"];
-            styles5.foreground = colors[colorIndex];
+            styles6.foreground = colors[colorIndex];
           } else {
-            styles5.foreground = "white";
+            styles6.foreground = "white";
           }
-          this.logger.log(2, "MIDROW: " + stringify(styles5));
-          this.writeScreen.setPen(styles5);
+          this.logger.log(2, "MIDROW: " + stringify(styles6));
+          this.writeScreen.setPen(styles6);
         }
         outputDataUpdate(dispatch = false) {
           const time = this.logger.time;
@@ -43806,8 +43806,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles5 = positionStyles[position];
-      styles5.split(";").filter(Boolean).forEach((rule) => {
+      const styles6 = positionStyles[position];
+      styles6.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
         const prop = rule.slice(0, colonIdx).trim();
@@ -45271,10 +45271,1449 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/captions/src/version.ts
+  var PKG_VERSION13 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/captions/src/index.ts
+  var HLS_SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated";
+  var HLS_INSTANCE_RETRY_MS = 500;
+  function createCaptionsPlugin(config = {}) {
+    let api = null;
+    let video = null;
+    let addedTrackElements = [];
+    let hlsSubtitleHandler = null;
+    let observedTextTracks = null;
+    let hlsRetryTimer = null;
+    let hlsRetryUsed = false;
+    let hasAutoSelected = false;
+    const extractFromHLS = config.extractFromHLS !== false;
+    const autoSelect = config.autoSelect ?? false;
+    const defaultLanguage = config.defaultLanguage ?? "en";
+    const getVideo2 = () => {
+      if (video) return video;
+      video = api?.container.querySelector("video") ?? null;
+      return video;
+    };
+    const cleanupTracks = () => {
+      for (const trackEl of addedTrackElements) {
+        trackEl.parentNode?.removeChild(trackEl);
+      }
+      addedTrackElements = [];
+      api?.setState("textTracks", []);
+      api?.setState("currentTextTrack", null);
+    };
+    const addTrackElement = (source) => {
+      const videoEl = getVideo2();
+      if (!videoEl) throw new Error("No video element");
+      const trackEl = document.createElement("track");
+      trackEl.kind = source.kind || "subtitles";
+      trackEl.label = source.label;
+      trackEl.srclang = source.language;
+      trackEl.src = source.src;
+      trackEl.default = false;
+      videoEl.appendChild(trackEl);
+      addedTrackElements.push(trackEl);
+      if (trackEl.track) {
+        trackEl.track.mode = "disabled";
+      }
+      return trackEl;
+    };
+    const syncTracksToState = () => {
+      const videoEl = getVideo2();
+      if (!videoEl) return;
+      const tracks = [];
+      let currentTrack = null;
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        const track = videoEl.textTracks[i];
+        if (track.kind !== "subtitles" && track.kind !== "captions") continue;
+        const scarlettTrack = {
+          id: `track-${i}`,
+          label: track.label || `Track ${i + 1}`,
+          language: track.language || "",
+          kind: track.kind,
+          active: track.mode === "showing"
+        };
+        tracks.push(scarlettTrack);
+        if (track.mode === "showing") {
+          currentTrack = scarlettTrack;
+        }
+      }
+      api?.setState("textTracks", tracks);
+      api?.setState("currentTextTrack", currentTrack);
+    };
+    const selectTrack = (trackId) => {
+      const videoEl = getVideo2();
+      if (!videoEl) return;
+      hasAutoSelected = true;
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        const track = videoEl.textTracks[i];
+        if (track.kind !== "subtitles" && track.kind !== "captions") continue;
+        const id = `track-${i}`;
+        if (trackId && id === trackId) {
+          track.mode = "showing";
+        } else {
+          track.mode = "disabled";
+        }
+      }
+      syncTracksToState();
+    };
+    const maybeAutoSelect = () => {
+      if (!autoSelect || hasAutoSelected) return;
+      if (api?.getState("currentTextTrack")) {
+        hasAutoSelected = true;
+        return;
+      }
+      const tracks = api?.getState("textTracks") || [];
+      const match = tracks.find((t) => t.language === defaultLanguage);
+      if (!match) return;
+      selectTrack(match.id);
+      api?.logger.debug("Auto-selected caption track", { language: defaultLanguage, id: match.id });
+    };
+    const handleTextTracksChanged = () => {
+      syncTracksToState();
+      maybeAutoSelect();
+    };
+    const observeTextTracks = () => {
+      const videoEl = getVideo2();
+      if (!videoEl || observedTextTracks === videoEl.textTracks) return;
+      unobserveTextTracks();
+      const list = videoEl.textTracks;
+      if (typeof list?.addEventListener !== "function") return;
+      observedTextTracks = list;
+      observedTextTracks.addEventListener("addtrack", handleTextTracksChanged);
+      observedTextTracks.addEventListener("removetrack", handleTextTracksChanged);
+      observedTextTracks.addEventListener("change", handleTextTracksChanged);
+    };
+    const unobserveTextTracks = () => {
+      if (typeof observedTextTracks?.removeEventListener !== "function") {
+        observedTextTracks = null;
+        return;
+      }
+      observedTextTracks.removeEventListener("addtrack", handleTextTracksChanged);
+      observedTextTracks.removeEventListener("removetrack", handleTextTracksChanged);
+      observedTextTracks.removeEventListener("change", handleTextTracksChanged);
+      observedTextTracks = null;
+    };
+    const extractHlsSubtitles = () => {
+      if (!extractFromHLS || !api) return;
+      const hlsPlugin = api.getPlugin("hls-provider");
+      if (!hlsPlugin || hlsPlugin.isNativeHLS()) return;
+      const hlsInstance = hlsPlugin.getHlsInstance();
+      if (!hlsInstance?.subtitleTracks?.length) return;
+      api.logger.debug("Syncing HLS subtitle tracks", {
+        count: hlsInstance.subtitleTracks.length
+      });
+      syncTracksToState();
+      maybeAutoSelect();
+    };
+    const unsubscribeFromHls = () => {
+      if (hlsRetryTimer) {
+        clearTimeout(hlsRetryTimer);
+        hlsRetryTimer = null;
+      }
+      if (!hlsSubtitleHandler) return;
+      const hlsInstance = api?.getPlugin("hls-provider")?.getHlsInstance();
+      hlsInstance?.off(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+      hlsSubtitleHandler = null;
+    };
+    const syncFromHls = () => {
+      if (!extractFromHLS || !api) return;
+      const hlsPlugin = api.getPlugin("hls-provider");
+      if (!hlsPlugin || hlsPlugin.isNativeHLS()) return;
+      const hlsInstance = hlsPlugin.getHlsInstance();
+      if (!hlsInstance) {
+        if (!hlsRetryUsed) {
+          hlsRetryUsed = true;
+          hlsRetryTimer = setTimeout(() => {
+            hlsRetryTimer = null;
+            syncFromHls();
+          }, HLS_INSTANCE_RETRY_MS);
+        }
+        return;
+      }
+      unsubscribeFromHls();
+      hlsSubtitleHandler = () => extractHlsSubtitles();
+      hlsInstance.on(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+      extractHlsSubtitles();
+    };
+    const initSources = () => {
+      if (!config.sources?.length) return;
+      for (const source of config.sources) {
+        addTrackElement(source);
+      }
+    };
+    return {
+      id: "captions",
+      name: "Captions",
+      version: PKG_VERSION13,
+      type: "feature",
+      description: "WebVTT subtitles and closed captions with HLS extraction",
+      init(pluginApi) {
+        api = pluginApi;
+        api.logger.debug("Captions plugin initialized");
+        api.setState("textTracks", []);
+        api.setState("currentTextTrack", null);
+        const unsubTrackText = api.on("track:text", ({ trackId }) => {
+          selectTrack(trackId);
+        });
+        const unsubLoaded = api.on("media:loaded", () => {
+          video = null;
+          hasAutoSelected = false;
+          hlsRetryUsed = false;
+          cleanupTracks();
+          initSources();
+          observeTextTracks();
+          syncTracksToState();
+          maybeAutoSelect();
+          syncFromHls();
+        });
+        const unsubLoadRequest = api.on("media:load-request", () => {
+          video = null;
+          hasAutoSelected = false;
+          hlsRetryUsed = false;
+          unsubscribeFromHls();
+          unobserveTextTracks();
+          cleanupTracks();
+        });
+        api.onDestroy(() => {
+          unsubTrackText();
+          unsubLoaded();
+          unsubLoadRequest();
+          unsubscribeFromHls();
+          unobserveTextTracks();
+          cleanupTracks();
+        });
+      },
+      destroy() {
+        api?.logger.debug("Captions plugin destroyed");
+        unsubscribeFromHls();
+        unobserveTextTracks();
+        cleanupTracks();
+        video = null;
+        api = null;
+      }
+    };
+  }
+
+  // packages/plugins/chapters/src/normalise.ts
+  function normaliseChapters(chapters) {
+    const valid = chapters.filter(
+      (chapter) => chapter && typeof chapter.time === "number" && Number.isFinite(chapter.time) && chapter.time >= 0
+    );
+    const sorted = [...valid].sort((a, b) => a.time - b.time);
+    return sorted.map((chapter, index) => {
+      const next = sorted[index + 1];
+      const implicitEnd = next ? next.time : Infinity;
+      const explicitEnd = chapter.endTime;
+      const endTime = typeof explicitEnd === "number" && Number.isFinite(explicitEnd) && explicitEnd > chapter.time ? Math.min(explicitEnd, implicitEnd) : implicitEnd;
+      return { ...chapter, endTime };
+    });
+  }
+  function chapterIndexAt(chapters, time) {
+    for (let i = chapters.length - 1; i >= 0; i--) {
+      const chapter = chapters[i];
+      if (time >= chapter.time && time < chapter.endTime) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  function nextChapterIndex(chapters, time) {
+    const index = chapters.findIndex((chapter) => chapter.time > time);
+    return index;
+  }
+  function previousChapterIndex(chapters, time, threshold) {
+    const current = chapterIndexAt(chapters, time);
+    if (current === -1) {
+      for (let i = chapters.length - 1; i >= 0; i--) {
+        if (chapters[i].time <= time) {
+          return i;
+        }
+      }
+      return -1;
+    }
+    const elapsed = time - chapters[current].time;
+    return elapsed <= threshold && current > 0 ? current - 1 : current;
+  }
+
+  // packages/plugins/chapters/src/vtt.ts
+  function chaptersFromCues(cues) {
+    const chapters = [];
+    for (let i = 0; i < cues.length; i++) {
+      const cue = cues[i];
+      chapters.push({
+        time: cue.startTime,
+        // An open-ended cue reports Infinity, which is not a usable end time.
+        endTime: Number.isFinite(cue.endTime) ? cue.endTime : void 0,
+        label: cue.text
+      });
+    }
+    return chapters;
+  }
+  function loadChaptersFromTrack(container, src, options) {
+    const media = container.querySelector("video, audio");
+    if (!media) {
+      options.onError("no media element to attach a chapters track to");
+      return () => {
+      };
+    }
+    const trackEl = document.createElement("track");
+    trackEl.kind = "chapters";
+    trackEl.src = src;
+    trackEl.default = true;
+    let settled = false;
+    const read = () => {
+      if (settled) return;
+      const track = trackEl.track;
+      if (!track) return;
+      const cues = track.cues;
+      if (!cues || cues.length === 0) return;
+      settled = true;
+      options.onLoad(chaptersFromCues(cues));
+    };
+    const onLoad = () => read();
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      options.onError(`failed to load chapters from ${src}`);
+    };
+    trackEl.addEventListener("load", onLoad);
+    trackEl.addEventListener("error", onError);
+    media.appendChild(trackEl);
+    if (trackEl.track) {
+      trackEl.track.mode = "hidden";
+    }
+    read();
+    return () => {
+      trackEl.removeEventListener("load", onLoad);
+      trackEl.removeEventListener("error", onError);
+      trackEl.remove();
+    };
+  }
+
+  // packages/plugins/chapters/src/icon.ts
+  var CHAPTERS_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+  <path d="M4 6h2v2H4V6zm4 0h12v2H8V6zM4 11h2v2H4v-2zm4 0h12v2H8v-2zm-4 5h2v2H4v-2zm4 0h12v2H8v-2z"/>
+</svg>`;
+
+  // packages/plugins/chapters/src/ChapterList.ts
+  function formatChapterTime(seconds) {
+    const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor(safe % 3600 / 60);
+    const secs = safe % 60;
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+  var ChapterList = class {
+    constructor(options) {
+      this.chapters = [];
+      this.activeIndex = -1;
+      this.open = false;
+      this.api = null;
+      this.toggleHandler = (event) => {
+        event.stopPropagation();
+        this.setOpen(!this.open);
+      };
+      this.documentClickHandler = () => {
+        if (this.open) {
+          this.setOpen(false);
+        }
+      };
+      this.keydownHandler = (event) => {
+        if (event.key === "Escape" && this.open) {
+          this.setOpen(false);
+          this.button.focus();
+        }
+      };
+      this.onSelect = options.onSelect;
+      this.el = document.createElement("div");
+      this.el.className = "sp-chapters";
+      this.button = document.createElement("button");
+      this.button.className = "sp-control sp-chapters__button";
+      this.button.type = "button";
+      this.button.setAttribute("aria-label", "Chapters");
+      this.button.setAttribute("aria-haspopup", "true");
+      this.button.setAttribute("aria-expanded", "false");
+      this.button.innerHTML = CHAPTERS_ICON;
+      this.panel = document.createElement("div");
+      this.panel.className = "sp-chapters__panel";
+      this.panel.setAttribute("role", "menu");
+      this.panel.hidden = true;
+      this.el.appendChild(this.button);
+      this.el.appendChild(this.panel);
+      this.button.addEventListener("click", this.toggleHandler);
+      document.addEventListener("click", this.documentClickHandler);
+      document.addEventListener("keydown", this.keydownHandler);
+    }
+    /** Give the control access to the player, once the UI package hands it over. */
+    attach(api) {
+      this.api = api;
+    }
+    render() {
+      return this.el;
+    }
+    /**
+     * Hide the whole control when the media has no chapters.
+     *
+     * A chapters button that opens an empty panel is worse than no button, and
+     * most media has no chapters at all.
+     */
+    update() {
+      this.el.style.display = this.chapters.length > 0 ? "" : "none";
+    }
+    /** Replace the rendered list. */
+    setChapters(chapters) {
+      this.chapters = chapters;
+      this.renderPanel();
+      this.update();
+    }
+    /** Mark a chapter as the one holding the playhead. -1 clears the marking. */
+    setActiveIndex(index) {
+      if (index === this.activeIndex) return;
+      this.activeIndex = index;
+      const items = this.panel.querySelectorAll(".sp-chapters__item");
+      items.forEach((item, i) => {
+        item.classList.toggle("sp-chapters__item--active", i === index);
+        item.setAttribute("aria-current", i === index ? "true" : "false");
+      });
+    }
+    destroy() {
+      this.button.removeEventListener("click", this.toggleHandler);
+      document.removeEventListener("click", this.documentClickHandler);
+      document.removeEventListener("keydown", this.keydownHandler);
+      this.el.remove();
+      this.api = null;
+    }
+    setOpen(open) {
+      this.open = open;
+      this.panel.hidden = !open;
+      this.button.setAttribute("aria-expanded", String(open));
+      this.el.classList.toggle("sp-chapters--open", open);
+      if (open && this.activeIndex >= 0) {
+        const active = this.panel.querySelectorAll(".sp-chapters__item")[this.activeIndex];
+        active?.scrollIntoView({ block: "nearest" });
+      }
+    }
+    renderPanel() {
+      this.panel.textContent = "";
+      this.chapters.forEach((chapter, index) => {
+        const item = document.createElement("button");
+        item.className = "sp-chapters__item";
+        item.type = "button";
+        item.setAttribute("role", "menuitem");
+        item.setAttribute("aria-current", index === this.activeIndex ? "true" : "false");
+        if (index === this.activeIndex) {
+          item.classList.add("sp-chapters__item--active");
+        }
+        const time = document.createElement("span");
+        time.className = "sp-chapters__time";
+        time.textContent = formatChapterTime(chapter.time);
+        const text = document.createElement("span");
+        text.className = "sp-chapters__text";
+        const label = document.createElement("span");
+        label.className = "sp-chapters__label";
+        label.textContent = chapter.label;
+        text.appendChild(label);
+        if (chapter.subtitle) {
+          const subtitle = document.createElement("span");
+          subtitle.className = "sp-chapters__subtitle";
+          subtitle.textContent = chapter.subtitle;
+          text.appendChild(subtitle);
+        }
+        item.appendChild(time);
+        item.appendChild(text);
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.onSelect(index);
+          this.setOpen(false);
+        });
+        this.panel.appendChild(item);
+      });
+    }
+  };
+
+  // packages/plugins/chapters/src/styles.ts
+  var styles5 = `
+.sp-chapters {
+  position: relative;
+  display: inline-flex;
+}
+
+.sp-chapters__button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sp-chapters__panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  max-width: 340px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.sp-chapters__panel[hidden] {
+  display: none;
+}
+
+.sp-chapters__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-chapters__item:hover,
+.sp-chapters__item:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sp-chapters__item--active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sp-chapters__item--active .sp-chapters__label {
+  font-weight: 600;
+}
+
+.sp-chapters__time {
+  flex: 0 0 auto;
+  min-width: 46px;
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.sp-chapters__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sp-chapters__label {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.sp-chapters__subtitle {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+@media (max-width: 480px) {
+  .sp-chapters__panel {
+    min-width: 200px;
+    max-width: 76vw;
+  }
+}
+`;
+
+  // packages/plugins/chapters/src/version.ts
+  var PKG_VERSION14 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/chapters/src/index.ts
+  var STYLE_ID4 = "sp-chapters-styles";
+  var DEFAULT_PREVIOUS_THRESHOLD = 3;
+  function createChaptersPlugin(config = {}) {
+    let api = null;
+    let chapters = [];
+    let activeIndex = -1;
+    let list = null;
+    let styleEl = null;
+    let trackCleanup = null;
+    const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
+    const publish = (next) => {
+      chapters = normaliseChapters(next);
+      activeIndex = -1;
+      if (!api) return;
+      api.setState("chapters", chapters);
+      api.setState("currentChapter", null);
+      api.emit("chapter:loaded", { chapters });
+      list?.setChapters(chapters);
+      syncActive();
+    };
+    const syncActive = () => {
+      if (!api) return;
+      const currentTime = api.getState("currentTime") ?? 0;
+      const index = chapterIndexAt(chapters, currentTime);
+      if (index === activeIndex) return;
+      const previous = activeIndex === -1 ? null : chapters[activeIndex] ?? null;
+      const chapter = index === -1 ? null : chapters[index] ?? null;
+      activeIndex = index;
+      api.setState("currentChapter", chapter);
+      api.emit("chapter:change", { chapter, previous });
+      list?.setActiveIndex(index);
+    };
+    const seekTo = (time) => {
+      if (!api) return;
+      const video = api.container.querySelector("video");
+      if (!video) return;
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
+      if (live && seekableRange) {
+        video.currentTime = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+        return;
+      }
+      const duration = video.duration;
+      const upperBound = Number.isFinite(duration) && duration > 0 ? duration : null;
+      video.currentTime = upperBound === null ? Math.max(0, time) : Math.max(0, Math.min(upperBound, time));
+    };
+    const seekToChapter = (index) => {
+      const chapter = chapters[index];
+      if (!chapter || !api) return;
+      seekTo(chapter.time);
+      api.emit("chapter:select", { chapter });
+      syncActive();
+    };
+    return {
+      id: "chapters",
+      name: "Chapters",
+      version: PKG_VERSION14,
+      type: "feature",
+      init(pluginApi) {
+        api = pluginApi;
+        if (!document.getElementById(STYLE_ID4)) {
+          styleEl = document.createElement("style");
+          styleEl.id = STYLE_ID4;
+          styleEl.textContent = styles5;
+          document.head.appendChild(styleEl);
+        }
+        list = new ChapterList({
+          onSelect: (index) => seekToChapter(index)
+        });
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
+          registerControl2("chapters", (controlApi) => {
+            list?.attach(controlApi);
+            return list;
+          });
+        }).catch(() => {
+          api?.logger.debug("@scarlett-player/ui not present, chapters control not registered");
+        });
+        if (config.chapters?.length) {
+          publish(config.chapters);
+        } else if (config.src) {
+          trackCleanup = loadChaptersFromTrack(api.container, config.src, {
+            onLoad: (loaded) => publish(loaded),
+            onError: (message) => api?.logger.warn(`[chapters] ${message}`)
+          });
+        }
+        const unsubscribe = api.subscribeToState((event) => {
+          if (event.key === "currentTime") {
+            syncActive();
+          }
+        });
+        api.onDestroy(() => {
+          unsubscribe();
+          trackCleanup?.();
+          trackCleanup = null;
+        });
+      },
+      destroy() {
+        trackCleanup?.();
+        trackCleanup = null;
+        list?.destroy();
+        list = null;
+        styleEl?.remove();
+        styleEl = null;
+        chapters = [];
+        activeIndex = -1;
+        api = null;
+      },
+      setChapters(next) {
+        publish(next);
+      },
+      getChapters() {
+        return chapters;
+      },
+      seekToChapter,
+      next() {
+        if (!api) return;
+        const currentTime = api.getState("currentTime") ?? 0;
+        const index = nextChapterIndex(chapters, currentTime);
+        if (index !== -1) {
+          seekToChapter(index);
+        }
+      },
+      previous() {
+        if (!api) return;
+        const currentTime = api.getState("currentTime") ?? 0;
+        const index = previousChapterIndex(chapters, currentTime, previousThreshold);
+        if (index !== -1) {
+          seekToChapter(index);
+        }
+      }
+    };
+  }
+
+  // packages/plugins/analytics/src/helpers.ts
+  function generateId2() {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 11);
+    return `${timestamp}-${random}`;
+  }
+  function getSessionId() {
+    const STORAGE_KEY = "sp_session_id";
+    try {
+      let sessionId = sessionStorage.getItem(STORAGE_KEY);
+      if (!sessionId) {
+        sessionId = generateId2();
+        sessionStorage.setItem(STORAGE_KEY, sessionId);
+      }
+      return sessionId;
+    } catch (error) {
+      return generateId2();
+    }
+  }
+  function getAnonymousViewerId() {
+    const STORAGE_KEY = "sp_viewer_id";
+    try {
+      let viewerId = localStorage.getItem(STORAGE_KEY);
+      if (!viewerId) {
+        viewerId = generateId2();
+        localStorage.setItem(STORAGE_KEY, viewerId);
+      }
+      return viewerId;
+    } catch (error) {
+      try {
+        let viewerId = sessionStorage.getItem(STORAGE_KEY);
+        if (!viewerId) {
+          viewerId = generateId2();
+          sessionStorage.setItem(STORAGE_KEY, viewerId);
+        }
+        return viewerId;
+      } catch {
+        return generateId2();
+      }
+    }
+  }
+  function getBrowserInfo() {
+    const ua = navigator.userAgent;
+    if (ua.includes("Edg/")) {
+      const match = ua.match(/Edg\/(\d+)/);
+      return {
+        name: "Edge",
+        version: match ? match[1] : void 0
+      };
+    }
+    if (ua.includes("Chrome/") && !ua.includes("Edg/")) {
+      const match = ua.match(/Chrome\/(\d+)/);
+      return {
+        name: "Chrome",
+        version: match ? match[1] : void 0
+      };
+    }
+    if (ua.includes("Safari/") && !ua.includes("Chrome")) {
+      const match = ua.match(/Version\/(\d+)/);
+      return {
+        name: "Safari",
+        version: match ? match[1] : void 0
+      };
+    }
+    if (ua.includes("Firefox/")) {
+      const match = ua.match(/Firefox\/(\d+)/);
+      return {
+        name: "Firefox",
+        version: match ? match[1] : void 0
+      };
+    }
+    if (ua.includes("OPR/") || ua.includes("Opera/")) {
+      const match = ua.match(/(?:OPR|Opera)\/(\d+)/);
+      return {
+        name: "Opera",
+        version: match ? match[1] : void 0
+      };
+    }
+    return { name: "Unknown" };
+  }
+  function getOSInfo() {
+    const ua = navigator.userAgent;
+    const platform = navigator.platform || "";
+    if (ua.includes("Windows")) {
+      if (ua.includes("Windows NT 10.0")) return { name: "Windows", version: "10" };
+      if (ua.includes("Windows NT 6.3")) return { name: "Windows", version: "8.1" };
+      if (ua.includes("Windows NT 6.2")) return { name: "Windows", version: "8" };
+      if (ua.includes("Windows NT 6.1")) return { name: "Windows", version: "7" };
+      return { name: "Windows" };
+    }
+    if (ua.includes("Mac OS X")) {
+      const match = ua.match(/Mac OS X (\d+)[._](\d+)/);
+      return {
+        name: "macOS",
+        version: match ? `${match[1]}.${match[2]}` : void 0
+      };
+    }
+    if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iPod")) {
+      const match = ua.match(/OS (\d+)[._](\d+)/);
+      return {
+        name: "iOS",
+        version: match ? `${match[1]}.${match[2]}` : void 0
+      };
+    }
+    if (ua.includes("Android")) {
+      const match = ua.match(/Android (\d+(?:\.\d+)?)/);
+      return {
+        name: "Android",
+        version: match ? match[1] : void 0
+      };
+    }
+    if (ua.includes("Linux") || platform.includes("Linux")) {
+      return { name: "Linux" };
+    }
+    if (ua.includes("CrOS")) {
+      return { name: "ChromeOS" };
+    }
+    return { name: "Unknown" };
+  }
+  function getDeviceType() {
+    const ua = navigator.userAgent;
+    if (ua.includes("TV") || ua.includes("PlayStation") || ua.includes("Xbox") || ua.includes("SmartTV")) {
+      return "tv";
+    }
+    if (ua.includes("iPad") || ua.includes("Android") && !ua.includes("Mobile") || ua.includes("Tablet")) {
+      return "tablet";
+    }
+    if (ua.includes("Mobile") || ua.includes("iPhone") || ua.includes("iPod") || ua.includes("Android") && ua.includes("Mobile")) {
+      return "mobile";
+    }
+    return "desktop";
+  }
+  function getScreenSize() {
+    return `${window.screen.width}x${window.screen.height}`;
+  }
+  function getPlayerSize(container) {
+    if (!container) {
+      return `${window.innerWidth}x${window.innerHeight}`;
+    }
+    const rect = container.getBoundingClientRect();
+    return `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+  }
+  function getConnectionType() {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (conn) {
+      return conn.effectiveType || conn.type || "unknown";
+    }
+    return "unknown";
+  }
+  function calculateQoEScore(params) {
+    const {
+      startupTime,
+      rebufferDuration,
+      watchTime,
+      maxBitrate,
+      exitType,
+      errorCount
+    } = params;
+    let startupScore = 100;
+    if (startupTime !== null) {
+      if (startupTime < 1e3) startupScore = 100;
+      else if (startupTime < 2e3) startupScore = 85;
+      else if (startupTime < 4e3) startupScore = 70;
+      else if (startupTime < 8e3) startupScore = 50;
+      else startupScore = 30;
+    }
+    let smoothnessScore = 100;
+    if (watchTime > 0) {
+      const rebufferRatio = rebufferDuration / watchTime * 100;
+      if (rebufferRatio < 0.1) smoothnessScore = 100;
+      else if (rebufferRatio < 1) smoothnessScore = 85;
+      else if (rebufferRatio < 2) smoothnessScore = 70;
+      else if (rebufferRatio < 5) smoothnessScore = 50;
+      else smoothnessScore = 30;
+    }
+    let successScore = 100;
+    if (exitType === "error") {
+      successScore = 0;
+    } else if (errorCount > 0) {
+      successScore = Math.max(0, 100 - errorCount * 10);
+    }
+    let qualityScore = 80;
+    if (maxBitrate > 4e6) qualityScore = 100;
+    else if (maxBitrate > 2e6) qualityScore = 90;
+    else if (maxBitrate > 1e6) qualityScore = 75;
+    else if (maxBitrate > 5e5) qualityScore = 60;
+    else if (maxBitrate > 0) qualityScore = 40;
+    const qoeScore = successScore * 0.3 + startupScore * 0.25 + smoothnessScore * 0.3 + qualityScore * 0.15;
+    return Math.round(qoeScore);
+  }
+  function isDevelopment() {
+    return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.includes(".local");
+  }
+  function safeStringify(data) {
+    try {
+      return JSON.stringify(data);
+    } catch (error) {
+      return "{}";
+    }
+  }
+  function isHttpsUrl(url) {
+    if (!url || typeof url !== "string" || !url.trim()) {
+      return false;
+    }
+    try {
+      const base = typeof window !== "undefined" && window.location?.href ? window.location.href : void 0;
+      const parsed = base ? new URL(url, base) : new URL(url);
+      return parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  // packages/plugins/analytics/src/version.ts
+  var PKG_VERSION15 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/analytics/src/index.ts
+  var PLUGIN_VERSION = PKG_VERSION15;
+  var PLUGIN_NAME = "scarlett-player";
+  var DEFAULT_CONFIG5 = {
+    heartbeatInterval: 1e4,
+    errorSampleRate: 1,
+    disableInDev: false
+  };
+  function createAnalyticsPlugin(config) {
+    if (!config.beaconUrl) {
+      throw new Error("Analytics plugin requires beaconUrl");
+    }
+    if (!config.videoId) {
+      throw new Error("Analytics plugin requires videoId");
+    }
+    const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
+    let api = null;
+    let session;
+    let heartbeatTimer = null;
+    let lastHeartbeatTime = 0;
+    let isRebuffering = false;
+    let rebufferStartTime = null;
+    let pauseStartTime = null;
+    let cleanupFns = [];
+    function initSession() {
+      return {
+        viewId: generateId2(),
+        sessionId: getSessionId(),
+        viewerId: mergedConfig.viewerId || getAnonymousViewerId(),
+        viewStart: Date.now(),
+        playRequestTime: null,
+        firstFrameTime: null,
+        viewEnd: null,
+        watchTime: 0,
+        playTime: 0,
+        pauseCount: 0,
+        pauseDuration: 0,
+        seekCount: 0,
+        startupTime: null,
+        rebufferCount: 0,
+        rebufferDuration: 0,
+        errorCount: 0,
+        errors: [],
+        bitrateHistory: [],
+        qualityChanges: 0,
+        maxBitrate: 0,
+        avgBitrate: 0,
+        playbackState: "loading",
+        exitType: null
+      };
+    }
+    function sendBeacon(eventType, data = {}) {
+      if (mergedConfig.disableInDev && isDevelopment()) {
+        return;
+      }
+      if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) {
+        return;
+      }
+      const payload = {
+        // Event info
+        event: eventType,
+        timestamp: Date.now(),
+        // View context
+        viewId: session.viewId,
+        sessionId: session.sessionId,
+        viewerId: session.viewerId,
+        // Video context
+        videoId: mergedConfig.videoId,
+        videoTitle: mergedConfig.videoTitle,
+        isLive: mergedConfig.isLive ?? api?.getState("live") ?? false,
+        // Player context
+        playerVersion: PLUGIN_VERSION,
+        playerName: PLUGIN_NAME,
+        // Environment
+        browser: getBrowserInfo().name,
+        os: getOSInfo().name,
+        deviceType: getDeviceType(),
+        screenSize: getScreenSize(),
+        playerSize: getPlayerSize(api?.container ?? null),
+        connectionType: getConnectionType(),
+        // Custom dimensions
+        ...mergedConfig.customDimensions,
+        // Event-specific data
+        ...data
+      };
+      if (mergedConfig.customBeacon) {
+        mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
+        return;
+      }
+      if (navigator.sendBeacon) {
+        const blob = new Blob([safeStringify(payload)], {
+          type: "application/json"
+        });
+        navigator.sendBeacon(mergedConfig.beaconUrl, blob);
+      } else {
+        const shouldAttachApiKey = Boolean(
+          mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+        );
+        fetch(mergedConfig.beaconUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
+          },
+          body: safeStringify(payload),
+          keepalive: true
+        }).catch(() => {
+        });
+      }
+    }
+    function sendHeartbeat() {
+      if (!api) return;
+      const now2 = Date.now();
+      const timeSinceLastHeartbeat = now2 - lastHeartbeatTime;
+      session.watchTime += timeSinceLastHeartbeat;
+      if (session.playbackState === "playing" && !isRebuffering) {
+        session.playTime += timeSinceLastHeartbeat;
+      }
+      if (session.bitrateHistory.length > 0) {
+        const totalBitrateTime = session.bitrateHistory.reduce((sum, b, i, arr) => {
+          const nextTime = i < arr.length - 1 ? arr[i + 1]?.time : now2;
+          const duration = nextTime - b.time;
+          return sum + b.bitrate * duration;
+        }, 0);
+        const timeSpan = now2 - session.bitrateHistory[0].time;
+        session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : 0;
+      }
+      const state = {
+        currentTime: api.getState("currentTime"),
+        duration: api.getState("duration")
+      };
+      sendBeacon("heartbeat", {
+        watchTime: session.watchTime,
+        playTime: session.playTime,
+        currentTime: state.currentTime,
+        duration: state.duration,
+        rebufferCount: session.rebufferCount,
+        rebufferDuration: session.rebufferDuration,
+        avgBitrate: session.avgBitrate,
+        qoeScore: getQoEScore()
+      });
+      lastHeartbeatTime = now2;
+    }
+    function getQoEScore() {
+      return calculateQoEScore({
+        startupTime: session.startupTime,
+        rebufferDuration: session.rebufferDuration,
+        watchTime: session.watchTime,
+        maxBitrate: session.maxBitrate,
+        exitType: session.exitType,
+        errorCount: session.errorCount
+      });
+    }
+    function sendViewEnd() {
+      if (!api) return;
+      session.viewEnd = Date.now();
+      const state = {
+        currentTime: api.getState("currentTime"),
+        duration: api.getState("duration")
+      };
+      const completionRate = state.duration ? state.currentTime / state.duration * 100 : 0;
+      sendBeacon("viewEnd", {
+        watchTime: session.watchTime,
+        playTime: session.playTime,
+        startupTime: session.startupTime,
+        rebufferCount: session.rebufferCount,
+        rebufferDuration: session.rebufferDuration,
+        rebufferRatio: session.watchTime > 0 ? session.rebufferDuration / session.watchTime * 100 : 0,
+        avgBitrate: session.avgBitrate,
+        maxBitrate: session.maxBitrate,
+        qualityChanges: session.qualityChanges,
+        pauseCount: session.pauseCount,
+        pauseDuration: session.pauseDuration,
+        seekCount: session.seekCount,
+        errorCount: session.errorCount,
+        exitType: session.exitType,
+        qoeScore: getQoEScore(),
+        completionRate
+      });
+    }
+    function onPlayRequest() {
+      session.playRequestTime = Date.now();
+      sendBeacon("playRequest");
+    }
+    function onPlaying() {
+      const now2 = Date.now();
+      if (session.firstFrameTime === null) {
+        session.firstFrameTime = now2;
+        session.startupTime = session.playRequestTime ? now2 - session.playRequestTime : null;
+        sendBeacon("videoStart", {
+          startupTime: session.startupTime
+        });
+      }
+      if (isRebuffering && rebufferStartTime) {
+        const rebufferDuration = now2 - rebufferStartTime;
+        session.rebufferDuration += rebufferDuration;
+        isRebuffering = false;
+        rebufferStartTime = null;
+        sendBeacon("rebufferEnd", {
+          duration: rebufferDuration,
+          totalRebufferTime: session.rebufferDuration
+        });
+      }
+      if (pauseStartTime) {
+        const pauseDuration = now2 - pauseStartTime;
+        session.pauseDuration += pauseDuration;
+        pauseStartTime = null;
+      }
+      session.playbackState = "playing";
+    }
+    function onPause() {
+      if (!api) return;
+      session.pauseCount++;
+      session.playbackState = "paused";
+      pauseStartTime = Date.now();
+      sendBeacon("pause", {
+        currentTime: api.getState("currentTime")
+      });
+    }
+    function onWaiting() {
+      if (!api) return;
+      if (session.firstFrameTime !== null && !isRebuffering) {
+        isRebuffering = true;
+        rebufferStartTime = Date.now();
+        session.rebufferCount++;
+        sendBeacon("rebufferStart", {
+          rebufferCount: session.rebufferCount,
+          currentTime: api.getState("currentTime")
+        });
+      }
+    }
+    function onSeeking() {
+      if (!api) return;
+      session.seekCount++;
+      sendBeacon("seeking", {
+        seekCount: session.seekCount,
+        seekTo: api.getState("currentTime")
+      });
+    }
+    function onEnded() {
+      session.playbackState = "ended";
+      session.exitType = "completed";
+      sendViewEnd();
+    }
+    function onError(payload) {
+      const error = payload.error;
+      session.errorCount++;
+      const errorEvent = {
+        time: Date.now(),
+        type: error.name || "Error",
+        message: error.message || "Unknown error",
+        fatal: error.fatal ?? false
+      };
+      session.errors.push(errorEvent);
+      if (session.errors.length > 100) {
+        session.errors = session.errors.slice(-100);
+      }
+      sendBeacon("error", {
+        errorType: errorEvent.type,
+        errorMessage: errorEvent.message,
+        errorCode: error.code,
+        fatal: errorEvent.fatal
+      });
+      if (errorEvent.fatal) {
+        session.playbackState = "error";
+        session.exitType = "error";
+        sendViewEnd();
+      }
+    }
+    function onQualityChange(payload) {
+      if (!api) return;
+      const now2 = Date.now();
+      session.qualityChanges++;
+      const qualities = api.getState("qualities");
+      const currentQuality = qualities.find((q) => q.id === payload.quality);
+      if (currentQuality) {
+        const bitrateChange = {
+          time: now2,
+          bitrate: currentQuality.bitrate,
+          width: currentQuality.width,
+          height: currentQuality.height
+        };
+        session.bitrateHistory.push(bitrateChange);
+        if (session.bitrateHistory.length > 500) {
+          session.bitrateHistory = session.bitrateHistory.slice(-500);
+        }
+        if (currentQuality.bitrate > session.maxBitrate) {
+          session.maxBitrate = currentQuality.bitrate;
+        }
+        sendBeacon("qualityChange", {
+          bitrate: currentQuality.bitrate,
+          width: currentQuality.width,
+          height: currentQuality.height,
+          auto: payload.auto
+        });
+      }
+    }
+    function onVisibilityChange() {
+      if (document.hidden) {
+        session.exitType = "background";
+        sendHeartbeat();
+      }
+    }
+    function onBeforeUnload() {
+      if (!session.exitType) {
+        session.exitType = "abandoned";
+      }
+      sendViewEnd();
+    }
+    return {
+      id: "analytics",
+      name: "Analytics",
+      version: PLUGIN_VERSION,
+      type: "analytics",
+      description: "Quality of Experience and engagement analytics",
+      async init(pluginApi) {
+        api = pluginApi;
+        session = initSession();
+        lastHeartbeatTime = Date.now();
+        sendBeacon("viewStart");
+        const unsubPlay = api.on("playback:play", () => {
+          onPlayRequest();
+          onPlaying();
+        });
+        const unsubPause = api.on("playback:pause", onPause);
+        const unsubWaiting = api.on("media:waiting", onWaiting);
+        const unsubSeeking = api.on("playback:seeking", onSeeking);
+        const unsubEnded = api.on("playback:ended", onEnded);
+        const unsubError = api.on("media:error", onError);
+        const unsubQuality = api.on("quality:change", onQualityChange);
+        cleanupFns.push(
+          unsubPlay,
+          unsubPause,
+          unsubWaiting,
+          unsubSeeking,
+          unsubEnded,
+          unsubError,
+          unsubQuality
+        );
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        window.addEventListener("beforeunload", onBeforeUnload);
+        cleanupFns.push(() => {
+          document.removeEventListener("visibilitychange", onVisibilityChange);
+          window.removeEventListener("beforeunload", onBeforeUnload);
+        });
+        heartbeatTimer = setInterval(
+          sendHeartbeat,
+          mergedConfig.heartbeatInterval || 1e4
+        );
+        api.logger.info("Analytics plugin initialized", {
+          viewId: session.viewId,
+          videoId: mergedConfig.videoId
+        });
+      },
+      async destroy() {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (!session.viewEnd) {
+          session.exitType = session.exitType || "abandoned";
+          sendViewEnd();
+        }
+        cleanupFns.forEach((fn) => fn());
+        cleanupFns = [];
+        api?.logger.info("Analytics plugin destroyed");
+        api = null;
+      },
+      // === Public API ===
+      getViewId() {
+        return session.viewId;
+      },
+      getSessionId() {
+        return session.sessionId;
+      },
+      getQoEScore() {
+        return getQoEScore();
+      },
+      getMetrics() {
+        return { ...session };
+      },
+      trackEvent(name, data = {}) {
+        sendBeacon(`custom:${name}`, data);
+      }
+    };
+  }
+
   // demo/demo.ts
-  var VERSION = true ? "1.8.0" : "dev";
+  var VERSION = true ? "1.8.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
+  var VIDEO_DURATION_SECONDS = 634;
+  var CAPTIONS_VTT_EN = `WEBVTT
+
+1
+00:00:03.000 --> 00:00:08.000
+Big Buck Bunny, a Blender Foundation open movie.
+
+2
+00:00:14.000 --> 00:00:19.000
+These subtitles are a demo, parsed from an inline WebVTT string.
+
+3
+00:00:36.000 --> 00:00:41.000
+Morning light spreads across the meadow.
+
+4
+00:01:02.000 --> 00:01:08.000
+A very large rabbit steps out of his burrow.
+
+5
+00:01:40.000 --> 00:01:46.000
+Three rodents decide the day needs a victim.
+
+6
+00:02:18.000 --> 00:02:24.000
+The first acorn finds its target.
+
+7
+00:02:58.000 --> 00:03:04.000
+Enough is enough.
+
+8
+00:03:44.000 --> 00:03:50.000
+The rabbit starts building.
+
+9
+00:04:26.000 --> 00:04:32.000
+Every trap gets tested exactly once.
+`;
+  var CAPTIONS_VTT_ES = `WEBVTT
+
+1
+00:00:03.000 --> 00:00:08.000
+Big Buck Bunny, una pelicula abierta de la Blender Foundation.
+
+2
+00:00:14.000 --> 00:00:19.000
+Estos subtitulos son una demostracion, leidos de un texto WebVTT incrustado.
+
+3
+00:00:36.000 --> 00:00:41.000
+La luz de la manana se extiende por el prado.
+
+4
+00:01:02.000 --> 00:01:08.000
+Un conejo enorme sale de su madriguera.
+
+5
+00:01:40.000 --> 00:01:46.000
+Tres roedores deciden que el dia necesita una victima.
+
+6
+00:02:18.000 --> 00:02:24.000
+La primera bellota da en el blanco.
+
+7
+00:02:58.000 --> 00:03:04.000
+Ya basta.
+
+8
+00:03:44.000 --> 00:03:50.000
+El conejo empieza a construir.
+
+9
+00:04:26.000 --> 00:04:32.000
+Cada trampa se prueba una sola vez.
+`;
+  function vttObjectUrl(vtt) {
+    return URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
+  }
+  var VIDEO_CHAPTERS = [
+    { time: 0, label: "Opening", subtitle: "Titles and sunrise" },
+    { time: 34, label: "The Meadow", subtitle: "Big Buck Bunny wakes up" },
+    { time: 96, label: "The Bullies", subtitle: "Frank, Rinky and Gamera" },
+    { time: 215, label: "Preparations", subtitle: "Building the traps" },
+    { time: 340, label: "Payback", subtitle: "One trap at a time" },
+    { time: 520, label: "Credits", subtitle: "Peach open movie", endTime: VIDEO_DURATION_SECONDS }
+  ];
+  var ANALYTICS_LOG_LIMIT = 50;
+  var ANALYTICS_DETAIL_KEYS = [
+    "startupTime",
+    "currentTime",
+    "seekTo",
+    "duration",
+    "bitrate",
+    "height",
+    "watchTime",
+    "playTime",
+    "qoeScore",
+    "rebufferCount",
+    "errorMessage",
+    "exitType",
+    "completionRate"
+  ];
+  function formatBeaconDetail(payload) {
+    const parts = [];
+    for (const key of ANALYTICS_DETAIL_KEYS) {
+      if (parts.length >= 3) break;
+      const value = payload[key];
+      if (value === void 0 || value === null || value === "") continue;
+      parts.push(`${key}=${typeof value === "number" ? Math.round(value * 10) / 10 : String(value)}`);
+    }
+    return parts.join("  ");
+  }
+  function appendAnalyticsRow(payload) {
+    const log = document.getElementById("analytics-log");
+    if (!log) return;
+    log.querySelector(".analytics-empty")?.remove();
+    const row = document.createElement("div");
+    row.className = "analytics-row";
+    const time = document.createElement("span");
+    time.className = "analytics-time";
+    time.textContent = new Date(payload.timestamp).toLocaleTimeString();
+    const event = document.createElement("span");
+    event.className = "analytics-event";
+    event.textContent = String(payload.event);
+    const detail = document.createElement("span");
+    detail.className = "analytics-detail";
+    detail.textContent = formatBeaconDetail(payload);
+    row.append(time, event, detail);
+    log.prepend(row);
+    while (log.childElementCount > ANALYTICS_LOG_LIMIT) {
+      log.lastElementChild?.remove();
+    }
+  }
+  function clearAnalyticsLog() {
+    const log = document.getElementById("analytics-log");
+    if (!log) return;
+    log.innerHTML = '<div class="analytics-empty">Beacons will appear here as you play the video...</div>';
+  }
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
     if (!container) {
@@ -45296,9 +46735,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           theme: {
             accentColor: "#e50914"
           },
-          // Spelled out because 'share' is not in the default layout - the share
-          // plugin registers the control, but a layout has to ask for it. This is
-          // the default order with 'share' inserted before the cast buttons.
+          // Spelled out because 'share' and 'chapters' are not in the default
+          // layout - those plugins register their controls, but a layout has to
+          // ask for them. This is the default order with 'chapters' inserted
+          // before the settings menu and 'share' before the cast buttons.
           controls: [
             "play",
             "skip-backward",
@@ -45308,6 +46748,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             "live-indicator",
             "bandwidth-indicator",
             "spacer",
+            "chapters",
             "settings",
             "captions",
             "share",
@@ -45338,14 +46779,51 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         // matchMedia('(any-pointer: coarse)'). It matters most here, where the
         // responsive control bar moves the skip buttons into the overflow tray
         // on a phone and double-tap seeking is what replaces them.
-        createGesturesPlugin()
+        createGesturesPlugin(),
+        // Two demo subtitle tracks, served from blob: URLs built out of the
+        // strings above. The plugin appends a <track> per source on media:loaded
+        // and mirrors the video's TextTrackList into `textTracks` state, which is
+        // what lights up the captions button and the settings menu's Captions
+        // row. `autoSelect` is left off so captions start hidden, the way a
+        // viewer expects.
+        createCaptionsPlugin({
+          sources: [
+            { language: "en", label: "English", src: vttObjectUrl(CAPTIONS_VTT_EN) },
+            { language: "es", label: "Spanish", src: vttObjectUrl(CAPTIONS_VTT_ES) }
+          ]
+        }),
+        // An inline list, so no chapters file is fetched. The plugin writes
+        // `chapters` state (the progress bar paints a marker per boundary) and
+        // registers the 'chapters' control listed above.
+        createChaptersPlugin({
+          chapters: VIDEO_CHAPTERS
+        }),
+        // Nothing leaves the page: `customBeacon` replaces the transport, so the
+        // plugin never calls navigator.sendBeacon or fetch, and `beaconUrl` -
+        // required by the factory, and passed to the custom beacon as its first
+        // argument - is a reserved .invalid host that cannot resolve.
+        createAnalyticsPlugin({
+          beaconUrl: "https://beacon.example.invalid/scarlett-demo",
+          videoId: "big-buck-bunny",
+          videoTitle: "Big Buck Bunny",
+          videoDuration: VIDEO_DURATION_SECONDS,
+          isLive: false,
+          viewerPlan: "free",
+          // Faster than the 10s default so the demo panel fills while someone is
+          // still looking at it.
+          heartbeatInterval: 5e3,
+          customBeacon: (_url, payload) => appendAnalyticsRow(payload)
+        })
       ].filter(Boolean)
     });
+    document.getElementById("analytics-clear")?.addEventListener("click", clearAnalyticsLog);
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
     player.on("media:loadedmetadata", (e) => console.log("\u{1F4CA} Metadata:", e));
     player.on("quality:levels", (e) => console.log("\u{1F3AF} Quality levels:", e));
+    player.on("chapter:change", (e) => console.log("\u{1F516} Chapter:", e.chapter?.label ?? "none"));
+    player.on("track:text", (e) => console.log("\u{1F4AC} Text track:", e.trackId ?? "off"));
     player.on("error", (e) => console.error("\u274C Error:", e));
     window.player = player;
     window.watermarkPlugin = player.getPlugin("watermark");
