@@ -54,7 +54,7 @@ This is the case the override exists for. Inside `iframe.html`, `window.location
 
 Two things follow from where the button lives. It is a registered control in `@scarlett-player/ui`, so it is **video only** - the audio UIs render a fixed template with no control registry - and it needs the controls to be on.
 
-The `embed` target works in there too: `iframe.html` passes its own URL, query string and all, as `embedBaseUrl`, so the snippet the sheet copies is a complete embed of the video being watched. Snippets always carry `shareUrl`, so a share from inside a copied embed still points at the real page.
+The `embed` target can be used inside `iframe.html` as well by passing `embed-base-url` with a canonical embed URL. If omitted, the embed snippet target is excluded to prevent leaking signed or credentialed playback URLs from the iframe query string. Snippets carry `shareUrl`, so a share from inside a copied embed still points at the real page.
 
 Check your embed bundle is new enough: up to and including `@scarlett-player/embed` 1.8.0 the parameter was ignored, because no embed build shipped this plugin.
 

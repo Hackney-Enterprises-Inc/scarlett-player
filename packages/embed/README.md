@@ -291,13 +291,15 @@ or camelCase):
 - `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
 - `hide-delay`, `playback-rate`, `start-time`
 - `share-url` - the page the viewer should be sent to. Setting it adds the share button; omitting it leaves the control bar unchanged. See [Sharing](#sharing)
+- `embed-base-url` - optional canonical embed URL. Enables the **Embed** snippet target in the share sheet without leaking signed playback parameters
 
 `share-url` is the one parameter the player cannot work out for itself. Inside
 the iframe, `window.location.href` is the player page rather than your page, and
 cross-origin rules stop anything reading the parent, so a share would otherwise
-offer a link to the bare embed. There is no `embed-base-url` parameter: the page
-uses its own URL, query string and all, so the sheet's **Embed** option copies a
-working `<iframe>` snippet for the video the viewer is watching.
+offer a link to the bare embed. Pass `embed-base-url` if you wish to offer an
+`<iframe>` snippet option in the share sheet; omitting it excludes the embed
+target to avoid leaking query parameters (such as signed media URLs) from
+the running iframe.
 
 The iframe page always creates a video player: it does not read a `type`
 parameter in this version. For an audio or compact audio embed use the data
@@ -373,9 +375,8 @@ A few limits worth knowing:
 - **Needs the controls.** `data-controls="false"` removes the only way in, so
   sharing is skipped along with the rest of the UI.
 - **The embed code is opt-in separately.** The sheet's **Embed** option needs to
-  know where your `iframe.html` lives: pass `data-embed-base-url`, or use
-  `iframe.html` itself, which knows its own URL. Without it the option is left
-  out rather than shown broken.
+  know where your `iframe.html` lives: pass `data-embed-base-url` (or `embed-base-url`
+  in `iframe.html`). Without it the option is left out rather than shown broken.
 
 Full configuration (custom targets, icon, analytics hooks) lives in
 [`@scarlett-player/share`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/share).

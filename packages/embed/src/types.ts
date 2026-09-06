@@ -63,7 +63,7 @@ export interface EmbedConfig {
    * Only meaningful alongside {@link EmbedConfig.shareUrl}. The share sheet
    * drops the `embed` target rather than offering a broken snippet when this is
    * absent, so a share button without it still offers the OS sheet and copy
-   * link. `iframe.html` sets it to its own URL automatically.
+   * link. `iframe.html` reads it from `embed-base-url` / `embedBaseUrl`.
    */
   embedBaseUrl?: string;
   /** Brand/accent color for the player UI */

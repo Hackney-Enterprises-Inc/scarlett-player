@@ -62,11 +62,15 @@
     const shareUrl = params.get('shareUrl') ?? params.get('share-url');
     if (shareUrl) {
       config.shareUrl = shareUrl;
-      // This page IS the embed page, so its own URL is exactly the base an
-      // embed snippet needs - query string included, which is what carries
-      // src, poster and the branding into the copied iframe. The plugin
-      // rewrites startTime and shareUrl on top of it.
-      config.embedBaseUrl = window.location.href;
+    }
+
+    // Embed share target. Opt-in via explicit canonical embed URL: we
+    // deliberately do not fall back to window.location.href because its query
+    // string may contain signed or credentialed playback URLs (src) that must
+    // not be leaked in shared embed snippets.
+    const embedBaseUrl = params.get('embedBaseUrl') ?? params.get('embed-base-url');
+    if (embedBaseUrl) {
+      config.embedBaseUrl = embedBaseUrl;
     }
 
     // Parse numeric params
