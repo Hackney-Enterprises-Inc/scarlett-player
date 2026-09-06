@@ -5,7 +5,7 @@ Compact audio player UI for [Scarlett Player](https://scarlettplayer.com). Album
 ## Installation
 
 ```bash
-pnpm add @scarlett-player/core @scarlett-player/audio-ui
+pnpm add @scarlett-player/core @scarlett-player/native @scarlett-player/audio-ui
 ```
 
 `@scarlett-player/core` is a peer dependency. `@scarlett-player/playlist` is optional: previous/next, shuffle and repeat call it when it is present. Without it, previous seeks to the start of the track and next does nothing.
@@ -14,12 +14,13 @@ pnpm add @scarlett-player/core @scarlett-player/audio-ui
 
 ```ts
 import { createPlayer } from '@scarlett-player/core';
+import { createNativePlugin } from '@scarlett-player/native';
 import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
 
 const player = await createPlayer({
   container: '#player',
   src: 'https://example.com/track.mp3',
-  plugins: [createAudioUIPlugin({ layout: 'compact' })],
+  plugins: [createNativePlugin(), createAudioUIPlugin({ layout: 'compact' })],
 });
 ```
 

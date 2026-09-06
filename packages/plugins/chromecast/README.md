@@ -13,7 +13,7 @@ npm install @scarlett-player/core @scarlett-player/chromecast
 ```typescript
 import { createPlayer } from '@scarlett-player/core';
 import { createHLSPlugin } from '@scarlett-player/hls';
-import { chromecastPlugin } from '@scarlett-player/chromecast';
+import { chromecastPlugin, type IChromecastPlugin } from '@scarlett-player/chromecast';
 
 const player = await createPlayer({
   container: document.getElementById('player'),
@@ -25,7 +25,8 @@ const player = await createPlayer({
 await player.requestChromecast();
 
 // Stop casting
-player.stopCasting();
+const chromecast = player.getPlugin<IChromecastPlugin>('chromecast');
+chromecast?.endSession();
 ```
 
 ## Configuration

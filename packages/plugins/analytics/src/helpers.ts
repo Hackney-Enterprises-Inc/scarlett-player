@@ -431,3 +431,25 @@ export function formatDuration(ms: number): string {
     return `${seconds}s`;
   }
 }
+
+/**
+ * Check if a URL uses the HTTPS protocol.
+ *
+ * @param url - The URL string to evaluate
+ * @returns True if the URL resolves to the HTTPS protocol, false otherwise
+ */
+export function isHttpsUrl(url: string): boolean {
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return false;
+  }
+  try {
+    const base = typeof window !== 'undefined' && window.location?.href
+      ? window.location.href
+      : undefined;
+    const parsed = base ? new URL(url, base) : new URL(url);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+

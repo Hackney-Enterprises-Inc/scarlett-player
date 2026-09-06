@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createAnalyticsPlugin } from '../src/index';
+import { isHttpsUrl } from '../src/helpers';
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { BeaconPayload, AnalyticsConfig } from '../src/types';
 
@@ -539,6 +540,118 @@ describe('Analytics Plugin', () => {
       expect(metrics.viewId).toBeDefined();
       expect(metrics.sessionId).toBeDefined();
       expect(metrics.viewerId).toBeDefined();
+    });
+  });
+
+  describe('Fetch Fallback Transport & API Key Security', () => {
+    let originalSendBeacon: any;
+    let originalFetch: any;
+    let fetchMock: any;
+
+    beforeEach(() => {
+      originalSendBeacon = navigator.sendBeacon;
+      originalFetch = globalThis.fetch;
+      // Force fetch fallback by removing sendBeacon
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+      fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      globalThis.fetch = fetchMock;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: originalSendBeacon,
+        configurable: true,
+        writable: true,
+      });
+      globalThis.fetch = originalFetch;
+    });
+
+    it('attaches apiKey as X-API-Key header when beaconUrl uses HTTPS', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'secure-vid',
+        apiKey: 'secret-key-123',
+      });
+
+      await plugin.init(api);
+
+      expect(fetchMock).toHaveBeenCalled();
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        'X-API-Key': 'secret-key-123',
+      });
+    });
+
+    it('omits X-API-Key header when beaconUrl uses HTTP', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'http://insecure.example.com/analytics',
+        videoId: 'insecure-vid',
+        apiKey: 'secret-key-123',
+      });
+
+      await plugin.init(api);
+
+      expect(fetchMock).toHaveBeenCalled();
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers).toMatchObject({
+        'Content-Type': 'application/json',
+      });
+      expect(options.headers['X-API-Key']).toBeUndefined();
+    });
+
+    it('omits X-API-Key header when apiKey is not provided', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'no-key-vid',
+      });
+
+      await plugin.init(api);
+
+      expect(fetchMock).toHaveBeenCalled();
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers).toMatchObject({
+        'Content-Type': 'application/json',
+      });
+      expect(options.headers['X-API-Key']).toBeUndefined();
+    });
+
+    it('omits X-API-Key header when beaconUrl is not a valid HTTPS URL', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'ftp://files.example.com/analytics',
+        videoId: 'ftp-vid',
+        apiKey: 'secret-key-123',
+      });
+
+      await plugin.init(api);
+
+      expect(fetchMock).toHaveBeenCalled();
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers['X-API-Key']).toBeUndefined();
+    });
+  });
+
+  describe('isHttpsUrl Helper', () => {
+    it('identifies valid HTTPS URLs', () => {
+      expect(isHttpsUrl('https://api.example.com')).toBe(true);
+      expect(isHttpsUrl('https://api.example.com/beacon?query=1')).toBe(true);
+      expect(isHttpsUrl('HTTPS://API.EXAMPLE.COM/ANALYTICS')).toBe(true);
+      expect(isHttpsUrl('https://localhost:8443')).toBe(true);
+    });
+
+    it('rejects non-HTTPS URLs and invalid strings', () => {
+      expect(isHttpsUrl('http://api.example.com')).toBe(false);
+      expect(isHttpsUrl('http://localhost:3000')).toBe(false);
+      expect(isHttpsUrl('ftp://example.com')).toBe(false);
+      expect(isHttpsUrl('javascript:alert(1)')).toBe(false);
+      expect(isHttpsUrl('')).toBe(false);
+      expect(isHttpsUrl('   ')).toBe(false);
+      expect(isHttpsUrl(null as any)).toBe(false);
+      expect(isHttpsUrl(undefined as any)).toBe(false);
     });
   });
 });

@@ -36,6 +36,7 @@ import {
   calculateQoEScore,
   isDevelopment,
   safeStringify,
+  isHttpsUrl,
 } from './helpers';
 import { PKG_VERSION } from './version';
 
@@ -219,11 +220,14 @@ export function createAnalyticsPlugin(
       navigator.sendBeacon(mergedConfig.beaconUrl, blob);
     } else {
       // Fallback to fetch with keepalive
+      const shouldAttachApiKey = Boolean(
+        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+      );
       fetch(mergedConfig.beaconUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(mergedConfig.apiKey ? { 'X-API-Key': mergedConfig.apiKey } : {}),
+          ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey } : {}),
         },
         body: safeStringify(payload),
         keepalive: true,
