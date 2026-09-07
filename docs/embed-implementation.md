@@ -107,8 +107,8 @@ player.destroy();
   allowfullscreen
 ></iframe>
 
-<!-- Video ID (requires Laravel backend) -->
-<iframe src="https://embed.thestreamplatform.com/v/abc123"></iframe>
+<!-- Video ID (requires Laravel backend; replace with an existing video UUID) -->
+<iframe src="https://embed.thestreamplatform.com/v/123e4567-e89b-12d3-a456-426614174000"></iframe>
 
 <!-- Event slug -->
 <iframe src="https://embed.thestreamplatform.com/embed/fight-night-2025"></iframe>
@@ -204,7 +204,7 @@ class EmbedController extends Controller
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ $title ?? 'Video Player' }}</title>
   <meta name="robots" content="noindex, nofollow">
   @if(isset($poster))

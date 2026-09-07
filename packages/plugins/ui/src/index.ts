@@ -221,6 +221,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let lastFitSignature: string | null = null;
   /** Set when the container resized, or before the first fit, so the next update refits. */
   let fitPending = true;
+  let addedContainerClass = false;
 
   const layout = config.controls || DEFAULT_LAYOUT;
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
@@ -974,7 +975,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       }
 
       // Apply container class so the stylesheet's rules target it
-      container.classList.add('sp-container');
+      if (!container.classList.contains('sp-container')) {
+        container.classList.add('sp-container');
+        addedContainerClass = true;
+      }
 
       // Check if video is already playing (autoplay case)
       const isPlaying = api.getState('playing');
@@ -1203,7 +1207,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       styleEl = null;
 
       // Remove the container class we added at init
-      api?.container?.classList.remove('sp-container');
+      if (addedContainerClass) {
+        api?.container?.classList.remove('sp-container');
+        addedContainerClass = false;
+      }
 
       api?.logger.debug('UI controls plugin destroyed');
     },

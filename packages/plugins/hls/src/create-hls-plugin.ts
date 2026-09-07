@@ -1352,7 +1352,7 @@ export function createHLSPluginWith(
         drift: hls.drift || 0,
         liveSyncPosition: hls.liveSyncPosition ??
           (video?.seekable?.length
-            ? video.seekable.end(video.seekable.length - 1) - 3
+            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3)
             : undefined),
       };
     },
