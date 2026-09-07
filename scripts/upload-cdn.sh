@@ -149,17 +149,51 @@ upload "packages/embed/iframe.html" "iframe.html" "text/html"
 
 # Prove the CDN is serving what we just wrote. A publish that uploads to the
 # wrong bucket, or to a bucket nothing fronts, otherwise looks like a success.
+# Check the HTTP status AND that the response body contains the version string,
+# which proves Fastly's cache actually holds the new file and not a stale copy.
 if [ "${SKIP_VERIFY:-0}" != "1" ]; then
   echo ""
   echo "Verifying..."
   for path in "v${VERSION}/embed.umd.cjs" "latest/embed.umd.cjs"; do
     status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${CDN_BASE}/${path}")
-    echo "  ${path} -> ${status}"
+    echo "  ${path} -> HTTP ${status}"
     if [ "$status" != "200" ]; then
       echo "Error: CDN did not serve ${path} (HTTP ${status})" >&2
       exit 1
     fi
   done
+
+  # Verify the latest copy actually contains the version we just published.
+  # If the CDN serves stale cache, the check will retry and fail if not updated.
+  tmp_file=$(mktemp)
+  body=""
+  verified=0
+
+  for attempt in 1 2 3 4 5; do
+    if curl -sS --max-time 30 "${CDN_BASE}/latest/embed.umd.cjs" -o "$tmp_file"; then
+      body=$(head -c 512 "$tmp_file" 2>/dev/null || true)
+      if [ -n "$body" ] && echo "$body" | grep -q "$VERSION"; then
+        echo "  latest/embed.umd.cjs contains version $VERSION ✓"
+        verified=1
+        break
+      fi
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      echo "  Retrying verification in 2s (attempt $attempt/5)..."
+      sleep 2
+    fi
+  done
+
+  rm -f "$tmp_file"
+
+  if [ "$verified" -ne 1 ]; then
+    if [ -z "$body" ]; then
+      echo "Error: could not fetch latest/embed.umd.cjs for content verification" >&2
+    else
+      echo "Error: latest/embed.umd.cjs does not contain version $VERSION (stale cache?)" >&2
+    fi
+    exit 1
+  fi
 fi
 
 echo ""

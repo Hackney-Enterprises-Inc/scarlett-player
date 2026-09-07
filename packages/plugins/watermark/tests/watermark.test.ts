@@ -243,7 +243,7 @@ describe('show/hide on playback events', () => {
     expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
   });
 
-  it('hides watermark on playback:pause', () => {
+  it('keeps watermark visible on playback:pause', () => {
     const plugin = createWatermarkPlugin({ text: 'test' });
     plugin.init(mockApi);
 
@@ -251,7 +251,8 @@ describe('show/hide on playback events', () => {
     pauseCallback?.();
 
     const el = mockApi.container.querySelector('.sp-watermark');
-    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(false);
   });
 
   it('hides watermark on playback:ended', () => {
@@ -431,6 +432,28 @@ describe('runtime API', () => {
     const img = mockApi.container.querySelector('.sp-watermark img');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe('https://example.com/logo.png');
+  });
+
+  it('setText clears previous image and replaces with text', () => {
+    plugin.setImage('https://example.com/logo.png');
+    expect(mockApi.container.querySelector('.sp-watermark img')).not.toBeNull();
+
+    plugin.setText('replaced-text');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(mockApi.container.querySelector('.sp-watermark img')).toBeNull();
+    expect(el?.textContent).toBe('replaced-text');
+  });
+
+  it('setImage clears previous text and replaces with image', () => {
+    plugin.setText('some-text');
+    plugin.setImage('https://example.com/logo2.png');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    const img = mockApi.container.querySelector('.sp-watermark img');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe('https://example.com/logo2.png');
+    expect(el?.textContent).toBe('');
   });
 
   it('setPosition moves the watermark', () => {

@@ -55,9 +55,6 @@ export function chromecastPlugin(): IChromecastPlugin {
   let localTimeBeforeCast = 0;
   let localSrcBeforeCast = '';
 
-  // Track previous isMediaLoaded state for media-ended detection
-  let previousIsMediaLoaded = false;
-
   // Event handler references for cleanup
   let castStateHandler: ((event: CastFramework.CastStateEventData) => void) | null = null;
   let sessionStateHandler: ((event: CastFramework.SessionStateEventData) => void) | null = null;
@@ -225,9 +222,13 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     api.logger.info('Chromecast disconnected', { resumeTime: castTime });
 
-    // Resume local playback at cast position
+    // Skip local seek for live streams — the cast position may be outside
+    // the DVR window, and seeking there would confuse hls.js.
+    const isLive = api.getState('live');
+
+    // Resume local playback at cast position (VOD only)
     const video = api.container.querySelector('video');
-    if (video && castTime > 0) {
+    if (video && castTime > 0 && !isLive) {
       video.currentTime = castTime;
       video.play().catch(() => {
         // Autoplay may be blocked
@@ -276,7 +277,7 @@ export function chromecastPlugin(): IChromecastPlugin {
 
   /**
    * Handle remote player state changes.
-   * Detects media-ended via isMediaLoaded transition (true -> false).
+   * Detects media ended via playerState == 'IDLE' with idleReason == 'FINISHED'.
    */
   const handleRemotePlayerChange = (): void => {
     if (!remotePlayer) return;
@@ -284,13 +285,13 @@ export function chromecastPlugin(): IChromecastPlugin {
     // Only sync state when connected
     if (!api.getState('chromecastActive')) return;
 
-    // Detect media ended on Cast device via isMediaLoaded transition
-    const isMediaLoaded = remotePlayer.isMediaLoaded;
-    if (previousIsMediaLoaded && !isMediaLoaded) {
-      api.logger.debug('Cast media ended (isMediaLoaded transition)');
+    // Detect media ended on Cast device via playerState and idleReason
+    // on the media session.
+    const mediaSession = currentSession?.getMediaSession();
+    if (mediaSession?.playerState === 'IDLE' && mediaSession?.idleReason === 'FINISHED') {
+      api.logger.debug('Cast media ended (IDLE + FINISHED)');
       api.emit('playback:ended', undefined);
     }
-    previousIsMediaLoaded = isMediaLoaded;
 
     // Sync cast state to player state
     api.setState('currentTime', remotePlayer.currentTime);
@@ -320,9 +321,36 @@ export function chromecastPlugin(): IChromecastPlugin {
         await loadMediaOnCast(src, 0);
       });
 
-      // Register cleanup for load-request listener
+      // Command interception: when Chromecast is active, route play/pause/seek
+      // to the remote player instead of the local element.
+      const unsubPlay = api.on('playback:play', () => {
+        if (!api.getState('chromecastActive')) return;
+        if (remotePlayer?.isPaused && remotePlayerController) {
+          remotePlayerController.playOrPause();
+        }
+      });
+
+      const unsubPause = api.on('playback:pause', () => {
+        if (!api.getState('chromecastActive')) return;
+        if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
+          remotePlayerController.playOrPause();
+        }
+      });
+
+      const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
+        if (!api.getState('chromecastActive')) return;
+        if (remotePlayer && remotePlayerController) {
+          remotePlayer.currentTime = time;
+          remotePlayerController.seek();
+        }
+      });
+
+      // Register cleanup for listeners
       api.onDestroy(() => {
         unsubLoadRequest();
+        unsubPlay();
+        unsubPause();
+        unsubSeek();
       });
 
       // Check if Cast is supported in this browser
@@ -343,10 +371,12 @@ export function chromecastPlugin(): IChromecastPlugin {
     },
 
     async destroy(): Promise<void> {
-      // End any active session
+      // End session gracefully — let the TV continue playback rather than
+      // forcibly stopping it. The viewer may want to keep watching on the big
+      // screen after navigating away from the player page.
       if (currentSession) {
         try {
-          currentSession.endSession(true);
+          currentSession.endSession(false);
         } catch {
           // Ignore errors during cleanup
         }

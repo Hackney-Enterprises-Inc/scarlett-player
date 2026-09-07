@@ -114,6 +114,9 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null);
 const playerInstance = ref<ScarlettPlayer | null>(null);
 
+// Track unmount during async init to prevent wiring events into a detached tree
+let unmounted = false;
+
 // Lifecycle
 onMounted(async () => {
   if (!containerRef.value) {
@@ -140,16 +143,25 @@ onMounted(async () => {
     };
 
     // Create player instance
-    playerInstance.value = new PlayerClass(playerOptions);
+    const instance = new PlayerClass(playerOptions);
+    playerInstance.value = instance;
 
     // Initialize player
-    await playerInstance.value.init();
+    await instance.init();
+
+    // If the component unmounted while init() was in flight, destroy
+    // the instance rather than wiring events into a detached tree.
+    if (unmounted) {
+      await instance.destroy();
+      playerInstance.value = null;
+      return;
+    }
 
     // Set up event listeners
-    setupEventListeners(playerInstance.value);
+    setupEventListeners(instance);
 
     // Emit ready event
-    emit('ready', playerInstance.value);
+    emit('ready', instance);
   } catch (error) {
     console.error('Failed to initialize ScarlettPlayer:', error);
     emit('error', error instanceof Error ? error : new Error(String(error)));
@@ -157,8 +169,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (playerInstance.value) {
-    playerInstance.value.destroy();
+  unmounted = true;
+  const instance = playerInstance.value;
+  if (instance) {
+    instance.destroy();
     playerInstance.value = null;
   }
 });

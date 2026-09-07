@@ -1492,6 +1492,7 @@ describe('HLS plugin poster', () => {
   let state: Record<string, unknown>;
   let created: CapturedHls[];
   let posterSubscriber: ((event: { key: string }) => void) | null;
+  const allStateSubscribers: ((event: { key: string; value: unknown }) => void)[] = [];
   const mockCtor = createMockHlsConstructor();
 
   const SRC_A = 'http://example.com/a.m3u8';
@@ -1500,7 +1501,10 @@ describe('HLS plugin poster', () => {
   /** Push a new poster into state the way core's setPoster() does. */
   const setPoster = (value: string): void => {
     state.poster = value;
-    posterSubscriber?.({ key: 'poster' });
+    // Notify all state subscribers, dispatching by key
+    for (const sub of allStateSubscribers) {
+      sub({ key: 'poster', value });
+    }
   };
 
   /** Run a full hls.js load, resolving it through a manifest-parsed event. */
@@ -1534,13 +1538,18 @@ describe('HLS plugin poster', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     state = { live: false, muted: false, volume: 1, poster: 'https://cdn.test/art.jpg' };
+    allStateSubscribers.length = 0;
 
     plugin = createHLSPlugin();
     api = createMockAPI();
     api.getState.mockImplementation((key: string) => state[key]);
     api.subscribeToState.mockImplementation((cb: (event: { key: string }) => void) => {
       posterSubscriber = cb;
-      return vi.fn();
+      allStateSubscribers.push(cb);
+      return vi.fn(() => {
+        const idx = allStateSubscribers.indexOf(cb);
+        if (idx !== -1) allStateSubscribers.splice(idx, 1);
+      });
     });
 
     await plugin.init(api);

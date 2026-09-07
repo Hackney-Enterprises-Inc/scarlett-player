@@ -166,26 +166,26 @@ export function setupHlsEventHandlers(
   });
 
   // Level loaded - may contain live stream info and DVR window
-  addHandler('hlsLevelLoaded', (_event: string, data: { details: { live?: boolean; totalduration?: number; targetduration?: number } }) => {
+  addHandler('hlsLevelLoaded', (_event: string, data: { details: { live?: boolean; totalduration?: number; targetduration?: number; fragmentStart?: number; edge?: number; fragments?: Array<{ start?: number }> } }) => {
     if (data.details?.live !== undefined) {
       api.setState('live', data.details.live);
 
-      // For live streams, compute seekable range and live edge state
+      // For live streams, compute seekable range from the level details
+      // rather than from the media element. Under MSE (hls.js),
+      // video.seekable.start(0) remains 0 instead of reflecting the real
+      // sliding window (details.fragmentStart). Scrubbing to the start
+      // of the bar then triggers hls.js to jump back to live.
       if (data.details.live) {
+        const details = data.details;
+        const start = details.fragmentStart ?? (details.fragments?.[0]?.start ?? 0);
+        const end = details.edge ?? details.totalduration ?? 0;
+        api.setState('seekableRange', { start, end });
+
         const video = hls.media as HTMLVideoElement | null;
-        if (video && video.seekable && video.seekable.length > 0) {
-          const start = video.seekable.start(0);
-          const end = video.seekable.end(video.seekable.length - 1);
-          api.setState('seekableRange', { start, end });
-
-          // Live edge: within 3x target duration (or 10s fallback) of seekable end
-          const threshold = (data.details.targetduration ?? 3) * 3;
-          const isAtLiveEdge = (end - video.currentTime) < threshold;
-          api.setState('liveEdge', isAtLiveEdge);
-
-          // Latency: how far behind live edge
-          const latency = end - video.currentTime;
-          api.setState('liveLatency', Math.max(0, latency));
+        if (video) {
+          const latency = Math.max(0, end - video.currentTime);
+          api.setState('liveLatency', latency);
+          api.setState('liveEdge', latency < ((details.targetduration ?? 3) * 3));
         }
       }
 

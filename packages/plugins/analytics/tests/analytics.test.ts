@@ -654,4 +654,84 @@ describe('Analytics Plugin', () => {
       expect(isHttpsUrl(undefined as any)).toBe(false);
     });
   });
+
+  describe('Unload beacon handling', () => {
+    let originalSendBeacon: any;
+    let originalFetch: any;
+    let fetchMock: any;
+    let sendBeaconMock: any;
+
+    beforeEach(() => {
+      originalSendBeacon = navigator.sendBeacon;
+      originalFetch = globalThis.fetch;
+      fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      globalThis.fetch = fetchMock;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: originalSendBeacon,
+        configurable: true,
+        writable: true,
+      });
+      globalThis.fetch = originalFetch;
+    });
+
+    it('falls back to keepalive fetch when navigator.sendBeacon returns false', async () => {
+      sendBeaconMock = vi.fn().mockReturnValue(false);
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: sendBeaconMock,
+        configurable: true,
+        writable: true,
+      });
+
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'fallback-vid',
+        apiKey: 'key-123',
+      });
+
+      await plugin.init(api);
+
+      // Trigger beforeunload
+      fetchMock.mockClear();
+      window.dispatchEvent(new Event('beforeunload'));
+
+      expect(sendBeaconMock).toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.example.com/analytics',
+        expect.objectContaining({
+          method: 'POST',
+          keepalive: true,
+        })
+      );
+    });
+
+    it('deduplicates between beforeunload and pagehide so viewEnd is only sent once', async () => {
+      sendBeaconMock = vi.fn().mockReturnValue(true);
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: sendBeaconMock,
+        configurable: true,
+        writable: true,
+      });
+
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics?existing=param',
+        videoId: 'dedup-vid',
+        apiKey: 'key-123',
+      });
+
+      await plugin.init(api);
+      sendBeaconMock.mockClear();
+
+      // Dispatch beforeunload then pagehide
+      window.dispatchEvent(new Event('beforeunload'));
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(sendBeaconMock).toHaveBeenCalledTimes(1);
+      const urlUsed = sendBeaconMock.mock.calls[0][0];
+      expect(urlUsed).toContain('existing=param');
+      expect(urlUsed).toContain('api_key=key-123');
+    });
+  });
 });

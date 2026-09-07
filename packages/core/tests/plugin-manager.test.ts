@@ -320,6 +320,40 @@ describe('PluginManager', () => {
       expect(plugin.init).toHaveBeenCalledTimes(1);
     });
 
+    it('should return shared in-flight promise to concurrent init callers', async () => {
+      let resolveInit: () => void = () => {};
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+
+      const plugin = createMockPlugin({
+        init: vi.fn(() => initPromise),
+      });
+      pluginManager.register(plugin);
+
+      let caller1Done = false;
+      let caller2Done = false;
+
+      const p1 = pluginManager.initPlugin('test-plugin').then(() => {
+        caller1Done = true;
+      });
+      const p2 = pluginManager.initPlugin('test-plugin').then(() => {
+        caller2Done = true;
+      });
+
+      // While init is in flight, neither caller should be done
+      expect(caller1Done).toBe(false);
+      expect(caller2Done).toBe(false);
+
+      resolveInit();
+      await Promise.all([p1, p2]);
+
+      expect(caller1Done).toBe(true);
+      expect(caller2Done).toBe(true);
+      expect(plugin.init).toHaveBeenCalledTimes(1);
+      expect(pluginManager.getPluginState('test-plugin')).toBe('ready');
+    });
+
     it('should throw error for plugin not found', async () => {
       await expect(pluginManager.initPlugin('non-existent')).rejects.toThrow('not found');
     });

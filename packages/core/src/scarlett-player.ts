@@ -155,6 +155,9 @@ export class ScarlettPlayer {
   /** Removes the four fullscreen listeners; assigned in the constructor. */
   private unwireFullscreen: (() => void) | null = null;
 
+  /** In-flight teardown promise, returned to concurrent destroy() callers. */
+  private destroyPromise: Promise<void> | null = null;
+
   /**
    * In-flight initialisation pass, shared by concurrent callers.
    *
@@ -440,6 +443,7 @@ export class ScarlettPlayer {
         bufferedAmount: 0,
         playbackState: 'loading',
         error: null,
+        live: false,
       });
 
       // Destroy previous provider if switching
@@ -1097,46 +1101,64 @@ export class ScarlettPlayer {
   /**
    * Destroy the player and cleanup all resources.
    *
+   * Awaits asynchronous plugin teardowns before releasing core systems.
+   *
    * @example
    * ```ts
-   * player.destroy();
+   * await player.destroy();
    * ```
    */
-  destroy(): void {
+  destroy(): Promise<void> {
+    if (this.destroyPromise) {
+      return this.destroyPromise;
+    }
     if (this.destroyed) {
-      return;
+      return Promise.resolve();
     }
 
-    this.logger.info('Destroying player');
+    this.destroyPromise = (async () => {
+      this.logger.info('Destroying player');
 
-    // Cancel every in-flight load through the mechanism load() already
-    // trusts. Its post-await "bail if superseded" checks guard the reads
-    // that would otherwise walk into a torn-down state manager, but
-    // destroy() did not participate in the generation counter, so a destroy
-    // mid-load left the generation matching and the continuation ran on.
-    this.loadGeneration++;
+      // Set destroyed flag immediately so that any code running after the
+      // synchronous call to destroy() — even without awaiting the returned
+      // promise — sees the player as destroyed and throws instead of
+      // operating on a half-torn-down instance.
+      this.destroyed = true;
 
-    // Clear any pending seek resume timeout
-    if (this.seekResumeTimeout !== null) {
-      clearTimeout(this.seekResumeTimeout);
-      this.seekResumeTimeout = null;
-    }
+      // Cancel every in-flight load through the mechanism load() already
+      // trusts. Its post-await "bail if superseded" checks guard the reads
+      // that would otherwise walk into a torn-down state manager, but
+      // destroy() did not participate in the generation counter, so a destroy
+      // mid-load left the generation matching and the continuation ran on.
+      this.loadGeneration++;
 
-    this.unwireFullscreen?.();
-    this.unwireFullscreen = null;
+      // Clear any pending seek resume timeout
+      if (this.seekResumeTimeout !== null) {
+        clearTimeout(this.seekResumeTimeout);
+        this.seekResumeTimeout = null;
+      }
 
-    // Emit destroy event
-    this.eventBus.emit('player:destroy', undefined);
+      this.unwireFullscreen?.();
+      this.unwireFullscreen = null;
 
-    // Destroy plugins
-    this.pluginManager.destroyAll();
+      // Emit destroy event
+      this.eventBus.emit('player:destroy', undefined);
 
-    // Cleanup core systems
-    this.eventBus.destroy();
-    this.stateManager.destroy();
+      // Await plugin teardowns before destroying event bus & state manager
+      try {
+        await this.pluginManager.destroyAll();
+      } catch (err) {
+        this.logger.error('Error during plugin destruction', err as Record<string, any>);
+      }
 
-    this.destroyed = true;
-    this.logger.info('Player destroyed');
+      // Cleanup core systems
+      this.eventBus.destroy();
+      this.stateManager.destroy();
+
+      this.logger.info('Player destroyed');
+    })();
+
+    return this.destroyPromise;
   }
 
   // ===== State Getters =====

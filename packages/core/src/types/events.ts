@@ -295,6 +295,8 @@ export interface PlayerEventMap {
     delayMs: number;
     elapsedMs?: number;
     windowMs?: number;
+    /** When true, the outage has lasted long enough that the event may have ended. */
+    longOutage?: boolean;
   };
 
   /**

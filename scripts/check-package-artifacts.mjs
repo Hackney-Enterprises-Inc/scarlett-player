@@ -139,7 +139,14 @@ const advertisedPaths = (manifest) => {
 
   if (manifest.exports !== undefined) walkExports(manifest.exports, 'exports');
 
-  return paths.filter((entry) => entry.path.startsWith('.'));
+  return paths.filter((entry) => {
+    // Normalize paths like "dist/index.cjs" to "./dist/index.cjs" so the
+    // filter does not silently skip packages whose manifests omit the leading
+    // dot (e.g. "main": "dist/index.cjs").
+    const normalized = entry.path.startsWith('.') ? entry.path : `./${entry.path}`;
+    entry.path = normalized;
+    return true;
+  });
 };
 
 const packageDirs = [...new Set(workspaceGlobs().flatMap(expandGlob))]

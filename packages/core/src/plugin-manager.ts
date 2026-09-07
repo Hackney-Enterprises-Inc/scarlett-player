@@ -20,6 +20,8 @@ interface PluginRecord extends PluginDescriptor {
 
 export class PluginManager {
   private plugins = new Map<string, PluginRecord>();
+  private initPromises = new Map<string, Promise<void>>();
+  private initializingStack = new Set<string>();
   private eventBus: EventBus;
   private stateManager: StateManager;
   private logger: Logger;
@@ -95,48 +97,72 @@ export class PluginManager {
     }
 
     if (record.state === 'ready') return;
-    if (record.state === 'initializing') {
+
+    if (this.initializingStack.has(id)) {
       throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
     }
 
-    // Ensure dependencies are ready
-    for (const depId of record.plugin.dependencies || []) {
-      const dep = this.plugins.get(depId);
-      if (!dep) {
-        throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
-      }
-      if (dep.state !== 'ready') {
-        await this.initPlugin(depId);
-      }
+    const inFlight = this.initPromises.get(id);
+    if (inFlight) {
+      return inFlight;
     }
 
-    try {
-      record.state = 'initializing';
-
-      if (record.plugin.onStateChange) {
-        const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
-        record.api.onDestroy(unsub);
-      }
-
-      if (record.plugin.onError) {
-        const unsub = this.eventBus.on('error', (err) => {
-          record.plugin.onError?.(err.originalError || new Error(err.message));
-        });
-        record.api.onDestroy(unsub);
-      }
-
-      await record.plugin.init(record.api, record.config);
-
-      record.state = 'ready';
-      this.logger.info(`Plugin ready: ${id}`);
-      this.eventBus.emit('plugin:active', { name: id });
-    } catch (error) {
-      record.state = 'error';
-      record.error = error as Error;
-      this.logger.error(`Plugin init failed: ${id}`, { error });
-      this.eventBus.emit('plugin:error', { name: id, error: error as Error });
-      throw error;
+    if (record.state === 'initializing') {
+      const promise = this.initPromises.get(id);
+      if (promise) return promise;
+      return;
     }
+
+    const initPromise = (async () => {
+      this.initializingStack.add(id);
+      try {
+        // Ensure dependencies are ready
+        for (const depId of record.plugin.dependencies || []) {
+          const dep = this.plugins.get(depId);
+          if (!dep) {
+            throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
+          }
+          if (dep.state !== 'ready') {
+            await this.initPlugin(depId);
+          }
+        }
+      } finally {
+        this.initializingStack.delete(id);
+      }
+
+      try {
+        record.state = 'initializing';
+
+        if (record.plugin.onStateChange) {
+          const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
+          record.api.onDestroy(unsub);
+        }
+
+        if (record.plugin.onError) {
+          const unsub = this.eventBus.on('error', (err) => {
+            record.plugin.onError?.(err.originalError || new Error(err.message));
+          });
+          record.api.onDestroy(unsub);
+        }
+
+        await record.plugin.init(record.api, record.config);
+
+        record.state = 'ready';
+        this.logger.info(`Plugin ready: ${id}`);
+        this.eventBus.emit('plugin:active', { name: id });
+      } catch (error) {
+        record.state = 'error';
+        record.error = error as Error;
+        this.logger.error(`Plugin init failed: ${id}`, { error });
+        this.eventBus.emit('plugin:error', { name: id, error: error as Error });
+        throw error;
+      } finally {
+        this.initPromises.delete(id);
+      }
+    })();
+
+    this.initPromises.set(id, initPromise);
+    return initPromise;
   }
 
   /** Destroy all plugins in reverse dependency order. */
@@ -155,15 +181,14 @@ export class PluginManager {
 
     try {
       await record.plugin.destroy();
-      record.api.runCleanups();
-      // Reset to 'registered' so it can be re-initialized later
-      record.state = 'registered';
-      this.logger.info(`Plugin destroyed: ${id}`);
-      this.eventBus.emit('plugin:destroyed', { name: id });
     } catch (error) {
       this.logger.error(`Plugin destroy failed: ${id}`, { error });
-      // Even on error, reset state so plugin can be retried
+    } finally {
+      // runCleanups() must run even when destroy() throws, so listeners
+      // and timers registered via api.onDestroy() are always released.
+      record.api.runCleanups();
       record.state = 'registered';
+      this.eventBus.emit('plugin:destroyed', { name: id });
     }
   }
 
