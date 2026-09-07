@@ -57,6 +57,9 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
   const bufferedAmount = ref(0);
   const fullscreen = ref(false);
 
+  // Track unmount during async init to prevent assigning a dead player
+  let unmounted = false;
+
   // Initialize player
   async function init() {
     if (!options.container.value) {
@@ -81,6 +84,14 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
 
       const instance = new PlayerClass(playerOptions);
       await instance.init();
+
+      // If the component unmounted while init() was in flight, destroy
+      // the instance immediately rather than assigning a dead player.
+      if (unmounted) {
+        await instance.destroy();
+        return;
+      }
+
       player.value = instance;
 
       // Setup state sync
@@ -246,6 +257,7 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     });
 
     onBeforeUnmount(() => {
+      unmounted = true;
       if (player.value) {
         player.value.destroy();
         player.value = null;

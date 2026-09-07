@@ -68,6 +68,9 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   const dynamic = config.dynamic ?? false;
   const dynamicInterval = config.dynamicInterval ?? 10000;
   const showDelay = config.showDelay ?? 0;
+  let currentImageUrl: string | undefined = config.imageUrl;
+  let currentText: string | undefined = config.text;
+  let mutationObserver: MutationObserver | null = null;
 
   let positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
 
@@ -86,10 +89,15 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
 
   /**
    * Update the watermark content (text or image).
+   * Uses runtime-tracked values (`currentImageUrl` / `currentText`) so that
+   * `setText()` can override an image and vice-versa.
    */
   const updateContent = (el: HTMLDivElement, imageUrl?: string, text?: string): void => {
-    const img = imageUrl || config.imageUrl;
-    const txt = text || config.text;
+    if (imageUrl !== undefined) currentImageUrl = imageUrl;
+    if (text !== undefined) currentText = text;
+
+    const img = currentImageUrl;
+    const txt = currentText;
 
     el.innerHTML = '';
     if (img) {
@@ -188,6 +196,10 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
       clearTimeout(showDelayTimer);
       showDelayTimer = null;
     }
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+      mutationObserver = null;
+    }
     if (element?.parentNode) {
       element.parentNode.removeChild(element);
     }
@@ -209,8 +221,41 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
       element = createElement();
       api.container.appendChild(element);
 
+      // DOM hardening: watch for removal or style tampering and re-attach
+      mutationObserver = new MutationObserver((mutations) => {
+        if (!element || !api) return;
+        for (const mutation of mutations) {
+          if (mutation.type === 'childList') {
+            // Element was removed from its parent — re-attach
+            if (mutation.removedNodes.length > 0) {
+              let wasRemoved = false;
+              mutation.removedNodes.forEach((node) => {
+                if (node === element) wasRemoved = true;
+              });
+              if (wasRemoved && api) {
+                api.container.appendChild(element!);
+              }
+            }
+          } else if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+            // Inline style was altered — restore opacity and pointer-events
+            if (element) {
+              element.style.opacity = String(opacity);
+              element.style.pointerEvents = 'none';
+              element.style.position = 'absolute';
+              element.style.zIndex = '10';
+            }
+          }
+        }
+      });
+      mutationObserver.observe(api.container, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+
       // Show on play (with optional delay)
       const unsubPlay = api.on('playback:play', () => {
+        // Clear any pending show delay before starting a new one
+        if (showDelayTimer) {
+          clearTimeout(showDelayTimer);
+          showDelayTimer = null;
+        }
         if (showDelay > 0) {
           showDelayTimer = setTimeout(() => {
             show();
@@ -222,9 +267,9 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
         }
       });
 
-      // Hide on pause/ended
+      // Keep watermark visible while paused — hiding it leaves screenshots
+      // and screen captures unmarked. Only stop dynamic repositioning.
       const unsubPause = api.on('playback:pause', () => {
-        hide();
         stopDynamic();
         if (showDelayTimer) {
           clearTimeout(showDelayTimer);
@@ -290,7 +335,8 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
 
     setPadding(value: number): void {
       currentPadding = Math.max(0, value);
-      currentBottomPadding = currentPadding;
+      // Preserve the 40px minimum bottom clearance for player controls
+      currentBottomPadding = Math.max(value, config.padding ?? 40);
       positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
       // Re-apply current position with new padding
       setPosition(currentPosition);

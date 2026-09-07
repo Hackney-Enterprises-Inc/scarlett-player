@@ -49,6 +49,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # Validate before building. These three gates run lint, typecheck and
+      # tests in the same order as CI, so a release cannot ship code that
+      # would fail the PR pipeline.
+      - name: Run linter
+        run: pnpm run lint
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+      - name: Run test suite
+        run: NODE_OPTIONS=--no-experimental-require-module pnpm run test
+
       - name: Build packages
         run: pnpm run build
 
@@ -341,8 +353,10 @@ jobs:
     name: Deploy to TSP Assets
     needs: release
     # always() so a failure in another publish target (npm, most likely) does not
-    # skip this one. The CDN does not depend on npm in any way.
-    if: always() && needs.release.outputs.published == 'true'
+    # skip this one. The CDN does not depend on npm in any way — but it must
+    # NOT deploy if npm publish failed, because consumers cannot install a
+    # version that never reached the registry.
+    if: always() && needs.release.outputs.published == 'true' && needs.release.result == 'success'
     runs-on: ubuntu-latest
 
     steps:

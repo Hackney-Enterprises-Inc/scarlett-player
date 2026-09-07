@@ -212,28 +212,75 @@ export function createAnalyticsPlugin(
       return;
     }
 
-    // Use sendBeacon API for reliability (survives page unload)
+    const body = safeStringify(payload);
+    const shouldAttachApiKey = Boolean(
+      mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+    );
+
+    // Primary transport: fetch with keepalive. Unlike sendBeacon, fetch
+    // supports custom headers (X-API-Key), which is how the backend
+    // authenticates beacons. 100% of sendBeacon-based beacons arrived
+    // without the header — sendBeacon cannot attach custom headers at all.
+    fetch(mergedConfig.beaconUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
+      },
+      body,
+      keepalive: true,
+    }).catch(() => {
+      // Silently fail - don't disrupt playback
+    });
+  }
+
+  /**
+   * Send a beacon on page unload using navigator.sendBeacon.
+   *
+   * sendBeacon cannot attach custom headers, so the API key is appended
+   * as a query parameter instead. This is the only path that survives
+   * iOS Safari's aggressive process termination on pagehide.
+   */
+  function sendUnloadBeacon(
+    eventType: AnalyticsEventType | string,
+    data: Record<string, unknown> = {}
+  ): void {
+    if (mergedConfig.disableInDev && isDevelopment()) return;
+    if (eventType === 'error' && Math.random() > (mergedConfig.errorSampleRate ?? 1.0)) return;
+
+    const payload: BeaconPayload = {
+      event: eventType,
+      timestamp: Date.now(),
+      viewId: session.viewId,
+      sessionId: session.sessionId,
+      viewerId: session.viewerId,
+      videoId: mergedConfig.videoId,
+      videoTitle: mergedConfig.videoTitle,
+      isLive: mergedConfig.isLive ?? api?.getState('live') ?? false,
+      playerVersion: PLUGIN_VERSION,
+      playerName: PLUGIN_NAME,
+      browser: getBrowserInfo().name,
+      os: getOSInfo().name,
+      deviceType: getDeviceType(),
+      screenSize: getScreenSize(),
+      playerSize: getPlayerSize(api?.container ?? null),
+      connectionType: getConnectionType(),
+      ...mergedConfig.customDimensions,
+      ...data,
+    };
+
+    if (mergedConfig.customBeacon) {
+      mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
+      return;
+    }
+
     if (navigator.sendBeacon) {
-      const blob = new Blob([safeStringify(payload)], {
-        type: 'application/json',
-      });
-      navigator.sendBeacon(mergedConfig.beaconUrl, blob);
-    } else {
-      // Fallback to fetch with keepalive
-      const shouldAttachApiKey = Boolean(
-        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-      );
-      fetch(mergedConfig.beaconUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey } : {}),
-        },
-        body: safeStringify(payload),
-        keepalive: true,
-      }).catch(() => {
-        // Silently fail - don't disrupt playback
-      });
+      // Append API key as query parameter — sendBeacon cannot set headers
+      const urlWithApiKey = mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+        ? `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`
+        : mergedConfig.beaconUrl;
+      const blob = new Blob([safeStringify(payload)], { type: 'application/json' });
+      navigator.sendBeacon(urlWithApiKey, blob);
     }
   }
 
@@ -303,6 +350,12 @@ export function createAnalyticsPlugin(
    */
   function sendViewEnd(): void {
     if (!api) return;
+
+    // Stop heartbeat so it does not keep ticking after viewEnd
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
 
     session.viewEnd = Date.now();
 
@@ -410,8 +463,9 @@ export function createAnalyticsPlugin(
   function onWaiting(): void {
     if (!api) return;
 
-    // Only count as rebuffer if we've started playing
-    if (session.firstFrameTime !== null && !isRebuffering) {
+    // Only count as rebuffer if we've started playing AND are not
+    // mid-seek (seeks trigger waiting which is not a rebuffer).
+    if (session.firstFrameTime !== null && !isRebuffering && !api.getState('seeking')) {
       isRebuffering = true;
       rebufferStartTime = Date.now();
       session.rebufferCount++;
@@ -447,7 +501,7 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle errors.
+   * Handle errors (from media:error subscription).
    */
   function onError(payload: { error: Error }): void {
     const error = payload.error;
@@ -470,6 +524,43 @@ export function createAnalyticsPlugin(
       errorType: errorEvent.type,
       errorMessage: errorEvent.message,
       errorCode: (error as any).code,
+      fatal: errorEvent.fatal,
+    });
+
+    if (errorEvent.fatal) {
+      session.playbackState = 'error';
+      session.exitType = 'error';
+      sendViewEnd();
+    }
+  }
+
+  /**
+   * Handle core error events (in addition to media:error).
+   *
+   * Core errors (e.g. provider not found, plugin init failure) are not
+   * reported through media:error but should still be counted and sent.
+   */
+  function onCoreError(err: any): void {
+    if (!err) return;
+    const error = err.originalError || err;
+    if (!(error instanceof Error)) return;
+
+    session.errorCount++;
+    const errorEvent: ErrorEvent = {
+      time: Date.now(),
+      type: error.name || 'CoreError',
+      message: error.message || 'Unknown core error',
+      fatal: err.fatal ?? false,
+    };
+
+    session.errors.push(errorEvent);
+    if (session.errors.length > 100) {
+      session.errors = session.errors.slice(-100);
+    }
+
+    sendBeacon('error', {
+      errorType: errorEvent.type,
+      errorMessage: errorEvent.message,
       fatal: errorEvent.fatal,
     });
 
@@ -527,17 +618,35 @@ export function createAnalyticsPlugin(
     if (document.hidden) {
       session.exitType = 'background';
       sendHeartbeat();
+    } else {
+      // Reset exitType when returning to foreground so that a subsequent
+      // pagehide does not inherit the stale 'background' label.
+      session.exitType = null;
     }
   }
 
   /**
-   * Handle page unload.
+   * Handle page unload (beforeunload + pagehide).
+   *
+   * `pagehide` is essential for iOS Safari where `beforeunload` is not
+   * reliably fired. Both handlers use `sendUnloadBeacon` which falls back
+   * to `navigator.sendBeacon` (the only API that survives process
+   * termination).
    */
   function onBeforeUnload(): void {
     if (!session.exitType) {
       session.exitType = 'abandoned';
     }
-    sendViewEnd();
+    sendUnloadBeacon('viewEnd', {
+      watchTime: session.watchTime,
+      playTime: session.playTime,
+      startupTime: session.startupTime,
+      rebufferCount: session.rebufferCount,
+      rebufferDuration: session.rebufferDuration,
+      avgBitrate: session.avgBitrate,
+      maxBitrate: session.maxBitrate,
+      exitType: session.exitType,
+    });
   }
 
   // === Plugin Interface ===
@@ -567,6 +676,7 @@ export function createAnalyticsPlugin(
       const unsubSeeking = api.on('playback:seeking', onSeeking);
       const unsubEnded = api.on('playback:ended', onEnded);
       const unsubError = api.on('media:error', onError);
+      const unsubCoreError = api.on('error', onCoreError);
       const unsubQuality = api.on('quality:change', onQualityChange);
 
       cleanupFns.push(
@@ -576,16 +686,19 @@ export function createAnalyticsPlugin(
         unsubSeeking,
         unsubEnded,
         unsubError,
+        unsubCoreError,
         unsubQuality
       );
 
       // Page lifecycle events
       document.addEventListener('visibilitychange', onVisibilityChange);
       window.addEventListener('beforeunload', onBeforeUnload);
+      window.addEventListener('pagehide', onBeforeUnload);
 
       cleanupFns.push(() => {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('beforeunload', onBeforeUnload);
+        window.removeEventListener('pagehide', onBeforeUnload);
       });
 
       // Start heartbeat

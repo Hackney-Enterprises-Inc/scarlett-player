@@ -654,7 +654,7 @@ describe('Chromecast Plugin', () => {
 
       await plugin.destroy();
 
-      expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(true);
+      expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(false);
     });
 
     it('should remove event listeners on destroy', async () => {

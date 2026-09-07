@@ -1097,17 +1097,25 @@ export class ScarlettPlayer {
   /**
    * Destroy the player and cleanup all resources.
    *
+   * Awaits asynchronous plugin teardowns before releasing core systems.
+   *
    * @example
    * ```ts
-   * player.destroy();
+   * await player.destroy();
    * ```
    */
-  destroy(): void {
+  async destroy(): Promise<void> {
     if (this.destroyed) {
       return;
     }
 
     this.logger.info('Destroying player');
+
+    // Set destroyed flag immediately so that any code running after the
+    // synchronous call to destroy() — even without awaiting the returned
+    // promise — sees the player as destroyed and throws instead of
+    // operating on a half-torn-down instance.
+    this.destroyed = true;
 
     // Cancel every in-flight load through the mechanism load() already
     // trusts. Its post-await "bail if superseded" checks guard the reads
@@ -1128,14 +1136,17 @@ export class ScarlettPlayer {
     // Emit destroy event
     this.eventBus.emit('player:destroy', undefined);
 
-    // Destroy plugins
-    this.pluginManager.destroyAll();
+    // Await plugin teardowns before destroying event bus & state manager
+    try {
+      await this.pluginManager.destroyAll();
+    } catch (err) {
+      this.logger.error('Error during plugin destruction', err as Record<string, any>);
+    }
 
     // Cleanup core systems
     this.eventBus.destroy();
     this.stateManager.destroy();
 
-    this.destroyed = true;
     this.logger.info('Player destroyed');
   }
 

@@ -96,7 +96,10 @@ export class PluginManager {
 
     if (record.state === 'ready') return;
     if (record.state === 'initializing') {
-      throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
+      // A second load() arriving before the first provider finishes
+      // initializing is normal (e.g. playlist advancing during init),
+      // not a circular dependency. Return silently rather than throwing.
+      return;
     }
 
     // Ensure dependencies are ready
@@ -155,15 +158,14 @@ export class PluginManager {
 
     try {
       await record.plugin.destroy();
-      record.api.runCleanups();
-      // Reset to 'registered' so it can be re-initialized later
-      record.state = 'registered';
-      this.logger.info(`Plugin destroyed: ${id}`);
-      this.eventBus.emit('plugin:destroyed', { name: id });
     } catch (error) {
       this.logger.error(`Plugin destroy failed: ${id}`, { error });
-      // Even on error, reset state so plugin can be retried
+    } finally {
+      // runCleanups() must run even when destroy() throws, so listeners
+      // and timers registered via api.onDestroy() are always released.
+      record.api.runCleanups();
       record.state = 'registered';
+      this.eventBus.emit('plugin:destroyed', { name: id });
     }
   }
 

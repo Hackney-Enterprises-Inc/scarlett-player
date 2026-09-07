@@ -255,11 +255,15 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     // provider wrote only `'loading'` and `'ready'`, so which of the two
     // providers was in use decided what a reader of the key saw during
     // ordinary playback (second review of the 1.7.1 wave).
+    //
+    // Do NOT emit playback:play here — the core player emits it from
+    // ScarlettPlayer.play(), and emitting it again from the native
+    // provider's element event causes duplicate play callbacks and
+    // recursion in analytics and other plugins.
     on('playing', () => {
       api?.setState('playing', true);
       api?.setState('paused', false);
       api?.setState('playbackState', 'playing');
-      api?.emit('playback:play', undefined);
       syncEndedFromElement();
     });
 
@@ -267,7 +271,6 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api?.setState('playing', false);
       api?.setState('paused', true);
       api?.setState('playbackState', 'paused');
-      api?.emit('playback:pause', undefined);
     });
 
     on('ended', () => {

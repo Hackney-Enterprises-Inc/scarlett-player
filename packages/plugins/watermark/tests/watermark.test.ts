@@ -243,7 +243,7 @@ describe('show/hide on playback events', () => {
     expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
   });
 
-  it('hides watermark on playback:pause', () => {
+  it('keeps watermark visible on playback:pause', () => {
     const plugin = createWatermarkPlugin({ text: 'test' });
     plugin.init(mockApi);
 
@@ -251,7 +251,8 @@ describe('show/hide on playback events', () => {
     pauseCallback?.();
 
     const el = mockApi.container.querySelector('.sp-watermark');
-    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(false);
   });
 
   it('hides watermark on playback:ended', () => {
