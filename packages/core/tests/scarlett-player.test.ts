@@ -658,6 +658,45 @@ describe('ScarlettPlayer', () => {
       // Should not throw
     });
 
+    it('should return the same promise to concurrent destroy calls and wait for cleanup', async () => {
+      let settleDestroy: () => void = () => {};
+      const destroyPromise = new Promise<void>((resolve) => {
+        settleDestroy = resolve;
+      });
+
+      const plugin = createMockPlugin({
+        id: 'async-plugin',
+        destroy: vi.fn(() => destroyPromise),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [plugin] });
+      await player.init();
+
+      let caller1Done = false;
+      let caller2Done = false;
+
+      const d1 = player.destroy();
+      const d2 = player.destroy();
+      expect(d1).toBe(d2);
+
+      const p1 = d1.then(() => {
+        caller1Done = true;
+      });
+      const p2 = d2.then(() => {
+        caller2Done = true;
+      });
+
+      expect(caller1Done).toBe(false);
+      expect(caller2Done).toBe(false);
+
+      settleDestroy();
+      await Promise.all([p1, p2]);
+
+      expect(caller1Done).toBe(true);
+      expect(caller2Done).toBe(true);
+      expect(() => player.pause()).toThrow('destroyed player');
+    });
+
     it('should cancel an in-flight load instead of running its continuation', async () => {
       let settleLoad: (() => void) | undefined;
       const loadSource = vi.fn(

@@ -55,9 +55,6 @@ export function chromecastPlugin(): IChromecastPlugin {
   let localTimeBeforeCast = 0;
   let localSrcBeforeCast = '';
 
-  // Track previous isMediaLoaded state for media-ended detection
-  let previousIsMediaLoaded = false;
-
   // Event handler references for cleanup
   let castStateHandler: ((event: CastFramework.CastStateEventData) => void) | null = null;
   let sessionStateHandler: ((event: CastFramework.SessionStateEventData) => void) | null = null;
@@ -288,11 +285,10 @@ export function chromecastPlugin(): IChromecastPlugin {
     // Only sync state when connected
     if (!api.getState('chromecastActive')) return;
 
-    // Detect media ended on Cast device via playerState.
-    // The previous approach used isMediaLoaded transitions (true -> false),
-    // which fired prematurely when a remote paused the stream.
-    const mediaInfo = (remotePlayer as any).mediaInfo;
-    if (mediaInfo?.playerState === 'IDLE' && mediaInfo?.idleReason === 'FINISHED') {
+    // Detect media ended on Cast device via playerState and idleReason
+    // on the media session.
+    const mediaSession = currentSession?.getMediaSession();
+    if (mediaSession?.playerState === 'IDLE' && mediaSession?.idleReason === 'FINISHED') {
       api.logger.debug('Cast media ended (IDLE + FINISHED)');
       api.emit('playback:ended', undefined);
     }

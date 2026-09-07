@@ -143,24 +143,25 @@ onMounted(async () => {
     };
 
     // Create player instance
-    playerInstance.value = new PlayerClass(playerOptions);
+    const instance = new PlayerClass(playerOptions);
+    playerInstance.value = instance;
 
     // Initialize player
-    await playerInstance.value.init();
+    await instance.init();
 
     // If the component unmounted while init() was in flight, destroy
     // the instance rather than wiring events into a detached tree.
     if (unmounted) {
-      await playerInstance.value.destroy();
+      await instance.destroy();
       playerInstance.value = null;
       return;
     }
 
     // Set up event listeners
-    setupEventListeners(playerInstance.value);
+    setupEventListeners(instance);
 
     // Emit ready event
-    emit('ready', playerInstance.value);
+    emit('ready', instance);
   } catch (error) {
     console.error('Failed to initialize ScarlettPlayer:', error);
     emit('error', error instanceof Error ? error : new Error(String(error)));
@@ -169,8 +170,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unmounted = true;
-  if (playerInstance.value) {
-    playerInstance.value.destroy();
+  const instance = playerInstance.value;
+  if (instance) {
+    instance.destroy();
     playerInstance.value = null;
   }
 });

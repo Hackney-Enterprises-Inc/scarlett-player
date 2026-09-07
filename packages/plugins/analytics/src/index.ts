@@ -274,14 +274,40 @@ export function createAnalyticsPlugin(
       return;
     }
 
+    const body = safeStringify(payload);
+
     if (navigator.sendBeacon) {
       // Append API key as query parameter — sendBeacon cannot set headers
-      const urlWithApiKey = mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-        ? `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`
-        : mergedConfig.beaconUrl;
-      const blob = new Blob([safeStringify(payload)], { type: 'application/json' });
-      navigator.sendBeacon(urlWithApiKey, blob);
+      let urlWithApiKey = mergedConfig.beaconUrl;
+      if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
+        try {
+          const urlObj = new URL(mergedConfig.beaconUrl);
+          urlObj.searchParams.set('api_key', mergedConfig.apiKey);
+          urlWithApiKey = urlObj.toString();
+        } catch {
+          urlWithApiKey = `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
+        }
+      }
+      const blob = new Blob([body], { type: 'application/json' });
+      const sent = navigator.sendBeacon(urlWithApiKey, blob);
+      if (sent) return;
     }
+
+    // Fallback to fetch with keepalive when sendBeacon is unavailable or returns false
+    const shouldAttachApiKey = Boolean(
+      mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+    );
+    fetch(mergedConfig.beaconUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
+      },
+      body,
+      keepalive: true,
+    }).catch(() => {
+      // Silently fail - don't disrupt playback
+    });
   }
 
   /**
@@ -634,6 +660,9 @@ export function createAnalyticsPlugin(
    * termination).
    */
   function onBeforeUnload(): void {
+    if (session.viewEnd) return;
+    session.viewEnd = Date.now();
+
     if (!session.exitType) {
       session.exitType = 'abandoned';
     }

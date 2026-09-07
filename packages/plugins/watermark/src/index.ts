@@ -93,8 +93,14 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
    * `setText()` can override an image and vice-versa.
    */
   const updateContent = (el: HTMLDivElement, imageUrl?: string, text?: string): void => {
-    if (imageUrl !== undefined) currentImageUrl = imageUrl;
-    if (text !== undefined) currentText = text;
+    if (imageUrl !== undefined) {
+      currentImageUrl = imageUrl;
+      currentText = undefined;
+    }
+    if (text !== undefined) {
+      currentText = text;
+      currentImageUrl = undefined;
+    }
 
     const img = currentImageUrl;
     const txt = currentText;

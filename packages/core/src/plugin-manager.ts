@@ -20,6 +20,8 @@ interface PluginRecord extends PluginDescriptor {
 
 export class PluginManager {
   private plugins = new Map<string, PluginRecord>();
+  private initPromises = new Map<string, Promise<void>>();
+  private initializingStack = new Set<string>();
   private eventBus: EventBus;
   private stateManager: StateManager;
   private logger: Logger;
@@ -95,51 +97,72 @@ export class PluginManager {
     }
 
     if (record.state === 'ready') return;
+
+    if (this.initializingStack.has(id)) {
+      throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
+    }
+
+    const inFlight = this.initPromises.get(id);
+    if (inFlight) {
+      return inFlight;
+    }
+
     if (record.state === 'initializing') {
-      // A second load() arriving before the first provider finishes
-      // initializing is normal (e.g. playlist advancing during init),
-      // not a circular dependency. Return silently rather than throwing.
+      const promise = this.initPromises.get(id);
+      if (promise) return promise;
       return;
     }
 
-    // Ensure dependencies are ready
-    for (const depId of record.plugin.dependencies || []) {
-      const dep = this.plugins.get(depId);
-      if (!dep) {
-        throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
-      }
-      if (dep.state !== 'ready') {
-        await this.initPlugin(depId);
-      }
-    }
-
-    try {
-      record.state = 'initializing';
-
-      if (record.plugin.onStateChange) {
-        const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
-        record.api.onDestroy(unsub);
+    const initPromise = (async () => {
+      this.initializingStack.add(id);
+      try {
+        // Ensure dependencies are ready
+        for (const depId of record.plugin.dependencies || []) {
+          const dep = this.plugins.get(depId);
+          if (!dep) {
+            throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
+          }
+          if (dep.state !== 'ready') {
+            await this.initPlugin(depId);
+          }
+        }
+      } finally {
+        this.initializingStack.delete(id);
       }
 
-      if (record.plugin.onError) {
-        const unsub = this.eventBus.on('error', (err) => {
-          record.plugin.onError?.(err.originalError || new Error(err.message));
-        });
-        record.api.onDestroy(unsub);
+      try {
+        record.state = 'initializing';
+
+        if (record.plugin.onStateChange) {
+          const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
+          record.api.onDestroy(unsub);
+        }
+
+        if (record.plugin.onError) {
+          const unsub = this.eventBus.on('error', (err) => {
+            record.plugin.onError?.(err.originalError || new Error(err.message));
+          });
+          record.api.onDestroy(unsub);
+        }
+
+        await record.plugin.init(record.api, record.config);
+
+        record.state = 'ready';
+        this.logger.info(`Plugin ready: ${id}`);
+        this.eventBus.emit('plugin:active', { name: id });
+      } catch (error) {
+        record.state = 'error';
+        record.error = error as Error;
+        this.logger.error(`Plugin init failed: ${id}`, { error });
+        this.eventBus.emit('plugin:error', { name: id, error: error as Error });
+        throw error;
+      } finally {
+        this.initPromises.delete(id);
       }
+    })();
 
-      await record.plugin.init(record.api, record.config);
-
-      record.state = 'ready';
-      this.logger.info(`Plugin ready: ${id}`);
-      this.eventBus.emit('plugin:active', { name: id });
-    } catch (error) {
-      record.state = 'error';
-      record.error = error as Error;
-      this.logger.error(`Plugin init failed: ${id}`, { error });
-      this.eventBus.emit('plugin:error', { name: id, error: error as Error });
-      throw error;
-    }
+    this.initPromises.set(id, initPromise);
+    return initPromise;
   }
 
   /** Destroy all plugins in reverse dependency order. */

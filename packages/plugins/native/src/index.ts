@@ -111,6 +111,8 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
    * renders the artwork itself).
    */
   let is_audio_source = false;
+  /** Guard tracking whether play was initiated via ScarlettPlayer.play() */
+  let isCorePlayRequested = false;
 
   /** Get file extension from URL */
   const getExtension = (src: string): string => {
@@ -256,18 +258,23 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     // providers was in use decided what a reader of the key saw during
     // ordinary playback (second review of the 1.7.1 wave).
     //
-    // Do NOT emit playback:play here — the core player emits it from
-    // ScarlettPlayer.play(), and emitting it again from the native
-    // provider's element event causes duplicate play callbacks and
-    // recursion in analytics and other plugins.
     on('playing', () => {
       api?.setState('playing', true);
       api?.setState('paused', false);
       api?.setState('playbackState', 'playing');
       syncEndedFromElement();
+
+      if (isCorePlayRequested) {
+        // ScarlettPlayer.play() already emitted playback:play
+        isCorePlayRequested = false;
+      } else {
+        // Direct video.play() call (e.g. BigPlayButton, keyboard, native controls)
+        api?.emit('playback:play', undefined);
+      }
     });
 
     on('pause', () => {
+      isCorePlayRequested = false;
       api?.setState('playing', false);
       api?.setState('paused', true);
       api?.setState('playbackState', 'paused');
@@ -474,19 +481,26 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
       // Setup playback control listeners
       const unsubPlay = api.on('playback:play', async () => {
+        if (api?.getState('chromecastActive')) return;
         if (!video) return;
+        if (!video.paused) return; // Prevent recursive play() when triggered by playing emit
         try {
+          isCorePlayRequested = true;
           await video.play();
         } catch (e) {
+          isCorePlayRequested = false;
           api?.logger.error('Play failed', e);
         }
       });
 
       const unsubPause = api.on('playback:pause', () => {
+        if (api?.getState('chromecastActive')) return;
+        isCorePlayRequested = false;
         video?.pause();
       });
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
+        if (api?.getState('chromecastActive')) return;
         if (!video) return;
         if (!Number.isFinite(time)) return;
         const clampedTime = Math.max(0, Math.min(time, video.duration || 0));

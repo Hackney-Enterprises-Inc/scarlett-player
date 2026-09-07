@@ -41,6 +41,7 @@ export namespace ChromeCastMedia {
   export interface Media {
     getEstimatedTime(): number;
     playerState: string;
+    idleReason?: string;
   }
 }
 

@@ -160,6 +160,8 @@ export function createHLSPluginWith(
   // Latched once the window closes so exhaustion is announced exactly once
   // and no further attempt can be scheduled against a closed window
   let reconnectExhausted = false;
+  let isReconnecting = false;
+  let isLiveClassified = false;
 
   // Playback stall watchdog: if timeupdate stops advancing while playing,
   // synthesize a recoverable error into the reconnect scheduler.
@@ -914,6 +916,7 @@ export function createHLSPluginWith(
     reconnectResumePosition = 0;
     reconnectTriggerError = null;
     reconnectExhausted = false;
+    isReconnecting = false;
   };
 
   /**
@@ -929,7 +932,11 @@ export function createHLSPluginWith(
     lastStallCheckTime = Date.now();
     lastStallCheckPosition = video.currentTime;
 
-    const targetDuration = Math.max(15, 4 * (video.duration || 0) || 15);
+    const levelTargetDuration =
+      (hls as any)?.targetDuration ??
+      (hls as any)?.levels?.[(hls as any)?.currentLevel]?.details?.targetduration ??
+      0;
+    const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
     const checkInterval = Math.min(targetDuration, 30000);
 
     const check = () => {
@@ -1040,7 +1047,7 @@ export function createHLSPluginWith(
 
     // Live streams get an indefinite window: the event may resume after an
     // extended intermission. VOD keeps the finite window from config.
-    const isLive = api?.getState('live') ?? false;
+    const isLive = (api?.getState('live') ?? false) && isLiveClassified;
     const configWindowMs = mergedConfig.reconnectWindowMs ?? 300000;
     const window_ms = isLive ? Infinity : configWindowMs;
     const elapsed_ms = Date.now() - reconnectWindowStart;
@@ -1100,7 +1107,7 @@ export function createHLSPluginWith(
     // For live streams, allow reconnect even before first playback (e.g.
     // viewer loading during pre-event intermission). VOD requires that
     // content has played at least once so a wrong URL does not retry forever.
-    const isLive = api?.getState('live') ?? false;
+    const isLive = (api?.getState('live') ?? false) && isLiveClassified;
     if (!isLive && !hasPlayedContent) return;
     if (error.type !== 'network' && error.type !== 'media') return;
 
@@ -1126,6 +1133,7 @@ export function createHLSPluginWith(
    */
   const attemptReconnect = async (): Promise<void> => {
     if (!api || !currentSrc) return;
+    isReconnecting = true;
 
     // New pipeline session: continuations from the dead one must bail, and
     // this attempt itself must bail if a user load or destroy supersedes it
@@ -1198,6 +1206,8 @@ export function createHLSPluginWith(
       if (session !== loadSession) return;
       api?.logger.warn(`Auto-reconnect attempt ${reconnectAttempts} failed`);
       scheduleReconnectAttempt();
+    } finally {
+      isReconnecting = false;
     }
   };
 
@@ -1312,21 +1322,24 @@ export function createHLSPluginWith(
       // A viewer whose wifi dropped should not wait out a 30s backoff after
       // their connection has already returned.
       if (typeof window !== 'undefined') {
-      onlineListener = () => {
-        if (reconnectTimer) {
-          api?.logger.info('Browser back online, reconnecting immediately');
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        // Re-open the reconnect window on network restoration so a viewer
-        // whose wifi dropped is not stranded by an exhausted window.
-        reconnectExhausted = false;
-        if (!reconnectWindowStart) {
-          reconnectWindowStart = Date.now();
-          reconnectResumePosition = video?.currentTime ?? 0;
-        }
-        void attemptReconnect();
-      };
+        onlineListener = () => {
+          const hasActiveReconnect =
+            reconnectTimer !== null ||
+            reconnectWindowStart > 0 ||
+            isReconnecting ||
+            (reconnectAttempts > 0 && !reconnectExhausted);
+
+          if (!hasActiveReconnect) {
+            return;
+          }
+
+          if (reconnectTimer) {
+            api?.logger.info('Browser back online, reconnecting immediately');
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          void attemptReconnect();
+        };
         window.addEventListener('online', onlineListener);
       }
 
@@ -1335,6 +1348,13 @@ export function createHLSPluginWith(
       // track change and a Vue prop change were all invisible to the viewer.
       const unsubPoster = api.subscribeToState((event) => {
         if (event.key === 'poster') applyPoster();
+      });
+
+      // Track explicit live classification for the current source
+      const unsubLive = api.subscribeToState((event) => {
+        if (event.key === 'live') {
+          isLiveClassified = true;
+        }
       });
 
       // Register cleanup
@@ -1347,6 +1367,7 @@ export function createHLSPluginWith(
         unsubRate();
         unsubQuality();
         unsubPoster();
+        unsubLive();
       });
 
       // Stall watchdog: start when playing, stop when paused.
@@ -1391,6 +1412,8 @@ export function createHLSPluginWith(
       const session = ++loadSession;
       cancelReconnect();
       hasPlayedContent = false;
+      isLiveClassified = false;
+      api.setState('live', false);
 
       // Cleanup previous source (also settles a pending load promise)
       cleanup(new Error('HLS load cancelled: superseded by a new load'));

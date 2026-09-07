@@ -434,6 +434,28 @@ describe('runtime API', () => {
     expect(img?.getAttribute('src')).toBe('https://example.com/logo.png');
   });
 
+  it('setText clears previous image and replaces with text', () => {
+    plugin.setImage('https://example.com/logo.png');
+    expect(mockApi.container.querySelector('.sp-watermark img')).not.toBeNull();
+
+    plugin.setText('replaced-text');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    expect(mockApi.container.querySelector('.sp-watermark img')).toBeNull();
+    expect(el?.textContent).toBe('replaced-text');
+  });
+
+  it('setImage clears previous text and replaces with image', () => {
+    plugin.setText('some-text');
+    plugin.setImage('https://example.com/logo2.png');
+
+    const el = mockApi.container.querySelector('.sp-watermark');
+    const img = mockApi.container.querySelector('.sp-watermark img');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe('https://example.com/logo2.png');
+    expect(el?.textContent).toBe('');
+  });
+
   it('setPosition moves the watermark', () => {
     plugin.setPosition('top-left');
 

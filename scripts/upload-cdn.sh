@@ -164,14 +164,35 @@ if [ "${SKIP_VERIFY:-0}" != "1" ]; then
   done
 
   # Verify the latest copy actually contains the version we just published.
-  # If the CDN serves stale cache, the grep will fail.
-  body=$(curl -sS --max-time 30 "${CDN_BASE}/latest/embed.umd.cjs" | head -c 512)
-  if [ -z "$body" ]; then
-    echo "Warning: could not fetch latest/embed.umd.cjs for content verification" >&2
-  elif echo "$body" | grep -q "$VERSION"; then
-    echo "  latest/embed.umd.cjs contains version $VERSION ✓"
-  else
-    echo "Warning: latest/embed.umd.cjs may not contain version $VERSION (stale cache?)" >&2
+  # If the CDN serves stale cache, the check will retry and fail if not updated.
+  tmp_file=$(mktemp)
+  body=""
+  verified=0
+
+  for attempt in 1 2 3 4 5; do
+    if curl -sS --max-time 30 "${CDN_BASE}/latest/embed.umd.cjs" -o "$tmp_file"; then
+      body=$(head -c 512 "$tmp_file" 2>/dev/null || true)
+      if [ -n "$body" ] && echo "$body" | grep -q "$VERSION"; then
+        echo "  latest/embed.umd.cjs contains version $VERSION ✓"
+        verified=1
+        break
+      fi
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      echo "  Retrying verification in 2s (attempt $attempt/5)..."
+      sleep 2
+    fi
+  done
+
+  rm -f "$tmp_file"
+
+  if [ "$verified" -ne 1 ]; then
+    if [ -z "$body" ]; then
+      echo "Error: could not fetch latest/embed.umd.cjs for content verification" >&2
+    else
+      echo "Error: latest/embed.umd.cjs does not contain version $VERSION (stale cache?)" >&2
+    fi
+    exit 1
   fi
 fi
 

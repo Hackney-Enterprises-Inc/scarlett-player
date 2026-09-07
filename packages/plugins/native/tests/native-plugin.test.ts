@@ -566,3 +566,72 @@ describe('playbackState key', () => {
     expect(state.playbackState).toBe('loading');
   });
 });
+
+describe('playback:play emission and Chromecast guard', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, any>;
+  const listeners: Record<string, ((payload?: any) => void) | undefined> = {};
+
+  beforeEach(async () => {
+    plugin = createNativePlugin();
+    state = { chromecastActive: false };
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn((event: string, handler: (payload?: any) => void) => {
+        listeners[event] = handler;
+        return vi.fn();
+      }),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+    void plugin.loadSource('https://example.com/video.mp4').catch(() => {});
+  });
+
+  it('emits playback:play on direct element playing event', () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.dispatchEvent(new Event('playing'));
+
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:play', undefined);
+  });
+
+  it('does not emit duplicate playback:play when play was initiated via core', async () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.play = vi.fn().mockResolvedValue(undefined);
+
+    // Trigger playback:play listener (from core player)
+    await listeners['playback:play']?.();
+
+    mockApi.emit.mockClear();
+
+    // Now element fires playing
+    el.dispatchEvent(new Event('playing'));
+
+    expect(mockApi.emit).not.toHaveBeenCalledWith('playback:play', undefined);
+  });
+
+  it('does not control video element when chromecastActive is true', async () => {
+    state.chromecastActive = true;
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.pause = vi.fn();
+
+    await listeners['playback:play']?.();
+    expect(el.play).not.toHaveBeenCalled();
+
+    listeners['playback:pause']?.();
+    expect(el.pause).not.toHaveBeenCalled();
+
+    listeners['playback:seeking']?.({ time: 50 });
+    expect(el.currentTime).toBe(0);
+  });
+});

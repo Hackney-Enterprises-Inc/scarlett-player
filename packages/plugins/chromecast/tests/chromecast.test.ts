@@ -22,7 +22,7 @@ const createMockCastSDK = () => {
     })),
     loadMedia: vi.fn().mockResolvedValue(undefined),
     endSession: vi.fn(),
-    getMediaSession: vi.fn(() => null),
+    getMediaSession: vi.fn((): any => null),
   };
 
   const mockCastContext = {
@@ -346,6 +346,30 @@ describe('Chromecast Plugin', () => {
       plugin.endSession();
 
       expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(true);
+    });
+
+    it('should detect media ended when mediaSession has playerState IDLE and idleReason FINISHED', async () => {
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      // Connect session
+      mockSDK.sessionHandlers[0]?.({
+        sessionState: 'SESSION_STARTED',
+      });
+
+      // Mock mediaSession returned by currentSession
+      mockSDK.mockSession.getMediaSession.mockReturnValue({
+        playerState: 'IDLE',
+        idleReason: 'FINISHED',
+        getEstimatedTime: () => 100,
+      });
+
+      // Trigger remote player change
+      mockSDK.remotePlayerHandlers[0]?.({ field: 'any', value: null });
+
+      expect(api.emit).toHaveBeenCalledWith('playback:ended', undefined);
     });
   });
 
