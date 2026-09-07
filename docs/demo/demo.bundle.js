@@ -292,10 +292,15 @@
          */
         define(key, initialValue) {
           if (this.signals.has(key)) {
-            const existing = this.definedDefaults.get(key);
-            if (existing !== void 0 && !Object.is(existing, initialValue)) {
+            const isPluginKey = this.definedDefaults.has(key);
+            const isCoreKey = key in DEFAULT_STATE;
+            const existing = isPluginKey ? this.definedDefaults.get(key) : DEFAULT_STATE[key];
+            if ((isPluginKey || isCoreKey) && !Object.is(existing, initialValue)) {
               console.warn(
-                `[StateManager] State key "${String(key)}" is already defined with a different default. Keeping: ${JSON.stringify(existing)}, ignoring: ${JSON.stringify(initialValue)}`
+                `[StateManager] State key "${String(key)}" is already defined with a different default. Keeping:`,
+                existing,
+                "ignoring:",
+                initialValue
               );
             }
             return;
@@ -2811,7 +2816,7 @@
     return `${sign}${m}:${pad(s)}`;
   }
   function formatLiveTime(behindLive) {
-    if (behindLive <= 0) {
+    if (!Number.isFinite(behindLive) || behindLive <= 0) {
       return "LIVE";
     }
     return `-${formatTime(behindLive)}`;
@@ -43159,7 +43164,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const isTrack = (t) => typeof t === "object" && t !== null && typeof t.src === "string";
     const loadPersistedPlaylist = () => {
       if (!mergedConfig.persist) return;
-      if (mergedConfig.tracks?.length) return;
+      if (mergedConfig.tracks !== void 0) return;
       try {
         const data = localStorage.getItem(mergedConfig.persistKey);
         if (!data) return;
@@ -43167,7 +43172,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const restored = Array.isArray(parsed.tracks) ? parsed.tracks.filter(isTrack) : [];
         if (restored.length === 0) return;
         tracks = restored;
-        const index = typeof parsed.currentIndex === "number" ? parsed.currentIndex : -1;
+        const index = Number.isInteger(parsed.currentIndex) ? parsed.currentIndex : -1;
         currentIndex = index >= 0 ? Math.min(index, tracks.length - 1) : -1;
         shuffle = parsed.shuffle === true;
         repeat = parsed.repeat === "one" || parsed.repeat === "all" ? parsed.repeat : "none";
@@ -43210,7 +43215,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = pluginApi;
         api.logger.info("Playlist plugin initialized");
         loadPersistedPlaylist();
-        if (shuffle && tracks.length > 0) {
+        if (shuffle && tracks.length > 0 && shuffleOrder.length !== tracks.length) {
           generateShuffleOrder();
         }
         let advanceTimeout = null;
@@ -43575,14 +43580,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           navigator.mediaSession.setActionHandler("seekbackward", (details) => {
             const offset = details.seekOffset || seekOffset;
             const currentTime = api?.getState("currentTime") || 0;
-            const newTime = Math.max(seekBounds().min, currentTime - offset);
+            const { min, max } = seekBounds();
+            const newTime = Math.min(max, Math.max(min, currentTime - offset));
             api?.logger.debug("Media session: seekbackward", { offset, newTime });
             api?.emit("playback:seeking", { time: newTime });
           });
           navigator.mediaSession.setActionHandler("seekforward", (details) => {
             const offset = details.seekOffset || seekOffset;
             const currentTime = api?.getState("currentTime") || 0;
-            const newTime = Math.min(seekBounds().max, currentTime + offset);
+            const { min, max } = seekBounds();
+            const newTime = Math.max(min, Math.min(max, currentTime + offset));
             api?.logger.debug("Media session: seekforward", { offset, newTime });
             api?.emit("playback:seeking", { time: newTime });
           });
@@ -44280,12 +44287,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const key = e.key;
         const duration = api?.getState("duration") || 0;
         const currentTime = api?.getState("currentTime") || 0;
+        const live = api?.getState("live") === true;
+        const seekableRange = live ? api?.getState("seekableRange") : null;
+        const min = seekableRange?.start ?? 0;
+        const max = seekableRange?.end ?? duration;
         let time = null;
-        if (key === "ArrowLeft") time = Math.max(0, currentTime - SEEK_STEP_SECONDS);
-        else if (key === "ArrowRight") time = Math.min(duration, currentTime + SEEK_STEP_SECONDS);
-        else if (key === "Home") time = 0;
-        else if (key === "End") time = duration;
+        if (key === "ArrowLeft") time = currentTime - SEEK_STEP_SECONDS;
+        else if (key === "ArrowRight") time = currentTime + SEEK_STEP_SECONDS;
+        else if (key === "Home") time = min;
+        else if (key === "End") time = max;
         if (time === null) return;
+        time = Math.min(max, Math.max(min, time));
         e.preventDefault();
         api?.emit("playback:seeking", { time });
       });
@@ -44779,6 +44791,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var CREDENTIAL_PARAMS = /* @__PURE__ */ new Set([
     "token",
     "access_token",
+    "id_token",
+    "refresh_token",
     "auth",
     "authorization",
     "jwt",
@@ -44791,7 +44805,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "session",
     "sessionid",
     "expires",
-    "policy"
+    "policy",
+    // CloudFront signed URLs. `signature`, `expires` and `policy` above cover
+    // the rest of the canned-policy set.
+    "key-pair-id",
+    // AWS SigV4 presigned URLs, which a page served straight out of S3 carries.
+    // The whole set goes, not just the signature: the remainder is unusable
+    // without it and only makes the shared link unreadable.
+    "x-amz-signature",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "x-amz-expires",
+    "x-amz-algorithm",
+    "x-amz-date",
+    "x-amz-signedheaders"
   ]);
   function stripCredentials(href) {
     try {
@@ -47576,7 +47603,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.9.0" : "dev";
+  var VERSION = true ? "1.10.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
