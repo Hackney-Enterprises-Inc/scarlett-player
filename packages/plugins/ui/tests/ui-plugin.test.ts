@@ -1337,5 +1337,61 @@ describe('UI Plugin', () => {
 
       await plugin.destroy();
     });
+
+    describe('without ResizeObserver', () => {
+      beforeEach(() => {
+        // A viewport with no ResizeObserver: the plugin used to fit the bar at
+        // init and on control changes, and never again.
+        vi.stubGlobal('ResizeObserver', undefined);
+        observed = null;
+      });
+
+      it('refits on a debounced window resize instead', async () => {
+        vi.useFakeTimers();
+        barWidth = 320;
+        const plugin = uiPlugin();
+        await plugin.init(api);
+        expect(inTray('.sp-volume')).toBe(true);
+
+        barWidth = 960;
+        window.dispatchEvent(new Event('resize'));
+        vi.advanceTimersByTime(200);
+        flushFrame();
+
+        expect(inBar('.sp-volume')).toBe(true);
+
+        await plugin.destroy();
+        vi.useRealTimers();
+      });
+
+      it('bounds the menus from the window resize too', async () => {
+        vi.useFakeTimers();
+        const plugin = uiPlugin();
+        await plugin.init(api);
+        Object.defineProperty(api.container, 'clientHeight', {
+          value: 400,
+          configurable: true,
+        });
+
+        barHeight = 90;
+        window.dispatchEvent(new Event('resize'));
+        vi.advanceTimersByTime(200);
+
+        expect(api.container.style.getPropertyValue('--sp-menu-max-height')).toBe('294px');
+
+        await plugin.destroy();
+        vi.useRealTimers();
+      });
+
+      it('removes the window listener on destroy', async () => {
+        const removeSpy = vi.spyOn(window, 'removeEventListener');
+        const plugin = uiPlugin();
+        await plugin.init(api);
+        await plugin.destroy();
+
+        expect(removeSpy).toHaveBeenCalledWith('resize', expect.any(Function));
+        removeSpy.mockRestore();
+      });
+    });
   });
 });

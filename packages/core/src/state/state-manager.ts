@@ -203,7 +203,10 @@ export class StateManager {
    * untouched. Plugins commonly re-run setup after a source change, and that
    * must not reset state that is already live.
    *
-   * Namespace plugin keys with the plugin's own name to avoid collisions.
+   * Namespace plugin keys with the plugin's own name to avoid collisions. A
+   * redefinition with a *different* default is a collision rather than a
+   * re-run, so it warns: the first definition still wins, but silently
+   * diverging state was previously impossible to diagnose.
    *
    * @param key - State property key
    * @param initialValue - Value used only when the key is new
@@ -215,6 +218,16 @@ export class StateManager {
    */
   define<K extends StateKey>(key: K, initialValue: StateValue<K>): void {
     if (this.signals.has(key)) {
+      const existing = this.definedDefaults.get(key);
+      // A re-run of the same plugin's setup passes the same default and stays
+      // quiet; two plugins claiming one key with different defaults do not.
+      if (existing !== undefined && !Object.is(existing, initialValue)) {
+        console.warn(
+          `[StateManager] State key "${String(key)}" is already defined with a ` +
+            `different default. Keeping: ${JSON.stringify(existing)}, ` +
+            `ignoring: ${JSON.stringify(initialValue)}`
+        );
+      }
       return;
     }
 

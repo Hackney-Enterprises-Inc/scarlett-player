@@ -152,6 +152,60 @@ describe('fatal error detail payload', () => {
     expect(detail).not.toHaveProperty('url');
   });
 
+  it('recovers the segment URL from a fragment error that sets no data.url', async () => {
+    // hls.js constructs a fragment HTTP failure with `frag` and `response` and
+    // never sets `data.url`. Reading only `data.url` dropped the failing
+    // segment from the diagnostics an origin outage produces.
+    await loadAndFail(
+      { maxNetworkRetries: 0 },
+      {
+        type: 'networkError',
+        details: 'fragLoadError',
+        fatal: true,
+        frag: { url: SEGMENT_URL },
+        response: { url: SEGMENT_URL, code: 503, text: 'Service Unavailable' },
+      }
+    );
+
+    expect(lastFatalError()?.detail).toMatchObject({
+      type: 'network',
+      httpStatus: 503,
+      url: 'https://cdn.example.com/live/720p/00042.ts',
+    });
+  });
+
+  it('recovers the key URL from a key load error carrying only a response URL', async () => {
+    await loadAndFail(
+      { maxNetworkRetries: 0 },
+      {
+        type: 'networkError',
+        details: 'keyLoadError',
+        fatal: true,
+        response: { url: SEGMENT_URL, code: 403, text: 'Forbidden' },
+      }
+    );
+
+    expect(lastFatalError()?.detail?.url).toBe('https://cdn.example.com/live/720p/00042.ts');
+  });
+
+  it('still prefers data.url when the error carries one', async () => {
+    const MANIFEST_URL = 'https://cdn.example.com/live/playlist.m3u8?token=secret';
+
+    await loadAndFail(
+      { maxNetworkRetries: 0 },
+      {
+        type: 'networkError',
+        details: 'manifestLoadError',
+        fatal: true,
+        url: MANIFEST_URL,
+        // A stale frag from an earlier request must not win over data.url
+        frag: { url: SEGMENT_URL },
+      }
+    );
+
+    expect(lastFatalError()?.detail?.url).toBe('https://cdn.example.com/live/playlist.m3u8');
+  });
+
   it('omits httpStatus for the synthetic playlist-validation error (code 0)', async () => {
     await loadAndFail(
       { maxNetworkRetries: 0 },

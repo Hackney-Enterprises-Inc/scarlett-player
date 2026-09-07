@@ -80,6 +80,10 @@ importers:
 
   packages/embed:
     dependencies:
+      '@scarlett-player/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@scarlett-player/analytics':
         specifier: workspace:*
         version: link:../plugins/analytics
@@ -89,9 +93,6 @@ importers:
       '@scarlett-player/captions':
         specifier: workspace:*
         version: link:../plugins/captions
-      '@scarlett-player/core':
-        specifier: workspace:*
-        version: link:../core
       '@scarlett-player/gestures':
         specifier: workspace:*
         version: link:../plugins/gestures
@@ -116,16 +117,15 @@ importers:
       '@scarlett-player/watermark':
         specifier: workspace:*
         version: link:../plugins/watermark
-      hls.js:
-        specifier: ^1.6.0
-        version: 1.6.15
-    devDependencies:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.27
       '@vitest/ui':
         specifier: ^1.1.0
         version: 1.6.1(vitest@1.6.1)
+      hls.js:
+        specifier: ^1.6.0
+        version: 1.6.15
       jsdom:
         specifier: ^23.0.0
         version: 23.2.0

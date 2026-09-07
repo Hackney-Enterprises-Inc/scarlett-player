@@ -1091,12 +1091,17 @@ export const styles = `
 
 /* ============================================
    CSS Custom Properties (Theming)
+   ============================================
+
+   Token defaults live at the use sites as var() fallbacks, not in a :root
+   block. A :root declaration wrote --sp-accent, --sp-color, --sp-bg,
+   --sp-control-height and --sp-icon-size into the HOST document, so mounting a
+   player changed variables the page may own. A .sp-container declaration would
+   be no better: the container rule wins for every descendant, so it would
+   override a host that themes the player from its own :root. A var() fallback
+   does neither - it applies only where nothing else defines the token.
+
+   setTheme() writes the same names onto the player's container, which still
+   wins over the fallbacks.
    ============================================ */
-:root {
-  --sp-accent: #e50914;
-  --sp-color: #fff;
-  --sp-bg: rgba(0, 0, 0, 0.8);
-  --sp-control-height: 48px;
-  --sp-icon-size: 24px;
-}
 `;

@@ -263,22 +263,45 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     }
   };
 
+  /** A persisted entry is only usable as a track if it can actually be loaded. */
+  const isTrack = (t: unknown): t is PlaylistTrack =>
+    typeof t === 'object' &&
+    t !== null &&
+    typeof (t as { src?: unknown }).src === 'string';
+
   /**
-   * Load playlist from localStorage
+   * Load playlist from localStorage.
+   *
+   * Storage is untrusted input - another tab, an older release, or a hand-edited
+   * key can all put a shape here that this build does not expect - so every
+   * field is validated and anything unusable is dropped rather than restored.
    */
   const loadPersistedPlaylist = (): void => {
     if (!mergedConfig.persist) return;
 
+    // Config wins: a caller that supplied tracks did not ask for whatever this
+    // browser happens to have in storage under a shared key.
+    if (mergedConfig.tracks?.length) return;
+
     try {
       const data = localStorage.getItem(mergedConfig.persistKey!);
-      if (data) {
-        const parsed = JSON.parse(data);
-        tracks = parsed.tracks || [];
-        currentIndex = parsed.currentIndex ?? -1;
-        shuffle = parsed.shuffle ?? false;
-        repeat = parsed.repeat ?? 'none';
-        shuffleOrder = parsed.shuffleOrder || [];
-      }
+      if (!data) return;
+
+      const parsed = JSON.parse(data) as Record<string, unknown>;
+      const restored = Array.isArray(parsed.tracks) ? parsed.tracks.filter(isTrack) : [];
+      if (restored.length === 0) return;
+
+      tracks = restored;
+
+      const index = typeof parsed.currentIndex === 'number' ? parsed.currentIndex : -1;
+      currentIndex = index >= 0 ? Math.min(index, tracks.length - 1) : -1;
+      shuffle = parsed.shuffle === true;
+      repeat = parsed.repeat === 'one' || parsed.repeat === 'all' ? parsed.repeat : 'none';
+      shuffleOrder = Array.isArray(parsed.shuffleOrder)
+        ? parsed.shuffleOrder.filter(
+            (n): n is number => typeof n === 'number' && n >= 0 && n < tracks.length
+          )
+        : [];
     } catch (e) {
       api?.logger.warn('Failed to load persisted playlist', e);
     }
@@ -295,10 +318,17 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
   /**
    * Set current track (emits playlist:change event).
-   * When autoLoad is enabled (default), also emits media:load-request
-   * so the core player automatically loads the source.
+   *
+   * When autoLoad is enabled (default), also emits media:load-request so the
+   * core player automatically loads the source.
+   *
+   * @param index - Track index
+   * @param options.autoplay - Whether the load request should start playback.
+   *        Manual selection passes true (the click is the intent); auto-advance
+   *        passes whether playback was actually running, so a paused playlist
+   *        does not start playing on its own.
    */
-  const setCurrentTrack = (index: number): void => {
+  const setCurrentTrack = (index: number, options: { autoplay?: boolean } = {}): void => {
     if (index < 0 || index >= tracks.length) {
       api?.logger.warn('Invalid track index', { index });
       return;
@@ -327,7 +357,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
     // Automatically request media load if autoLoad is enabled
     if (mergedConfig.autoLoad !== false && track.src) {
-      api?.emit('media:load-request', { src: track.src, autoplay: true });
+      api?.emit('media:load-request', { src: track.src, autoplay: options.autoplay ?? true });
     }
   };
 
@@ -359,12 +389,19 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
         const nextIdx = getNextIndex();
         if (nextIdx >= 0) {
+          // `ended` has already flipped `playing` false, so ask whether the
+          // viewer had paused this playlist rather than reading it now.
+          const wasPlaying = !api?.getState('paused');
+
           const advance = () => {
             api?.logger.debug('Auto-advancing to next track', { nextIdx });
-            setCurrentTrack(nextIdx);
+            setCurrentTrack(nextIdx, { autoplay: wasPlaying });
           };
 
           if (mergedConfig.advanceDelay) {
+            // Two ended events inside the delay would otherwise arm two
+            // timers and skip a track; the first handle was simply overwritten.
+            if (advanceTimeout) clearTimeout(advanceTimeout);
             advanceTimeout = setTimeout(advance, mergedConfig.advanceDelay);
           } else {
             advance();

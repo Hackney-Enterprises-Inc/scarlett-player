@@ -10,11 +10,25 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
 const OUT_DIR = 'dist';
 
 /**
+ * Names of the two shared hls.js chunks, stamped with the package version.
+ *
+ * `latest/` is served at `max-age=3600` while `v<version>/` is immutable
+ * (`scripts/upload-cdn.sh`). An unstamped `latest/hls.js` therefore let a
+ * browser holding yesterday's cached chunk pair it with a freshly fetched
+ * `latest/embed.js` from the next release. Stamping the name means a cached
+ * bundle keeps importing the exact chunk it was built against, which is still
+ * on the CDN under its own name.
+ */
+const HLS_CHUNK_NAME = `hls.${pkg.version}.js`;
+const HLS_LIGHT_CHUNK_NAME = `hls.light.${pkg.version}.js`;
+
+/**
  * The only chunk names that are allowed to be shared between builds, i.e. the
  * ones `chunkFileNames` deliberately leaves without a build prefix.
- * `scripts/check-embed-chunks.mjs` asserts the same set against dist.
+ * `scripts/check-embed-chunks.mjs` derives the same set from the same
+ * package.json version, and the two must move in lockstep.
  */
-const SHARED_CHUNK_NAMES = new Set(['hls.js', 'hls.light.js']);
+const SHARED_CHUNK_NAMES = new Set([HLS_CHUNK_NAME, HLS_LIGHT_CHUNK_NAME]);
 
 /**
  * Build variants:
@@ -84,11 +98,15 @@ const fileName = (format: string) => {
  * everything shares one flat directory.
  *
  * The two hls.js chunks stay unprefixed on purpose: the full and video builds
- * emit byte-identical `hls.js`, so one copy serves both, and the audio build's
- * light chunk has a distinct name of its own. That "byte-identical" is not an
- * assumption any more: `guardSharedChunks()` below compares the bytes on every
- * build, so a divergence fails the build instead of shipping whichever copy
- * was written last.
+ * emit a byte-identical `hls.<version>.js`, so one copy serves both, and the
+ * audio build's light chunk has a distinct name of its own. That
+ * "byte-identical" is not an assumption any more: `guardSharedChunks()` below
+ * compares the bytes on every build, so a divergence fails the build instead of
+ * shipping whichever copy was written last.
+ *
+ * They carry the package version instead of a build prefix. `latest/` is
+ * mutable and cached for an hour, so an unstamped name let a stale cached
+ * `latest/embed.js` pair with a newer `latest/hls.js`. See HLS_CHUNK_NAME.
  *
  * @param chunkInfo - Rollup's pre-render chunk metadata
  * @returns Stable, unhashed file name for the chunk
@@ -100,7 +118,7 @@ const chunkFileNames = (chunkInfo: Rollup.PreRenderedChunk): string => {
   if (isHlsChunk) {
     // hls.js/light resolves through .../hls.js/dist/hls.light.mjs
     const isLight = modules.some((id) => /hls\.js[\\/].*light/.test(id));
-    return isLight ? 'hls.light.js' : 'hls.js';
+    return isLight ? HLS_LIGHT_CHUNK_NAME : HLS_CHUNK_NAME;
   }
 
   return `${baseName}.${chunkInfo.name}.js`;
@@ -112,8 +130,8 @@ const chunkFileNames = (chunkInfo: Rollup.PreRenderedChunk): string => {
  *
  * The three builds write into one `dist` with `emptyOutDir: false`, and
  * `chunkFileNames` hands two chunk names out unprefixed on the strength of a
- * claim: the full and video builds' `hls.js` are the same file, so whichever
- * writes second is harmless. Nothing enforced that.
+ * claim: the full and video builds' `hls.<version>.js` are the same file, so
+ * whichever writes second is harmless. Nothing enforced that.
  * `scripts/check-embed-chunks.mjs` cannot: it only asserts that every chunk a
  * bundle imports exists, and after a silent overwrite the file still exists.
  * A hls.js major bump that changed the two module graphs, or a build that

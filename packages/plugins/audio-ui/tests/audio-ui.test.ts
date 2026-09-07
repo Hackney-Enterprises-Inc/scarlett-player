@@ -556,6 +556,58 @@ describe('progress bar interaction', () => {
 
     expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 50 });
   });
+
+  describe('keyboard', () => {
+    /** The progress bar, which already carries role="slider" and tabindex="0". */
+    const bar = (): HTMLElement =>
+      plugin.getElement()?.querySelector('.scarlett-audio__progress-bar') as HTMLElement;
+
+    /** Press a key on the progress bar with the playhead at `at` seconds. */
+    const press = (key: string, at: number): void => {
+      mockApi.getState.mockImplementation((k: string) => {
+        if (k === 'duration') return 100;
+        if (k === 'currentTime') return at;
+        return 0;
+      });
+      bar().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    };
+
+    it('seeks back 5s on ArrowLeft', () => {
+      press('ArrowLeft', 40);
+
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 35 });
+    });
+
+    it('seeks forward 5s on ArrowRight', () => {
+      press('ArrowRight', 40);
+
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 45 });
+    });
+
+    it('clamps at both ends', () => {
+      press('ArrowLeft', 2);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 0 });
+
+      press('ArrowRight', 98);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    });
+
+    it('jumps to the ends on Home and End', () => {
+      press('Home', 40);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 0 });
+
+      press('End', 40);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    });
+
+    it('leaves other keys to whoever else wants them', () => {
+      const event = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+      bar().dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(mockApi.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+    });
+  });
 });
 
 describe('volume slider interaction', () => {
@@ -589,6 +641,67 @@ describe('volume slider interaction', () => {
     volumeSlider.dispatchEvent(clickEvent);
 
     expect(mockApi.emit).toHaveBeenCalledWith('volume:change', { volume: 0.5, muted: false });
+  });
+
+  describe('keyboard', () => {
+    /** The volume slider, which already carries role="slider" and tabindex="0". */
+    const slider = (): HTMLElement =>
+      plugin.getElement()?.querySelector('.scarlett-audio__volume-slider') as HTMLElement;
+
+    /** Press a key on the volume slider with the volume at `at`. */
+    const press = (key: string, at: number): void => {
+      mockApi.getState.mockImplementation((k: string) => (k === 'volume' ? at : 0));
+      slider().dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      );
+    };
+
+    /** The volume carried by the last volume:change emit. */
+    const lastVolume = (): number => {
+      const calls = mockApi.emit.mock.calls.filter(([event]) => event === 'volume:change');
+      return (calls[calls.length - 1]?.[1] as { volume: number }).volume;
+    };
+
+    it('steps down on ArrowLeft and ArrowDown', () => {
+      press('ArrowLeft', 0.5);
+      expect(lastVolume()).toBeCloseTo(0.45);
+
+      press('ArrowDown', 0.5);
+      expect(lastVolume()).toBeCloseTo(0.45);
+    });
+
+    it('steps up on ArrowRight and ArrowUp', () => {
+      press('ArrowRight', 0.5);
+      expect(lastVolume()).toBeCloseTo(0.55);
+
+      press('ArrowUp', 0.5);
+      expect(lastVolume()).toBeCloseTo(0.55);
+    });
+
+    it('clamps to [0, 1]', () => {
+      press('ArrowDown', 0.02);
+      expect(lastVolume()).toBe(0);
+
+      press('ArrowUp', 0.98);
+      expect(lastVolume()).toBe(1);
+    });
+
+    it('jumps to silence and full on Home and End', () => {
+      press('Home', 0.5);
+      expect(lastVolume()).toBe(0);
+
+      press('End', 0.5);
+      expect(lastVolume()).toBe(1);
+    });
+
+    it('unmutes on a deliberate change', () => {
+      press('ArrowUp', 0.5);
+
+      expect(mockApi.emit).toHaveBeenLastCalledWith('volume:change', {
+        volume: expect.any(Number),
+        muted: false,
+      });
+    });
   });
 });
 
@@ -789,5 +902,62 @@ describe('playlist state updates', () => {
 
     const repeatBtn = plugin.getElement()?.querySelector('.scarlett-audio__btn--repeat');
     expect(repeatBtn?.classList.contains('scarlett-audio__btn--active')).toBe(true);
+  });
+});
+
+describe('icon writes', () => {
+  let plugin: IAudioUIPlugin;
+  let mockApi: ReturnType<typeof createMockApi>;
+
+  beforeEach(async () => {
+    plugin = createAudioUIPlugin();
+    mockApi = createMockApi();
+    await plugin.init(mockApi);
+  });
+
+  afterEach(async () => {
+    await plugin.destroy();
+  });
+
+  it('does not rewrite an unchanged icon on every currentTime tick', () => {
+    const playBtn = plugin.getElement()?.querySelector(
+      '.scarlett-audio__btn--play'
+    ) as HTMLElement;
+    const stateCallback = mockApi.subscribeToState.mock.calls[0][0];
+
+    // Enter the playing state once, then tick the clock 20 times.
+    mockApi.getState.mockImplementation((key: string) => {
+      if (key === 'playing') return true;
+      if (key === 'duration') return 100;
+      return 0;
+    });
+    stateCallback({ key: 'playing', value: true });
+
+    const svg = playBtn.querySelector('svg');
+    for (let i = 1; i <= 20; i++) {
+      stateCallback({ key: 'currentTime', value: i });
+    }
+
+    // Each innerHTML write reparses the SVG and discards the live node, so the
+    // node surviving is the proof that only one write happened.
+    expect(playBtn.querySelector('svg')).toBe(svg);
+  });
+
+  it('still swaps the icon when the state actually changes', () => {
+    const playBtn = plugin.getElement()?.querySelector(
+      '.scarlett-audio__btn--play'
+    ) as HTMLElement;
+    const stateCallback = mockApi.subscribeToState.mock.calls[0][0];
+
+    mockApi.getState.mockImplementation((key: string) => (key === 'playing' ? true : 0));
+    stateCallback({ key: 'playing', value: true });
+    expect(playBtn.getAttribute('aria-label')).toBe('Pause');
+    const playing = playBtn.innerHTML;
+
+    mockApi.getState.mockImplementation(() => 0);
+    stateCallback({ key: 'playing', value: false });
+
+    expect(playBtn.getAttribute('aria-label')).toBe('Play');
+    expect(playBtn.innerHTML).not.toBe(playing);
   });
 });

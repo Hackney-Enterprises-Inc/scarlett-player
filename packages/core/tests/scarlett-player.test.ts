@@ -868,6 +868,48 @@ describe('ScarlettPlayer', () => {
 
       expect((provider as any).loadSource).toHaveBeenCalledWith('video.m3u8');
     });
+
+    it('should not reload the initial source on a second init()', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({
+        container,
+        src: 'video.m3u8',
+        plugins: [provider],
+      });
+
+      await player.init();
+      await player.init();
+
+      expect((provider as any).loadSource).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not overwrite a source the host loaded before init()', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({
+        container,
+        src: 'video.m3u8',
+        plugins: [provider],
+      });
+
+      await player.load('custom.mp4');
+      await player.init();
+
+      expect((provider as any).loadSource).toHaveBeenCalledTimes(1);
+      expect((provider as any).loadSource).toHaveBeenCalledWith('custom.mp4');
+      expect(player.getState().source?.src).toBe('custom.mp4');
+    });
   });
 
   describe('auto-initialization', () => {
@@ -1479,6 +1521,104 @@ describe('ScarlettPlayer', () => {
       player.seekToLive();
 
       expect(seekSpy).toHaveBeenCalledWith({ time: 150 });
+    });
+
+    // The test above proves only the first branch, against a provider that
+    // returns whatever this file wrote. Everything a real provider can
+    // actually hand back - no getLiveInfo at all, live info with no sync
+    // position, a non-finite duration - falls through to the chain below, and
+    // none of it was covered.
+
+    it('should fall back to the seekable range when the provider has no getLiveInfo', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('seekableRange', { start: 100, end: 220 });
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      player.seekToLive();
+
+      expect(seekSpy).toHaveBeenCalledWith({ time: 220 });
+    });
+
+    it('should fall back when getLiveInfo reports no live sync position', async () => {
+      // The native provider's live info carries no liveSyncPosition: that is
+      // an hls.js concept. Seeking to `undefined` is what the guard prevents.
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+        getLiveInfo: vi.fn(() => ({
+          isLive: true,
+          latency: 2,
+          targetLatency: 3,
+          drift: 0.5,
+        })),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('seekableRange', { start: 100, end: 220 });
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      player.seekToLive();
+
+      expect(seekSpy).toHaveBeenCalledWith({ time: 220 });
+    });
+
+    it('should fall back to a finite duration when there is no seekable range', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('duration', 300);
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      player.seekToLive();
+
+      expect(seekSpy).toHaveBeenCalledWith({ time: 300 });
+    });
+
+    it('should not seek to Infinity, which is what a live duration reports', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('duration', Infinity);
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      player.seekToLive();
+
+      expect(seekSpy).not.toHaveBeenCalled();
     });
   });
 

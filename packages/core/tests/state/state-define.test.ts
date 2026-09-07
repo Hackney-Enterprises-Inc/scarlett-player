@@ -65,6 +65,28 @@ describe('StateManager.define', () => {
     expect(state.getValue('testPluginValue')).toBe(42);
   });
 
+  it('stays silent when a re-define passes the same default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    state.define('testPluginValue', 1);
+    state.define('testPluginValue', 1);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns once and keeps the first value when two defaults conflict', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    state.define('testPluginValue', 1);
+    state.define('testPluginValue', 2);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('testPluginValue');
+    expect(state.getValue('testPluginValue')).toBe(1);
+    warn.mockRestore();
+  });
+
   it('does not resubscribe on re-define', () => {
     const subscriber = vi.fn();
     state.define('testPluginValue', 0);

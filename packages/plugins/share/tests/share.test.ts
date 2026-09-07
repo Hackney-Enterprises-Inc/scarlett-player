@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSharePlugin } from '../src/index';
-import { applyTimestamp, resolveBaseUrl } from '../src/url';
+import { applyTimestamp, resolveBaseUrl, stripCredentials } from '../src/url';
 import { resolveTargets } from '../src/targets';
 import { ShareButton } from '../src/ShareButton';
 import { sanitizeIcon } from '../src/sanitize';
@@ -97,6 +97,36 @@ describe('URL resolution', () => {
     expect(resolveBaseUrl(config)).toBe('https://tsp.test/watch/one');
     current = 'https://tsp.test/watch/two';
     expect(resolveBaseUrl(config)).toBe('https://tsp.test/watch/two');
+  });
+
+  it('drops credential query params from the page URL', () => {
+    const href = 'https://tsp.test/watch?v=abc123&token=xyz&Signature=sig';
+    const result = stripCredentials(href);
+
+    expect(result).toBe('https://tsp.test/watch?v=abc123');
+  });
+
+  it('keeps page identity params, which is why this is a denylist', () => {
+    // origin + pathname would share the wrong video from /watch?v=abc123.
+    expect(stripCredentials('https://tsp.test/watch?v=abc123')).toBe(
+      'https://tsp.test/watch?v=abc123',
+    );
+  });
+
+  it('drops the fragment, where implicit-flow tokens land', () => {
+    expect(stripCredentials('https://tsp.test/watch?v=abc#access_token=xyz')).toBe(
+      'https://tsp.test/watch?v=abc',
+    );
+  });
+
+  it('returns an unparseable URL unchanged rather than throwing', () => {
+    expect(stripCredentials('not a url')).toBe('not a url');
+  });
+
+  it('returns an explicit config.url verbatim, credentials and all', () => {
+    // The host said what to share; filtering it would be second-guessing.
+    const url = 'https://tsp.test/watch?v=abc&token=xyz#frag';
+    expect(resolveBaseUrl({ url })).toBe(url);
   });
 
   it('never shares the media src', async () => {

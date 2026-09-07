@@ -13,7 +13,7 @@
  * Usage: node scripts/hls-fixture.mjs
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,19 @@ const MANIFEST = join(FIXTURE_DIR, 'vod.m3u8');
  */
 export function ensureHlsFixture() {
   if (existsSync(MANIFEST)) return MANIFEST;
+
+  // Checked before the real call so a missing ffmpeg reports what to install
+  // rather than surfacing as a raw ENOENT spawn error from execFileSync. CI
+  // runs this on ubuntu-latest, where ffmpeg is preinstalled; a developer
+  // machine may not have it.
+  const probe = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+  if (probe.error) {
+    throw new Error(
+      'ffmpeg is not on PATH, so the local HLS fixture cannot be generated. ' +
+        'Install it (macOS: `brew install ffmpeg`, Debian/Ubuntu: ' +
+        '`apt-get install -y ffmpeg`) and re-run.'
+    );
+  }
 
   mkdirSync(FIXTURE_DIR, { recursive: true });
   console.log('Generating local HLS fixture (ffmpeg, ~60s of test video)...');

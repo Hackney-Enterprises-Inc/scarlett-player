@@ -836,6 +836,91 @@ describe('persistence', () => {
     expect(state.repeat).toBe('all');
   });
 
+  it('ignores storage entirely when the caller supplied tracks', async () => {
+    // A shared persistKey across two players must not let one player's history
+    // replace the list the host handed the other.
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({ tracks: [{ id: 'saved', src: 'saved.mp3', title: 'Saved Track' }] })
+    );
+
+    const plugin = createPlaylistPlugin({
+      persist: true,
+      persistKey: 'test-playlist',
+      tracks: sampleTracks,
+    });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().tracks).toHaveLength(sampleTracks.length);
+    expect(plugin.getState().tracks[0].title).toBe('Track 1');
+  });
+
+  it('survives corrupt JSON in storage', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue('{not json');
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    const mockApi = createMockApi();
+
+    await expect(plugin.init(mockApi)).resolves.not.toThrow();
+    expect(plugin.getState().tracks).toEqual([]);
+    expect(mockApi.logger.warn).toHaveBeenCalled();
+  });
+
+  it('ignores a persisted tracks field that is not an array', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(JSON.stringify({ tracks: 'nope' }));
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().tracks).toEqual([]);
+  });
+
+  it('drops persisted entries with no usable src', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({
+        tracks: [{ id: 'a' }, null, 'string', { id: 'b', src: 'ok.mp3' }],
+        currentIndex: 0,
+      })
+    );
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().tracks).toHaveLength(1);
+    expect(plugin.getState().tracks[0].src).toBe('ok.mp3');
+  });
+
+  it('clamps a persisted currentIndex past the end of the restored list', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({
+        tracks: [{ id: 'a', src: 'a.mp3' }, { id: 'b', src: 'b.mp3' }],
+        currentIndex: 47,
+      })
+    );
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().currentIndex).toBe(1);
+    expect(plugin.getCurrentTrack()?.src).toBe('b.mp3');
+  });
+
+  it('ignores a persisted repeat mode this build does not know', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({ tracks: [{ id: 'a', src: 'a.mp3' }], repeat: 'sideways' })
+    );
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().repeat).toBe('none');
+  });
+
   it('does not persist when persist is false', async () => {
     localStorageMock.clear();
     vi.clearAllMocks(); // Clear the mock call count
@@ -915,6 +1000,78 @@ describe('auto-advance', () => {
     // Simulate playback ended - should advance to Track 2, not replay Track 1
     captured.ended?.();
     expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
+  });
+
+  it('carries autoplay: true for a manual selection', async () => {
+    localStorageMock.clear();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+    const mockApi = createMockApi();
+    await plugin.init(mockApi);
+
+    plugin.play(1);
+
+    expect(mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: true,
+    });
+  });
+
+  it('carries autoplay: false when auto-advancing a paused playlist', async () => {
+    localStorageMock.clear();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true });
+    const mockApi = createMockApi();
+    mockApi.getState.mockImplementation((key: string) => (key === 'paused' ? true : 0));
+
+    const captured: { ended?: () => void } = {};
+    mockApi.on.mockImplementation((event, cb) => {
+      if (event === 'playback:ended') captured.ended = cb;
+      return vi.fn();
+    });
+
+    await plugin.init(mockApi);
+    plugin.play(0);
+    mockApi.emit.mockClear();
+
+    captured.ended?.();
+
+    expect(mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: false,
+    });
+  });
+
+  it('schedules one advance when two ended events land inside advanceDelay', async () => {
+    vi.useFakeTimers();
+    localStorageMock.clear();
+    const plugin = createPlaylistPlugin({
+      tracks: sampleTracks,
+      autoAdvance: true,
+      advanceDelay: 1000,
+    });
+    const mockApi = createMockApi();
+
+    const captured: { ended?: () => void } = {};
+    mockApi.on.mockImplementation((event, cb) => {
+      if (event === 'playback:ended') captured.ended = cb;
+      return vi.fn();
+    });
+
+    await plugin.init(mockApi);
+    plugin.play(0);
+    mockApi.emit.mockClear();
+
+    captured.ended?.();
+    captured.ended?.();
+    vi.advanceTimersByTime(2000);
+
+    // One advance, not two: the second ended used to overwrite the first timer
+    // handle and leave both armed, so the track was loaded twice over.
+    const loadRequests = mockApi.emit.mock.calls.filter(
+      ([event]) => event === 'media:load-request'
+    );
+    expect(loadRequests).toHaveLength(1);
+    expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
+    vi.useRealTimers();
   });
 
   it('emits playlist:ended when no more tracks', async () => {

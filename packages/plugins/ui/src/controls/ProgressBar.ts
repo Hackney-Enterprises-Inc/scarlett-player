@@ -387,8 +387,10 @@ export class ProgressBar implements Control {
         }
       }
 
-      // Hide tooltip on touch end
-      this.tooltip.style.opacity = '0';
+      // Clear the inline value rather than setting '0': an inline style
+      // outranks `.sp-progress-wrapper:hover .sp-progress__tooltip { opacity: 1 }`,
+      // so '0' hid the tooltip for the rest of the session.
+      this.tooltip.style.opacity = '';
       this.thumbnailPreview.hide();
     }
   };
@@ -399,7 +401,9 @@ export class ProgressBar implements Control {
 
   private onMouseLeave = (): void => {
     if (!this.isDragging) {
-      this.tooltip.style.opacity = '0';
+      // Clear rather than zero - see onTouchEnd. The stylesheet's hover rule
+      // brings the tooltip back on the next hover only if nothing inline wins.
+      this.tooltip.style.opacity = '';
       this.thumbnailPreview.hide();
     }
   };
@@ -477,6 +481,7 @@ export class ProgressBar implements Control {
     this.wrapper.removeEventListener('mousemove', this.onMouseMove);
     this.wrapper.removeEventListener('mouseleave', this.onMouseLeave);
     this.wrapper.removeEventListener('touchstart', this.onTouchStart);
+    this.el.removeEventListener('keydown', this.onKeyDown);
     document.removeEventListener('mousemove', this.onDocMouseMove);
     document.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('touchmove', this.onDocTouchMove);

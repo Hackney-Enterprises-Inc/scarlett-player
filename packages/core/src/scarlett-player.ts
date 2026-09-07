@@ -130,6 +130,13 @@ export class ScarlettPlayer {
   /** Initial source URL */
   private initialSrc?: string;
 
+  /**
+   * True once `initialSrc` has been handed to `load()`, or once the host has
+   * loaded a source of its own. Guards `init()`'s initial load so a second
+   * `init()` cannot clobber active playback.
+   */
+  private initialSrcLoaded = false;
+
   /** Counter to detect stale load() calls */
   private loadGeneration = 0;
 
@@ -383,7 +390,8 @@ export class ScarlettPlayer {
    * Initialises non-provider plugins, wires the lifecycle listeners and loads
    * `initialSrc` when one was given. Idempotent: calling it twice, or calling
    * it after a `load()` has already initialised the player, wires nothing a
-   * second time and re-emits nothing.
+   * second time, re-emits nothing, and does not reload `initialSrc` over
+   * whatever is playing.
    *
    * @returns Promise resolving when initialisation (and any initial load) is done
    */
@@ -392,8 +400,14 @@ export class ScarlettPlayer {
 
     await this.ensureInitialized();
 
-    // Load initial source if provided
-    if (this.initialSrc) {
+    // Load initial source if provided, and only the first time. A second
+    // init() must not reload it over active playback, and a host that called
+    // load() first has already said what it wants playing.
+    if (this.initialSrc && !this.initialSrcLoaded) {
+      // Set before awaiting: load() re-enters through the media:load-request
+      // handler that ensureInitialized() wires, and a flag set afterwards
+      // would let the re-entrant pass load initialSrc a second time.
+      this.initialSrcLoaded = true;
       await this.load(this.initialSrc);
     }
   }
@@ -425,6 +439,10 @@ export class ScarlettPlayer {
    */
   async load(source: string): Promise<void> {
     this.checkDestroyed();
+
+    // A source is now the host's business: a later init() must not overwrite
+    // it with initialSrc.
+    this.initialSrcLoaded = true;
 
     // Increment generation to invalidate any in-flight load
     const generation = ++this.loadGeneration;

@@ -25,7 +25,7 @@
  *      mixed-exports warning but could just as easily have moved the API
  *      behind window.ScarlettPlayer.default and broken every embed on the
  *      web without a single test noticing.
- *   7. Narrow-viewport reachability (live demo stream, like 1-3): on a 320px
+ *   7. Narrow-viewport reachability (local fixture, like every scenario): on a 320px
  *      touch viewport both coarse-pointer queries match, the controls
  *      that must never move are still in the bar and inside the player, the
  *      skip buttons are in the overflow tray, the tray's adopted skip button
@@ -38,15 +38,22 @@
  *   python3 -m http.server 8899 --bind 127.0.0.1   # from repo root
  *   npx -y playwright@latest node scripts/verify-browser.mjs   # or: node scripts/verify-browser.mjs
  *
- * Requires the `playwright` package to be importable, a local Chrome
- * (launched via channel: 'chrome'), and ffmpeg on PATH (scenarios 4-5
- * auto-generate a local HLS fixture via scripts/hls-fixture.mjs).
- * Exits non-zero on any failed assertion.
+ * Requires the `playwright` package to be importable (with its bundled
+ * Chromium installed - `npx playwright install --with-deps chromium`) and
+ * ffmpeg on PATH, which scripts/hls-fixture.mjs uses to generate the local
+ * HLS fixture every scenario now plays. Exits non-zero on any failed
+ * assertion.
  *
- * NOTE: scenarios 1-3 still use the live demo stream
- * (vod.thestreamplatform.com); scenarios 4-5 are fully local. PiP is not
- * exercised here (headless Chrome cannot enter PiP); the readiness gate
- * is covered by unit tests in @scarlett-player/ui.
+ * Playwright's bundled Chromium, not `channel: 'chrome'`: a system Google
+ * Chrome install is not present on CI runners, and requiring one is what kept
+ * this harness out of CI.
+ *
+ * NOTE: no scenario touches an external origin. Every one of them plays
+ * scripts/fixtures/hls/vod.m3u8 over the local server, so a run is unaffected
+ * by the demo origin's availability - the 503 that produced the fragLoadError
+ * diagnostics fix would have taken this harness down with it. PiP is not
+ * exercised here (headless Chromium cannot enter PiP); the readiness gate is
+ * covered by unit tests in @scarlett-player/ui.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -77,7 +84,28 @@ const EMBED_DIST = 'http://127.0.0.1:8899/packages/embed/dist/';
 
 ensureHlsFixture();
 
-const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const browser = await chromium.launch({ headless: true });
+
+/**
+ * Refuse every request that is not served by the local test server.
+ *
+ * Enforcement, not belt-and-braces: the assertions below are all made against
+ * the local fixture now, but the demo page's own default source and poster are
+ * hosted, so without this a run would still fire requests at them and a broken
+ * swap would go unnoticed until the day that origin was down. Aborting instead
+ * of allowing means "the harness must not need the public internet" is checked
+ * on every run rather than asserted in a comment.
+ *
+ * @param {import('playwright').Page} page - Page to confine to 127.0.0.1
+ * @returns {Promise<void>}
+ */
+const blockExternalOrigins = (page) =>
+  page.route(/^https?:\/\//, (route) => {
+    const { hostname } = new global.URL(route.request().url());
+    return hostname === '127.0.0.1' || hostname === 'localhost'
+      ? route.continue()
+      : route.abort('failed');
+  });
 const results = [];
 const record = (name, pass, detail) => {
   results.push({ name, pass, detail });
@@ -90,6 +118,7 @@ const record = (name, pass, detail) => {
  */
 const newTrackedPage = async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await blockExternalOrigins(page);
   const errors = { pageErrors: [], rejections: [] };
   page.on('pageerror', (err) => errors.pageErrors.push(String(err)));
   await page.addInitScript(() => {
@@ -103,6 +132,30 @@ const newTrackedPage = async () => {
     return errors;
   };
   return { page, errors, collect };
+};
+
+/**
+ * Point the demo's player at the local HLS fixture.
+ *
+ * The demo page's own default source is the hosted demo stream, so every
+ * scenario that just loaded the page is playing over the public internet until
+ * this runs. Driven through `window.player.load()` - the same mechanism
+ * scenarios 4 and 5 already use - rather than a new hook in the demo.
+ *
+ * @param {import('playwright').Page} page - A page that has loaded the demo
+ * @param {string} src - Manifest to load; defaults to the VOD fixture
+ * @returns {Promise<void>} Resolves once the load has settled, failure included
+ */
+const loadFixture = async (page, src = FIXTURE_VOD) => {
+  // The container div's id shadows window.player until demo.ts finishes init
+  // and assigns the real instance.
+  await page.waitForFunction(
+    () => window.player && typeof window.player.load === 'function',
+    { timeout: 30000 }
+  );
+  // A rejected load is a legitimate outcome here: scenario 1 calls this while
+  // every manifest is routed to a 404 on purpose.
+  await page.evaluate((s) => window.player.load(s).catch(() => {}), src);
 };
 
 const state = (page) => page.evaluate(() => {
@@ -126,6 +179,7 @@ const state = (page) => page.evaluate(() => {
 {
   console.log('\n--- Scenario 1: manifest 404 on initial load ---');
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await blockExternalOrigins(page);
   await page.route('**/*.m3u8', (r) => r.fulfill({ status: 404, body: 'nope' }));
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.sp-error-overlay', { timeout: 30000 });
@@ -181,6 +235,12 @@ const state = (page) => page.evaluate(() => {
   });
   record('init() settles (no permanent hang)', initSettles === 'resolved', initSettles);
 
+  // Point the player at the LOCAL fixture before the recovery leg. The failing
+  // load above never left the browser (Playwright fulfilled it), but Try Again
+  // reloads the current source for real, and the demo's default is the hosted
+  // demo stream.
+  await loadFixture(page);
+
   // Now the manifest comes back: Try Again must actually recover
   await page.unroute('**/*.m3u8');
   await page.locator('.sp-error-overlay__retry').click();
@@ -196,8 +256,10 @@ const state = (page) => page.evaluate(() => {
 {
   console.log('\n--- Scenario 2: transient outage self-heals ---');
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await blockExternalOrigins(page);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('video', { timeout: 30000 });
+  await loadFixture(page);
   await page.waitForTimeout(4000);
   await page.evaluate(() => document.querySelector('video').play());
   await page.waitForTimeout(3000);
@@ -239,9 +301,11 @@ const state = (page) => page.evaluate(() => {
   let dropped = 0;
   for (let run = 1; run <= 6; run++) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await blockExternalOrigins(page);
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('button.sp-play', { timeout: 30000 });
     await page.waitForSelector('video', { timeout: 30000 });
+    await loadFixture(page);
     await page.waitForTimeout(1200);
     // Scrolled AFTER the settle wait, not before it. The share plugin
     // registers its control roughly 150ms after the bar first renders, and
@@ -420,6 +484,7 @@ const state = (page) => page.evaluate(() => {
 {
   console.log('\n--- Scenario 6: built embed UMD global surface ---');
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await blockExternalOrigins(page);
   // Same origin as the bundle, so the script tag is not a cross-origin load.
   await page.goto(EMBED_DIST, { waitUntil: 'domcontentloaded' });
 
@@ -525,12 +590,38 @@ const state = (page) => page.evaluate(() => {
       hasTouch: true,
       isMobile: true,
     });
+    await blockExternalOrigins(p);
     await p.goto(URL, { waitUntil: 'domcontentloaded' });
     await p.waitForSelector('.sp-controls', { timeout: 15000 });
+    await loadFixture(p);
     await p.waitForFunction(
       () => (document.querySelector('video')?.duration ?? 0) > 0,
       null,
       { timeout: 30000 }
+    );
+
+    // Then wait for the bar to stop changing. `duration > 0` says the source
+    // is ready, not that the control bar has finished settling: the share
+    // plugin registers its control ~150ms after the bar first renders and the
+    // UI plugin rebuilds the bar in response, and the fit itself is scheduled
+    // into a render frame. Measuring on the duration signal alone caught the
+    // bar mid-rebuild, and the 414px leg reported the skip buttons still in
+    // the bar because the overflow pass had not run yet. Scenario 3 documents
+    // the same race from the other side.
+    await p.waitForFunction(
+      () => {
+        const bar = document.querySelector('.sp-controls');
+        const tray = document.querySelector('.sp-overflow-tray');
+        if (!bar) return false;
+
+        const signature = `${bar.children.length}:${tray?.children.length ?? 0}`;
+        const stable = window.__barSignature === signature;
+        window.__barSignature = signature;
+
+        return stable;
+      },
+      null,
+      { timeout: 15000, polling: 300 }
     );
 
     return p;

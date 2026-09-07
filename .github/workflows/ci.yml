@@ -84,3 +84,51 @@ jobs:
         run: pnpm run test
         env:
           NODE_OPTIONS: --no-experimental-require-module
+
+      # ---- Real-browser verification: push to main only ----
+      #
+      # jsdom has no layout engine and no MSE, so three classes of defect are
+      # untestable in the suites above and are only covered here: the control
+      # bar's overflow/fit arithmetic (measured with getBoundingClientRect,
+      # which is 0x0 in jsdom and stubbed by hand from numbers someone read off
+      # a real browser), the built UMD bundle's window.ScarlettPlayer surface
+      # (the embed unit tests mock core and never load a bundle), and MSE
+      # teardown races under real hls.js. The mock-drift case itself - a handler
+      # reading `data.url` for an error type hls.js never sets it on, which
+      # passed every mocked test while the diagnostic was broken in production -
+      # is covered cheaply by packages/plugins/hls/tests/integration.test.ts in
+      # the run above, so it does not need this job.
+      #
+      # Gated to `push` rather than run on every pull request, deliberately.
+      # The harness takes ~3.5 minutes before the Chromium install, and several
+      # scenarios assert against fixed waits tuned on a developer machine
+      # (outage recovery, reconnect, six sequential page loads). It has never
+      # run on a CI runner, so its flake rate under CI load is unknown, and a
+      # flaky required check is worse than no check: people learn to re-run it
+      # and stop reading it. Running on merge keeps it exercised - which is the
+      # point, it previously ran nowhere and was rotting - at no cost to PR
+      # turnaround. Move the condition to `pull_request` once a few weeks of
+      # main runs show it is stable.
+      - name: Install Playwright Chromium
+        if: github.event_name == 'push'
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate HLS fixture
+        if: github.event_name == 'push'
+        run: node scripts/hls-fixture.mjs
+
+      - name: Run headless browser verification
+        if: github.event_name == 'push'
+        run: |
+          node demo/build.cjs
+          python3 -m http.server 8899 --bind 127.0.0.1 &
+          echo $! > /tmp/http.pid
+          node scripts/verify-browser.mjs
+          kill "$(cat /tmp/http.pid)"
+
+      # The harness needs a built demo bundle, and CI's demo-bundle commit
+      # belongs to release.yml alone. Leaving the rebuild in the working tree
+      # here would let a later step pick it up.
+      - name: Discard the rebuilt demo bundle
+        if: always() && github.event_name == 'push'
+        run: git checkout -- demo/demo.bundle.js docs/demo/demo.bundle.js || true

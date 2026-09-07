@@ -22,15 +22,79 @@ function resolve(value: string | (() => string) | undefined, fallback: () => str
 }
 
 /**
+ * Query parameters removed from a default share URL.
+ *
+ * Signed-playback and session credentials, matched case-insensitively. This is
+ * deliberately a denylist, not a whole-query strip: page identity often lives
+ * in the query (`/watch?v=abc123`), and dropping it would share the wrong page.
+ * A host whose credentials use other names should pass `config.url` explicitly.
+ */
+const CREDENTIAL_PARAMS = new Set([
+  'token',
+  'access_token',
+  'auth',
+  'authorization',
+  'jwt',
+  'sig',
+  'signature',
+  'hmac',
+  'key',
+  'apikey',
+  'api_key',
+  'session',
+  'sessionid',
+  'expires',
+  'policy',
+]);
+
+/**
+ * Strip credential query parameters and the fragment from a page URL.
+ *
+ * @param href - The page URL to clean
+ * @returns The URL without credential params or fragment; `href` unchanged
+ *          when it cannot be parsed
+ *
+ * @example
+ * ```ts
+ * stripCredentials('https://site.com/watch?v=abc123&token=xyz#t=1');
+ * // 'https://site.com/watch?v=abc123'
+ * ```
+ */
+export function stripCredentials(href: string): string {
+  try {
+    const parsed = new URL(href);
+
+    // Snapshot the keys: deleting while iterating the live iterator skips entries.
+    for (const name of [...parsed.searchParams.keys()]) {
+      if (CREDENTIAL_PARAMS.has(name.toLowerCase())) {
+        parsed.searchParams.delete(name);
+      }
+    }
+
+    // Implicit-flow tokens land in the fragment, and a fragment is never
+    // meaningful to a share recipient.
+    parsed.hash = '';
+
+    return parsed.toString();
+  } catch {
+    return href;
+  }
+}
+
+/**
  * The page URL to share.
  *
- * Defaults to `window.location.href`. There is deliberately no `src` fallback:
- * playback URLs are often signed, so sharing one would leak a credential and
- * hand the recipient a link that expires.
+ * Defaults to `window.location.href` with credential query parameters and the
+ * fragment removed (see {@link stripCredentials}). There is deliberately no
+ * `src` fallback: playback URLs are often signed, so sharing one would leak a
+ * credential and hand the recipient a link that expires.
+ *
+ * An explicitly supplied `config.url` is returned verbatim - the host said
+ * what to share.
  */
 export function resolveBaseUrl(config: SharePluginConfig): string {
   return resolve(config.url, () =>
-    typeof window === 'undefined' ? '' : window.location.href,
+    typeof window === 'undefined' ? '' : stripCredentials(window.location.href),
   );
 }
 

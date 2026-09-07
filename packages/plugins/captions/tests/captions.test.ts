@@ -481,6 +481,63 @@ describe('hls.js subtitle extraction', () => {
     expect(mockApi.video.querySelector('track[srclang="fr"]')).not.toBeNull();
   });
 
+  it('subscribes to the subtitle switch hls.js emits for its own changes', () => {
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    expect(hls.instance.on).toHaveBeenCalledWith('hlsSubtitleTrackSwitch', expect.any(Function));
+  });
+
+  it('follows a switch hls.js made itself, without going through selectTrack', () => {
+    // An automatic switch, or Safari's own subtitle menu, never routes through
+    // selectTrack(), so currentTextTrack went stale and the UI kept a checkmark
+    // on the wrong entry.
+    const list = fakeTextTrackList([
+      { kind: 'subtitles', label: 'English', language: 'en' },
+      { kind: 'subtitles', label: 'Spanish', language: 'es' },
+    ]);
+    Object.defineProperty(mockApi.video, 'textTracks', { value: list, configurable: true });
+
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    // hls.js flips the rendition on the element behind our back.
+    (list[1] as unknown as { mode: string }).mode = 'showing';
+    hls.fire('hlsSubtitleTrackSwitch');
+
+    const current = mockApi.setState.mock.calls
+      .filter((call: unknown[]) => call[0] === 'currentTextTrack')
+      .pop();
+
+    expect((current?.[1] as { label: string } | null)?.label).toBe('Spanish');
+  });
+
+  it('adds no duplicate entries when the switch handler resyncs', () => {
+    Object.defineProperty(mockApi.video, 'textTracks', {
+      value: fakeTextTrackList([
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es' },
+      ]),
+      configurable: true,
+    });
+
+    const plugin = createCaptionsPlugin();
+    plugin.init(mockApi);
+    mediaLoadedCallback?.();
+
+    hls.fire('hlsSubtitleTrackSwitch');
+    hls.fire('hlsSubtitleTrackSwitch');
+
+    const lastTextTracks = mockApi.setState.mock.calls
+      .filter((call: unknown[]) => call[0] === 'textTracks')
+      .pop();
+
+    expect((lastTextTracks?.[1] as unknown[]).length).toBe(2);
+    expect(mockApi.video.querySelectorAll('track').length).toBe(0);
+  });
+
   it('unsubscribes from hls.js on destroy', () => {
     const plugin = createCaptionsPlugin();
     plugin.init(mockApi);
@@ -489,6 +546,7 @@ describe('hls.js subtitle extraction', () => {
     plugin.destroy();
 
     expect(hls.instance.off).toHaveBeenCalledWith('hlsSubtitleTracksUpdated', expect.any(Function));
+    expect(hls.instance.off).toHaveBeenCalledWith('hlsSubtitleTrackSwitch', expect.any(Function));
   });
 });
 

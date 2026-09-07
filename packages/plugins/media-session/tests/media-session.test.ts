@@ -569,6 +569,77 @@ describe('action handlers', () => {
     expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 120 });
   });
 
+  it('seekto clamps a request past the end of a VOD', () => {
+    mockApi.getState.mockImplementation((key: string) => {
+      if (key === 'duration') return 300;
+      return 0;
+    });
+    actionHandlers['seekto']({ seekTime: 5000 });
+
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 300 });
+  });
+
+  describe('live DVR window', () => {
+    /** Live, with the seekable window sitting well away from zero. */
+    const liveWindow = (currentTime: number) => {
+      mockApi.getState.mockImplementation((key: string) => {
+        if (key === 'live') return true;
+        if (key === 'seekableRange') return { start: 100, end: 200 };
+        if (key === 'currentTime') return currentTime;
+        if (key === 'duration') return Infinity;
+        return 0;
+      });
+    };
+
+    /** The time carried by the last playback:seeking emit. */
+    const lastSeek = (): number => {
+      const calls = mockApi.emit.mock.calls.filter(([event]) => event === 'playback:seeking');
+      return (calls[calls.length - 1]?.[1] as { time: number }).time;
+    };
+
+    it('stop seeks to the start of the window, not to 0', () => {
+      liveWindow(150);
+      actionHandlers['stop']();
+
+      expect(lastSeek()).toBe(100);
+    });
+
+    it('seekbackward clamps to the start of the window', () => {
+      liveWindow(105);
+      actionHandlers['seekbackward']({ seekOffset: 30 });
+
+      expect(lastSeek()).toBe(100);
+    });
+
+    it('seekforward clamps to the end of the window', () => {
+      liveWindow(195);
+      actionHandlers['seekforward']({ seekOffset: 30 });
+
+      expect(lastSeek()).toBe(200);
+    });
+
+    it('seekto clamps to the window at both ends', () => {
+      liveWindow(150);
+
+      actionHandlers['seekto']({ seekTime: 0 });
+      expect(lastSeek()).toBe(100);
+
+      actionHandlers['seekto']({ seekTime: 99999 });
+      expect(lastSeek()).toBe(200);
+    });
+
+    it('never emits Infinity when duration is Infinite and no window is known', () => {
+      mockApi.getState.mockImplementation((key: string) => {
+        if (key === 'currentTime') return 30;
+        if (key === 'duration') return Infinity;
+        return 0;
+      });
+      actionHandlers['seekforward']({ seekOffset: 10 });
+
+      expect(lastSeek()).toBe(40);
+    });
+  });
+
   it('previoustrack action calls playlist.previous when available', () => {
     const mockPlaylist = { previous: vi.fn() };
     mockApi.getPlugin.mockReturnValue(mockPlaylist);

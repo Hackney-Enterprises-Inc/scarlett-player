@@ -95,6 +95,7 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
   let lifecycle = 0;
 
   let trackCleanup: (() => void) | null = null;
+  let unsubLoaded: (() => void) | null = null;
 
   const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
 
@@ -119,6 +120,23 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     // A list arriving mid-playback should light up the chapter under the
     // playhead straight away rather than waiting for the next boundary.
     syncActive();
+  };
+
+  /**
+   * Attach the `config.src` chapters track, once a media element exists.
+   *
+   * Idempotent and safe to call on every `media:loadedmetadata`: it returns
+   * early when a track is already attached, and when the provider has not put
+   * a media element in the container yet.
+   */
+  const attachChapterTrack = (): void => {
+    if (trackCleanup || !config.src) return;
+    if (!api?.container.querySelector('video, audio')) return;
+
+    trackCleanup = loadChaptersFromTrack(api.container, config.src, {
+      onLoad: (loaded) => publish(loaded),
+      onError: (message) => api?.logger.warn(`[chapters] ${message}`),
+    });
   };
 
   /** Recompute the active chapter and emit when it changed. */
@@ -231,10 +249,12 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
       if (config.chapters?.length) {
         publish(config.chapters);
       } else if (config.src) {
-        trackCleanup = loadChaptersFromTrack(api.container, config.src, {
-          onLoad: (loaded) => publish(loaded),
-          onError: (message) => api?.logger.warn(`[chapters] ${message}`),
-        });
+        // Try now for a provider that already attached its element, and again
+        // on loadedmetadata for one that has not. vtt.ts returns a no-op
+        // cleanup and never retries when the element is missing, so a single
+        // init()-time call loses that race permanently.
+        attachChapterTrack();
+        unsubLoaded = api.on('media:loadedmetadata', attachChapterTrack);
       }
 
       const unsubscribe = api.subscribeToState((event) => {
@@ -245,6 +265,8 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
 
       api.onDestroy(() => {
         unsubscribe();
+        unsubLoaded?.();
+        unsubLoaded = null;
         trackCleanup?.();
         trackCleanup = null;
       });
@@ -252,6 +274,8 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
 
     destroy(): void {
       lifecycle++;
+      unsubLoaded?.();
+      unsubLoaded = null;
       trackCleanup?.();
       trackCleanup = null;
       list?.destroy();

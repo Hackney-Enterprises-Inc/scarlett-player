@@ -149,6 +149,14 @@ const FALLBACK_BAR_PADDING_X = 24;
 const FALLBACK_BAR_GAP = 4;
 
 /**
+ * Debounce for the window-resize fallback used where ResizeObserver is absent.
+ *
+ * A drag-resize fires `resize` continuously; refitting the bar on every one of
+ * those would measure the DOM dozens of times per second for no visible gain.
+ */
+const RESIZE_FALLBACK_DEBOUNCE_MS = 100;
+
+/**
  * Room a popover menu gives up on top of the control bar's own height.
  *
  * 8 for the gap the menus already sit above the bar by (`bottom: calc(100% +
@@ -240,6 +248,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let entries: ControlEntry[] = [];
   let timeEntry: ControlEntry | null = null;
   let resizeObserver: ResizeObserver | null = null;
+  /** Debounce handle for the window-resize fallback, where ResizeObserver is absent. */
+  let windowResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The window-resize fallback listener, so destroy() can remove it. */
+  let onWindowResize: (() => void) | null = null;
   let barPaddingX = FALLBACK_BAR_PADDING_X;
   let barGap = FALLBACK_BAR_GAP;
   let volumeSliderWidth = FALLBACK_VOLUME_SLIDER_WIDTH;
@@ -1174,6 +1186,21 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
           scheduleUpdate();
         });
         resizeObserver.observe(container);
+      } else if (responsive && typeof window !== 'undefined') {
+        // No ResizeObserver: window resize is the only signal left. It misses a
+        // container that resizes without the window doing so, but that is
+        // strictly more than the nothing this branch used to do - the bar was
+        // fitted at init and on control changes, and never again.
+        onWindowResize = (): void => {
+          if (windowResizeTimer) clearTimeout(windowResizeTimer);
+          windowResizeTimer = setTimeout(() => {
+            windowResizeTimer = null;
+            applyMenuBounds(container.clientHeight);
+            fitPending = true;
+            scheduleUpdate();
+          }, RESIZE_FALLBACK_DEBOUNCE_MS);
+        };
+        window.addEventListener('resize', onWindowResize);
       }
 
       // Plugin init order is not guaranteed, so a control this layout asks for
@@ -1251,6 +1278,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
       resizeObserver?.disconnect();
       resizeObserver = null;
+
+      if (onWindowResize) {
+        window.removeEventListener('resize', onWindowResize);
+        onWindowResize = null;
+      }
+      if (windowResizeTimer) {
+        clearTimeout(windowResizeTimer);
+        windowResizeTimer = null;
+      }
 
       // The container belongs to the host and may be reused for a second
       // player, which would read this one's menu bound until its own observer

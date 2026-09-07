@@ -8,6 +8,7 @@ import type { IPluginAPI } from '@scarlett-player/core';
 import type { AudioTrack } from '@scarlett-player/core';
 import type { HlsAudioTrack, HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
 import { formatLevel } from './quality';
+import { sanitizeUrl } from './sanitize-url';
 
 /** hls.js event names (avoiding import to keep bundle small) */
 export const HLS_EVENTS = {
@@ -52,13 +53,31 @@ export function mapErrorType(hlsType: string): HLSErrorType {
   }
 }
 
-/** Parse hls.js error data into our format */
+/**
+ * Parse hls.js error data into our format.
+ *
+ * @param data - Raw `hlsError` payload from hls.js
+ * @returns The normalised error, with the request URL recovered from
+ *          whichever field the originating error type populated
+ */
 export function parseHlsError(data: Record<string, unknown>): HLSError {
+  const frag = data.frag as { url?: string } | undefined;
+  const response = data.response as { code?: number; text?: string; url?: string } | undefined;
+  const context = data.context as { url?: string } | undefined;
+
   return {
     type: mapErrorType(data.type as string),
     details: data.details as string || 'Unknown error',
     fatal: data.fatal as boolean || false,
-    url: data.url as string | undefined,
+    // hls.js puts the request URL in a different place per error type:
+    // playlist errors set data.url, while fragment and key load errors set
+    // data.url not at all and carry it on data.frag.url and data.response.url.
+    // Reading only data.url dropped the failing segment from every diagnostic
+    // an origin outage produces - which is the case the diagnostics exist for.
+    url: (data.url as string | undefined)
+      ?? frag?.url
+      ?? response?.url
+      ?? context?.url,
     reason: data.reason as string | undefined,
     response: data.response as { code: number; text: string } | undefined,
   };
@@ -300,14 +319,16 @@ export function setupHlsEventHandlers(
       api.logger.error(`HLS fatal error: ${error.details} (type=${error.type})`, {
         type: error.type,
         details: error.details,
-        url: error.url,
+        status: error.response?.code,
+        url: sanitizeUrl(error.url),
       });
     } else {
       api.logger.warn(`HLS error: ${error.details} (type=${error.type}, fatal=${error.fatal})`, {
         type: error.type,
         details: error.details,
         fatal: error.fatal,
-        url: error.url,
+        status: error.response?.code,
+        url: sanitizeUrl(error.url),
       });
     }
 
