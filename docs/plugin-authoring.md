@@ -162,8 +162,10 @@ init(api) {
   const self = this;
 
   // The factory still receives the per-player IPluginAPI - pass it on, and
-  // hand the control whatever plugin state it needs alongside.
-  registerControl('example', (controlApi) => new ExampleButton(controlApi, self), { owner });
+  // hand the control whatever plugin state it needs alongside. A control that
+  // takes plugin state declares it: `constructor(api: IPluginAPI, plugin: ExamplePlugin)`,
+  // unlike the one-argument ExampleButton above.
+  registerControl('example', (controlApi) => new ExamplePanel(controlApi, self), { owner });
 
   // Only the id you registered. `unregisterControlsFor(owner)` drops every
   // control scoped to that container, including ones other plugins registered

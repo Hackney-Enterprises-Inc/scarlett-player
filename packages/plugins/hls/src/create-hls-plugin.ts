@@ -1568,6 +1568,13 @@ export function createHLSPluginWith(
       const session = ++loadSession;
       cleanup(new Error('HLS load cancelled: switching to native HLS'));
 
+      // Same source, different pipeline: cleanup() drops the source identity,
+      // so put it back before anything can read it. Left null, the switch back
+      // that AirPlay asks for on disconnect bailed with 'No source loaded' and
+      // stranded the viewer on native HLS, and auto-reconnect stayed disabled
+      // for the rest of the session.
+      currentSrc = savedSrc;
+
       // Load with native HLS
       await loadNative(savedSrc);
 
@@ -1621,6 +1628,9 @@ export function createHLSPluginWith(
       // Cleanup native; the switch is a new session
       const session = ++loadSession;
       cleanup(new Error('HLS load cancelled: switching to hls.js'));
+
+      // Same source, different pipeline - see switchToNative().
+      currentSrc = savedSrc;
 
       // Load with hls.js
       await loadWithHlsJs(savedSrc);

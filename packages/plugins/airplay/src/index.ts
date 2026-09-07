@@ -75,61 +75,78 @@ export function airplayPlugin(): IAirPlayPlugin {
   };
 
   /**
-   * Move to native HLS now that AirPlay is actually connected.
+   * True while a provider switch started here has not settled yet.
    *
-   * Deliberately NOT done before opening the picker. Switching up front left a
+   * A switch is a teardown plus a reload, so it resolves several ticks after
+   * it is asked for, and a connection change inside that window must not
+   * start a second one against a half-built pipeline.
+   */
+  let providerSwitchInFlight = false;
+
+  /**
+   * Bring the HLS provider in line with the current AirPlay connection state:
+   * native HLS while a device is connected (wireless playback requires it),
+   * hls.js when it is not (quality menu, hls.js error recovery).
+   *
+   * Deliberately NOT run before opening the picker. Switching up front left a
    * viewer who cancelled the picker stuck on native HLS - no quality menu, no
    * hls.js recovery - for the rest of the session, with nothing to switch them
    * back, because no connection event ever arrived.
+   *
+   * Switches are serialised, and the one in flight re-runs this when it
+   * settles. A viewer who disconnected while the switch to native was still
+   * loading used to be dropped twice over: the provider had not flipped to
+   * native yet, so the disconnect saw hls.js and did nothing, and the switch
+   * then landed on native with no device attached - exactly the stuck state
+   * the picker change above exists to avoid.
    */
-  const switchToNativeForAirPlay = (): void => {
+  const syncProviderToAirPlay = (): void => {
+    if (providerSwitchInFlight) return;
+
     const hlsPlugin = api?.getPlugin<{
       isNativeHLS(): boolean;
       switchToNative(): Promise<void>;
+      switchToHlsJs(): Promise<void>;
     }>('hls-provider');
 
-    if (!hlsPlugin || hlsPlugin.isNativeHLS()) return;
+    if (!hlsPlugin) return;
 
-    api.logger.info('AirPlay connected, switching to native HLS');
-    hlsPlugin
-      .switchToNative()
+    const active = api.getState('airplayActive') === true;
+    if (active === hlsPlugin.isNativeHLS()) return;
+
+    const target = active ? 'native HLS' : 'hls.js';
+    api.logger.info(`AirPlay ${active ? 'connected' : 'disconnected'}, switching to ${target}`);
+
+    providerSwitchInFlight = true;
+    (active ? hlsPlugin.switchToNative() : hlsPlugin.switchToHlsJs())
       .then(() => {
         // The provider may have replaced the element.
         attachToVideo();
       })
       .catch((err: unknown) => {
-        api.logger.warn('Failed to switch to native HLS for AirPlay', { error: err });
+        api.logger.warn(`Failed to switch to ${target} for AirPlay`, { error: err });
+      })
+      .finally(() => {
+        providerSwitchInFlight = false;
+
+        // Only when the viewer moved while the switch was running. Re-running
+        // on an unchanged state would retry a failing switch forever.
+        if ((api.getState('airplayActive') === true) !== active) {
+          syncProviderToAirPlay();
+        }
       });
   };
 
   const handleTargetChange = (): void => {
     const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
-    const wasActive = api.getState('airplayActive');
+    const wasActive = api.getState('airplayActive') === true;
     api.setState('airplayActive', active);
     api.emit(active ? 'airplay:connected' : 'airplay:disconnected', undefined);
 
-    // A real connection is the signal to hand playback to the native path.
-    if (!wasActive && active) {
-      switchToNativeForAirPlay();
-      return;
-    }
-
-    // When AirPlay disconnects, switch back to hls.js for quality control
-    if (wasActive && !active) {
-      api.logger.info('AirPlay disconnected, restoring hls.js');
-      const hlsPlugin = api.getPlugin<{
-        isNativeHLS(): boolean;
-        switchToHlsJs(): Promise<void>;
-      }>('hls-provider');
-
-      if (hlsPlugin?.isNativeHLS()) {
-        hlsPlugin.switchToHlsJs().then(() => {
-          // Re-attach to the (potentially new) video element
-          attachToVideo();
-        }).catch((err: unknown) => {
-          api.logger.warn('Failed to switch back to hls.js', { error: err });
-        });
-      }
+    // A real connection is the signal to hand playback to the native path,
+    // and a real disconnection the signal to take it back.
+    if (wasActive !== active) {
+      syncProviderToAirPlay();
     }
   };
 

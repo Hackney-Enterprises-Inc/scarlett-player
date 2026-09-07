@@ -384,6 +384,11 @@ describe('AirPlay Plugin - provider swaps and picker safety', () => {
 
   const emitLoaded = (): void => loadedHandlers.forEach((h) => h());
 
+  /** Drain the promise chain a provider switch settles through. */
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
   beforeEach(() => {
     loadedHandlers = [];
     originalWebkitMethod = (HTMLVideoElement.prototype as WebkitVideoElement)
@@ -541,5 +546,82 @@ describe('AirPlay Plugin - provider swaps and picker safety', () => {
     emitLoaded();
 
     expect(cancelFirst).toHaveBeenCalledWith(1);
+  });
+
+  it('restores hls.js when AirPlay drops while the switch to native is in flight', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    // A provider whose switch resolves only when the test says so, so the
+    // disconnect lands squarely inside the switch.
+    let isNative = false;
+    let finishNativeSwitch = (): void => {};
+    const switchToNative = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishNativeSwitch = () => {
+            isNative = true;
+            resolve();
+          };
+        })
+    );
+    const switchToHlsJs = vi.fn(async () => {
+      isNative = false;
+    });
+
+    const api = createApi(container, {
+      isNativeHLS: () => isNative,
+      switchToNative,
+      switchToHlsJs,
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    // Device connects: the switch to native starts but does not settle.
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+
+    // Viewer disconnects mid-switch. Nothing may run against the half-built
+    // pipeline yet.
+    video.webkitCurrentPlaybackTargetIsWireless = false;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    expect(switchToHlsJs).not.toHaveBeenCalled();
+
+    finishNativeSwitch();
+    await flushMicrotasks();
+
+    // ...but once it settles, the viewer must not be left on native HLS.
+    expect(switchToHlsJs).toHaveBeenCalledTimes(1);
+    expect(isNative).toBe(false);
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-switch when the connection state is unchanged after a failed switch', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    const switchToNative = vi.fn().mockRejectedValue(new Error('nope'));
+    const switchToHlsJs = vi.fn().mockResolvedValue(undefined);
+
+    const api = createApi(container, {
+      isNativeHLS: () => false,
+      switchToNative,
+      switchToHlsJs,
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    await flushMicrotasks();
+
+    // A provider still reporting hls.js is not a reason to try forever.
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+    expect(switchToHlsJs).not.toHaveBeenCalled();
   });
 });
