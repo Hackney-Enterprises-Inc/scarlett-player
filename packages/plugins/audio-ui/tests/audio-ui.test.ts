@@ -607,6 +607,52 @@ describe('progress bar interaction', () => {
       expect(event.defaultPrevented).toBe(false);
       expect(mockApi.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
     });
+
+    /**
+     * Press a key with live state: playhead at `at` seconds, optional DVR
+     * window, and a duration that defaults to Infinity, as a live stream
+     * reports. Proves seeks ride the window edge rather than duration.
+     */
+    const pressLive = (
+      key: string,
+      at: number,
+      range: { start: number; end: number } | null,
+      duration = Infinity
+    ): void => {
+      mockApi.getState.mockImplementation((k: string) => {
+        if (k === 'live') return true;
+        if (k === 'seekableRange') return range;
+        if (k === 'duration') return duration;
+        if (k === 'currentTime') return at;
+        return 0;
+      });
+      bar().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    };
+
+    it('bounds live seeks to the DVR window when one is reported', () => {
+      // Home and ArrowLeft stop at the window start, not 0.
+      pressLive('Home', 1200, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 600 });
+
+      pressLive('ArrowLeft', 602, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 600 });
+
+      // End rides the window edge, not duration (Infinity on live).
+      pressLive('End', 1200, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 3600 });
+
+      // ArrowRight clamps at the window end.
+      pressLive('ArrowRight', 3598, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 3600 });
+    });
+
+    it('falls back to [0, duration] on live when no window is reported', () => {
+      pressLive('Home', 40, null, 100);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 0 });
+
+      pressLive('ArrowRight', 98, null, 100);
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    });
   });
 });
 

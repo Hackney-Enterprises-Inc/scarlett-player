@@ -5,6 +5,10 @@
 '@scarlett-player/playlist': minor
 '@scarlett-player/ui': minor
 '@scarlett-player/audio-ui': minor
+'@scarlett-player/chapters': minor
+'@scarlett-player/gestures': minor
+'@scarlett-player/native': minor
+'@scarlett-player/vue': minor
 ---
 
 Review pass: state redefinition warnings, share-URL credential coverage, live
@@ -30,5 +34,22 @@ seek clamping and playlist persistence.
   rejects a fractional persisted `currentIndex`, which passed the old `>= 0`
   test and then indexed nothing; and keeps a restored shuffle order that still
   covers every track instead of reshuffling a persisted session on every load.
-- `ui` and `audio-ui` require `@scarlett-player/core` `^1.10.0`, the release
-  that adds the `SHARED_ICON_PATHS` and `formatTime` exports they import.
+
+Peer dependency ranges now state the version each package actually needs,
+audited against core's and `ui`'s export surface at each release. Every plugin
+declared `^1.8.0` while importing APIs added later, so a consumer could resolve
+a core or `ui` old enough to be missing them:
+
+- `ui` and `audio-ui` require core `^1.10.0` - the release adding the
+  `SHARED_ICON_PATHS` and `formatTime` exports they import.
+- `chapters`, `gestures`, `native`, `playlist` and `share` require core
+  `^1.9.0`, which added `injectSharedStyles`, `ReleaseStyles` and
+  `sanitizeUrl`.
+- `chapters`, `playlist` and `share` require `ui` `^1.9.0` for their optional
+  peer. They register controls with `registerControl(id, factory, { owner })`
+  and release them with `unregisterControl(id, { owner })`; the options
+  argument arrived in 1.9.0, and against 1.8.0 the registration is silently
+  global - the multi-player bug the `owner` scope exists to prevent.
+- `native` and `vue` declare `jsdom`, which their Vitest configs select as the
+  test environment. It resolved only because pnpm satisfied Vitest's optional
+  peer from another workspace package that did declare it.

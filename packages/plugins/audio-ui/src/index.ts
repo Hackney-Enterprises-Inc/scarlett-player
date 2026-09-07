@@ -645,12 +645,20 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       const key = (e as KeyboardEvent).key;
       const duration = api?.getState('duration') || 0;
       const currentTime = api?.getState('currentTime') || 0;
+      // On live DVR the seekable window, not [0, duration], bounds a seek - the
+      // same rule the chapters plugin's seekTo applies. Home and ArrowLeft must
+      // not target a time before the window start, and End rides the window
+      // edge rather than duration, which a live stream reports as Infinity.
+      const live = api?.getState('live') === true;
+      const seekableRange = live ? api?.getState('seekableRange') : null;
+      const min = seekableRange?.start ?? 0;
+      const max = seekableRange?.end ?? duration;
       let time: number | null = null;
 
-      if (key === 'ArrowLeft') time = Math.max(0, currentTime - SEEK_STEP_SECONDS);
-      else if (key === 'ArrowRight') time = Math.min(duration, currentTime + SEEK_STEP_SECONDS);
-      else if (key === 'Home') time = 0;
-      else if (key === 'End') time = duration;
+      if (key === 'ArrowLeft') time = Math.max(min, currentTime - SEEK_STEP_SECONDS);
+      else if (key === 'ArrowRight') time = Math.min(max, currentTime + SEEK_STEP_SECONDS);
+      else if (key === 'Home') time = min;
+      else if (key === 'End') time = max;
       if (time === null) return;
 
       e.preventDefault();
