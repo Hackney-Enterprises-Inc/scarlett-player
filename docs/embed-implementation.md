@@ -107,8 +107,8 @@ player.destroy();
   allowfullscreen
 ></iframe>
 
-<!-- Video ID (requires Laravel backend) -->
-<iframe src="https://embed.thestreamplatform.com/v/abc123"></iframe>
+<!-- Video ID (requires Laravel backend; replace with an existing video UUID) -->
+<iframe src="https://embed.thestreamplatform.com/v/123e4567-e89b-12d3-a456-426614174000"></iframe>
 
 <!-- Event slug -->
 <iframe src="https://embed.thestreamplatform.com/embed/fight-night-2025"></iframe>
@@ -204,7 +204,7 @@ class EmbedController extends Controller
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ $title ?? 'Video Player' }}</title>
   <meta name="robots" content="noindex, nofollow">
   @if(isset($poster))
@@ -311,24 +311,27 @@ iframe.html            # iframe embed helper
 
 ### Recommended URL Structure
 
+CDN base: `https://assets.thestreamplatform.com/scarlett-player/{version}/`
+
 ```
-cdn.thestreamplatform.com/player/
-├── v0.1.0/
+assets.thestreamplatform.com/scarlett-player/
+├── v<version>/
 │   ├── embed.js
 │   ├── embed.umd.cjs
 │   └── iframe.html
-├── latest/ → v0.1.0/  # Symlink to current
-└── embed.umd.cjs      # Always latest
+├── latest/ → v<version>/  # Symlink to current (v${VERSION} release contract)
+└── embed.umd.cjs          # Always latest
 ```
 
 ### Usage
 
 ```html
 <!-- Pin to version (recommended) -->
-<script src="https://cdn.../player/v0.1.0/embed.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/v<version>/embed.umd.cjs"></script>
+<!-- or: https://assets.thestreamplatform.com/scarlett-player/{version}/embed.umd.cjs -->
 
 <!-- Always latest -->
-<script src="https://cdn.../player/latest/embed.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 ```
 
 ---
@@ -477,13 +480,13 @@ cd packages/embed && npm publish --access public
 
 ### Before Publishing Checklist
 
-- [ ] Update version in all package.json files (use `pnpm version`)
+- [ ] Update version in package.json files aligning with the embed manifest's `v${VERSION}` release contract
 - [ ] Set correct `repository` URL in package.json (currently "TBD")
 - [ ] Add `LICENSE` file to root and packages
 - [ ] Verify `files` field in package.json includes correct files
 - [ ] Run `pnpm validate` (lint + typecheck + test + build)
 - [ ] Create CHANGELOG entries
-- [ ] Tag release in git
+- [ ] Tag release in git (`v<version>` matching `v${VERSION}`)
 
 ### Scoped vs Unscoped
 
@@ -527,5 +530,5 @@ jobs:
 1. **No tests** - Write tests before publishing
 2. ~~**Repository URL is "TBD"**~~ - ✅ Set to https://github.com/Hackney-Enterprises-Inc/scarlett-player
 3. **Empty stub packages** - Remove or implement react/, 19 stub plugins
-4. **Version 0.1.0** - Consider 1.0.0 for stable release
+4. **Version <version>** - Align with embed manifest's v${VERSION} release contract
 5. ~~**No LICENSE file**~~ - ✅ MIT license added

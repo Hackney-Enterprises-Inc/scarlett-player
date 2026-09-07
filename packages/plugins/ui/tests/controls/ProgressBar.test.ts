@@ -700,5 +700,22 @@ describe('ProgressBar - Live DVR', () => {
       expect(wrapper.querySelector('.sp-progress__tooltip-chapter')).toBeNull();
       bar.destroy();
     });
+
+    it('does not seek video when calculated time is non-finite', () => {
+      const mockApi = createMockApi({ duration: Infinity, currentTime: 15 });
+      const bar = new ProgressBar(mockApi);
+      const wrapper = bar.render();
+      const el = wrapper.querySelector('.sp-progress') as HTMLElement;
+      el.getBoundingClientRect = () => ({ left: 0, width: 100 }) as DOMRect;
+
+      wrapper.dispatchEvent(new MouseEvent('mousemove', { clientX: 50, bubbles: true }));
+      const tooltip = wrapper.querySelector('.sp-progress__tooltip') as HTMLElement;
+      expect(tooltip.textContent).toBe('0:00');
+
+      wrapper.dispatchEvent(new MouseEvent('mousedown', { clientX: 50, bubbles: true }));
+      const video = mockApi.container.querySelector('video') as HTMLVideoElement;
+      expect(video.currentTime).toBe(15);
+      bar.destroy();
+    });
   });
 });

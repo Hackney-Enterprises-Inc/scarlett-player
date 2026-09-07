@@ -250,7 +250,7 @@ export class ProgressBar implements Control {
     this.renderedDuration = range;
   }
 
-  private getTimeFromPosition(clientX: number): number {
+  private getTimeFromPosition(clientX: number): number | null {
     const rect = this.el.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
 
@@ -260,18 +260,19 @@ export class ProgressBar implements Control {
     if (live && seekableRange) {
       // Map percentage to seekable range for live DVR
       const rangeLength = seekableRange.end - seekableRange.start;
-      return seekableRange.start + percent * rangeLength;
+      const time = seekableRange.start + percent * rangeLength;
+      return Number.isFinite(time) ? time : null;
     }
 
     const duration = this.api.getState('duration') || 0;
     const time = percent * duration;
-    return Number.isFinite(time) ? time : 0;
+    return Number.isFinite(time) ? time : null;
   }
 
   private updateTooltip(clientX: number): void {
     const rect = this.el.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const time = this.getTimeFromPosition(clientX);
+    const time = this.getTimeFromPosition(clientX) ?? 0;
 
     const live = this.api.getState('live');
     const seekableRange = this.api.getState('seekableRange');
@@ -466,7 +467,7 @@ export class ProgressBar implements Control {
     this.lastSeekTime = now;
 
     const time = this.getTimeFromPosition(clientX);
-    if (Number.isFinite(time)) {
+    if (time !== null && Number.isFinite(time)) {
       video.currentTime = time;
     }
   }
