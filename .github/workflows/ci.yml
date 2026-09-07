@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # No version pin on purpose: action-setup reads packageManager from
       # package.json (pnpm@10.25.0). The old pin installed pnpm 8, which
@@ -24,7 +24,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: 'pnpm'
@@ -112,6 +112,19 @@ jobs:
       - name: Install Playwright Chromium
         if: github.event_name == 'push'
         run: npx playwright install --with-deps chromium
+
+      # scripts/hls-fixture.mjs shells out to a real ffmpeg. The GitHub-hosted
+      # ubuntu-24.04 image does not carry one (ffmpeg was dropped from the
+      # runner image), and Playwright's bundled build is a private binary under
+      # ~/.cache/ms-playwright that is never put on PATH, so the step below
+      # died with "ffmpeg is not on PATH" on every push to main from the day
+      # this job was added. Installed explicitly rather than relying on the
+      # image.
+      - name: Install ffmpeg
+        if: github.event_name == 'push'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Generate HLS fixture
         if: github.event_name == 'push'

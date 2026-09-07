@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -41,7 +41,7 @@ jobs:
       # Node 24: trusted publishing needs >= 22.14, and 20 is deprecated on
       # GitHub runners, which were force-upgrading these actions to 24 anyway.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: 'pnpm'
@@ -147,8 +147,18 @@ jobs:
       # attestations are generated automatically, so no --provenance flag.
       #
       # Every package published here needs its own trusted publisher entry on
-      # npmjs.com. A package without one fails with a 404, the same misleading
-      # code npm uses for any unauthorised PUT.
+      # npmjs.com. A package without one fails in one of two ways, neither of
+      # which names the real cause: a 404, the same code npm uses for any
+      # unauthorised PUT, or ENEEDAUTH ("This command requires you to be logged
+      # in"), which is what a package the registry has never seen returns -
+      # there is nothing to match an OIDC identity against, so pnpm falls
+      # through to token auth and finds no token. @scarlett-player/clips@1.11.0
+      # failed exactly that way on 2026-09-07. npm will not let you configure a
+      # trusted publisher for a name that does not exist yet, so a brand-new
+      # package needs one manual `npm publish` (a granular token or `npm login`,
+      # from a checkout of the tagged commit) to create it; add the trusted
+      # publisher entry immediately after, and every later version comes from
+      # this workflow.
       # Published one package at a time on purpose, rather than `pnpm publish -r`.
       # Recursive publish stops at the first rejection, so on 2026-08-11 a single
       # unauthorised package (a new one, with no trusted publisher entry yet)
@@ -189,7 +199,7 @@ jobs:
               echo "+ ${name}@${version} published"
               published+=("${name}@${version}")
             else
-              echo "! ${name}@${version} FAILED (a 404 here means no trusted publisher entry yet)"
+              echo "! ${name}@${version} FAILED (404 or ENEEDAUTH here means no trusted publisher entry yet; a package not on the registry at all needs one manual publish first)"
               failed+=("${name}@${version}")
             fi
           done < <(pnpm list -r --depth -1 --json | node -e "
@@ -219,6 +229,8 @@ jobs:
             echo "Failed to publish: ${failed[*]}"
             echo "Add a trusted publisher entry (this repo + release.yml) for each on npmjs.com,"
             echo "then re-run this job. Packages that already succeeded are skipped on the retry."
+            echo "A package that is not on the registry at all cannot have that entry created:"
+            echo "publish its first version by hand (npm login / granular token), then add it."
             printf '\n**Failed:** `%s`\n' "${failed[*]}" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
@@ -278,7 +290,7 @@ jobs:
       # rebuilding or re-tagging anything.
       - name: Upload CDN payload
         if: steps.check_release.outputs.exists == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cdn-payload
           path: |
@@ -296,7 +308,7 @@ jobs:
       - name: Create GitHub Release
         id: gh_release
         if: steps.check_release.outputs.exists == 'false' && steps.npm_publish.outcome == 'success'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
@@ -384,12 +396,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Restores packages/embed/dist/ and packages/embed/iframe.html, the paths
       # the upload script expects.
       - name: Download CDN payload
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: cdn-payload
           path: packages/embed
