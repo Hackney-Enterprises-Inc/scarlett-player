@@ -1491,7 +1491,6 @@ describe('HLS plugin poster', () => {
   let api: MockPluginAPI;
   let state: Record<string, unknown>;
   let created: CapturedHls[];
-  let posterSubscriber: ((event: { key: string }) => void) | null;
   const allStateSubscribers: ((event: { key: string; value: unknown }) => void)[] = [];
   const mockCtor = createMockHlsConstructor();
 
@@ -1521,7 +1520,6 @@ describe('HLS plugin poster', () => {
     vi.clearAllMocks();
     hlsLoader.resetLoader();
     created = [];
-    posterSubscriber = null;
     installMediaStubs();
 
     vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockCtor as any);
@@ -1544,7 +1542,6 @@ describe('HLS plugin poster', () => {
     api = createMockAPI();
     api.getState.mockImplementation((key: string) => state[key]);
     api.subscribeToState.mockImplementation((cb: (event: { key: string }) => void) => {
-      posterSubscriber = cb;
       allStateSubscribers.push(cb);
       return vi.fn(() => {
         const idx = allStateSubscribers.indexOf(cb);

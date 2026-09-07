@@ -31,9 +31,11 @@ export function ensureHlsFixture() {
   if (existsSync(MANIFEST)) return MANIFEST;
 
   // Checked before the real call so a missing ffmpeg reports what to install
-  // rather than surfacing as a raw ENOENT spawn error from execFileSync. CI
-  // runs this on ubuntu-latest, where ffmpeg is preinstalled; a developer
-  // machine may not have it.
+  // rather than surfacing as a raw ENOENT spawn error from execFileSync.
+  // Nothing provides ffmpeg for free: the ubuntu-24.04 runner image no longer
+  // ships one (ci.yml installs it explicitly before calling this), and a
+  // developer machine may not have it either. Playwright's bundled ffmpeg does
+  // not count - it lives under ~/.cache/ms-playwright and is never on PATH.
   const probe = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
   if (probe.error) {
     throw new Error(

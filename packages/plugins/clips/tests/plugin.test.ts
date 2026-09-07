@@ -343,11 +343,8 @@ describe('setRange / setTitle / getRange', () => {
     expect(range?.clientRequestId).toBeTruthy();
     expect(Number.isNaN(Date.parse(range!.capturedAt))).toBe(false);
     expect(range).not.toHaveProperty('src');
-    // The signed URL must not reach a host's endpoint under any key, so assert
-    // on what actually goes on the wire rather than on the one field name.
-    const wire = JSON.stringify(range);
-    expect(wire).not.toContain(SIGNED_SRC);
-    expect(wire).not.toContain('SECRET-DO-NOT-SHARE');
+    // The signed URL must not reach a host under any key; asserted on the
+    // request body itself in the endpoint-path suite below.
 
     plugin.close();
     expect(plugin.getRange()).toBeNull();
@@ -579,6 +576,13 @@ describe('commit() - endpoint path', () => {
     await plugin.commit();
 
     expect(endpoint.fetch).toHaveBeenCalledTimes(1);
+    // What actually goes on the wire: the signed source URL must not reach a
+    // host's endpoint under any key, so assert on the serialized request body
+    // rather than on the payload object and one field name.
+    const wire = String((endpoint.fetch.mock.calls[0][1] as RequestInit).body);
+    expect(JSON.parse(wire)).toMatchObject({ mediaId: 'video-42' }); // not a vacuous body
+    expect(wire).not.toContain(SIGNED_SRC);
+    expect(wire).not.toContain('SECRET-DO-NOT-SHARE');
     expect(lastEmitted(api, 'clip:created')).toMatchObject({ result });
     expect(plugin.isOpen()).toBe(false);
   });
