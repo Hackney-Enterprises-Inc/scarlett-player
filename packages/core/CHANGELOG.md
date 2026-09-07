@@ -1,5 +1,121 @@
 # @scarlett-player/core
 
+## 1.10.0
+
+### Minor Changes
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Core: `init()` no longer reloads `initialSrc` on a second call, and
+  `StateManager.define()` warns on a conflicting redefinition.
+  - `init()` documented itself as idempotent while unconditionally reloading
+    `initialSrc`, so a second `init()` clobbered active playback, and an
+    `init()` after a host's own `load()` replaced the source the host asked for.
+    The initial load now happens once, and a `load()` of any kind claims the
+    source.
+  - `define()` returned silently when a key already existed. Two plugins
+    claiming one key with different defaults produced diverging state with no
+    diagnostic. The first definition still wins - unchanged behaviour - but a
+    conflicting default is now reported.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Review pass: state redefinition warnings, share-URL credential coverage, live
+  seek clamping and playlist persistence.
+  - `StateManager.define()` detects two collisions it used to miss: a key first
+    defined with an explicit `undefined` default, and a plugin claiming a core
+    key such as `volume`. Core defaults now come from `DEFAULT_STATE`, since core
+    keys never reach the plugin default map. Identical re-runs stay silent.
+  - That warning no longer builds its message with `JSON.stringify`, which threw
+    on a circular default or a BigInt and turned a diagnostic into a broken
+    `define()`.
+  - `formatLiveTime()` reports `LIVE` for a non-finite distance instead of
+    `-0:00`, which read as a precise offset derived from an unknown seekable end.
+  - The default share URL also drops `id_token`, `refresh_token`, the AWS SigV4
+    `x-amz-*` set and CloudFront's `key-pair-id`, so a page served from a
+    presigned URL does not share its signature.
+  - Media Session `seekbackward` and `seekforward` clamp at both ends of the DVR
+    window. A `currentTime` recorded before the window slid sat outside the
+    range, and a one-sided clamp left the target outside it too.
+  - Playlist treats `tracks: []` as a supplied empty playlist rather than "no
+    preference", so storage can no longer refill a list the host emptied;
+    rejects a fractional persisted `currentIndex`, which passed the old `>= 0`
+    test and then indexed nothing; and keeps a restored shuffle order that still
+    covers every track instead of reshuffling a persisted session on every load.
+
+  Peer dependency ranges now state the version each package actually needs,
+  audited against core's and `ui`'s export surface at each release. Every plugin
+  declared `^1.8.0` while importing APIs added later, so a consumer could resolve
+  a core or `ui` old enough to be missing them:
+  - `ui` and `audio-ui` require core `^1.10.0` - the release adding the
+    `SHARED_ICON_PATHS` and `formatTime` exports they import.
+  - `chapters`, `gestures`, `native`, `playlist` and `share` require core
+    `^1.9.0`, which added `injectSharedStyles`, `ReleaseStyles` and
+    `sanitizeUrl`.
+  - `chapters`, `playlist` and `share` require `ui` `^1.9.0` for their optional
+    peer. They register controls with `registerControl(id, factory, { owner })`
+    and release them with `unregisterControl(id, { owner })`; the options
+    argument arrived in 1.9.0, and against 1.8.0 the registration is silently
+    global - the multi-player bug the `owner` scope exists to prevent.
+  - `native` and `vue` declare `jsdom`, which their Vitest configs select as the
+    test environment. It resolved only because pnpm satisfied Vitest's optional
+    peer from another workspace package that did declare it.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Testing: the browser harness runs on bundled Chromium against local fixtures
+  and runs in CI, and an HLS integration suite loads the real hls.js.
+  - `scripts/verify-browser.mjs` launches Playwright's bundled Chromium instead
+    of requiring a system Google Chrome, which is what kept it out of CI. Every
+    scenario now plays the local HLS fixture, and each page hard-blocks
+    non-local origins, so a run cannot depend on the demo origin being up - the
+    503 that produced the URL-recovery fix above would otherwise have taken the
+    harness down with it. Scenario 7 also waits for the control bar to settle
+    before measuring, rather than racing the rebuild that follows a late control
+    registration.
+  - CI installs Chromium, generates the fixture and runs the harness after the
+    unit tests. `scripts/hls-fixture.mjs` now reports a missing ffmpeg instead of
+    surfacing a raw spawn error.
+  - New `packages/plugins/hls/tests/integration.test.ts` imports hls.js itself
+    and asserts what the mocks cannot: that the event names and error-detail
+    strings the plugin switches on still exist, that `parseHlsError` recovers the
+    URL from a fragment error built the way hls.js builds it, and that the
+    `MANIFEST_PARSED` and `LEVEL_LOADED` payloads carry the fields `event-map.ts`
+    reads - checked against manifests hls.js actually parsed.
+  - Two tests that encoded current behaviour were rewritten: analytics'
+    `startupTime` assertion no longer passes for `null`, and `seekToLive()` now
+    covers the fallback chain a real provider reaches instead of only the mocked
+    `getLiveInfo()` branch.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - UI: the progress tooltip returns after a mouse leave, a leaked keydown listener
+  is removed, `--sp-*` is no longer declared on `:root`, and a window-resize
+  fallback covers viewports without `ResizeObserver`. Audio UI: keyboard support
+  on the progress and volume sliders, and no more per-tick `innerHTML` rewrites.
+
+  **UI**
+  - `ProgressBar` set `tooltip.style.opacity = '0'` on mouse leave and touch end.
+    An inline style outranks the stylesheet's hover rule, so the tooltip never
+    came back on a later hover. The inline value is now cleared instead.
+  - `ProgressBar.destroy()` removes its `keydown` listener, which was the only
+    one it left attached.
+  - The stylesheet no longer declares `--sp-accent`, `--sp-color`, `--sp-bg`,
+    `--sp-control-height` and `--sp-icon-size` on `:root`, which wrote five names
+    into the host document. Defaults live at the use sites as `var()` fallbacks,
+    so a host theming through its own `:root` keeps working and `setTheme()`
+    still wins on the container.
+  - Where `ResizeObserver` is unavailable the bar refits on a debounced window
+    resize. It was previously fitted at init and on control changes and never
+    again.
+
+  **Audio UI**
+  - The progress bar and volume slider respond to arrow keys, Home and End. Both
+    already carried `role="slider"` and `tabindex="0"`, so a keyboard viewer
+    could focus them and had nothing to press.
+  - Button icons are only rewritten when they change. `updateUI()` runs on every
+    `currentTime` tick and each `innerHTML` write reparsed the SVG.
+
+  **Shared code**
+
+  `formatTime`/`formatLiveTime` and the SVG paths both UI packages draw now live
+  in `@scarlett-player/core`, which is already a peer dependency of both. `ui`
+  re-exports the formatters, so its public surface is unchanged.
+  `@scarlett-player/hls`'s `sanitizeUrl` re-exports core's implementation rather
+  than duplicating it; it remains exported from both HLS entries.
+
 ## 1.9.0
 
 ### Minor Changes
