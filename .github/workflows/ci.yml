@@ -11,9 +11,23 @@ jobs:
     name: Test & Build
     runs-on: ubuntu-latest
 
+    # This job only reads the repository - it lints, builds and tests. Stated
+    # explicitly rather than inheriting the repository or organization default,
+    # so widening that default later cannot hand a write-scoped token to a
+    # pull_request run of untrusted branch code.
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Nothing in this job pushes, and `pnpm install` below runs lifecycle
+          # scripts out of the pull request's own tree. Left at the default,
+          # checkout writes the GITHUB_TOKEN into .git/config, where any of
+          # those scripts could read it. release.yml keeps the default because
+          # it does push the demo bundle.
+          persist-credentials: false
 
       # No version pin on purpose: action-setup reads packageManager from
       # package.json (pnpm@10.25.0). The old pin installed pnpm 8, which

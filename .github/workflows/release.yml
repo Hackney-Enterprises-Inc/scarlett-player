@@ -155,10 +155,22 @@ jobs:
       # through to token auth and finds no token. @scarlett-player/clips@1.11.0
       # failed exactly that way on 2026-09-07. npm will not let you configure a
       # trusted publisher for a name that does not exist yet, so a brand-new
-      # package needs one manual `npm publish` (a granular token or `npm login`,
-      # from a checkout of the tagged commit) to create it; add the trusted
-      # publisher entry immediately after, and every later version comes from
-      # this workflow.
+      # package needs one manual publish to create it:
+      #
+      #   pnpm publish --filter <name> --access public --no-git-checks
+      #
+      # authenticated with `npm login` or a granular token in ~/.npmrc. pnpm,
+      # never `npm publish`, for the same reason the step itself uses pnpm (see
+      # below): npm ships `workspace:*` ranges verbatim and every install of the
+      # result fails to resolve. Run it from the release commit this job is
+      # failing on - check out the release branch or that commit by sha, NOT
+      # `v<version>`: that tag is created by the "Create GitHub Release" step at
+      # the end of this job, so it does not exist while the publish is still
+      # failing. Confirm the version you are about to put on the registry first,
+      # with `node -p "require('./packages/<dir>/package.json').version"`, because
+      # a published version can never be replaced. Add the trusted publisher
+      # entry immediately after, and every later version comes from this
+      # workflow.
       # Published one package at a time on purpose, rather than `pnpm publish -r`.
       # Recursive publish stops at the first rejection, so on 2026-08-11 a single
       # unauthorised package (a new one, with no trusted publisher entry yet)
@@ -229,8 +241,13 @@ jobs:
             echo "Failed to publish: ${failed[*]}"
             echo "Add a trusted publisher entry (this repo + release.yml) for each on npmjs.com,"
             echo "then re-run this job. Packages that already succeeded are skipped on the retry."
-            echo "A package that is not on the registry at all cannot have that entry created:"
-            echo "publish its first version by hand (npm login / granular token), then add it."
+            echo "A package that is not on the registry at all cannot have that entry created."
+            echo "Publish its first version by hand from this release commit (the v<version> tag"
+            echo "does not exist yet - this job creates it only after npm succeeds), after"
+            echo "checking the version in its package.json, then add the entry:"
+            echo "  pnpm publish --filter <name> --access public --no-git-checks"
+            echo "authenticated with npm login or a granular token. Use pnpm, not npm publish:"
+            echo "npm ships workspace:* ranges verbatim and the published package will not install."
             printf '\n**Failed:** `%s`\n' "${failed[*]}" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
