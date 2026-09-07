@@ -557,6 +557,115 @@
       color: #e0e0e0;
     }
 
+    /* Clip controls panel (modelled on Watermark Controls) */
+    .clip-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+
+    .clip-control-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .clip-control-row label {
+      min-width: 140px;
+      font-size: 0.875rem;
+      color: #aaa;
+    }
+
+    .clip-control-row input[type="range"] {
+      flex: 1;
+    }
+
+    .clip-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+
+    .clip-btn:hover {
+      border-color: #e50914;
+    }
+
+    .clip-hint {
+      font-size: 0.75rem;
+      color: #888;
+    }
+
+    /* Clip log panel (modelled on the Analytics Log) */
+    .clip-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .clip-header h2 {
+      margin-bottom: 0;
+    }
+
+    .clip-log {
+      background: #0d0d0d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.7rem;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .clip-row {
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #1e1e1e;
+    }
+
+    .clip-row-head {
+      display: flex;
+      gap: 12px;
+    }
+
+    .clip-time {
+      color: #666;
+      flex: 0 0 auto;
+    }
+
+    .clip-event {
+      color: #e50914;
+      flex: 0 0 120px;
+    }
+
+    .clip-detail {
+      color: #888;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .clip-json {
+      margin: 6px 0 0;
+      color: #9cdcfe;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .clip-log-empty {
+      color: #666;
+    }
+
     .code-content .keyword { color: #c792ea; }
     .code-content .string { color: #c3e88d; }
     .code-content .comment { color: #676e95; font-style: italic; }
@@ -645,6 +754,7 @@
         <span class="feature active">UI Controls</span>
         <span class="feature active">AirPlay</span>
         <span class="feature active">Chromecast</span>
+        <span class="feature active">Clips</span>
       </div>
     </div>
 
@@ -667,6 +777,7 @@
 <span class="keyword">import</span> { uiPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/ui'</span>;
 <span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
 <span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
+<span class="keyword">import</span> { createClipsPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/clips'</span>;
 
 <span class="comment">// Create the player</span>
 <span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
@@ -681,11 +792,43 @@
     }),
     <span class="function">airplayPlugin</span>(),
     <span class="function">chromecastPlugin</span>(),
+    <span class="comment">// Viewer-created clips: what a real host running the clips</span>
+    <span class="comment">// server writes - the plugin POSTs the captured range as JSON.</span>
+    <span class="function">createClipsPlugin</span>({
+      <span class="property">mediaId</span>: <span class="string">'video-42'</span>,
+      <span class="property">endpoint</span>: { <span class="property">url</span>: <span class="string">'/api/clips'</span> },
+    }),
   ],
 });
 
 <span class="comment">// Initialize and start playback</span>
 <span class="keyword">await</span> player.<span class="function">init</span>();</pre>
+      </div>
+    </div>
+
+    <div class="info">
+      <h2>Clip Controls</h2>
+      <div class="clip-controls">
+        <div class="clip-control-row">
+          <label>Min: <span id="clip-min-value">5</span>s</label>
+          <input type="range" id="clip-min" min="1" max="120" step="1" value="5">
+        </div>
+        <div class="clip-control-row">
+          <label>Max: <span id="clip-max-value">60</span>s</label>
+          <input type="range" id="clip-max" min="5" max="300" step="5" value="60">
+        </div>
+        <div class="clip-control-row">
+          <label>Pre-roll: <span id="clip-preroll-value">30</span>s</label>
+          <input type="range" id="clip-preroll" min="5" max="300" step="5" value="30">
+        </div>
+        <div class="clip-control-row">
+          <label>Step: <span id="clip-step-value">1</span>s</label>
+          <input type="range" id="clip-step" min="0.5" max="10" step="0.5" value="1">
+        </div>
+        <div class="clip-control-row">
+          <button id="clip-open-btn" class="clip-btn">Open selector</button>
+          <span class="clip-hint">opens pre-rolled behind the playhead, VOD only - the sliders re-run plugin.configure()</span>
+        </div>
       </div>
     </div>
   </div>
@@ -838,6 +981,17 @@ playlist.<span class="function">add</span>([
         <div class="stat-label">Buffered</div>
         <div class="stat-value" id="buffered">0%</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Simulated clips server: onCreate payloads plus the rendering-to-ready sequence -->
+  <div class="info">
+    <div class="clip-header">
+      <h2>Clip Log</h2>
+      <button id="clip-clear" class="clip-btn">Clear</button>
+    </div>
+    <div class="clip-log" id="clip-log">
+      <div class="clip-log-empty">Clips you create will appear here...</div>
     </div>
   </div>
 

@@ -213,7 +213,7 @@ export class StateManager {
    *
    * @example
    * ```ts
-   * state.define('highlightSelection', null);
+   * state.define('clipSelection', null);
    * ```
    */
   define<K extends StateKey>(key: K, initialValue: StateValue<K>): void {

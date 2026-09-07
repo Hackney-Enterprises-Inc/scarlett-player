@@ -345,7 +345,7 @@ export interface CoreStateStore {
  * ```ts
  * declare module '@scarlett-player/core' {
  *   interface StateStore {
- *     highlightSelection: { start: number; end: number } | null;
+ *     clipSelection: { start: number; end: number } | null;
  *   }
  * }
  * ```

@@ -23,7 +23,8 @@
       "@scarlett-player/watermark",
       "@scarlett-player/share",
       "@scarlett-player/chapters",
-      "@scarlett-player/gestures"
+      "@scarlett-player/gestures",
+      "@scarlett-player/clips"
     ]
   ],
   "linked": [],
