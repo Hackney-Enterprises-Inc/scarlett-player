@@ -28,7 +28,7 @@
     "format": "prettier --write \"packages/**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\"",
     "clean": "pnpm --filter './packages/**' run clean && rm -rf node_modules",
-    "validate": "node scripts/check-package-scripts.mjs && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "validate": "node scripts/check-package-scripts.mjs && pnpm run lint && pnpm run build && node scripts/check-package-types.mjs && pnpm run typecheck && pnpm run test",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm run build && changeset publish"

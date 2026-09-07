@@ -700,3 +700,76 @@ describe('EventBus', () => {
     });
   });
 });
+
+describe('EventBus - re-entrant once() registration', () => {
+  it('keeps a once handler registered from inside another once handler', () => {
+    const bus = new EventBus();
+    const second = vi.fn();
+
+    bus.once('playback:play', () => {
+      bus.once('playback:play', second);
+    });
+
+    bus.emit('playback:play', undefined);
+    // The re-entrant handler must survive the emit that registered it.
+    expect(second).not.toHaveBeenCalled();
+    expect(bus.listenerCount('playback:play')).toBe(1);
+
+    bus.emit('playback:play', undefined);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(bus.listenerCount('playback:play')).toBe(0);
+  });
+
+  it('keeps a re-entrant once handler through emitAsync', async () => {
+    const bus = new EventBus();
+    const second = vi.fn();
+
+    bus.once('playback:play', () => {
+      bus.once('playback:play', second);
+    });
+
+    await bus.emitAsync('playback:play', undefined);
+    expect(second).not.toHaveBeenCalled();
+
+    await bus.emitAsync('playback:play', undefined);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('still fires each once handler exactly once', () => {
+    const bus = new EventBus();
+    const a = vi.fn();
+    const b = vi.fn();
+
+    bus.once('playback:play', a);
+    bus.once('playback:play', b);
+
+    bus.emit('playback:play', undefined);
+    bus.emit('playback:play', undefined);
+
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-fire a once handler that re-registers itself', () => {
+    const bus = new EventBus();
+    let calls = 0;
+
+    const handler = () => {
+      calls++;
+      if (calls < 3) bus.once('playback:play', handler);
+    };
+    bus.once('playback:play', handler);
+
+    bus.emit('playback:play', undefined);
+    expect(calls).toBe(1);
+
+    bus.emit('playback:play', undefined);
+    expect(calls).toBe(2);
+
+    bus.emit('playback:play', undefined);
+    expect(calls).toBe(3);
+
+    bus.emit('playback:play', undefined);
+    expect(calls).toBe(3);
+  });
+});

@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockPluginAPI } from '../mock-api';
 import { SettingsMenu } from '../../src/controls/SettingsMenu';
-import type { IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';
+import type { QualityLevel, TextTrack } from '@scarlett-player/core';
 
-function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
+function createMockApi(overrides: Record<string, unknown> = {}): MockPluginAPI {
   const state: Record<string, unknown> = {
     qualities: [],
     currentQuality: null,
@@ -32,6 +33,7 @@ function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
   };
@@ -43,9 +45,9 @@ const MOCK_TRACKS: TextTrack[] = [
 ];
 
 const MOCK_QUALITIES: QualityLevel[] = [
-  { id: '360p', label: '360p', height: 360, bitrate: 800000 },
-  { id: '720p', label: '720p', height: 720, bitrate: 2500000 },
-  { id: '1080p', label: '1080p', height: 1080, bitrate: 5000000 },
+  { id: '360p', label: '360p', width: 640, height: 360, bitrate: 800000, active: false },
+  { id: '720p', label: '720p', width: 1280, height: 720, bitrate: 2500000, active: false },
+  { id: '1080p', label: '1080p', width: 1920, height: 1080, bitrate: 5000000, active: false },
 ];
 
 describe('SettingsMenu', () => {
@@ -1079,5 +1081,146 @@ describe('SettingsMenu', () => {
     );
     const value = speedRow?.querySelector('.sp-settings-panel__value');
     expect(value?.textContent).toContain('2x');
+  });
+});
+
+describe('SettingsMenu - focus restoration', () => {
+  let api: ReturnType<typeof createMockApi>;
+  let menu: SettingsMenu;
+  let el: HTMLElement;
+
+  const gear = (): HTMLButtonElement => el.querySelector('.sp-settings__btn') as HTMLButtonElement;
+
+  beforeEach(() => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    el = menu.render();
+    // Attached: focus() is a no-op on a detached element.
+    document.body.appendChild(el);
+  });
+
+  afterEach(() => {
+    menu.destroy();
+    el.remove();
+  });
+
+  it('returns focus to the gear button after choosing an option', () => {
+    gear().click();
+    expect(menu.isMenuOpen()).toBe(true);
+
+    const speedRow = Array.from(el.querySelectorAll<HTMLElement>('.sp-settings-panel__row')).find(
+      (row) => row.textContent?.includes('Speed')
+    );
+    speedRow?.click();
+
+    const normal = Array.from(
+      el.querySelectorAll<HTMLElement>('.sp-settings-panel__item')
+    ).find((item) => item.getAttribute('data-id') === '1');
+    normal?.click();
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(document.activeElement).toBe(gear());
+  });
+
+  it('returns focus to the gear button on Escape', () => {
+    gear().click();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(document.activeElement).toBe(gear());
+  });
+
+  it('does not steal focus when the viewer clicks elsewhere', () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+
+    gear().click();
+    outside.focus();
+    document.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(document.activeElement).toBe(outside);
+
+    outside.remove();
+  });
+
+  it('does not move focus when it was already closed', () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+
+    menu.close();
+
+    expect(document.activeElement).toBe(outside);
+
+    outside.remove();
+  });
+});
+
+describe('SettingsMenu - audio tracks', () => {
+  const MOCK_AUDIO = [
+    { id: 'audio-0', label: 'English', language: 'en', active: true },
+    { id: 'audio-1', label: 'Director Commentary', language: 'en', active: false },
+  ];
+
+  const rows = (el: HTMLElement): string[] =>
+    Array.from(el.querySelectorAll('.sp-settings-panel__label')).map(
+      (label) => label.textContent ?? ''
+    );
+
+  it('offers no Audio row when the stream has one rendition', () => {
+    const api = createMockApi({
+      audioTracks: [MOCK_AUDIO[0]],
+      currentAudioTrack: MOCK_AUDIO[0],
+    });
+    const menu = new SettingsMenu(api);
+    const el = menu.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+
+    expect(rows(el)).not.toContain('Audio');
+
+    menu.destroy();
+  });
+
+  it('offers an Audio row showing the active rendition', () => {
+    const api = createMockApi({
+      audioTracks: MOCK_AUDIO,
+      currentAudioTrack: MOCK_AUDIO[0],
+    });
+    const menu = new SettingsMenu(api);
+    const el = menu.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+
+    expect(rows(el)).toContain('Audio');
+    expect(el.textContent).toContain('English');
+
+    menu.destroy();
+  });
+
+  it('emits track:audio for the chosen rendition and closes', () => {
+    const api = createMockApi({
+      audioTracks: MOCK_AUDIO,
+      currentAudioTrack: MOCK_AUDIO[0],
+    });
+    const menu = new SettingsMenu(api);
+    const el = menu.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+
+    const audioRow = Array.from(el.querySelectorAll<HTMLElement>('.sp-settings-panel__row')).find(
+      (row) => row.textContent?.startsWith('Audio')
+    );
+    audioRow?.click();
+
+    const items = Array.from(el.querySelectorAll<HTMLElement>('.sp-settings-panel__item'));
+    expect(items.map((item) => item.getAttribute('data-id'))).toEqual(['audio-0', 'audio-1']);
+    expect(items[0].classList.contains('sp-settings-panel__item--active')).toBe(true);
+
+    items[1].click();
+
+    expect(api.emit).toHaveBeenCalledWith('track:audio', { trackId: 'audio-1' });
+    expect(menu.isMenuOpen()).toBe(false);
+
+    menu.destroy();
   });
 });

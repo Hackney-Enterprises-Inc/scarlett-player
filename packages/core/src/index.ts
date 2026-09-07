@@ -28,6 +28,8 @@ export {
   currentEffect,
   setCurrentEffect,
   getCurrentEffect,
+  pushEffect,
+  popEffect,
   type UnsubscribeFn,
 } from './state/index';
 
@@ -64,6 +66,14 @@ export { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 
 // Re-export URL sanitizer for telemetry-safe logging across packages
 export { sanitizeUrl } from './utils/url';
+
+// Re-export the shared stylesheet helper so plugins that inject one <style>
+// per document all reference-count it the same way
+export {
+  injectSharedStyles,
+  sharedStyleHolders,
+  type ReleaseStyles,
+} from './utils/shared-styles';
 
 // Re-export all type definitions
 export type {

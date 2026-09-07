@@ -4,14 +4,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { uiPlugin } from '../src/index';
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from './mock-api';
 import { PKG_VERSION } from '../src/version';
 import { registerControl, resetControlRegistry } from '../src/control-registry';
 
 /**
  * Create a mock plugin API
  */
-function createMockApi(): IPluginAPI {
+function createMockApi(): MockPluginAPI {
   const state: Record<string, unknown> = {
     playing: false,
     paused: true,
@@ -70,7 +70,7 @@ function createMockApi(): IPluginAPI {
 }
 
 describe('UI Plugin', () => {
-  let api: IPluginAPI;
+  let api: MockPluginAPI;
 
   beforeEach(() => {
     api = createMockApi();
@@ -561,6 +561,22 @@ describe('UI Plugin', () => {
     const isVisible = (): boolean =>
       button()?.classList.contains('sp-big-play--visible') ?? false;
 
+    const overlay = (): HTMLElement | null => api.container.querySelector('.sp-error-overlay');
+    /**
+     * Dispatch a player event to the handlers the plugin registered.
+     *
+     * `api.on` is a spy, so its recorded calls are the subscription list.
+     */
+    const fire = (event: string, payload?: unknown): void => {
+      const calls = (api.on as unknown as { mock: { calls: [string, (p: unknown) => void][] } }).mock
+        .calls;
+      calls.filter(([name]) => name === event).forEach(([, handler]) => handler(payload));
+    };
+
+    /** The error overlay's Go Back button. */
+    const dismissBtn = (): HTMLButtonElement | null =>
+      api.container.querySelector('.sp-error-overlay__dismiss');
+
     /**
      * Run the queued frame.
      *
@@ -640,13 +656,53 @@ describe('UI Plugin', () => {
       await plugin.destroy();
     });
 
-    it('hides while an error is set', async () => {
+    it('hides while the error overlay is on screen', async () => {
       const plugin = uiPlugin();
       await plugin.init(api);
 
       setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
 
       expect(isVisible()).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('comes back once the viewer dismisses the error overlay', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
+      expect(isVisible()).toBe(false);
+
+      // Dismissing leaves `error` state populated. The button must still come
+      // back, or the viewer has no way to start the video again.
+      dismissBtn()?.click();
+      notify?.();
+      flushFrame();
+
+      expect(isVisible()).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('comes back when a new source loads over a stale error', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
+      expect(isVisible()).toBe(false);
+
+      fire('media:loaded', { src: 'next.mp4', type: 'video/mp4' });
+      flushFrame();
+
+      expect(overlay()?.classList.contains('sp-error-overlay--visible')).toBe(false);
+      expect(isVisible()).toBe(true);
 
       await plugin.destroy();
     });

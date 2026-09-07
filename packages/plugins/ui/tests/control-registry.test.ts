@@ -7,11 +7,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { uiPlugin, registerControl, unregisterControl, getControlFactory, resetControlRegistry } from '../src/index';
+import {
+  uiPlugin,
+  registerControl,
+  unregisterControl,
+  unregisterControlsFor,
+  getControlFactory,
+  resetControlRegistry,
+} from '../src/index';
 import type { Control } from '../src/types';
 import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from './mock-api';
 
-function createMockApi(): IPluginAPI {
+function createMockApi(): MockPluginAPI {
   const state: Record<string, unknown> = {
     playing: false,
     paused: true,
@@ -43,7 +51,7 @@ function createMockApi(): IPluginAPI {
     getPlugin: vi.fn(() => null),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
-  } as unknown as IPluginAPI;
+  } as unknown as MockPluginAPI;
 }
 
 /** Minimal control, standing in for one a plugin package would ship. */
@@ -60,7 +68,7 @@ function createTestControl(label: string): Control {
 }
 
 describe('control registry', () => {
-  let api: IPluginAPI;
+  let api: MockPluginAPI;
 
   beforeEach(() => {
     resetControlRegistry();
@@ -203,5 +211,161 @@ describe('control registry', () => {
       expect(() => registerControl('demo', () => createTestControl('demo'))).not.toThrow();
       expect(document.querySelector('.sp-demo')).toBeNull();
     });
+  });
+});
+
+describe('control registry - per-player scoping', () => {
+  let apiA: IPluginAPI;
+  let apiB: IPluginAPI;
+
+  beforeEach(() => {
+    resetControlRegistry();
+    apiA = createMockApi();
+    apiB = createMockApi();
+  });
+
+  afterEach(() => {
+    resetControlRegistry();
+    apiA.container.remove();
+    apiB.container.remove();
+    document.querySelectorAll('style').forEach((s) => s.remove());
+  });
+
+  it('serves each player its own factory for the same id', () => {
+    const factoryA = vi.fn(() => createTestControl('a'));
+    const factoryB = vi.fn(() => createTestControl('b'));
+
+    registerControl('demo', factoryA, { owner: apiA.container });
+    registerControl('demo', factoryB, { owner: apiB.container });
+
+    expect(getControlFactory('demo', apiA.container)).toBe(factoryA);
+    expect(getControlFactory('demo', apiB.container)).toBe(factoryB);
+  });
+
+  it('falls back to a global factory when the player registered none', () => {
+    const global = vi.fn(() => createTestControl('global'));
+    registerControl('demo', global);
+
+    expect(getControlFactory('demo', apiA.container)).toBe(global);
+  });
+
+  it('prefers the player-owned factory over a global one', () => {
+    const global = vi.fn(() => createTestControl('global'));
+    const owned = vi.fn(() => createTestControl('owned'));
+
+    registerControl('demo', global);
+    registerControl('demo', owned, { owner: apiA.container });
+
+    expect(getControlFactory('demo', apiA.container)).toBe(owned);
+    expect(getControlFactory('demo', apiB.container)).toBe(global);
+    expect(getControlFactory('demo')).toBe(global);
+  });
+
+  it('hides a scoped factory from a lookup with no owner', () => {
+    registerControl('demo', () => createTestControl('a'), { owner: apiA.container });
+
+    expect(getControlFactory('demo')).toBeNull();
+  });
+
+  it('drops everything a player registered', () => {
+    registerControl('one', () => createTestControl('one'), { owner: apiA.container });
+    registerControl('two', () => createTestControl('two'), { owner: apiA.container });
+    registerControl('one', () => createTestControl('other'), { owner: apiB.container });
+
+    expect(unregisterControlsFor(apiA.container)).toBe(2);
+
+    expect(getControlFactory('one', apiA.container)).toBeNull();
+    expect(getControlFactory('two', apiA.container)).toBeNull();
+    expect(getControlFactory('one', apiB.container)).not.toBeNull();
+  });
+
+  it('unregisters a scoped factory without touching the global one', () => {
+    const global = vi.fn(() => createTestControl('global'));
+    registerControl('demo', global);
+    registerControl('demo', () => createTestControl('owned'), { owner: apiA.container });
+
+    expect(unregisterControl('demo', { owner: apiA.container })).toBe(true);
+    expect(getControlFactory('demo', apiA.container)).toBe(global);
+  });
+
+  it('builds each player its own control from its own factory', async () => {
+    registerControl('demo', () => createTestControl('from-a'), { owner: apiA.container });
+    registerControl('demo', () => createTestControl('from-b'), { owner: apiB.container });
+
+    const pluginA = uiPlugin({ controls: ['demo'], responsive: false });
+    const pluginB = uiPlugin({ controls: ['demo'], responsive: false });
+    await pluginA.init(apiA);
+    await pluginB.init(apiB);
+
+    expect(apiA.container.querySelector('.sp-from-a')).not.toBeNull();
+    expect(apiA.container.querySelector('.sp-from-b')).toBeNull();
+    expect(apiB.container.querySelector('.sp-from-b')).not.toBeNull();
+    expect(apiB.container.querySelector('.sp-from-a')).toBeNull();
+
+    await pluginA.destroy();
+    await pluginB.destroy();
+  });
+});
+
+describe('multi-player isolation', () => {
+  let apiA: IPluginAPI;
+  let apiB: IPluginAPI;
+
+  beforeEach(() => {
+    resetControlRegistry();
+    document.head.innerHTML = '';
+    apiA = createMockApi();
+    apiB = createMockApi();
+  });
+
+  afterEach(() => {
+    resetControlRegistry();
+    apiA.container.remove();
+    apiB.container.remove();
+    document.querySelectorAll('style').forEach((s) => s.remove());
+  });
+
+  it('leaves the surviving player styled and working after the other is destroyed', async () => {
+    const pluginA = uiPlugin({ responsive: false });
+    const pluginB = uiPlugin({ responsive: false });
+    await pluginA.init(apiA);
+    await pluginB.init(apiB);
+
+    // One shared sheet, not one per player.
+    expect(document.querySelectorAll('#sp-ui-styles')).toHaveLength(1);
+
+    await pluginA.destroy();
+
+    // B is still mounted, so the sheet must still be there.
+    expect(document.getElementById('sp-ui-styles')).not.toBeNull();
+    expect(apiB.container.querySelector('.sp-controls')).not.toBeNull();
+    expect(apiB.container.querySelector('.sp-play')).not.toBeNull();
+
+    // B's controls still respond.
+    pluginB.hide();
+    expect(
+      apiB.container.querySelector('.sp-controls')?.classList.contains('sp-controls--hidden')
+    ).toBe(true);
+    pluginB.show();
+    expect(
+      apiB.container.querySelector('.sp-controls')?.classList.contains('sp-controls--visible')
+    ).toBe(true);
+
+    await pluginB.destroy();
+    expect(document.getElementById('sp-ui-styles')).toBeNull();
+  });
+
+  it('does not rebuild one player for another player`s registration', async () => {
+    const pluginA = uiPlugin({ controls: ['play', 'demo'], responsive: false });
+    await pluginA.init(apiA);
+
+    const before = apiA.container.querySelector('.sp-controls')?.children.length;
+
+    registerControl('demo', () => createTestControl('b-only'), { owner: apiB.container });
+
+    expect(apiA.container.querySelector('.sp-b-only')).toBeNull();
+    expect(apiA.container.querySelector('.sp-controls')?.children.length).toBe(before);
+
+    await pluginA.destroy();
   });
 });

@@ -25,6 +25,7 @@
  * ```
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
 import type { IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
 import type { ShareContext, SharePluginConfig, ShareTarget } from './types';
 import { applyTimestamp, resolveBaseUrl, resolveTitle } from './url';
@@ -78,7 +79,19 @@ const STYLE_ID = 'sp-share-styles';
 export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
   let api: IPluginAPI | null = null;
   let sheet: ShareSheet | null = null;
-  let styleEl: HTMLStyleElement | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
+  /**
+   * Bumped by every init() and destroy().
+   *
+   * The UI package is pulled in with a runtime import, so its `.then()` can
+   * land after the plugin was torn down (or after a re-init). Registering then
+   * hands a later rebuild a control wired to a dead instance, and overwrites
+   * the registration the current lifecycle just made. The callback captures the
+   * generation it was scheduled under and skips when it no longer matches.
+   */
+  let lifecycle = 0;
+
 
   const configuredTargets = config.targets ?? DEFAULT_TARGETS;
 
@@ -215,15 +228,14 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
     description: 'Native share sheet, copy link, timestamps and embed codes',
 
     init(pluginApi: IPluginAPI): void {
+      const generation = ++lifecycle;
       api = pluginApi;
       api.logger.debug('Share plugin initialized');
 
-      if (!document.getElementById(STYLE_ID)) {
-        styleEl = document.createElement('style');
-        styleEl.id = STYLE_ID;
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
-      }
+      // Reference-counted: the sheet is shared by every player on the page, and
+      // an unguarded remove() on the first destroy stripped the styling from
+      // the players still mounted.
+      releaseStyles = injectSharedStyles(STYLE_ID, styles);
 
       sheet = new ShareSheet(api, {
         onSelect: (target) => {
@@ -243,8 +255,16 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
       // Registering does not place the button anywhere - the host opts in by
       // listing 'share' in its control layout. Done via a runtime import so a
       // headless host never needs @scarlett-player/ui installed.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
+        .then(({ registerControl, unregisterControl }) => {
+          // Destroyed (or re-initialised) while the import was in flight: this
+          // registration belongs to a lifecycle that is over.
+          if (generation !== lifecycle) return;
+
+          // Scoped to this player's container: the factory closes over THIS
+          // plugin instance's activate(), so a global registration would open
+          // one player's share sheet from another player's button.
           registerControl(
             'share',
             (controlApi) =>
@@ -252,7 +272,14 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
                 icon: config.buttonIcon,
                 label: config.buttonLabel,
               }),
+            { owner },
           );
+          // Only the id this plugin registered. unregisterControlsFor(owner)
+          // drops every control scoped to the container, so destroying share
+          // also unregistered the chapters and playlist controls sharing it.
+          releaseControls = () => {
+            unregisterControl('share', { owner });
+          };
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, share control not registered');
@@ -265,10 +292,13 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
     },
 
     destroy(): void {
+      lifecycle++;
       sheet?.destroy();
       sheet = null;
-      styleEl?.remove();
-      styleEl = null;
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       api = null;
     },
 

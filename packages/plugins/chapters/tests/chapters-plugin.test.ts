@@ -9,6 +9,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createChaptersPlugin } from '../src/index';
 import { formatChapterTime } from '../src/ChapterList';
+import {
+  getControlFactory,
+  registerControl,
+  resetControlRegistry,
+} from '@scarlett-player/ui';
 
 const CHAPTERS = [
   { time: 0, label: 'Preshow' },
@@ -316,5 +321,53 @@ describe('formatChapterTime', () => {
   it('treats unusable input as zero', () => {
     expect(formatChapterTime(Number.NaN)).toBe('0:00');
     expect(formatChapterTime(-10)).toBe('0:00');
+  });
+});
+
+describe('chapters control registration', () => {
+  /** Let the plugin's runtime `import('@scarlett-player/ui')` settle. */
+  const flushImport = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    resetControlRegistry();
+  });
+
+  afterEach(() => {
+    resetControlRegistry();
+  });
+
+  it('gives back only its own control on destroy', async () => {
+    const api = createMockApi();
+    const plugin = createChaptersPlugin({ chapters: CHAPTERS });
+
+    plugin.init(api as never);
+    await flushImport();
+
+    // Another plugin scoped to the same player - share and playlist both do
+    // exactly this against api.container.
+    registerControl('share', (() => ({})) as never, { owner: api.container });
+
+    expect(getControlFactory('chapters', api.container)).not.toBeNull();
+
+    plugin.destroy();
+
+    expect(getControlFactory('chapters', api.container)).toBeNull();
+    // unregisterControlsFor(owner) dropped every registration on the
+    // container, so tearing down chapters took the share button with it.
+    expect(getControlFactory('share', api.container)).not.toBeNull();
+  });
+
+  it('does not register when destroyed before the UI import resolves', async () => {
+    const api = createMockApi();
+    const plugin = createChaptersPlugin({ chapters: CHAPTERS });
+
+    plugin.init(api as never);
+    plugin.destroy();
+
+    await flushImport();
+
+    // The registration belongs to a lifecycle that is over: honouring it would
+    // hand the next rebuild a control wired to a destroyed ChapterList.
+    expect(getControlFactory('chapters', api.container)).toBeNull();
   });
 });

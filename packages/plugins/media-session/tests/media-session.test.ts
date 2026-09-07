@@ -2,8 +2,32 @@
  * Tests for Media Session Plugin
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { createMediaSessionPlugin, type IMediaSessionPlugin } from '../src/index';
 import { PKG_VERSION } from '../src/version';
+import type { IPluginAPI } from '@scarlett-player/core';
+
+/**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks.
+ *
+ * Extending the real interface is what makes the stub usable without a cast at
+ * each call site, so it cannot silently drift behind `IPluginAPI`; the members
+ * are re-declared as `Mock` so a suite can still call `.mockReturnValue()` or
+ * read `.mock.calls` on them.
+ */
+interface MockPluginAPI extends IPluginAPI {
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
+
 
 // Mock MediaSession API
 const mockSetActionHandler = vi.fn();
@@ -64,8 +88,9 @@ function teardownMediaSessionMock() {
 }
 
 // Helper to create mock plugin API
-function createMockApi() {
+function createMockApi(): MockPluginAPI {
   return {
+    pluginId: 'media-session',
     container: document.createElement('div'),
     logger: {
       info: vi.fn(),
@@ -77,8 +102,10 @@ function createMockApi() {
     emit: vi.fn(),
     setState: vi.fn(),
     getState: vi.fn().mockReturnValue(0),
+    defineState: vi.fn(),
     subscribeToState: vi.fn().mockReturnValue(vi.fn()),
     onDestroy: vi.fn(),
+    off: vi.fn(),
     getPlugin: vi.fn(),
   };
 }

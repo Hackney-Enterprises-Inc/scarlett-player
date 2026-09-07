@@ -6,7 +6,7 @@
  * Target size: ~400 bytes minified
  */
 
-import { currentEffect, setCurrentEffect, getCurrentEffect, trackEffectSubscription, type UnsubscribeFn } from './effect';
+import { currentEffect, pushEffect, popEffect, trackEffectSubscription, type UnsubscribeFn } from './effect';
 
 /**
  * A computed signal that derives its value from other signals.
@@ -49,15 +49,16 @@ export class Computed<T> {
    */
   get(): T {
     if (this.dirty) {
-      // Run computation with this computed as the current effect
-      const prevEffect = getCurrentEffect();
-      setCurrentEffect(this.invalidateCallback);
+      // Run computation with this computed as the current effect. Pushed
+      // rather than swapped so an enclosing effect keeps tracking the signals
+      // it reads after this recomputation returns.
+      pushEffect(this.invalidateCallback);
 
       try {
         this.value = this.computation();
         this.dirty = false;
       } finally {
-        setCurrentEffect(prevEffect);
+        popEffect();
       }
     }
 
@@ -104,7 +105,9 @@ export class Computed<T> {
    * @internal
    */
   private notifySubscribers(): void {
-    this.subscribers.forEach(subscriber => {
+    // Snapshot first: a subscribing effect re-tracks its dependencies while it
+    // runs, and a Set delete+re-add during forEach would visit it twice.
+    Array.from(this.subscribers).forEach(subscriber => {
       try {
         subscriber();
       } catch (error) {

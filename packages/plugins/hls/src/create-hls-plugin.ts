@@ -28,7 +28,7 @@ import type {
   HlsInstance,
   HlsConstructor,
 } from './types';
-import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
 import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 import { createValidatingPlaylistLoader, PLAYLIST_INVALID_TEXT } from './playlist-validation';
 import { sanitizeUrl } from './sanitize-url';
@@ -1318,6 +1318,27 @@ export function createHLSPluginWith(
         }
       });
 
+      // Handle alternate audio rendition selection from the UI
+      const unsubAudioTrack = api.on('track:audio', ({ trackId }: { trackId: string | null }) => {
+        if (!hls || isNative) {
+          // Native HLS switches renditions through the element's own
+          // AudioTrackList, which the browser drives; there is nothing to do.
+          api?.logger.warn('Audio track selection not available');
+          return;
+        }
+
+        const index = audioTrackIndex(trackId);
+        const tracks = hls.audioTracks ?? [];
+
+        if (index < 0 || index >= tracks.length) {
+          api?.logger.warn('Ignoring unknown audio track selection', { trackId });
+          return;
+        }
+
+        hls.audioTrack = index;
+        api?.logger.debug(`Audio: queued switch to track ${index}`);
+      });
+
       // Reconnect immediately when the browser reports the network is back.
       // A viewer whose wifi dropped should not wait out a 30s backoff after
       // their connection has already returned.
@@ -1366,6 +1387,7 @@ export function createHLSPluginWith(
         unsubMute();
         unsubRate();
         unsubQuality();
+        unsubAudioTrack();
         unsubPoster();
         unsubLive();
       });
@@ -1542,9 +1564,20 @@ export function createHLSPluginWith(
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
 
-      // Cleanup hls.js; the switch is a new session
+      // Cleanup hls.js; the switch is a new session. cancelReconnect() first:
+      // cleanup() leaves the reconnect timer armed, and a reconnect scheduled
+      // against the old pipeline would fire into the newly switched one,
+      // tearing down a healthy player and seeking it to a stale position.
       const session = ++loadSession;
+      cancelReconnect();
       cleanup(new Error('HLS load cancelled: switching to native HLS'));
+
+      // Same source, different pipeline: cleanup() drops the source identity,
+      // so put it back before anything can read it. Left null, the switch back
+      // that AirPlay asks for on disconnect bailed with 'No source loaded' and
+      // stranded the viewer on native HLS, and auto-reconnect stayed disabled
+      // for the rest of the session.
+      currentSrc = savedSrc;
 
       // Load with native HLS
       await loadNative(savedSrc);
@@ -1596,9 +1629,14 @@ export function createHLSPluginWith(
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
 
-      // Cleanup native; the switch is a new session
+      // Cleanup native; the switch is a new session. cancelReconnect() first —
+      // see switchToNative().
       const session = ++loadSession;
+      cancelReconnect();
       cleanup(new Error('HLS load cancelled: switching to hls.js'));
+
+      // Same source, different pipeline - see switchToNative().
+      currentSrc = savedSrc;
 
       // Load with hls.js
       await loadWithHlsJs(savedSrc);

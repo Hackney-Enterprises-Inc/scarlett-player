@@ -11,6 +11,11 @@ import { applyTimestamp, resolveBaseUrl } from '../src/url';
 import { resolveTargets } from '../src/targets';
 import { ShareButton } from '../src/ShareButton';
 import { sanitizeIcon } from '../src/sanitize';
+import {
+  getControlFactory,
+  registerControl,
+  resetControlRegistry,
+} from '@scarlett-player/ui';
 
 /** Let queued promise callbacks run - target handlers are async. */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -603,5 +608,44 @@ describe('sanitizeIcon', () => {
 
   it('finds the svg even when it is not the first node', () => {
     expect(sanitizeIcon('<!-- comment --><svg><circle r="1"/></svg>')).toContain('<circle');
+  });
+});
+
+describe('share control registration', () => {
+  beforeEach(() => {
+    resetControlRegistry();
+  });
+
+  afterEach(() => {
+    resetControlRegistry();
+  });
+
+  it('gives back only its own control on destroy', async () => {
+    const api = createMockApi();
+    const plugin = createSharePlugin();
+
+    plugin.init(api as never);
+    await flush();
+
+    // A neighbour scoped to the same player.
+    registerControl('chapters', (() => ({})) as never, { owner: api.container });
+
+    expect(getControlFactory('share', api.container)).not.toBeNull();
+
+    plugin.destroy();
+
+    expect(getControlFactory('share', api.container)).toBeNull();
+    expect(getControlFactory('chapters', api.container)).not.toBeNull();
+  });
+
+  it('does not register when destroyed before the UI import resolves', async () => {
+    const api = createMockApi();
+    const plugin = createSharePlugin();
+
+    plugin.init(api as never);
+    plugin.destroy();
+    await flush();
+
+    expect(getControlFactory('share', api.container)).toBeNull();
   });
 });

@@ -17,11 +17,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist tsconfig.tsbuildinfo && tsc && vite build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && vue-tsc -p tsconfig.json && vite build && publint",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "typecheck": "vue-tsc --noEmit -p tsconfig.typecheck.json",
+    "clean": "rimraf dist",
+    "lint:publish": "publint"
   },
   "keywords": [
     "video",
@@ -52,10 +53,12 @@
     "@scarlett-player/core": "workspace:*",
     "@types/node": "^20.0.0",
     "@vitejs/plugin-vue": "^4.5.0",
+    "publint": "^0.3.24",
     "rimraf": "^5.0.5",
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
     "vitest": "^1.1.0",
-    "vue": "^3.3.0"
+    "vue": "^3.3.0",
+    "vue-tsc": "^2.2.12"
   }
 }

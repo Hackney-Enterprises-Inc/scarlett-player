@@ -12,6 +12,7 @@
  *   single polite live region carrying the announcement instead.
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
 import type { GestureZone, PointerRecord } from './types';
 
 const STYLE_ID = 'sp-gestures-styles';
@@ -97,7 +98,7 @@ export class GestureOverlay {
   private zones: Record<'left' | 'right', HTMLDivElement>;
   private labels: Record<'left' | 'right', HTMLSpanElement>;
   private live: HTMLDivElement;
-  private styleEl: HTMLStyleElement | null = null;
+  private releaseStyles: ReleaseStyles | null = null;
   private hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly pointerHandler = (event: PointerEvent): void => {
@@ -205,8 +206,8 @@ export class GestureOverlay {
     this.el.removeEventListener('pointerup', this.pointerHandler);
     this.el.removeEventListener('pointercancel', this.pointerHandler);
     this.el.remove();
-    this.styleEl?.remove();
-    this.styleEl = null;
+    this.releaseStyles?.();
+    this.releaseStyles = null;
   }
 
   /** Exposed for tests and for hosts that want to inspect the surface. */
@@ -226,12 +227,13 @@ export class GestureOverlay {
     return { zone, label };
   }
 
+  /**
+   * Claim the shared gesture stylesheet.
+   *
+   * Reference-counted: two players on one page share the sheet, and destroying
+   * either used to take it away from the other.
+   */
   private injectStyles(): void {
-    if (document.getElementById(STYLE_ID)) return;
-
-    this.styleEl = document.createElement('style');
-    this.styleEl.id = STYLE_ID;
-    this.styleEl.textContent = styles;
-    document.head.appendChild(this.styleEl);
+    this.releaseStyles = injectSharedStyles(STYLE_ID, styles);
   }
 }

@@ -3,6 +3,29 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAudioUIPlugin, type IAudioUIPlugin } from '../src/index';
+import type { Mock } from 'vitest';
+import type { IPluginAPI } from '@scarlett-player/core';
+
+/**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks.
+ *
+ * Extending the real interface is what makes the stub usable without a cast at
+ * each call site, so it cannot silently drift behind `IPluginAPI`; the members
+ * are re-declared as `Mock` so a suite can still call `.mockReturnValue()` or
+ * read `.mock.calls` on them.
+ */
+interface MockPluginAPI extends IPluginAPI {
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
 import { PKG_VERSION } from '../src/version';
 
 // Mock requestAnimationFrame
@@ -31,9 +54,10 @@ afterEach(() => {
 });
 
 // Helper to create mock plugin API
-function createMockApi() {
+function createMockApi(): MockPluginAPI {
   const container = document.createElement('div');
   return {
+    pluginId: 'audio-ui',
     container,
     logger: {
       info: vi.fn(),
@@ -56,8 +80,10 @@ function createMockApi() {
       };
       return defaults[key];
     }),
+    defineState: vi.fn(),
     subscribeToState: vi.fn().mockReturnValue(vi.fn()),
     onDestroy: vi.fn(),
+    off: vi.fn(),
     getPlugin: vi.fn(),
   };
 }

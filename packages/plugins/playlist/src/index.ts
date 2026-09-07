@@ -22,6 +22,7 @@ import type {
 
 import { PlaylistPanel, PlaylistSkipButton } from './controls';
 import { injectStyles } from './styles';
+import type { ReleaseStyles } from '@scarlett-player/core';
 
 // Re-export types
 export type {
@@ -105,6 +106,19 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
   // Plugin state
   let api: IPluginAPI | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
+  /**
+   * Bumped by every init() and destroy().
+   *
+   * The UI package is pulled in with a runtime import, so its `.then()` can
+   * land after the plugin was torn down (or after a re-init). Registering then
+   * hands a later rebuild a control wired to a dead instance, and overwrites
+   * the registration the current lifecycle just made. The callback captures the
+   * generation it was scheduled under and skips when it no longer matches.
+   */
+  let lifecycle = 0;
+
   let tracks: PlaylistTrack[] = mergedConfig.tracks || [];
   let currentIndex = mergedConfig.initialIndex ?? -1;
   // Clamp initialIndex to valid range (-1 to tracks.length - 1)
@@ -326,6 +340,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     description: 'Playlist management with shuffle, repeat, and gapless playback',
 
     async init(pluginApi: IPluginAPI): Promise<void> {
+      const generation = ++lifecycle;
       api = pluginApi;
       api.logger.info('Playlist plugin initialized');
 
@@ -361,27 +376,48 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       });
 
       // Register cleanup
-      injectStyles();
+      releaseStyles = injectStyles();
 
       // Registering does not place anything - the host opts in by listing
       // 'playlist-previous', 'playlist-next' or 'playlist' in its control
       // layout. Runtime import so a headless host never needs the UI package.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
+        .then(({ registerControl, unregisterControl }) => {
+          // Destroyed (or re-initialised) while the import was in flight: this
+          // registration belongs to a lifecycle that is over.
+          if (generation !== lifecycle) return;
+
           const self = plugin;
 
+          // Scoped to this player's container: every factory closes over THIS
+          // playlist instance, and a global registration let the next player on
+          // the page overwrite it and drive the wrong playlist.
           registerControl(
             'playlist-previous',
             () => new PlaylistSkipButton(self, 'previous') as never,
+            { owner },
           );
-          registerControl('playlist-next', () => new PlaylistSkipButton(self, 'next') as never);
+          registerControl('playlist-next', () => new PlaylistSkipButton(self, 'next') as never, {
+            owner,
+          });
           registerControl(
             'playlist',
             () =>
               new PlaylistPanel(self, {
                 onSelect: (index) => self.play(index),
               }) as never,
+            { owner },
           );
+          // Only the ids this plugin registered. unregisterControlsFor(owner)
+          // drops every control scoped to the container, so destroying the
+          // playlist also unregistered the chapters and share controls
+          // sharing it.
+          releaseControls = () => {
+            unregisterControl('playlist-previous', { owner });
+            unregisterControl('playlist-next', { owner });
+            unregisterControl('playlist', { owner });
+          };
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, playlist controls not registered');
@@ -427,8 +463,13 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     },
 
     async destroy(): Promise<void> {
+      lifecycle++;
       api?.logger.info('Playlist plugin destroying');
       persistPlaylist();
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       api = null;
     },
 

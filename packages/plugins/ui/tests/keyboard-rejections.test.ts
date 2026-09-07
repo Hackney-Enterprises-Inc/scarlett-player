@@ -81,9 +81,10 @@ describe('keyboard shortcut rejection safety', () => {
     plugin = uiPlugin();
     await plugin.init(api);
 
-    // Focus inside the container so the shortcut handler engages
-    const btn = container.querySelector('button');
-    (btn as HTMLButtonElement | null)?.focus();
+    // Focus the container itself so the shortcut handler engages. Not a
+    // control button: a focused button owns Space and Enter, so the shortcut
+    // deliberately stands down for those keys.
+    container.focus();
   });
 
   afterEach(async () => {

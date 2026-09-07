@@ -31,6 +31,7 @@
  * ```
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
 import type { Chapter, IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
 import type { ChaptersPluginConfig, ResolvedChapter } from './types';
 import {
@@ -80,7 +81,19 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
   let chapters: ResolvedChapter[] = [];
   let activeIndex = -1;
   let list: ChapterList | null = null;
-  let styleEl: HTMLStyleElement | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
+  /**
+   * Bumped by every init() and destroy().
+   *
+   * The UI package is pulled in with a runtime import, so its `.then()` can
+   * land after the plugin was torn down (or after a re-init). Registering then
+   * hands a later rebuild a control wired to a dead instance, and overwrites
+   * the registration the current lifecycle just made. The callback captures the
+   * generation it was scheduled under and skips when it no longer matches.
+   */
+  let lifecycle = 0;
+
   let trackCleanup: (() => void) | null = null;
 
   const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
@@ -171,14 +184,13 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     type: 'feature' as PluginType,
 
     init(pluginApi: IPluginAPI): void {
+      const generation = ++lifecycle;
       api = pluginApi;
 
-      if (!document.getElementById(STYLE_ID)) {
-        styleEl = document.createElement('style');
-        styleEl.id = STYLE_ID;
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
-      }
+      // Reference-counted: the sheet is shared by every player on the page, and
+      // an unguarded remove() on the first destroy stripped the styling from
+      // the players still mounted.
+      releaseStyles = injectSharedStyles(STYLE_ID, styles);
 
       list = new ChapterList({
         onSelect: (index) => seekToChapter(index),
@@ -187,12 +199,30 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
       // Registering does not place the control anywhere - the host opts in by
       // listing 'chapters' in its control layout. Runtime import so a headless
       // host never needs @scarlett-player/ui installed.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
-          registerControl('chapters', (controlApi) => {
-            list?.attach(controlApi);
-            return list as unknown as ReturnType<Parameters<typeof registerControl>[1]>;
-          });
+        .then(({ registerControl, unregisterControl }) => {
+          // Destroyed (or re-initialised) while the import was in flight: this
+          // registration belongs to a lifecycle that is over.
+          if (generation !== lifecycle) return;
+
+          // Scoped to this player's container: the factory hands back THIS
+          // plugin instance's list, and a global registration let the next
+          // player on the page overwrite it and drive the wrong element.
+          registerControl(
+            'chapters',
+            (controlApi) => {
+              list?.attach(controlApi);
+              return list as unknown as ReturnType<Parameters<typeof registerControl>[1]>;
+            },
+            { owner }
+          );
+          // Only the id this plugin registered. unregisterControlsFor(owner)
+          // drops every control scoped to the container, so destroying chapters
+          // also unregistered the playlist and share controls sharing it.
+          releaseControls = () => {
+            unregisterControl('chapters', { owner });
+          };
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, chapters control not registered');
@@ -221,12 +251,15 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     },
 
     destroy(): void {
+      lifecycle++;
       trackCleanup?.();
       trackCleanup = null;
       list?.destroy();
       list = null;
-      styleEl?.remove();
-      styleEl = null;
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       chapters = [];
       activeIndex = -1;
       api = null;

@@ -77,6 +77,13 @@ export class QualityMenu implements Control {
     // Hide if no quality levels
     this.el.style.display = qualities.length > 0 ? '' : 'none';
 
+    // A hidden control must not report an open menu: the control bar's
+    // auto-hide waits on isMenuOpen(), so a menu left open behind a
+    // display:none wrapper kept the bar on screen for the rest of the session.
+    if (qualities.length === 0 && this.isOpen) {
+      this.close();
+    }
+
     // Update button label to show current quality
     this.btnLabel.textContent = currentQuality?.label || 'Auto';
 
@@ -162,6 +169,17 @@ export class QualityMenu implements Control {
     this.isOpen = false;
     this.menu.classList.remove('sp-quality-menu--open');
     this.btn.setAttribute('aria-expanded', 'false');
+  }
+
+  /**
+   * Whether the dropdown is open.
+   *
+   * Read by the UI plugin so the control bar's auto-hide waits for it.
+   *
+   * @returns True while the menu is showing
+   */
+  isMenuOpen(): boolean {
+    return this.isOpen;
   }
 
   destroy(): void {

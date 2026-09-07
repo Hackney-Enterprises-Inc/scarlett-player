@@ -31,6 +31,21 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'opus', 'we
 /** All supported extensions */
 const SUPPORTED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
 
+/**
+ * `MediaError` codes, spelled out rather than read off the global.
+ *
+ * The values are fixed by the HTML spec, and the `MediaError` interface object
+ * is not present in every environment this code runs in - jsdom has none, so
+ * touching it threw a ReferenceError inside the error listener and swallowed
+ * the whole error path, in tests and in any host without it.
+ */
+const MEDIA_ERR = {
+  ABORTED: 1,
+  NETWORK: 2,
+  DECODE: 3,
+  SRC_NOT_SUPPORTED: 4,
+} as const;
+
 const MIME_TYPES: Record<string, string> = {
   // Video
   mp4: 'video/mp4',
@@ -113,6 +128,26 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   let is_audio_source = false;
   /** Guard tracking whether play was initiated via ScarlettPlayer.play() */
   let isCorePlayRequested = false;
+  /**
+   * Load-session guard, mirroring the HLS plugin's.
+   *
+   * Bumped by every entry point that starts or stops a load (loadSource,
+   * destroy). Async continuations capture the value when they start and bail
+   * once it no longer matches, so a superseded load can never fire its
+   * watchdog, settle its promise, or write state over the live source.
+   */
+  let loadSession = 0;
+  /** Settles the in-flight load promise when its session is superseded. */
+  let abortPendingLoad: ((reason: Error) => void) | null = null;
+  /**
+   * Whether the current source got as far as `loadedmetadata`.
+   *
+   * A source the element already parsed cannot later be "not supported": a
+   * MEDIA_ERR_SRC_NOT_SUPPORTED after that point is a failed fetch further into
+   * the stream, and Safari's native HLS reports mid-stream outages exactly that
+   * way. Reported as a network error so retry and reconnect logic engages.
+   */
+  let has_parsed_source = false;
 
   /** Get file extension from URL */
   const getExtension = (src: string): string => {
@@ -199,13 +234,61 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     return video;
   };
 
+  /**
+   * Translate an `HTMLMediaElement.error` into a player error code and message.
+   *
+   * Every media failure used to be reported as `PLAYBACK_FAILED`, which threw
+   * away the one piece of information a consumer needs to decide whether to
+   * retry: a network blip is worth another attempt, an unsupported codec is
+   * not.
+   *
+   * @param error - The element's `MediaError`, if it has one
+   * @returns The player error code and a viewer-facing message
+   */
+  const classifyMediaError = (
+    error: MediaError | null
+  ): { code: ErrorCode; message: string } => {
+    switch (error?.code) {
+      case MEDIA_ERR.ABORTED:
+        return { code: ErrorCode.PLAYBACK_FAILED, message: 'Playback aborted' };
+
+      case MEDIA_ERR.NETWORK:
+        return { code: ErrorCode.MEDIA_NETWORK_ERROR, message: 'Network error' };
+
+      case MEDIA_ERR.DECODE:
+        return {
+          code: ErrorCode.MEDIA_DECODE_ERROR,
+          message: 'Decode error - format may not be supported',
+        };
+
+      case MEDIA_ERR.SRC_NOT_SUPPORTED:
+        // See has_parsed_source: once the element has parsed the stream, this
+        // is a mid-stream fetch failure, not an unplayable format.
+        return has_parsed_source
+          ? { code: ErrorCode.MEDIA_NETWORK_ERROR, message: 'Network error' }
+          : { code: ErrorCode.SOURCE_LOAD_FAILED, message: 'Format not supported' };
+
+      default:
+        return { code: ErrorCode.PLAYBACK_FAILED, message: 'Unknown video error' };
+    }
+  };
+
   /** Setup video event listeners */
   const setupEventListeners = (videoEl: HTMLVideoElement): () => void => {
     const handlers: Array<[string, EventListener]> = [];
+    // The load these listeners belong to. An element torn down mid-load can
+    // still emit while its removal is in flight; those events must not write
+    // state belonging to the source that replaced it.
+    const session = loadSession;
 
     const on = (event: string, handler: EventListener) => {
-      videoEl.addEventListener(event, handler);
-      handlers.push([event, handler]);
+      const guarded: EventListener = (event_object) => {
+        if (session !== loadSession) return;
+        handler(event_object);
+      };
+
+      videoEl.addEventListener(event, guarded);
+      handlers.push([event, guarded]);
     };
 
     /**
@@ -372,28 +455,11 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     // Error handling
     on('error', () => {
       const error = videoEl.error;
-      let message = 'Unknown video error';
+      const { code, message } = classifyMediaError(error);
 
-      if (error) {
-        switch (error.code) {
-          case MediaError.MEDIA_ERR_ABORTED:
-            message = 'Playback aborted';
-            break;
-          case MediaError.MEDIA_ERR_NETWORK:
-            message = 'Network error';
-            break;
-          case MediaError.MEDIA_ERR_DECODE:
-            message = 'Decode error - format may not be supported';
-            break;
-          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            message = 'Format not supported';
-            break;
-        }
-      }
-
-      api?.logger.error('Video error', { code: error?.code, message });
+      api?.logger.error('Video error', { mediaErrorCode: error?.code, code, message });
       api?.emit('error', {
-        code: ErrorCode.PLAYBACK_FAILED,
+        code,
         message,
         fatal: true,
         timestamp: Date.now(),
@@ -543,6 +609,14 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
     async destroy(): Promise<void> {
       api?.logger.info('Native video plugin destroying');
+
+      // Teardown is a new session: an in-flight load's watchdog must not fire
+      // against a torn-down element, and its promise must not hang.
+      loadSession++;
+      const pending = abortPendingLoad;
+      abortPendingLoad = null;
+      pending?.(new Error('Player destroyed during load'));
+
       cleanup();
 
       if (video?.parentNode) {
@@ -552,6 +626,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api = null;
       derived_title = null;
       is_audio_source = false;
+      has_parsed_source = false;
     },
 
     async loadSource(src: string): Promise<void> {
@@ -563,6 +638,16 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       is_audio_source = isAudio;
 
       api.logger.info('Loading native media source', { src: sanitizeUrl(src), mimeType, isAudio });
+
+      // A new load supersedes anything in flight. Bump first so the old
+      // session's watchdog and element listeners bail, then settle its promise
+      // - an abandoned load must not leave the caller's await hanging.
+      const session = ++loadSession;
+      const superseded = abortPendingLoad;
+      abortPendingLoad = null;
+      superseded?.(new Error('Load superseded by a newer source'));
+
+      has_parsed_source = false;
 
       // Cleanup previous source
       cleanup();
@@ -616,10 +701,23 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
             clearTimeout(watchdog);
             watchdog = null;
           }
+          if (abortPendingLoad === abort) {
+            abortPendingLoad = null;
+          }
         };
 
-        const onLoaded = () => {
+        /** Give up on this load because a newer one, or destroy(), replaced it. */
+        const abort = (reason: Error): void => {
           settle();
+          reject(reason);
+        };
+
+        abortPendingLoad = abort;
+
+        const onLoaded = () => {
+          if (session !== loadSession) return;
+          settle();
+          has_parsed_source = true;
 
           // Apply initial volume/muted state to video element
           // This must happen before autoplay for muted autoplay to work
@@ -637,6 +735,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         };
 
         const onError = () => {
+          if (session !== loadSession) return;
           settle();
 
           const error = videoEl.error;
@@ -647,6 +746,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         // stalls without erroring pins the viewer on a spinner forever.
         if (load_timeout_ms > 0) {
           watchdog = setTimeout(() => {
+            if (session !== loadSession) return;
             settle();
             reject(new Error('Video took too long to load (network timeout)'));
           }, load_timeout_ms);

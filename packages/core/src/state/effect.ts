@@ -6,6 +6,17 @@
  */
 
 /**
+ * Stack of executing effects.
+ *
+ * A stack rather than a single slot because effects nest: a computed
+ * recomputing inside an effect, or an effect created inside another effect,
+ * must restore the enclosing tracking context when it finishes instead of
+ * clearing it and silently dropping the outer effect's remaining dependencies.
+ * @internal
+ */
+const effectStack: Array<() => void> = [];
+
+/**
  * Effect context that can be modified
  * @internal
  */
@@ -20,12 +31,72 @@ const effectContext = {
 export let currentEffect: (() => void) | null = null;
 
 /**
- * Set the current effect context (used internally by computed)
+ * Sync the exported `currentEffect` binding (and the legacy context object)
+ * with the top of the effect stack.
+ * @internal
+ */
+function syncCurrentEffect(): void {
+  const top = effectStack.length > 0 ? effectStack[effectStack.length - 1]! : null;
+  effectContext.current = top;
+  currentEffect = top;
+}
+
+/**
+ * Push an effect onto the tracking stack.
+ *
+ * Every push must be paired with a {@link popEffect} in a `finally` block.
+ * @internal
+ */
+export function pushEffect(effectFn: () => void): void {
+  effectStack.push(effectFn);
+  syncCurrentEffect();
+}
+
+/**
+ * Pop the innermost effect off the tracking stack, restoring the enclosing one.
+ * @internal
+ */
+export function popEffect(): void {
+  effectStack.pop();
+  syncCurrentEffect();
+}
+
+/**
+ * Set the current effect context (used internally by computed).
+ *
+ * Retained for backwards compatibility with the pre-stack API, which was a
+ * single slot: a non-null effect REPLACES the innermost frame, and `null` pops
+ * it. New code should call {@link pushEffect}/{@link popEffect} directly.
+ *
+ * Replacing rather than pushing is what makes the save/restore idiom work:
+ *
+ * ```ts
+ * const prev = getCurrentEffect();
+ * setCurrentEffect(inner);
+ * // ...
+ * setCurrentEffect(prev);
+ * ```
+ *
+ * Pushing would leave `inner` buried under the restored effect, so the
+ * enclosing `effect()`'s own popEffect() would unwind to `inner` instead of
+ * clearing the context, and the stack would grow by one frame per restore.
+ *
+ * @param effect - Effect to make current, or `null` to pop the innermost one
  * @internal
  */
 export function setCurrentEffect(effect: (() => void) | null): void {
-  effectContext.current = effect;
-  currentEffect = effect;
+  if (effect === null) {
+    popEffect();
+    return;
+  }
+
+  if (effectStack.length > 0) {
+    effectStack[effectStack.length - 1] = effect;
+  } else {
+    effectStack.push(effect);
+  }
+
+  syncCurrentEffect();
 }
 
 /**
@@ -64,10 +135,27 @@ export function trackEffectSubscription(effectFn: () => void, unsubscribe: () =>
 }
 
 /**
+ * Drop every subscription an effect currently holds.
+ *
+ * Run before each re-execution so dependencies that the effect no longer
+ * reads (a branch it stopped taking) stop waking it up.
+ * @internal
+ */
+function clearEffectSubscriptions(effectFn: () => void): void {
+  const cleanups = effectCleanups.get(effectFn);
+  if (!cleanups) return;
+
+  cleanups.forEach(unsub => unsub());
+  cleanups.clear();
+}
+
+/**
  * Create a reactive effect that runs when its dependencies change.
  *
  * The effect runs immediately and tracks any signals accessed during execution.
- * When those signals change, the effect re-runs automatically.
+ * When those signals change, the effect re-runs automatically. Dependencies are
+ * re-collected on every run, so a signal the effect stops reading stops
+ * triggering it.
  *
  * @param fn - Function to run as an effect
  * @returns Unsubscribe function to stop the effect
@@ -89,16 +177,20 @@ export function effect(fn: () => void): UnsubscribeFn {
   const execute = () => {
     if (disposed) return;
 
+    // Re-collect dependencies from scratch: anything read on the previous run
+    // but not on this one must no longer re-trigger the effect.
+    clearEffectSubscriptions(execute);
+
     // Set as current effect for dependency tracking
-    setCurrentEffect(execute);
+    pushEffect(execute);
     try {
       fn();
     } catch (error) {
       console.error('[Scarlett Player] Error in effect:', error);
       throw error;
     } finally {
-      // Clear current effect
-      setCurrentEffect(null);
+      // Restore the enclosing effect (or null at the top level)
+      popEffect();
     }
   };
 
@@ -108,11 +200,7 @@ export function effect(fn: () => void): UnsubscribeFn {
   // Return cleanup function that removes effect from all signal subscriber sets
   return () => {
     disposed = true;
-    const cleanups = effectCleanups.get(execute);
-    if (cleanups) {
-      cleanups.forEach(unsub => unsub());
-      cleanups.clear();
-      effectCleanups.delete(execute);
-    }
+    clearEffectSubscriptions(execute);
+    effectCleanups.delete(execute);
   };
 }

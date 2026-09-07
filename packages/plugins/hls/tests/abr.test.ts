@@ -114,6 +114,8 @@ describe('bandwidth state from FRAG_LOADED', () => {
       loadLevel: 0,
       media: null,
       bandwidthEstimate: 5_000_000,
+      audioTracks: [],
+      audioTrack: -1,
       handlers,
     };
 

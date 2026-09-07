@@ -344,3 +344,284 @@ describe('AirPlay Plugin', () => {
     });
   });
 });
+
+/**
+ * Install a fake Remote Playback API on an element.
+ *
+ * `HTMLMediaElement.remote` is a read-only accessor in lib.dom and absent in
+ * jsdom, so it has to be defined as an own property rather than assigned.
+ */
+function stubRemote(video: HTMLVideoElement, remote: unknown): void {
+  Object.defineProperty(video, 'remote', { configurable: true, value: remote });
+}
+
+describe('AirPlay Plugin - provider swaps and picker safety', () => {
+  let originalWebkitMethod: unknown;
+  let loadedHandlers: Array<() => void>;
+
+  const createApi = (
+    container: HTMLElement,
+    hlsPlugin?: unknown
+  ): IPluginAPI => {
+    const state: Record<string, unknown> = {};
+
+    return {
+      pluginId: 'airplay',
+      container,
+      getState: (key: string) => state[key],
+      setState: (key: string, value: unknown) => {
+        state[key] = value;
+      },
+      emit: vi.fn(),
+      on: vi.fn((event: string, handler: () => void) => {
+        if (event === 'media:loaded') loadedHandlers.push(handler);
+        return () => {};
+      }),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getPlugin: vi.fn((id: string) => (id === 'hls-provider' ? hlsPlugin : null)),
+    } as unknown as IPluginAPI;
+  };
+
+  const emitLoaded = (): void => loadedHandlers.forEach((h) => h());
+
+  /** Drain the promise chain a provider switch settles through. */
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
+  beforeEach(() => {
+    loadedHandlers = [];
+    originalWebkitMethod = (HTMLVideoElement.prototype as WebkitVideoElement)
+      .webkitShowPlaybackTargetPicker;
+    (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker = vi.fn();
+  });
+
+  afterEach(() => {
+    (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker =
+      originalWebkitMethod as never;
+    vi.restoreAllMocks();
+  });
+
+  it('re-attaches when the provider replaces the video element', async () => {
+    const container = document.createElement('div');
+    const first = createMockVideo();
+    container.appendChild(first);
+
+    const api = createApi(container);
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    // A provider swap: the old element goes, a new one takes its place.
+    const second = createMockVideo();
+    const removeSpy = vi.spyOn(first, 'removeEventListener');
+    const addSpy = vi.spyOn(second, 'addEventListener');
+    first.remove();
+    container.appendChild(second);
+
+    emitLoaded();
+
+    expect(removeSpy).toHaveBeenCalledWith(
+      'webkitcurrentplaybacktargetiswirelesschanged',
+      expect.any(Function)
+    );
+    expect(addSpy).toHaveBeenCalledWith(
+      'webkitcurrentplaybacktargetiswirelesschanged',
+      expect.any(Function)
+    );
+
+    // Availability now comes from the new element.
+    second.dispatchEvent(
+      Object.assign(new Event('webkitplaybacktargetavailabilitychanged'), {
+        availability: 'available',
+      })
+    );
+    expect(plugin.isAvailable()).toBe(true);
+  });
+
+  it('does not detach and re-attach when the element is unchanged', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    const api = createApi(container);
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    const removeSpy = vi.spyOn(video, 'removeEventListener');
+    emitLoaded();
+
+    expect(removeSpy).not.toHaveBeenCalled();
+  });
+
+  it('opens the picker without switching to native HLS first', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    const switchToNative = vi.fn().mockResolvedValue(undefined);
+    const api = createApi(container, {
+      isNativeHLS: () => false,
+      switchToNative,
+      switchToHlsJs: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+    await plugin.showPicker();
+
+    // Cancelling the picker must leave the viewer exactly where they were.
+    expect(switchToNative).not.toHaveBeenCalled();
+    expect(video.webkitShowPlaybackTargetPicker).toHaveBeenCalled();
+  });
+
+  it('switches to native HLS once a device actually connects', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    const switchToNative = vi.fn().mockResolvedValue(undefined);
+    const api = createApi(container, {
+      isNativeHLS: () => false,
+      switchToNative,
+      switchToHlsJs: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+    await plugin.showPicker();
+
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+    expect(plugin.isActive()).toBe(true);
+  });
+
+  it('cancels the remote-playback watch on destroy', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    const cancelWatchAvailability = vi.fn().mockResolvedValue(undefined);
+    stubRemote(video, {
+      watchAvailability: vi.fn().mockResolvedValue(7),
+      cancelWatchAvailability,
+    });
+    container.appendChild(video);
+
+    const api = createApi(container);
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    // Let watchAvailability() resolve so the id is recorded.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await plugin.destroy();
+
+    expect(cancelWatchAvailability).toHaveBeenCalledWith(7);
+  });
+
+  it('cancels the old element`s watch when the provider swaps it out', async () => {
+    const container = document.createElement('div');
+    const first = createMockVideo();
+    const cancelFirst = vi.fn().mockResolvedValue(undefined);
+    stubRemote(first, {
+      watchAvailability: vi.fn().mockResolvedValue(1),
+      cancelWatchAvailability: cancelFirst,
+    });
+    container.appendChild(first);
+
+    const api = createApi(container);
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    first.remove();
+    const second = createMockVideo();
+    stubRemote(second, {
+      watchAvailability: vi.fn().mockResolvedValue(2),
+      cancelWatchAvailability: vi.fn().mockResolvedValue(undefined),
+    });
+    container.appendChild(second);
+    emitLoaded();
+
+    expect(cancelFirst).toHaveBeenCalledWith(1);
+  });
+
+  it('restores hls.js when AirPlay drops while the switch to native is in flight', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    // A provider whose switch resolves only when the test says so, so the
+    // disconnect lands squarely inside the switch.
+    let isNative = false;
+    let finishNativeSwitch = (): void => {};
+    const switchToNative = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishNativeSwitch = () => {
+            isNative = true;
+            resolve();
+          };
+        })
+    );
+    const switchToHlsJs = vi.fn(async () => {
+      isNative = false;
+    });
+
+    const api = createApi(container, {
+      isNativeHLS: () => isNative,
+      switchToNative,
+      switchToHlsJs,
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    // Device connects: the switch to native starts but does not settle.
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+
+    // Viewer disconnects mid-switch. Nothing may run against the half-built
+    // pipeline yet.
+    video.webkitCurrentPlaybackTargetIsWireless = false;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    expect(switchToHlsJs).not.toHaveBeenCalled();
+
+    finishNativeSwitch();
+    await flushMicrotasks();
+
+    // ...but once it settles, the viewer must not be left on native HLS.
+    expect(switchToHlsJs).toHaveBeenCalledTimes(1);
+    expect(isNative).toBe(false);
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-switch when the connection state is unchanged after a failed switch', async () => {
+    const container = document.createElement('div');
+    const video = createMockVideo();
+    container.appendChild(video);
+
+    const switchToNative = vi.fn().mockRejectedValue(new Error('nope'));
+    const switchToHlsJs = vi.fn().mockResolvedValue(undefined);
+
+    const api = createApi(container, {
+      isNativeHLS: () => false,
+      switchToNative,
+      switchToHlsJs,
+    });
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    await flushMicrotasks();
+
+    // A provider still reporting hls.js is not a reason to try forever.
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+    expect(switchToHlsJs).not.toHaveBeenCalled();
+  });
+});

@@ -5,7 +5,7 @@
 <script setup lang="ts">
 // `defineExpose` is a compiler macro, not a runtime export: importing it made
 // the SFC compiler warn on every build and every test run.
-import { ref, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
+import { ref, shallowRef, markRaw, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
 import type { ScarlettPlayer, PlayerOptions, Plugin, PlayerEventMap } from '@scarlett-player/core';
 
 // Props
@@ -112,7 +112,12 @@ const emit = defineEmits<{
 
 // Refs
 const containerRef = ref<HTMLElement | null>(null);
-const playerInstance = ref<ScarlettPlayer | null>(null);
+// shallowRef + markRaw, never a deep ref: `ref()` wraps the instance in a
+// reactive Proxy that walks every property it touches, which costs on every
+// access and breaks the private class fields the player reads through `this`.
+// Nothing inside the instance drives this template - it renders one empty
+// container - so there is nothing to gain from making it reactive.
+const playerInstance = shallowRef<ScarlettPlayer | null>(null);
 
 // Track unmount during async init to prevent wiring events into a detached tree
 let unmounted = false;
@@ -144,7 +149,7 @@ onMounted(async () => {
 
     // Create player instance
     const instance = new PlayerClass(playerOptions);
-    playerInstance.value = instance;
+    playerInstance.value = markRaw(instance);
 
     // Initialize player
     await instance.init();
@@ -341,7 +346,7 @@ defineExpose({
   },
 
   // Plugin methods
-  getPlugin<T>(name: string) {
+  getPlugin<T extends Plugin>(name: string) {
     return playerInstance.value?.getPlugin<T>(name) ?? null;
   },
   registerPlugin(plugin: Plugin) {

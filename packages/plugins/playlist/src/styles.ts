@@ -5,6 +5,8 @@
  * headless host that never renders controls pays nothing for them.
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
+
 const STYLE_ID = 'sp-playlist-styles';
 
 export const styles = `
@@ -108,19 +110,13 @@ export const styles = `
 `;
 
 /**
- * Add the playlist stylesheet to the document, once.
+ * Add the playlist stylesheet to the document, once, and claim it.
  *
- * @returns The style element, or null when it was already present
+ * Reference-counted through core, so two players on one page share the sheet
+ * and the first teardown does not strip it from the second.
+ *
+ * @returns Function releasing this player's claim on the sheet
  */
-export function injectStyles(): HTMLStyleElement | null {
-  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) {
-    return null;
-  }
-
-  const el = document.createElement('style');
-  el.id = STYLE_ID;
-  el.textContent = styles;
-  document.head.appendChild(el);
-
-  return el;
+export function injectStyles(): ReleaseStyles {
+  return injectSharedStyles(STYLE_ID, styles);
 }

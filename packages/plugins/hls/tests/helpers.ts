@@ -38,6 +38,8 @@ export interface CapturedHls {
     nextLevel: number;
     loadLevel: number;
     media: null;
+    audioTracks: Array<{ id?: number; name?: string; lang?: string }>;
+    audioTrack: number;
   };
   handlers: Record<string, HlsEventHandler>;
 }
@@ -70,6 +72,8 @@ export const createCapturedHls = (): CapturedHls => {
     nextLevel: 0,
     loadLevel: 0,
     media: null,
+    audioTracks: [] as Array<{ id?: number; name?: string; lang?: string }>,
+    audioTrack: -1,
   };
   return { instance, handlers };
 };

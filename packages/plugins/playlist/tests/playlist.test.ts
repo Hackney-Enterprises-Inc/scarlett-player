@@ -2,8 +2,37 @@
  * Tests for Playlist Plugin
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { createPlaylistPlugin, type PlaylistTrack, type IPlaylistPlugin } from '../src/index';
 import { PKG_VERSION } from '../src/version';
+import type { IPluginAPI } from '@scarlett-player/core';
+import {
+  getControlFactory,
+  registerControl,
+  resetControlRegistry,
+} from '@scarlett-player/ui';
+
+/**
+ * A stubbed `IPluginAPI` whose methods are vitest mocks.
+ *
+ * Extending the real interface is what makes the stub usable without a cast at
+ * each call site, so it cannot silently drift behind `IPluginAPI`; the members
+ * are re-declared as `Mock` so a suite can still call `.mockReturnValue()` or
+ * read `.mock.calls` on them.
+ */
+interface MockPluginAPI extends IPluginAPI {
+  logger: { debug: Mock; info: Mock; warn: Mock; error: Mock };
+  getState: Mock;
+  setState: Mock;
+  defineState: Mock;
+  on: Mock;
+  off: Mock;
+  emit: Mock;
+  getPlugin: Mock;
+  onDestroy: Mock;
+  subscribeToState: Mock;
+}
+
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -28,8 +57,9 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 // Helper to create mock plugin API
-function createMockApi() {
+function createMockApi(): MockPluginAPI {
   return {
+    pluginId: 'playlist',
     container: document.createElement('div'),
     logger: {
       info: vi.fn(),
@@ -41,8 +71,10 @@ function createMockApi() {
     emit: vi.fn(),
     setState: vi.fn(),
     getState: vi.fn().mockReturnValue(0),
+    defineState: vi.fn(),
     subscribeToState: vi.fn().mockReturnValue(vi.fn()),
     onDestroy: vi.fn(),
+    off: vi.fn(),
     getPlugin: vi.fn(),
   };
 }
@@ -823,10 +855,10 @@ describe('auto-advance', () => {
     const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true });
     const mockApi = createMockApi();
 
-    let endedCallback: (() => void) | null = null;
+    const captured: { ended?: () => void } = {};
     mockApi.on.mockImplementation((event, cb) => {
       if (event === 'playback:ended') {
-        endedCallback = cb;
+        captured.ended = cb;
       }
       return vi.fn();
     });
@@ -835,7 +867,7 @@ describe('auto-advance', () => {
     plugin.play(0);
 
     // Simulate playback ended
-    endedCallback?.();
+    captured.ended?.();
 
     expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
   });
@@ -845,10 +877,10 @@ describe('auto-advance', () => {
     const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: false });
     const mockApi = createMockApi();
 
-    let endedCallback: (() => void) | null = null;
+    const captured: { ended?: () => void } = {};
     mockApi.on.mockImplementation((event, cb) => {
       if (event === 'playback:ended') {
-        endedCallback = cb;
+        captured.ended = cb;
       }
       return vi.fn();
     });
@@ -856,7 +888,7 @@ describe('auto-advance', () => {
     await plugin.init(mockApi);
     plugin.play(0);
 
-    endedCallback?.();
+    captured.ended?.();
 
     // Should still be on first track
     expect(plugin.getCurrentTrack()?.title).toBe('Track 1');
@@ -867,10 +899,10 @@ describe('auto-advance', () => {
     const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true, initialIndex: 0 });
     const mockApi = createMockApi();
 
-    let endedCallback: (() => void) | null = null;
+    const captured: { ended?: () => void } = {};
     mockApi.on.mockImplementation((event, cb) => {
       if (event === 'playback:ended') {
-        endedCallback = cb;
+        captured.ended = cb;
       }
       return vi.fn();
     });
@@ -881,7 +913,7 @@ describe('auto-advance', () => {
     expect(plugin.getCurrentTrack()?.title).toBe('Track 1');
 
     // Simulate playback ended - should advance to Track 2, not replay Track 1
-    endedCallback?.();
+    captured.ended?.();
     expect(plugin.getCurrentTrack()?.title).toBe('Track 2');
   });
 
@@ -890,10 +922,10 @@ describe('auto-advance', () => {
     const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true });
     const mockApi = createMockApi();
 
-    let endedCallback: (() => void) | null = null;
+    const captured: { ended?: () => void } = {};
     mockApi.on.mockImplementation((event, cb) => {
       if (event === 'playback:ended') {
-        endedCallback = cb;
+        captured.ended = cb;
       }
       return vi.fn();
     });
@@ -901,7 +933,7 @@ describe('auto-advance', () => {
     await plugin.init(mockApi);
     plugin.play(3); // Last track
 
-    endedCallback?.();
+    captured.ended?.();
 
     expect(mockApi.emit).toHaveBeenCalledWith('playlist:ended', undefined);
   });
@@ -957,5 +989,57 @@ describe('title state on track change (#45)', () => {
     // Empty write clears the media element's poster attribute instead of
     // leaving the previous track's image over the next one
     expect(mockApi.setState).toHaveBeenCalledWith('poster', '');
+  });
+});
+
+describe('playlist control registration', () => {
+  /** Let the plugin's runtime `import('@scarlett-player/ui')` settle. */
+  const flushImport = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const IDS = ['playlist-previous', 'playlist-next', 'playlist'] as const;
+
+  beforeEach(() => {
+    resetControlRegistry();
+  });
+
+  it('gives back only its own controls on destroy', async () => {
+    const api = createMockApi();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+
+    await plugin.init(api as never);
+    await flushImport();
+
+    // A neighbour scoped to the same player.
+    registerControl('chapters', (() => ({})) as never, { owner: api.container });
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).not.toBeNull();
+    }
+
+    await plugin.destroy();
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).toBeNull();
+    }
+    // unregisterControlsFor(owner) took every registration on the container,
+    // so tearing down the playlist also removed the chapters control.
+    expect(getControlFactory('chapters', api.container)).not.toBeNull();
+
+    resetControlRegistry();
+  });
+
+  it('does not register when destroyed before the UI import resolves', async () => {
+    const api = createMockApi();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+
+    await plugin.init(api as never);
+    await plugin.destroy();
+    await flushImport();
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).toBeNull();
+    }
+
+    resetControlRegistry();
   });
 });

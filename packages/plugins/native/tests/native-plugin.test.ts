@@ -1,7 +1,7 @@
 /**
  * Tests for Native Video Provider Plugin
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createNativePlugin } from '../src/index';
 import { PKG_VERSION } from '../src/version';
 
@@ -633,5 +633,200 @@ describe('playback:play emission and Chromecast guard', () => {
 
     listeners['playback:seeking']?.({ time: 50 });
     expect(el.currentTime).toBe(0);
+  });
+});
+
+describe('media error classification', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, any>;
+
+  const videoEl = (): HTMLVideoElement =>
+    mockApi.container.querySelector('video') as HTMLVideoElement;
+
+  /**
+   * Give the element a MediaError, since jsdom never produces one.
+   *
+   * Codes are the spec's own numbers (1 aborted, 2 network, 3 decode,
+   * 4 src-not-supported); jsdom has no `MediaError` global to read them from.
+   */
+  const setMediaError = (code: number): void => {
+    Object.defineProperty(videoEl(), 'error', {
+      configurable: true,
+      value: { code, message: 'boom' },
+    });
+  };
+
+  const emittedError = (): any =>
+    mockApi.emit.mock.calls.filter(([event]: [string]) => event === 'error').pop()?.[1];
+
+  beforeEach(async () => {
+    plugin = createNativePlugin({ loadTimeoutMs: 0 });
+    state = {};
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn(() => vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+    void plugin.loadSource('https://example.com/video.mp4').catch(() => {});
+  });
+
+  it('reports a network failure as MEDIA_NETWORK_ERROR', () => {
+    setMediaError(2);
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({
+      code: 'MEDIA_NETWORK_ERROR',
+      message: 'Network error',
+      fatal: true,
+    });
+  });
+
+  it('reports a decode failure as MEDIA_DECODE_ERROR', () => {
+    setMediaError(3);
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({ code: 'MEDIA_DECODE_ERROR' });
+  });
+
+  it('reports an unsupported source as SOURCE_LOAD_FAILED', () => {
+    setMediaError(4);
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({
+      code: 'SOURCE_LOAD_FAILED',
+      message: 'Format not supported',
+    });
+  });
+
+  it('reports an unsupported source AFTER the stream parsed as a network error', () => {
+    // Safari's native HLS reports a mid-stream outage this way. A source the
+    // element already parsed cannot have become unplayable.
+    videoEl().dispatchEvent(new Event('loadedmetadata'));
+
+    setMediaError(4);
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({ code: 'MEDIA_NETWORK_ERROR' });
+  });
+
+  it('reports an aborted load as PLAYBACK_FAILED', () => {
+    setMediaError(1);
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({
+      code: 'PLAYBACK_FAILED',
+      message: 'Playback aborted',
+    });
+  });
+
+  it('falls back to PLAYBACK_FAILED with no MediaError at all', () => {
+    Object.defineProperty(videoEl(), 'error', { configurable: true, value: null });
+    videoEl().dispatchEvent(new Event('error'));
+
+    expect(emittedError()).toMatchObject({
+      code: 'PLAYBACK_FAILED',
+      message: 'Unknown video error',
+    });
+  });
+});
+
+describe('load session guard', () => {
+  let plugin: ReturnType<typeof createNativePlugin>;
+  let mockApi: any;
+  let state: Record<string, any>;
+
+  const videoEl = (): HTMLVideoElement =>
+    mockApi.container.querySelector('video') as HTMLVideoElement;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    plugin = createNativePlugin({ loadTimeoutMs: 5000 });
+    state = {};
+
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn(() => vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    await plugin.init(mockApi);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('settles a superseded load instead of leaving it pending', async () => {
+    const first = plugin.loadSource('https://example.com/one.mp4');
+    const firstResult = expect(first).rejects.toThrow(/superseded/);
+
+    const second = plugin.loadSource('https://example.com/two.mp4');
+    const secondResult = expect(second).rejects.toThrow(/destroyed/);
+
+    await firstResult;
+
+    // Settle the one still in flight, so its watchdog cannot reject into the
+    // next test as an unhandled rejection.
+    await plugin.destroy();
+    await secondResult;
+  });
+
+  it('leaves only the live load`s watchdog armed', async () => {
+    const first = plugin.loadSource('https://example.com/one.mp4');
+    const firstResult = expect(first).rejects.toThrow(/superseded/);
+    const second = plugin.loadSource('https://example.com/two.mp4');
+    // Assertions attached before the clock moves: a rejection with no handler
+    // yet attached surfaces as an unhandled rejection and fails the run.
+    const secondResult = expect(second).rejects.toThrow(/too long to load/);
+    await firstResult;
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    // The superseded load already settled with its own reason above; the timeout
+    // belongs to the load that is actually in flight.
+    await secondResult;
+  });
+
+  it('settles an in-flight load when the plugin is destroyed', async () => {
+    const pending = plugin.loadSource('https://example.com/one.mp4');
+    const result = expect(pending).rejects.toThrow(/destroyed/);
+
+    await plugin.destroy();
+
+    await result;
+  });
+
+  it('lets the newest load settle on its own loadedmetadata', async () => {
+    const first = plugin.loadSource('https://example.com/one.mp4');
+    const firstResult = expect(first).rejects.toThrow(/superseded/);
+    const second = plugin.loadSource('https://example.com/two.mp4');
+    await firstResult;
+
+
+    videoEl().dispatchEvent(new Event('loadedmetadata'));
+
+    await expect(second).resolves.toBeUndefined();
+    expect(mockApi.emit).toHaveBeenCalledWith('media:loaded', {
+      src: 'https://example.com/two.mp4',
+      type: 'video/mp4',
+    });
   });
 });

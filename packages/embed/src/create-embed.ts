@@ -256,7 +256,14 @@ export async function createEmbedPlayer(
     const video = container.querySelector('video');
     if (video) {
       if (config.playbackRate) video.playbackRate = config.playbackRate;
-      if (config.startTime) video.currentTime = config.startTime;
+    }
+
+    // startTime has to wait for metadata: seeking an element that has not
+    // parsed its duration yet is silently dropped, so the viewer started at
+    // zero whenever the manifest had not landed by the time createPlayer()
+    // resolved - which is most of the time on a cold load.
+    if (config.startTime) {
+      seekWhenReady(player, video, config.startTime);
     }
 
     return player;
@@ -264,6 +271,32 @@ export async function createEmbedPlayer(
     console.error('[ScarlettPlayer] Failed to create player:', error);
     throw error;
   }
+}
+
+/**
+ * Seek to `startTime` as soon as the media knows its duration.
+ *
+ * Applied immediately when metadata is already parsed (a cached source can
+ * beat us here), otherwise on the first `media:loadedmetadata`.
+ *
+ * @param player - The player to seek
+ * @param video - The media element, when one exists yet
+ * @param startTime - Position in seconds
+ */
+function seekWhenReady(
+  player: ScarlettPlayer,
+  video: HTMLVideoElement | null,
+  startTime: number
+): void {
+  // HAVE_METADATA
+  if (video && video.readyState >= 1) {
+    player.seek(startTime);
+    return;
+  }
+
+  player.once('media:loadedmetadata', () => {
+    player.seek(startTime);
+  });
 }
 
 /**
@@ -309,17 +342,25 @@ export async function initAll(
   const selector = PLAYER_SELECTORS.join(', ');
   const elements = document.querySelectorAll<HTMLElement>(selector);
 
+  // Concurrent, not sequential: each player's setup is mostly network wait
+  // (plugin chunks, then the manifest), and running them one after another
+  // made the last player on a page wait out every player before it.
+  // allSettled, so one bad embed cannot stop the rest from initialising.
+  const results = await Promise.allSettled(
+    Array.from(elements).map((element) => initElement(element, pluginCreators, availableTypes))
+  );
+
   let initialized = 0;
   let errors = 0;
 
-  for (const element of Array.from(elements)) {
-    try {
-      const player = await initElement(element, pluginCreators, availableTypes);
-      if (player) initialized++;
-    } catch (error) {
-      errors++;
-      console.error('[ScarlettPlayer] Failed to initialize element:', error);
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      if (result.value) initialized++;
+      continue;
     }
+
+    errors++;
+    console.error('[ScarlettPlayer] Failed to initialize element:', result.reason);
   }
 
   if (initialized > 0) {

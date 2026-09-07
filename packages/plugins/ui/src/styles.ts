@@ -11,6 +11,10 @@ export const styles = `
    ============================================ */
 .sp-container {
   position: relative;
+  /* Own stacking context: the control bar, menus and overlays all carry
+     z-index, and without this they compete with the host page's own layers
+     instead of staying inside the player. */
+  isolation: isolate;
   width: 100%;
   height: 100%;
   background: #000;

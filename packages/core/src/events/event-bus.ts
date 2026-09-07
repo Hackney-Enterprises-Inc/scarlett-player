@@ -207,10 +207,15 @@ export class EventBus {
       // Create array to avoid modification during iteration
       const handlersArray = Array.from(onceHandlers);
       handlersArray.forEach(handler => {
+        // Remove this handler before invoking it. Wiping the whole set
+        // afterwards would also discard handlers a running handler registered
+        // re-entrantly, so those would never fire.
+        onceHandlers.delete(handler);
         this.safeCallHandler(handler, interceptedPayload);
       });
-      // Clear once handlers after calling
-      this.onceListeners.delete(event);
+      if (onceHandlers.size === 0) {
+        this.onceListeners.delete(event);
+      }
     }
   }
 
@@ -250,12 +255,16 @@ export class EventBus {
     const onceHandlers = this.onceListeners.get(event);
     if (onceHandlers) {
       const handlersArray = Array.from(onceHandlers);
-      const promises = handlersArray.map(handler =>
-        this.safeCallHandlerAsync(handler, interceptedPayload)
-      );
+      const promises = handlersArray.map(handler => {
+        // Remove before invoking so a handler registered from inside another
+        // once-handler survives this emit instead of being wiped with the set.
+        onceHandlers.delete(handler);
+        return this.safeCallHandlerAsync(handler, interceptedPayload);
+      });
       await Promise.all(promises);
-      // Clear once handlers after calling
-      this.onceListeners.delete(event);
+      if (onceHandlers.size === 0) {
+        this.onceListeners.delete(event);
+      }
     }
   }
 
