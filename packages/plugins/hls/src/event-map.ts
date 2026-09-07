@@ -324,23 +324,33 @@ export function setupVideoEventHandlers(
     api.setState('currentTime', video.currentTime);
     api.emit('playback:timeupdate', { currentTime: video.currentTime });
 
-    // Update live stream seekable range and live edge on every timeupdate
-    const isLive = api.getState('live');
-    if (isLive && video.seekable && video.seekable.length > 0) {
-      const start = video.seekable.start(0);
-      const end = video.seekable.end(video.seekable.length - 1);
-      api.setState('seekableRange', { start, end });
+    // Update live stream seekable range and live edge on every timeupdate.
+    // Also detect live from non-finite duration (native HLS on Safari),
+    // since hlsLevelLoaded never runs on the native path.
+    if (video.seekable && video.seekable.length > 0) {
+      if (api.getState('live') || !Number.isFinite(video.duration)) {
+        const start = video.seekable.start(0);
+        const end = video.seekable.end(video.seekable.length - 1);
+        api.setState('seekableRange', { start, end });
 
-      // Live edge: within 10 seconds of seekable end
-      const isAtLiveEdge = (end - video.currentTime) < 10;
-      api.setState('liveEdge', isAtLiveEdge);
-      api.setState('liveLatency', Math.max(0, end - video.currentTime));
+        // Live edge: within 10 seconds of seekable end
+        const latency = Math.max(0, end - video.currentTime);
+        api.setState('liveEdge', latency < 10);
+        api.setState('liveLatency', latency);
+      }
     }
   });
 
   addHandler('durationchange', () => {
-    api.setState('duration', video.duration || 0);
-    api.emit('media:loadedmetadata', { duration: video.duration || 0 });
+    const rawDuration = video.duration;
+    const isLive = !Number.isFinite(rawDuration) || rawDuration === Infinity;
+    if (isLive) {
+      api.setState('live', true);
+      api.setState('duration', 0);
+    } else {
+      api.setState('duration', rawDuration || 0);
+    }
+    api.emit('media:loadedmetadata', { duration: api.getState('duration') });
   });
 
   // Buffering

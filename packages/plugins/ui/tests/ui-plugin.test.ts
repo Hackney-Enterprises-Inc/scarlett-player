@@ -344,6 +344,28 @@ describe('UI Plugin', () => {
 
       expect(plugin.getControlBar()).toBeNull();
     });
+
+    it('should add sp-container on init and remove on destroy when not pre-existing', async () => {
+      const plugin = uiPlugin();
+      expect(api.container.classList.contains('sp-container')).toBe(false);
+
+      await plugin.init(api);
+      expect(api.container.classList.contains('sp-container')).toBe(true);
+
+      await plugin.destroy();
+      expect(api.container.classList.contains('sp-container')).toBe(false);
+    });
+
+    it('should preserve pre-existing sp-container on destroy', async () => {
+      api.container.classList.add('sp-container');
+      const plugin = uiPlugin();
+
+      await plugin.init(api);
+      expect(api.container.classList.contains('sp-container')).toBe(true);
+
+      await plugin.destroy();
+      expect(api.container.classList.contains('sp-container')).toBe(true);
+    });
   });
 
   describe('state subscription', () => {

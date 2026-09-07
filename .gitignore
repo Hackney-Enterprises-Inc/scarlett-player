@@ -63,3 +63,6 @@ scripts/fixtures/
 # hygiene is a review concern, see the Release / PR Checklist in CLAUDE.md.
 demo/demo.bundle.js.map
 docs/demo/demo.bundle.js.map
+
+
+.docs

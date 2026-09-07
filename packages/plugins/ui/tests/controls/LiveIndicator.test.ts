@@ -127,18 +127,16 @@ describe('LiveIndicator', () => {
     expect(el.getAttribute('aria-label')).toBe('Live broadcast - behind live edge, click to seek to live');
   });
 
-  it('should seek to live edge on click', () => {
+  it('should emit playback:seeking on click', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
     el.click();
-    expect(video.currentTime).toBe(100);
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
   });
 
-  it('should seek to live edge on Enter key', () => {
+  it('should emit playback:seeking on Enter key', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(video.currentTime).toBe(100);
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
   });
 
   it('should remove element on destroy', () => {
@@ -151,13 +149,13 @@ describe('LiveIndicator', () => {
 
   // --- Keyboard Interactions ---
 
-  it('should seek to live edge on Space key', () => {
+  it('should emit playback:seeking on Space key', () => {
     const el = liveIndicator.render();
     const video = api.container.querySelector('video')!;
     Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
     el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    expect(video.currentTime).toBe(100);
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
   });
 
   it('should not seek on unrelated key press', () => {
@@ -171,7 +169,7 @@ describe('LiveIndicator', () => {
 
   // --- Click when seekable range changes ---
 
-  it('should seek to updated seekable range end on click', () => {
+  it('should emit playback:seeking with updated seekable range end on click', () => {
     const el = liveIndicator.render();
     const video = api.container.querySelector('video')!;
     Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
@@ -185,7 +183,7 @@ describe('LiveIndicator', () => {
     });
 
     el.click();
-    expect(video.currentTime).toBe(200);
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 200 });
   });
 
   it('should not seek if no seekable range is available', () => {
@@ -270,26 +268,24 @@ describe('LiveIndicator', () => {
 
   it('should remove click event listener on destroy', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
-    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
     liveIndicator.destroy();
 
-    // Click after destroy should not seek
+    // Click after destroy should not emit seek event
+    vi.mocked(api.emit).mockClear();
     el.click();
-    expect(video.currentTime).toBe(50);
+    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
   });
 
   it('should remove keydown event listener on destroy', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
-    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
     liveIndicator.destroy();
 
-    // Keydown after destroy should not seek
+    // Keydown after destroy should not emit seek event
+    vi.mocked(api.emit).mockClear();
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(video.currentTime).toBe(50);
+    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
   });
 
   // --- Initial state ---

@@ -19,7 +19,7 @@
  * - M4A (MPEG-4 Audio)
  */
 
-import { ErrorCode, type IPluginAPI, type PluginType } from '@scarlett-player/core';
+import { ErrorCode, type IPluginAPI, type PluginType, sanitizeUrl } from '@scarlett-player/core';
 import { PKG_VERSION } from './version';
 
 /** Supported video extensions */
@@ -485,6 +485,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
         if (!video) return;
+        if (!Number.isFinite(time)) return;
         const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
         video.currentTime = clampedTime;
       });
@@ -544,7 +545,7 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       const isAudio = isAudioExtension(ext);
       is_audio_source = isAudio;
 
-      api.logger.info('Loading native media source', { src, mimeType, isAudio });
+      api.logger.info('Loading native media source', { src: sanitizeUrl(src), mimeType, isAudio });
 
       // Cleanup previous source
       cleanup();

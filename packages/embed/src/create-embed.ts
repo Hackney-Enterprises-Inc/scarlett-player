@@ -143,7 +143,7 @@ export async function createEmbedPlayer(
     // Add playlist plugin if available and playlist provided
     if (pluginCreators.playlist && config.playlist?.length) {
       plugins.push(pluginCreators.playlist({
-        items: config.playlist.map((item, index) => ({
+        tracks: config.playlist.map((item, index) => ({
           id: `item-${index}`,
           src: item.src,
           title: item.title,

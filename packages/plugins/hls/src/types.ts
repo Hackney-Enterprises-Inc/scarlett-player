@@ -113,6 +113,8 @@ export interface HLSLiveInfo {
   targetLatency: number;
   /** Drift from live edge */
   drift: number;
+  /** Position to seek to for live sync (seconds from start), when known */
+  liveSyncPosition?: number;
 }
 
 /** HLS Plugin interface extending base Plugin */

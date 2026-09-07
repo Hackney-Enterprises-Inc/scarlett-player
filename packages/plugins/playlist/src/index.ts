@@ -11,6 +11,7 @@
  */
 
 import type { IPluginAPI, PluginType } from '@scarlett-player/core';
+import { sanitizeUrl } from '@scarlett-player/core';
 import type {
   PlaylistPluginConfig,
   PlaylistTrack,
@@ -292,7 +293,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     const track = tracks[index];
     currentIndex = index;
 
-    api?.logger.info('Track changed', { index, title: track.title, src: track.src });
+    api?.logger.info('Track changed', { index, title: track.title, src: sanitizeUrl(track.src) });
 
     // Update state with track metadata. Title is ALWAYS written (empty when
     // the track has none) so a previous track's title never leaks into the

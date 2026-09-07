@@ -132,11 +132,13 @@ export const styles = `
   cursor: pointer;
   z-index: 10;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.25s ease;
 }
 
 .sp-progress-wrapper--visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Touch: a 20px wrapper is not a 20px target. The control bar is a later
