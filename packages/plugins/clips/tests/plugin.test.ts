@@ -343,6 +343,11 @@ describe('setRange / setTitle / getRange', () => {
     expect(range?.clientRequestId).toBeTruthy();
     expect(Number.isNaN(Date.parse(range!.capturedAt))).toBe(false);
     expect(range).not.toHaveProperty('src');
+    // The signed URL must not reach a host's endpoint under any key, so assert
+    // on what actually goes on the wire rather than on the one field name.
+    const wire = JSON.stringify(range);
+    expect(wire).not.toContain(SIGNED_SRC);
+    expect(wire).not.toContain('SECRET-DO-NOT-SHARE');
 
     plugin.close();
     expect(plugin.getRange()).toBeNull();

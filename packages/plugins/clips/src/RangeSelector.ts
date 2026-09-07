@@ -303,6 +303,10 @@ export class RangeSelector {
   /** @internal Convert clientX to a time on the track, or null if unusable. */
   private onPointerMove = (event: PointerEvent): void => {
     if (!this.drag) return;
+    // Only the pointer that started the drag drives it: a second finger on the
+    // track must not yank the handle. jsdom's stand-in MouseEvents carry no
+    // pointerId at all, so undefined matches the undefined recorded on drag.
+    if (event.pointerId !== this.drag.pointerId) return;
     const raw = this.timeFromClientX(event.clientX);
     if (raw === null) return;
     const landed = this.applyMove(this.drag.handle, raw, 'pointer');
@@ -312,8 +316,11 @@ export class RangeSelector {
   };
 
   /** @internal Release the drag; pointerup and pointercancel share the path. */
-  private onPointerUp = (): void => {
+  private onPointerUp = (event: PointerEvent): void => {
     if (!this.drag) return;
+    // A second pointer lifting must not end the drag - nor release a capture
+    // this component never took for it.
+    if (event.pointerId !== this.drag.pointerId) return;
     const { handle, pointerId } = this.drag;
     this.drag = null;
     this.track.releasePointerCapture?.(pointerId);

@@ -481,11 +481,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   function applyClipLimits(): void {
-    const values = {
+    const raw = {
       minDuration: Number(clipLimitInputs.minDuration?.value ?? 5),
       maxDuration: Number(clipLimitInputs.maxDuration?.value ?? 60),
       defaultDuration: Number(clipLimitInputs.defaultDuration?.value ?? 30),
       step: Number(clipLimitInputs.step?.value ?? 1),
+    };
+    // The sliders have independent ranges, so they can ask for min > max or a
+    // pre-roll outside [min, max]. configure() resolves both the same way
+    // (min drops to max; defaultDuration clamps into the pair), so normalize
+    // here first and show *those* numbers - a label reading 100s while the
+    // plugin runs 60s is the demo lying about what it just configured.
+    const maxDuration = raw.maxDuration;
+    const minDuration = Math.min(raw.minDuration, maxDuration);
+    const values = {
+      minDuration,
+      maxDuration,
+      defaultDuration: Math.min(Math.max(raw.defaultDuration, minDuration), maxDuration),
+      step: raw.step,
     };
     for (const key of Object.keys(values) as Array<keyof typeof values>) {
       const label = clipLimitLabels[key];

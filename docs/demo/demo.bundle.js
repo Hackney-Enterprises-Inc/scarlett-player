@@ -287,7 +287,7 @@
          *
          * @example
          * ```ts
-         * state.define('highlightSelection', null);
+         * state.define('clipSelection', null);
          * ```
          */
         define(key, initialValue) {
@@ -8097,10 +8097,10 @@ ${newDetails.m3u8}`);
       cue.id = generateCueId(cue.startTime, cue.endTime, cue.text);
       const region = regionElements[cueElement.getAttribute("region")];
       const style = styleElements[cueElement.getAttribute("style")];
-      const styles6 = getTtmlStyles(region, style, styleElements);
+      const styles7 = getTtmlStyles(region, style, styleElements);
       const {
         textAlign
-      } = styles6;
+      } = styles7;
       if (textAlign) {
         const lineAlign = textAlignToLineAlign[textAlign];
         if (lineAlign) {
@@ -8108,7 +8108,7 @@ ${newDetails.m3u8}`);
         }
         cue.align = textAlign;
       }
-      _extends(cue, styles6);
+      _extends(cue, styles7);
       return cue;
     }).filter((cue) => cue !== null);
   }
@@ -8163,12 +8163,12 @@ ${newDetails.m3u8}`);
     if (regionStyleName && styleElements.hasOwnProperty(regionStyleName)) {
       regionStyle = styleElements[regionStyleName];
     }
-    return styleAttributes.reduce((styles6, name) => {
+    return styleAttributes.reduce((styles7, name) => {
       const value = getAttributeNS(style, ttsNs, name) || getAttributeNS(region, ttsNs, name) || getAttributeNS(regionStyle, ttsNs, name);
       if (value) {
-        styles6[name] = value;
+        styles7[name] = value;
       }
-      return styles6;
+      return styles7;
     }, {});
   }
   function getAttributeNS(element, ns, name) {
@@ -25729,7 +25729,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
             let primaryPosition = 0;
             let integratedTime = 0;
             interstitialEvents.forEach((interstitial, i) => {
-              const preroll = interstitial.cue.pre;
+              const preroll2 = interstitial.cue.pre;
               const postroll = interstitial.cue.post;
               const previousEvent = interstitialEvents[i - 1] || null;
               const appendInPlace = interstitial.appendInPlace;
@@ -25740,7 +25740,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
               const inSameStartTimeSequence = (previousEvent == null ? void 0 : previousEvent.startTime) === eventStart;
               const start = eventStart + interstitial.cumulativeDuration;
               let end = appendInPlace ? start + interstitialDuration : eventStart + resumptionOffset;
-              if (preroll || !postroll && eventStart <= 0) {
+              if (preroll2 || !postroll && eventStart <= 0) {
                 const integratedStart = integratedTime;
                 integratedTime += timelineDuration;
                 interstitial.timelineStart = start;
@@ -25876,9 +25876,9 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => key === "initSeg
           let cumulativeDuration = 0;
           let lastScheduledStart = -1;
           interstitialEvents.forEach((interstitial, i) => {
-            const preroll = interstitial.cue.pre;
+            const preroll2 = interstitial.cue.pre;
             const postroll = interstitial.cue.post;
-            const eventStart = preroll ? 0 : postroll ? primaryDuration : interstitial.startTime;
+            const eventStart = preroll2 ? 0 : postroll ? primaryDuration : interstitial.startTime;
             this.updateAssetDurations(interstitial);
             const inSameStartTimeSequence = lastScheduledStart === eventStart;
             if (inSameStartTimeSequence) {
@@ -28699,12 +28699,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.background = "black";
           this.flash = false;
         }
-        setStyles(styles6) {
+        setStyles(styles7) {
           const attribs = ["foreground", "underline", "italics", "background", "flash"];
           for (let i = 0; i < attribs.length; i++) {
             const style = attribs[i];
-            if (styles6.hasOwnProperty(style)) {
-              this[style] = styles6[style];
+            if (styles7.hasOwnProperty(style)) {
+              this[style] = styles7[style];
             }
           }
         }
@@ -28863,8 +28863,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             return chars.join("");
           }
         }
-        setPenStyles(styles6) {
-          this.currPenState.setStyles(styles6);
+        setPenStyles(styles7) {
+          this.currPenState.setStyles(styles7);
           const currChar = this.chars[this.pos];
           currChar.setPenState(this.currPenState);
         }
@@ -28927,9 +28927,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const row = this.rows[this.currRow];
           row.insertChar(char);
         }
-        setPen(styles6) {
+        setPen(styles7) {
           const row = this.rows[this.currRow];
-          row.setPenStyles(styles6);
+          row.setPenStyles(styles7);
         }
         moveCursor(relPos) {
           const row = this.rows[this.currRow];
@@ -28970,14 +28970,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             row.setCursor(pacData.indent);
             pacData.color = row.chars[prevPos].penState.foreground;
           }
-          const styles6 = {
+          const styles7 = {
             foreground: pacData.color,
             underline: pacData.underline,
             italics: pacData.italics,
             background: "black",
             flash: false
           };
-          this.setPen(styles6);
+          this.setPen(styles7);
         }
         /**
          * Set background/extra foreground, but first do back_space, and then insert space (backwards compatibility).
@@ -29190,20 +29190,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.writeScreen.moveCursor(nrCols);
         }
         ccMIDROW(secondByte) {
-          const styles6 = {
+          const styles7 = {
             flash: false
           };
-          styles6.underline = secondByte % 2 === 1;
-          styles6.italics = secondByte >= 46;
-          if (!styles6.italics) {
+          styles7.underline = secondByte % 2 === 1;
+          styles7.italics = secondByte >= 46;
+          if (!styles7.italics) {
             const colorIndex = Math.floor(secondByte / 2) - 16;
             const colors = ["white", "green", "blue", "cyan", "red", "yellow", "magenta"];
-            styles6.foreground = colors[colorIndex];
+            styles7.foreground = colors[colorIndex];
           } else {
-            styles6.foreground = "white";
+            styles7.foreground = "white";
           }
-          this.logger.log(2, "MIDROW: " + stringify(styles6));
-          this.writeScreen.setPen(styles6);
+          this.logger.log(2, "MIDROW: " + stringify(styles7));
+          this.writeScreen.setPen(styles7);
         }
         outputDataUpdate(dispatch = false) {
           const time = this.logger.time;
@@ -44604,8 +44604,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       element.style.bottom = "";
       element.style.left = "";
       element.style.transform = "";
-      const styles6 = positionStyles[position];
-      styles6.split(";").filter(Boolean).forEach((rule) => {
+      const styles7 = positionStyles[position];
+      styles7.split(";").filter(Boolean).forEach((rule) => {
         const colonIdx = rule.indexOf(":");
         if (colonIdx === -1) return;
         const prop = rule.slice(0, colonIdx).trim();
@@ -46191,7 +46191,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const extractFromHLS = config.extractFromHLS !== false;
     const autoSelect = config.autoSelect ?? false;
     const defaultLanguage = config.defaultLanguage ?? "en";
-    const getVideo2 = () => {
+    const getVideo3 = () => {
       if (video) return video;
       video = api?.container.querySelector("video") ?? null;
       return video;
@@ -46205,7 +46205,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.setState("currentTextTrack", null);
     };
     const addTrackElement = (source) => {
-      const videoEl = getVideo2();
+      const videoEl = getVideo3();
       if (!videoEl) throw new Error("No video element");
       const trackEl = document.createElement("track");
       trackEl.kind = source.kind || "subtitles";
@@ -46221,7 +46221,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return trackEl;
     };
     const syncTracksToState = () => {
-      const videoEl = getVideo2();
+      const videoEl = getVideo3();
       if (!videoEl) return;
       const tracks = [];
       let currentTrack = null;
@@ -46244,7 +46244,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.setState("currentTextTrack", currentTrack);
     };
     const selectTrack = (trackId) => {
-      const videoEl = getVideo2();
+      const videoEl = getVideo3();
       if (!videoEl) return;
       hasAutoSelected = true;
       for (let i = 0; i < videoEl.textTracks.length; i++) {
@@ -46276,7 +46276,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       maybeAutoSelect();
     };
     const observeTextTracks = () => {
-      const videoEl = getVideo2();
+      const videoEl = getVideo3();
       if (!videoEl || observedTextTracks === videoEl.textTracks) return;
       unobserveTextTracks();
       const list = videoEl.textTracks;
@@ -46901,6 +46901,1783 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/clips/src/index.ts
+  init_src();
+
+  // packages/plugins/clips/src/types.ts
+  var ClipSubmitError = class extends Error {
+    /**
+     * @param message - Human-readable failure description
+     * @param status - HTTP status code, or 0 for a network-level failure
+     * @param body - Parsed response body when the server sent JSON, else null
+     */
+    constructor(message, status2, body) {
+      super(message);
+      this.name = "ClipSubmitError";
+      this.status = status2;
+      this.body = body;
+    }
+  };
+
+  // packages/plugins/clips/src/range.ts
+  var DEFAULT_MIN_DURATION = 5;
+  var DEFAULT_MAX_DURATION = 60;
+  var DEFAULT_DEFAULT_DURATION = 30;
+  var DEFAULT_STEP = 1;
+  var DEFAULT_TITLE_MAX_LENGTH = 80;
+  var EPSILON = 1e-9;
+  function clamp(value, lo, hi) {
+    return Math.min(Math.max(value, lo), hi);
+  }
+  function rawLimits(cfg) {
+    return {
+      minDuration: cfg.minDuration ?? DEFAULT_MIN_DURATION,
+      maxDuration: cfg.maxDuration ?? DEFAULT_MAX_DURATION,
+      defaultDuration: cfg.defaultDuration ?? DEFAULT_DEFAULT_DURATION,
+      step: cfg.step ?? DEFAULT_STEP
+    };
+  }
+  function resolveLimits(cfg) {
+    const limits = rawLimits(cfg);
+    if (limits.defaultDuration < limits.minDuration || limits.defaultDuration > limits.maxDuration) {
+      const clamped = clamp(limits.defaultDuration, limits.minDuration, limits.maxDuration);
+      console.warn(
+        `[clips] defaultDuration ${limits.defaultDuration} is outside [minDuration, maxDuration] = [${limits.minDuration}, ${limits.maxDuration}]; using ${clamped}.`
+      );
+      limits.defaultDuration = clamped;
+    }
+    return limits;
+  }
+  function bounds(state) {
+    return { min: 0, max: state.duration };
+  }
+  function snap(t, step) {
+    let s = step;
+    if (!Number.isFinite(s) || s <= 0) {
+      console.warn(`[clips] step must be a positive number of seconds; got ${step}, falling back to 1.`);
+      s = DEFAULT_STEP;
+    }
+    return Number((Math.round(t / s) * s).toFixed(6));
+  }
+  function preroll(currentTime, cfg, b) {
+    const limits = resolveLimits(cfg);
+    let end = Math.min(snap(clamp(currentTime, b.min, b.max), limits.step), b.max);
+    let start = snap(end - limits.defaultDuration, limits.step);
+    if (start < b.min) start = b.min;
+    if (end - start < limits.minDuration - EPSILON) {
+      end = Math.min(snap(start + limits.minDuration, limits.step), b.max);
+    }
+    return { start, end };
+  }
+  function moveStart(selection, t, cfg, b) {
+    const limits = rawLimits(cfg);
+    const lo = Math.max(b.min, selection.end - limits.maxDuration);
+    const hi = selection.end - limits.minDuration;
+    return { start: clamp(t, lo, hi), end: selection.end };
+  }
+  function moveEnd(selection, t, cfg, b) {
+    const limits = rawLimits(cfg);
+    const lo = selection.start + limits.minDuration;
+    const hi = Math.min(b.max, selection.start + limits.maxDuration);
+    return { start: selection.start, end: clamp(t, lo, hi) };
+  }
+  function validate(selection, cfg, b) {
+    const limits = rawLimits(cfg);
+    const { start, end } = selection;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return "out-of-bounds";
+    if (start < b.min - EPSILON || end > b.max + EPSILON) return "out-of-bounds";
+    if (end < start) return "inverted";
+    const duration = end - start;
+    if (duration > limits.maxDuration + EPSILON) return "too-long";
+    if (duration < limits.minDuration - EPSILON) return "too-short";
+    return null;
+  }
+  function validateTitle(title, cfg) {
+    if (cfg.title === false) return null;
+    const maxLength = cfg.title?.maxLength ?? DEFAULT_TITLE_MAX_LENGTH;
+    const required = cfg.title?.required ?? false;
+    const trimmed = title.trim();
+    if (trimmed.length === 0) return required ? "title-required" : null;
+    if (trimmed.length > maxLength) return "title-too-long";
+    return null;
+  }
+
+  // packages/plugins/clips/src/media.ts
+  function getVideo2(container) {
+    return container.querySelector("video");
+  }
+  function seekClamped(api, time) {
+    if (!api) return;
+    const video = getVideo2(api.container);
+    if (!video) return;
+    const live = api.getState("live");
+    const seekableRange = api.getState("seekableRange");
+    if (live && seekableRange) {
+      video.currentTime = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+      return;
+    }
+    const duration = video.duration;
+    const upperBound = Number.isFinite(duration) && duration > 0 ? duration : null;
+    video.currentTime = upperBound === null ? Math.max(0, time) : Math.max(0, Math.min(upperBound, time));
+  }
+
+  // packages/plugins/clips/src/preview.ts
+  function createPreviewLoop(api, options = {}) {
+    const enabled = options.enabled !== false;
+    let selection = null;
+    let suspended = false;
+    let disposers = [];
+    const rewind = () => {
+      if (selection) seekClamped(api, selection.start);
+    };
+    const onTimeUpdate = (payload) => {
+      if (!selection || suspended) return;
+      if (payload.currentTime >= selection.end) rewind();
+    };
+    const onEnded = () => {
+      if (!selection || suspended) return;
+      rewind();
+    };
+    return {
+      start(next) {
+        if (!enabled) return;
+        selection = { start: next.start, end: next.end };
+        suspended = false;
+        if (disposers.length > 0) return;
+        disposers = [api.on("playback:timeupdate", onTimeUpdate), api.on("playback:ended", onEnded)];
+      },
+      stop() {
+        for (const off of disposers) off();
+        disposers = [];
+        selection = null;
+        suspended = false;
+      },
+      suspend() {
+        suspended = true;
+      },
+      resume() {
+        suspended = false;
+      }
+    };
+  }
+
+  // packages/plugins/clips/src/submit.ts
+  var DEFAULT_TIMEOUT_MS = 15e3;
+  async function parseBody(response) {
+    let text;
+    try {
+      text = await response.text();
+    } catch {
+      return { value: null, failed: true };
+    }
+    if (text === "") return { value: null, failed: false };
+    try {
+      return { value: JSON.parse(text), failed: false };
+    } catch {
+      return { value: null, failed: false };
+    }
+  }
+  async function submitViaEndpoint(range, cfg) {
+    const fetchImpl = cfg.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl !== "function") {
+      throw new ClipSubmitError("clips: no fetch implementation available; provide endpoint.fetch", 0, null);
+    }
+    const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timedOut = () => new ClipSubmitError(`clips: clip request to ${cfg.url} timed out after ${timeoutMs}ms`, 0, null);
+    try {
+      let response;
+      try {
+        const extra = typeof cfg.headers === "function" ? await cfg.headers() : cfg.headers;
+        response = await fetchImpl(cfg.url, {
+          method: cfg.method ?? "POST",
+          headers: { "Content-Type": "application/json", ...extra },
+          credentials: cfg.credentials ?? "same-origin",
+          body: JSON.stringify(cfg.body ? cfg.body(range) : range),
+          signal: controller.signal
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw timedOut();
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new ClipSubmitError(`clips: clip request to ${cfg.url} failed: ${reason}`, 0, null);
+      }
+      const { value: body, failed } = await parseBody(response);
+      if (failed && controller.signal.aborted) throw timedOut();
+      if (response.ok) return body;
+      throw new ClipSubmitError(
+        `clips: clip request to ${cfg.url} failed with status ${response.status}`,
+        response.status,
+        body
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // packages/plugins/clips/src/ClipOverlay.ts
+  init_src();
+
+  // packages/plugins/clips/src/RangeSelector.ts
+  init_src();
+  var CLAMP_FLASH_MS = 1e3;
+  var KEYBOARD_COARSE_FACTOR = 5;
+  var RangeSelector = class {
+    /**
+     * Builds the selector DOM (detached - the caller mounts `element`).
+     *
+     * @param options - Initial selection, bounds, host config and callbacks
+     */
+    constructor(options) {
+      /** The drag in progress - the only state this component owns. */
+      this.drag = null;
+      this.clampTimer = null;
+      this.destroyed = false;
+      // --------------------------------------------------------------------------
+      // Pointer interaction
+      // --------------------------------------------------------------------------
+      /**
+       * @internal
+       * pointerdown picks the nearer handle - ties (pointer exactly at the
+       * selection midpoint) resolve to the start handle - captures the pointer on
+       * the track and announces the drag. It does NOT move anything yet: pressing
+       * beside a handle must not jump it.
+       */
+      this.onPointerDown = (event) => {
+        if (this.destroyed || this.drag) return;
+        if (event.button !== 0) return;
+        const raw = this.timeFromClientX(event.clientX);
+        if (raw === null) return;
+        const which = this.pickHandle(snap(raw, this.stepValue()));
+        this.drag = { handle: which, pointerId: event.pointerId };
+        this.track.setPointerCapture?.(event.pointerId);
+        this.track.classList.add("sp-clip-track--dragging");
+        this.handleEl(which).classList.add("sp-clip-handle--dragging");
+        this.handleEl(which).focus?.({ preventScroll: true });
+        this.callbacks.onDragStart?.(which);
+      };
+      /** @internal Convert clientX to a time on the track, or null if unusable. */
+      this.onPointerMove = (event) => {
+        if (!this.drag) return;
+        if (event.pointerId !== this.drag.pointerId) return;
+        const raw = this.timeFromClientX(event.clientX);
+        if (raw === null) return;
+        const landed = this.applyMove(this.drag.handle, raw, "pointer");
+        this.callbacks.onDragMove?.(this.drag.handle, landed);
+      };
+      /** @internal Release the drag; pointerup and pointercancel share the path. */
+      this.onPointerUp = (event) => {
+        if (!this.drag) return;
+        if (event.pointerId !== this.drag.pointerId) return;
+        const { handle, pointerId } = this.drag;
+        this.drag = null;
+        this.track.releasePointerCapture?.(pointerId);
+        this.track.classList.remove("sp-clip-track--dragging");
+        this.handleEl(handle).classList.remove("sp-clip-handle--dragging");
+        this.callbacks.onDragEnd?.({ ...this.selection });
+      };
+      this.selection = { start: options.selection.start, end: options.selection.end };
+      this.bounds = { min: options.bounds.min, max: options.bounds.max };
+      this.config = options.config;
+      this.callbacks = options.callbacks ?? {};
+      this.track = document.createElement("div");
+      this.track.className = "sp-clip-track";
+      this.rangeEl = document.createElement("div");
+      this.rangeEl.className = "sp-clip-track__range";
+      this.track.appendChild(this.rangeEl);
+      this.startHandle = this.buildHandle("start", "Clip start");
+      this.endHandle = this.buildHandle("end", "Clip end");
+      this.track.appendChild(this.startHandle);
+      this.track.appendChild(this.endHandle);
+      this.track.addEventListener("pointerdown", this.onPointerDown);
+      this.track.addEventListener("pointermove", this.onPointerMove);
+      this.track.addEventListener("pointerup", this.onPointerUp);
+      this.track.addEventListener("pointercancel", this.onPointerUp);
+      this.render();
+    }
+    /** The track element; the overlay mounts this and owns placement. */
+    get element() {
+      return this.track;
+    }
+    /**
+     * Re-render from state - the single path for external updates. The plugin
+     * calls this whenever `clipSelection` changes (setRange, keyboard, drags,
+     * `configure()` re-clamps). No callbacks fire: nothing here "moved", the
+     * world did.
+     *
+     * During an active drag the drag continues from the new selection (the next
+     * pointermove applies the model to what is passed in here).
+     *
+     * @param selection - The selection to render
+     * @param bounds - The bounds the track spans
+     * @param config - Optional replacement config (limits changed at runtime)
+     */
+    update(selection, bounds2, config) {
+      this.selection = { start: selection.start, end: selection.end };
+      this.bounds = { min: bounds2.min, max: bounds2.max };
+      if (config) this.config = config;
+      this.render();
+    }
+    /**
+     * Detach all listeners, clear timers and remove the DOM. Idempotent; the
+     * component must not be reused afterwards.
+     */
+    destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      this.track.removeEventListener("pointerdown", this.onPointerDown);
+      this.track.removeEventListener("pointermove", this.onPointerMove);
+      this.track.removeEventListener("pointerup", this.onPointerUp);
+      this.track.removeEventListener("pointercancel", this.onPointerUp);
+      if (this.clampTimer !== null) {
+        clearTimeout(this.clampTimer);
+        this.clampTimer = null;
+      }
+      this.drag = null;
+      this.track.remove();
+    }
+    // --------------------------------------------------------------------------
+    // DOM construction / rendering
+    // --------------------------------------------------------------------------
+    /** @internal Build one slider handle with its ARIA wiring and key handler. */
+    buildHandle(which, label) {
+      const el = document.createElement("div");
+      el.className = `sp-clip-handle sp-clip-handle--${which}`;
+      el.setAttribute("role", "slider");
+      el.setAttribute("tabindex", "0");
+      el.setAttribute("aria-label", label);
+      el.dataset.clipHandle = which;
+      el.addEventListener("keydown", (event) => this.onKeyDown(which, event));
+      return el;
+    }
+    /** @internal Position both handles and the range fill from current state. */
+    render() {
+      const { min, max } = this.bounds;
+      const span = max - min;
+      const pct = (t) => Number.isFinite(span) && span > 0 ? Math.min(Math.max((t - min) / span, 0), 1) * 100 : 0;
+      const startPct = pct(this.selection.start);
+      const endPct = pct(this.selection.end);
+      this.rangeEl.style.left = `${startPct}%`;
+      this.rangeEl.style.width = `${Math.max(endPct - startPct, 0)}%`;
+      this.startHandle.style.left = `${startPct}%`;
+      this.endHandle.style.left = `${endPct}%`;
+      for (const [el, time] of [
+        [this.startHandle, this.selection.start],
+        [this.endHandle, this.selection.end]
+      ]) {
+        el.setAttribute("aria-valuemin", String(min));
+        el.setAttribute("aria-valuemax", String(max));
+        el.setAttribute("aria-valuenow", String(time));
+        el.setAttribute("aria-valuetext", formatTime(time));
+      }
+    }
+    /**
+     * @internal Which handle a pointer position targets: the nearer one; an
+     * exact-midpoint tie goes to start (the pointer sits on the start side of
+     * the selection as it crosses the middle).
+     */
+    pickHandle(time) {
+      const { start, end } = this.selection;
+      return time - start <= end - time ? "start" : "end";
+    }
+    /** @internal Map a clientX to media seconds; null if the track has no box. */
+    timeFromClientX(clientX) {
+      const rect = this.track.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return null;
+      const { min, max } = this.bounds;
+      const ratio = (clientX - rect.left) / rect.width;
+      return min + Math.min(Math.max(ratio, 0), 1) * (max - min);
+    }
+    // --------------------------------------------------------------------------
+    // Keyboard interaction
+    // --------------------------------------------------------------------------
+    /**
+     * @internal
+     * ArrowLeft/Right step by one `step`, Shift+Arrow by five, Home/End jump to
+     * the track bounds. Every key handled here calls `preventDefault()` so the
+     * UI plugin's document-level shortcuts skip the event.
+     */
+    onKeyDown(which, event) {
+      if (this.destroyed) return;
+      const step = this.stepValue();
+      const delta = event.shiftKey ? step * KEYBOARD_COARSE_FACTOR : step;
+      const current = this.selection[which];
+      let target = null;
+      switch (event.key) {
+        case "ArrowLeft":
+          target = current - delta;
+          break;
+        case "ArrowRight":
+          target = current + delta;
+          break;
+        case "Home":
+          target = this.bounds.min;
+          break;
+        case "End":
+          target = this.bounds.max;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      this.applyMove(which, target, "keyboard");
+    }
+    // --------------------------------------------------------------------------
+    // Model application
+    // --------------------------------------------------------------------------
+    /**
+     * @internal The single commit path: snap the requested time, run the
+     * clamping model (`moveStart`/`moveEnd` - the other handle never moves),
+     * re-render, flash + report if clamped, and fire `onChange` when anything
+     * meaningful happened.
+     *
+     * @returns The handle's landed time
+     */
+    applyMove(which, requested, source) {
+      const target = snap(requested, this.stepValue());
+      const prev = this.selection;
+      const next = which === "start" ? moveStart(prev, target, this.config, this.bounds) : moveEnd(prev, target, this.config, this.bounds);
+      const landed = next[which];
+      const clamped = landed !== target;
+      const changed = next.start !== prev.start || next.end !== prev.end;
+      this.selection = next;
+      this.render();
+      if (clamped) this.flashClamp(which);
+      if (changed || clamped) {
+        this.callbacks.onChange?.({ ...next }, {
+          handle: which,
+          source,
+          clamped,
+          clampReason: clamped ? this.classifyClamp(which, target, landed) : null
+        });
+      }
+      return landed;
+    }
+    /**
+     * @internal Name the limit a clamped move hit. Recall the clamp geometry:
+     * `landed > requested` means the value was lifted to the lower limit;
+     * `landed < requested` means it was held down to the upper limit.
+     */
+    classifyClamp(which, requested, landed) {
+      const { maxDuration } = resolveLimits(this.config);
+      const { start, end } = this.selection;
+      const { min, max } = this.bounds;
+      if (which === "start") {
+        if (landed > requested) return min >= end - maxDuration ? "bounds" : "max-duration";
+        return "min-duration";
+      }
+      if (landed < requested) return max <= start + maxDuration ? "bounds" : "max-duration";
+      return "min-duration";
+    }
+    /** @internal Add `--clamped` to a handle, re-arming the ~1s removal timer. */
+    flashClamp(which) {
+      const el = this.handleEl(which);
+      el.classList.add("sp-clip-handle--clamped");
+      if (this.clampTimer !== null) clearTimeout(this.clampTimer);
+      this.clampTimer = setTimeout(() => {
+        this.clampTimer = null;
+        this.startHandle.classList.remove("sp-clip-handle--clamped");
+        this.endHandle.classList.remove("sp-clip-handle--clamped");
+      }, CLAMP_FLASH_MS);
+    }
+    /** @internal The handle element for a handle id. */
+    handleEl(which) {
+      return which === "start" ? this.startHandle : this.endHandle;
+    }
+    /** @internal Snap granularity with the same guard `snap()` applies. */
+    stepValue() {
+      const step = this.config.step ?? 1;
+      return Number.isFinite(step) && step > 0 ? step : 1;
+    }
+  };
+
+  // packages/plugins/clips/src/ClipOverlay.ts
+  var CLAMP_FLASH_MS2 = 1e3;
+  var DEFAULT_TITLE_MAX_LENGTH2 = 80;
+  var DEFAULT_TITLE_PLACEHOLDER = "Name this clip";
+  var DEFAULT_TITLE_LABEL = "Clip title";
+  var DEFAULT_CONFIRM_LABEL = "Create clip";
+  var titleFieldSeq = 0;
+  var ClipOverlay = class {
+    /**
+     * Builds the panel DOM (detached - {@link ClipOverlay.open} mounts it) and
+     * the {@link RangeSelector} inside it.
+     *
+     * @param options - Container, initial selection/bounds/config/title and the
+     * integration callbacks (see {@link ClipOverlayOptions})
+     */
+    constructor(options) {
+      this.submitting = false;
+      this.destroyed = false;
+      this.noticeTimer = null;
+      // --------------------------------------------------------------------------
+      // Event handlers
+      // --------------------------------------------------------------------------
+      /** @internal Selector committed a move: re-render and route it to the plugin. */
+      this.handleSelectorChange = (selection, meta) => {
+        this.selection = { start: selection.start, end: selection.end };
+        this.renderReadout();
+        this.renderValidity();
+        if (meta.clamped && meta.clampReason) this.showClampNotice(meta.clampReason);
+        this.callbacks.onSelectionChange({ ...this.selection }, meta);
+      };
+      /** @internal Keystroke in the title field: live counter + validity, raw text to the plugin. */
+      this.handleTitleInput = () => {
+        const value = this.titleInput?.value ?? "";
+        this.renderCounter();
+        this.renderValidity();
+        this.callbacks.onTitleChange(value);
+      };
+      /**
+       * @internal Enter in the title field confirms when valid and does nothing
+       * when not - `preventDefault()` either way, so the key never reaches the
+       * UI shortcuts or submits anything natively.
+       */
+      this.handleTitleKeydown = (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (!this.submitting && this.isCommittable()) this.callbacks.onConfirm();
+      };
+      /** @internal Cancel button: route to the plugin (close with reason 'user'). */
+      this.handleCancelClick = () => {
+        if (this.submitting) return;
+        this.callbacks.onCancel();
+      };
+      /** @internal Confirm button: guarded the same way Enter is. */
+      this.handleConfirmClick = () => {
+        if (this.submitting || !this.isCommittable()) return;
+        this.callbacks.onConfirm();
+      };
+      /**
+       * @internal
+       * Document-level trap, active while the panel is mounted (the SettingsMenu
+       * pattern): Escape cancels with `preventDefault()`, Tab/Shift+Tab cycle the
+       * panel's own focusables.
+       */
+      this.onDocumentKeyDown = (event) => {
+        if (this.destroyed) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          this.callbacks.onCancel();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const items = this.focusables();
+        if (items.length === 0) return;
+        event.preventDefault();
+        const current = items.indexOf(document.activeElement);
+        const last = items.length - 1;
+        let next;
+        if (event.shiftKey) {
+          next = current <= 0 ? last : current - 1;
+        } else {
+          next = current === -1 || current === last ? 0 : current + 1;
+        }
+        items[next].focus();
+      };
+      this.container = options.container;
+      this.callbacks = options.callbacks;
+      this.getReturnFocus = options.getReturnFocus;
+      this.selection = { start: options.selection.start, end: options.selection.end };
+      this.bounds = { min: options.bounds.min, max: options.bounds.max };
+      this.config = options.config;
+      this.confirmLabel = this.config.buttonLabel ?? DEFAULT_CONFIRM_LABEL;
+      this.panel = document.createElement("div");
+      this.panel.className = "sp-clip-panel";
+      this.panel.setAttribute("role", "dialog");
+      this.panel.setAttribute("aria-label", this.confirmLabel);
+      this.selector = new RangeSelector({
+        selection: this.selection,
+        bounds: this.bounds,
+        config: this.config,
+        callbacks: {
+          onChange: this.handleSelectorChange,
+          onDragStart: (handle) => this.callbacks.onDragStart?.(handle),
+          onDragMove: (handle, time) => this.callbacks.onDragMove?.(handle, time),
+          onDragEnd: (selection) => this.callbacks.onDragEnd?.(selection)
+        }
+      });
+      this.panel.appendChild(this.selector.element);
+      this.readout = document.createElement("div");
+      this.readout.className = "sp-clip-readout";
+      this.panel.appendChild(this.readout);
+      const titleCfg = options.config.title === false ? null : options.config.title ?? {};
+      this.titleMaxLength = titleCfg?.maxLength ?? DEFAULT_TITLE_MAX_LENGTH2;
+      if (titleCfg) {
+        const fieldId = `sp-clip-title-${titleFieldSeq += 1}`;
+        const label = document.createElement("label");
+        label.className = "sp-clip-title-label";
+        label.htmlFor = fieldId;
+        label.textContent = titleCfg.label ?? DEFAULT_TITLE_LABEL;
+        this.panel.appendChild(label);
+        this.titleInput = document.createElement("input");
+        this.titleInput.className = "sp-clip-title";
+        this.titleInput.type = "text";
+        this.titleInput.id = fieldId;
+        this.titleInput.maxLength = Math.max(0, this.titleMaxLength);
+        this.titleInput.placeholder = titleCfg.placeholder ?? DEFAULT_TITLE_PLACEHOLDER;
+        this.titleInput.value = options.title ?? "";
+        if (titleCfg.required) this.titleInput.setAttribute("aria-required", "true");
+        this.titleInput.addEventListener("input", this.handleTitleInput);
+        this.titleInput.addEventListener("keydown", this.handleTitleKeydown);
+        this.panel.appendChild(this.titleInput);
+        this.titleCounter = document.createElement("span");
+        this.titleCounter.className = "sp-clip-title-counter";
+        this.titleCounter.setAttribute("aria-hidden", "true");
+        this.panel.appendChild(this.titleCounter);
+      } else {
+        this.titleInput = null;
+        this.titleCounter = null;
+      }
+      this.notice = document.createElement("div");
+      this.notice.className = "sp-clip-notice";
+      this.notice.setAttribute("aria-live", "polite");
+      this.noticeText = document.createElement("span");
+      this.notice.appendChild(this.noticeText);
+      this.panel.appendChild(this.notice);
+      const actions = document.createElement("div");
+      actions.className = "sp-clip-actions";
+      this.cancelBtn = document.createElement("button");
+      this.cancelBtn.type = "button";
+      this.cancelBtn.className = "sp-clip-btn sp-clip-btn--cancel";
+      this.cancelBtn.textContent = "Cancel";
+      this.cancelBtn.addEventListener("click", this.handleCancelClick);
+      actions.appendChild(this.cancelBtn);
+      this.confirmBtn = document.createElement("button");
+      this.confirmBtn.type = "button";
+      this.confirmBtn.className = "sp-clip-btn sp-clip-btn--confirm";
+      this.confirmBtn.addEventListener("click", this.handleConfirmClick);
+      actions.appendChild(this.confirmBtn);
+      this.panel.appendChild(actions);
+      document.addEventListener("keydown", this.onDocumentKeyDown);
+      this.renderAll();
+    }
+    /** The panel element; mounted on the container by {@link ClipOverlay.open}. */
+    get element() {
+      return this.panel;
+    }
+    /**
+     * Mount the panel on the container and take focus: the `--open` class and
+     * the initial focus are deferred one frame (the SettingsMenu pattern) so
+     * the enter transition runs and the DOM is settled.
+     */
+    open() {
+      if (this.destroyed) return;
+      if (!this.panel.isConnected) this.container.appendChild(this.panel);
+      requestAnimationFrame(() => {
+        if (this.destroyed) return;
+        this.panel.classList.add("sp-clip-panel--open");
+        this.focusables()[0]?.focus();
+      });
+    }
+    /**
+     * Re-render from state after an external change (`setRange`, a
+     * `configure()` re-clamp, new limits or bounds). Render-only: the title
+     * field keeps whatever the viewer is typing; host-driven title writes go
+     * through {@link ClipOverlay.setTitle}.
+     *
+     * @param selection - The selection to render
+     * @param bounds - The bounds the track spans
+     * @param config - Optional replacement config (limits changed at runtime)
+     */
+    update(selection, bounds2, config) {
+      if (this.destroyed) return;
+      this.selection = { start: selection.start, end: selection.end };
+      this.bounds = { min: bounds2.min, max: bounds2.max };
+      if (config) this.config = config;
+      this.selector.update(selection, bounds2, config);
+      this.renderReadout();
+      this.renderValidity();
+    }
+    /**
+     * Write the title field from outside (a host calling `setTitle()` while the
+     * panel is open). The overlay's own keystrokes do not echo back here - the
+     * field keeps the raw text while typing.
+     *
+     * @param title - The title to show
+     */
+    setTitle(title) {
+      if (this.destroyed || !this.titleInput) return;
+      this.titleInput.value = title;
+      this.renderCounter();
+      this.renderValidity();
+    }
+    /**
+     * Enter or leave the submitting state: both buttons disabled, the `--submitting`
+     * modifier and a spinner replacing the Confirm label while a commit is in
+     * flight (plan "Submission").
+     *
+     * @param submitting - True while the submission is pending
+     */
+    setSubmitting(submitting) {
+      if (this.destroyed || this.submitting === submitting) return;
+      this.submitting = submitting;
+      this.renderConfirmContent();
+      this.renderValidity();
+    }
+    /**
+     * Show a notice in the `aria-live` slot: clamp reasons, validation hints,
+     * server error text. Written with `textContent` only - a server-supplied
+     * `body.message` containing markup renders as literal text, never HTML.
+     *
+     * @param message - The text to show
+     * @param options - Kind (`'error'` coloring) and optional auto-hide delay
+     */
+    showNotice(message, options = {}) {
+      if (this.destroyed) return;
+      this.clearNoticeTimer();
+      this.noticeText.textContent = message;
+      this.notice.classList.add("sp-clip-notice--visible");
+      this.notice.classList.toggle("sp-clip-notice--error", options.type === "error");
+      if (options.autoHideMs !== void 0) {
+        this.noticeTimer = setTimeout(() => {
+          this.noticeTimer = null;
+          this.notice.classList.remove("sp-clip-notice--visible");
+        }, options.autoHideMs);
+      }
+    }
+    /**
+     * Flash why a move was refused by a limit, for {@link CLAMP_FLASH_MS} -
+     * the same beat as the handle's `--clamped` flash.
+     *
+     * @param reason - Which limit bit stopped the move
+     */
+    showClampNotice(reason) {
+      const limits = resolveLimits(this.config);
+      let text;
+      if (reason === "max-duration") text = `Max ${limits.maxDuration}s`;
+      else if (reason === "min-duration") text = `Min ${limits.minDuration}s`;
+      else text = "Media edge";
+      this.showNotice(text, { autoHideMs: CLAMP_FLASH_MS2 });
+    }
+    /** Clear the notice and any pending auto-hide. Idempotent. */
+    hideNotice() {
+      if (this.destroyed) return;
+      this.clearNoticeTimer();
+      this.notice.classList.remove("sp-clip-notice--visible", "sp-clip-notice--error");
+      this.noticeText.textContent = "";
+    }
+    /**
+     * Detach listeners, destroy the selector, unmount the panel and return
+     * focus to the control-bar button when focus had been inside the panel.
+     * Idempotent; the instance must not be reused afterwards.
+     */
+    destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      const hadFocus = this.panel.contains(document.activeElement);
+      document.removeEventListener("keydown", this.onDocumentKeyDown);
+      this.clearNoticeTimer();
+      this.selector.destroy();
+      this.panel.remove();
+      if (hadFocus) {
+        const target = this.getReturnFocus?.() ?? null;
+        if (target && target.isConnected) target.focus();
+      }
+    }
+    // --------------------------------------------------------------------------
+    // Rendering
+    // --------------------------------------------------------------------------
+    /** @internal Re-render everything stateful. */
+    renderAll() {
+      this.renderReadout();
+      this.renderCounter();
+      this.renderConfirmContent();
+      this.renderValidity();
+    }
+    /** @internal `0:12 – 0:47 · 35s`, at the deliberately coarse whole-second granularity. */
+    renderReadout() {
+      const { start, end } = this.selection;
+      const secs = Math.max(0, end - start);
+      const shown = Number.isInteger(secs) ? String(secs) : secs.toFixed(1);
+      this.readout.textContent = `${formatTime(start)} \u2013 ${formatTime(end)} \xB7 ${shown}s`;
+    }
+    /** @internal Live `12/80` counter under the title field. */
+    renderCounter() {
+      if (!this.titleCounter) return;
+      this.titleCounter.textContent = `${(this.titleInput?.value ?? "").length}/${this.titleMaxLength}`;
+    }
+    /** @internal Swap the Confirm label for the spinner while submitting. */
+    renderConfirmContent() {
+      this.confirmBtn.textContent = "";
+      if (this.submitting) {
+        this.confirmBtn.classList.add("sp-clip-btn--submitting");
+        const spinner = document.createElement("span");
+        spinner.className = "sp-clip-spinner";
+        this.confirmBtn.appendChild(spinner);
+      } else {
+        this.confirmBtn.classList.remove("sp-clip-btn--submitting");
+        this.confirmBtn.textContent = this.confirmLabel;
+      }
+    }
+    /** @internal Whether the selection and title pass the pure-model validation. */
+    isCommittable() {
+      return validate(this.selection, this.config, this.bounds) === null && validateTitle(this.titleInput?.value ?? "", this.config) === null;
+    }
+    /** @internal Disabled states: submitting wins over validity; Cancel is free otherwise. */
+    renderValidity() {
+      this.cancelBtn.disabled = this.submitting;
+      this.confirmBtn.disabled = this.submitting || !this.isCommittable();
+    }
+    /**
+     * @internal The panel's focusables, in DOM order: the two slider handles,
+     * the title field, then the enabled action buttons. Selected through the
+     * pinned class vocabulary rather than a generic selector so the disabled
+     * Confirm drops out of the cycle.
+     */
+    focusables() {
+      return Array.from(
+        this.panel.querySelectorAll(
+          ".sp-clip-handle, .sp-clip-title, .sp-clip-btn:not([disabled])"
+        )
+      );
+    }
+    /** @internal */
+    clearNoticeTimer() {
+      if (this.noticeTimer !== null) {
+        clearTimeout(this.noticeTimer);
+        this.noticeTimer = null;
+      }
+    }
+  };
+
+  // packages/plugins/clips/src/sanitize.ts
+  var ALLOWED_ELEMENTS2 = /* @__PURE__ */ new Set([
+    "svg",
+    "g",
+    "path",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
+    "rect",
+    "defs",
+    "lineargradient",
+    "radialgradient",
+    "stop",
+    "clippath",
+    "mask",
+    "use",
+    "symbol",
+    "title",
+    "desc"
+  ]);
+  function sanitizeIcon2(markup) {
+    if (typeof markup !== "string" || markup.trim() === "") {
+      return null;
+    }
+    if (typeof DOMParser === "undefined") {
+      return null;
+    }
+    const doc = new DOMParser().parseFromString(markup, "text/html");
+    const svg = doc.body.querySelector("svg");
+    if (!svg) {
+      return null;
+    }
+    for (const element of Array.from(svg.querySelectorAll("*"))) {
+      if (!ALLOWED_ELEMENTS2.has(element.nodeName.toLowerCase())) {
+        element.remove();
+        continue;
+      }
+      stripDangerousAttributes2(element);
+    }
+    stripDangerousAttributes2(svg);
+    return svg.outerHTML;
+  }
+  function stripDangerousAttributes2(element) {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (name === "href" || name === "xlink:href" || name === "src") {
+        const value = attribute.value.replace(/\s+/g, "").toLowerCase();
+        if (value.startsWith("javascript:") || value.startsWith("data:text/html")) {
+          element.removeAttribute(attribute.name);
+        }
+      }
+    }
+  }
+
+  // packages/plugins/clips/src/ClipButton.ts
+  var CLIP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h3v16H4V4zm13 0h3v16h-3V4zM7 11h10v2H7z"/></svg>';
+  var ClipButton = class {
+    /**
+     * @param _api - The per-instance plugin API from the control factory; the
+     * button reads no player state directly (the options' predicates close over
+     * the plugin's own api), so this is kept for the factory signature only
+     * @param options - Label, icon and the state predicates wiring (see {@link ClipButtonOptions})
+     */
+    constructor(_api, options) {
+      this.clickHandler = () => {
+        this.options.onActivate();
+      };
+      this.options = options;
+      const label = options.label ?? "Create clip";
+      this.el = document.createElement("button");
+      this.el.type = "button";
+      this.el.className = "sp-clip-control sp-control";
+      this.el.setAttribute("aria-label", label);
+      this.el.setAttribute("title", label);
+      this.el.setAttribute("aria-haspopup", "dialog");
+      const icon = options.icon ? sanitizeIcon2(options.icon) : null;
+      this.el.innerHTML = icon ?? CLIP_ICON;
+      this.el.addEventListener("click", this.clickHandler);
+      this.update();
+    }
+    /** The button element; mounted into the control bar by the UI package. */
+    render() {
+      return this.el;
+    }
+    /**
+     * Reflect plugin state: hide the button when the media is not clippable
+     * unless a session is open (a hidden button cannot receive the focus
+     * return from the closing overlay), and mirror the open state in
+     * `aria-expanded`.
+     */
+    update() {
+      const open = this.options.isOpen();
+      const visible = open || this.options.isAvailable();
+      this.el.style.display = visible ? "" : "none";
+      this.el.setAttribute("aria-expanded", String(open));
+    }
+    /**
+     * The popover hook of the `Control` contract: true while the clip panel is
+     * on screen, which holds the control bar's auto-hide so it cannot vanish
+     * under the overlay.
+     *
+     * @returns Whether the clip selector is open
+     */
+    isMenuOpen() {
+      return this.options.isOpen();
+    }
+    /** Detach the click handler and remove the button. Idempotent. */
+    destroy() {
+      this.el.removeEventListener("click", this.clickHandler);
+      this.el.remove();
+    }
+  };
+
+  // packages/plugins/clips/src/styles.ts
+  var styles6 = `
+/* ==========================================================================
+   Range selector (RangeSelector.ts)
+   ========================================================================== */
+
+/*
+ * The track is a 44px-tall touch band (WCAG 2.5.5 floor); the visible rail is
+ * a 6px line centered by ::before so the hit area extends far past the art.
+ * touch-action: none keeps a scroll gesture from stealing handle drags.
+ * left/width/top offsets are set inline by JS from the selection state.
+ */
+.sp-clip-track {
+  position: relative;
+  height: 44px;
+  margin: 0 10px; /* keeps edge handles over the picture, not off it */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.sp-clip-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+}
+
+/* The shaded selection between the handles; never intercepts pointer input. */
+.sp-clip-track__range {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  background: var(--sp-accent, #e50914);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+/*
+ * Handles: transparent 44x44 hit areas (the "visually smaller via padding"
+ * rule - the 6x20px knob is drawn by ::before, inset to center it).
+ * translate(-50%, -50%) lets JS position the center with left: <pct>%.
+ */
+.sp-clip-handle {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+  z-index: 2; /* above the range fill so edge handles stay grabbable */
+}
+.sp-clip-handle::before {
+  content: '';
+  position: absolute;
+  inset: 12px 19px; /* 6px wide x 20px tall knob inside the 44px band */
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: inset 120ms ease, background-color 120ms ease;
+}
+/* Two grip lines, the "I drag" affordance. */
+.sp-clip-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(#555, #555) -2px 0 / 1px 100% no-repeat,
+    linear-gradient(#555, #555) 2px 0 / 1px 100% no-repeat;
+  pointer-events: none;
+  opacity: 0.9;
+}
+.sp-clip-handle--start,
+.sp-clip-handle--end {
+  /* Semantic hooks only: both handles render identically by design. JS and
+     tests select on these; visuals differ (yet) only through the state
+     modifiers below. */
+}
+
+@media (hover: hover) {
+  .sp-clip-handle:hover::before { inset: 10px 16px; }
+}
+
+/* Visible keyboard focus, per the house focus convention. */
+.sp-clip-handle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -6px;
+}
+.sp-clip-handle:focus-visible::before { inset: 10px 16px; }
+
+/* The handle currently under the pointer during a drag. */
+.sp-clip-handle--dragging {
+  cursor: grabbing;
+}
+.sp-clip-handle--dragging::before { inset: 10px 16px; }
+/* Grow the sibling knob too, matching .sp-progress--dragging behavior. */
+.sp-clip-track--dragging .sp-clip-handle::before { inset: 10px 16px; }
+
+/*
+ * Clamp flash: a move was refused by min/max duration or the bounds. JS adds
+ * this for ~1s (same beat as the overlay's notice flash) and colors the knob
+ * so the stop reads as deliberate, not as a dead track.
+ */
+.sp-clip-handle--clamped::before {
+  background: #ffd23f;
+}
+
+/* ==========================================================================
+   Overlay panel (ClipOverlay.ts, task 3.3)
+   ========================================================================== */
+
+/*
+ * Bottom panel anchored above the 64px control strip on the menus' layer
+ * (z-index 20: below the error overlay's 25, above big-play's 12 and the
+ * gestures surface's 6). No backdrop anywhere in this file - the picture
+ * stays undimmed so the loop preview is visible.
+ */
+.sp-clip-panel {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 64px;
+  z-index: 20;
+  background: rgba(28, 28, 30, 0.95); /* share sheet's #1c1c1e, lifted off the backdrop */
+  color: #fff;
+  border-radius: 12px;
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 560px;
+  margin: 0 auto;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.sp-clip-panel--open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* "0:12 \u2013 0:47 \xB7 35s" - tabular numerals so the line does not jitter. */
+.sp-clip-readout {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.9);
+  padding: 0 10px; /* aligns with the track's edge inset */
+}
+
+/*
+ * Notice slot: clamp reasons, then validation hints, then server messages.
+ * The element carries aria-live="polite" (set in JS); text is written with
+ * textContent only - server-supplied markup must render as text. Hidden
+ * (height-collapsed but live-region stable) until JS adds --visible.
+ */
+.sp-clip-notice {
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #ffd23f; /* matches the handle clamp flash */
+  padding: 0 10px;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.sp-clip-notice--visible { opacity: 1; }
+.sp-clip-notice--error { color: #ff6b6b; }
+
+/* Title field (hidden entirely when config.title === false). */
+.sp-clip-title-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 0 10px 2px;
+}
+.sp-clip-title {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 20px);
+  margin: 0 10px;
+  /* 16px keeps iOS Safari from zooming the viewport on focus. */
+  font-size: 16px;
+  font-family: inherit;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.sp-clip-title:focus-visible {
+  outline: 2px solid var(--sp-accent, #e50914);
+  outline-offset: -1px;
+}
+/* Live "12/80" counter; tabular so the digits do not shift as they roll. */
+.sp-clip-title-counter {
+  display: block;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 2px 12px 0 0;
+}
+
+/* Button row. */
+.sp-clip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 2px 10px 0;
+}
+.sp-clip-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  min-height: 44px; /* thumb target; matches .sp-control's floor */
+  cursor: pointer;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+.sp-clip-btn:active { transform: scale(0.96); }
+.sp-clip-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.sp-clip-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.sp-clip-btn--cancel {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+@media (hover: hover) {
+  .sp-clip-btn--cancel:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+}
+
+.sp-clip-btn--confirm {
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  min-width: 120px; /* steady width while the spinner replaces the label */
+}
+@media (hover: hover) {
+  .sp-clip-btn--confirm:hover:not(:disabled) { filter: brightness(1.12); }
+}
+
+/* Submitting state: JS sets disabled, adds --submitting, and appends the
+   spinner; the label text is swapped out by the overlay. */
+.sp-clip-btn--submitting { cursor: progress; }
+
+.sp-clip-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sp-clip-spin 800ms linear infinite;
+}
+@keyframes sp-clip-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Success toast (index.ts wiring, task 3.3)
+   ========================================================================== */
+
+/*
+ * A transient confirmation pill shown over the picture when a clip request
+ * lands. Centered at the bottom edge - the share toast's band, which is free
+ * here because a successful commit tears down the panel before the toast
+ * shows. JS removes it after ~2s; it never intercepts pointer input.
+ */
+.sp-clip-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translate(-50%, 8px);
+  z-index: 22; /* above the panel (20), below the error overlay (25) */
+  background: rgba(28, 28, 30, 0.95);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 20px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.sp-clip-toast--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-clip-panel,
+  .sp-clip-notice,
+  .sp-clip-btn,
+  .sp-clip-handle::before {
+    transition: none;
+  }
+  .sp-clip-spinner {
+    animation-duration: 1600ms; /* keep the "working" signal, drop the speed */
+  }
+}
+`;
+
+  // packages/plugins/clips/src/version.ts
+  var PKG_VERSION15 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/clips/src/index.ts
+  var DEFAULT_TITLE_MAX_LENGTH3 = 80;
+  var STYLE_ID6 = "sp-clips-styles";
+  var CONTROL_ID = "clip";
+  var TOAST_MESSAGE = "Clip requested";
+  var TOAST_VISIBLE_MS = 2e3;
+  var GENERIC_FAILURE_MESSAGE = "Couldn't create the clip. Please try again.";
+  var SEEK_THROTTLE_MS = 100;
+  function clipError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+  function newClientRequestId() {
+    const withUuid = globalThis.crypto;
+    if (typeof withUuid?.randomUUID === "function") return withUuid.randomUUID();
+    const rand = () => Math.random().toString(36).slice(2, 10);
+    return `clip-${Date.now().toString(36)}-${rand()}${rand()}`;
+  }
+  function isMisconfigured(config) {
+    const hasOnCreate = typeof config.onCreate === "function";
+    const hasEndpoint = config.endpoint !== void 0 && config.endpoint !== null;
+    return hasOnCreate === hasEndpoint;
+  }
+  function createClipsPlugin(config = {}) {
+    if (isMisconfigured(config)) {
+      throw new TypeError(
+        "createClipsPlugin: configure exactly one of `onCreate` (host-owned submission) or `endpoint` (built-in transport) - not both, and not neither."
+      );
+    }
+    const cfg = { ...config };
+    function applyLimits() {
+      const limits = resolveLimits(cfg);
+      let minDuration = limits.minDuration;
+      const maxDuration = limits.maxDuration;
+      if (minDuration > maxDuration) {
+        console.warn(
+          `[clips] minDuration ${minDuration} exceeds maxDuration ${maxDuration}; clamping minDuration to ${maxDuration}.`
+        );
+        minDuration = maxDuration;
+      }
+      cfg.minDuration = minDuration;
+      cfg.maxDuration = maxDuration;
+      cfg.defaultDuration = Math.min(Math.max(limits.defaultDuration, minDuration), maxDuration);
+      cfg.step = limits.step;
+    }
+    applyLimits();
+    let api = null;
+    let preview = null;
+    const disposers = [];
+    let sessionOpen = false;
+    let selection = null;
+    let sessionMediaId = null;
+    let sessionDuration = 0;
+    let clientRequestId = null;
+    let titleText = "";
+    let inFlight2 = false;
+    let inFlightGeneration = -1;
+    let lifecycle = 0;
+    let overlay = null;
+    let releaseStyles = null;
+    let releaseControls = null;
+    let clipControl = null;
+    let dragging = false;
+    let wasPlayingBeforeDrag = false;
+    let lastScrubSeek = 0;
+    let toastEl = null;
+    let toastTimer = null;
+    const currentBounds = () => bounds({ duration: sessionDuration });
+    function resolveMediaId() {
+      const { mediaId } = cfg;
+      if (typeof mediaId === "function") {
+        const value = mediaId();
+        return typeof value === "string" && value !== "" ? value : null;
+      }
+      return typeof mediaId === "string" && mediaId !== "" ? mediaId : null;
+    }
+    function reportError(error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      api?.logger.error("Clips error", { error: err });
+      config.onError?.(err);
+      api?.emit("clip:error", { error: err });
+    }
+    function buildRange(mediaId) {
+      if (!selection || clientRequestId === null) return null;
+      const trimmed = cfg.title === false ? "" : titleText.trim();
+      return {
+        startTime: selection.start,
+        endTime: selection.end,
+        duration: selection.end - selection.start,
+        mediaId,
+        clientRequestId,
+        title: trimmed === "" ? null : trimmed,
+        isLive: false,
+        seekableStart: null,
+        seekableEnd: null,
+        startDate: null,
+        endDate: null,
+        capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+    }
+    function endSession() {
+      sessionOpen = false;
+      selection = null;
+      sessionMediaId = null;
+      clientRequestId = null;
+      preview?.stop();
+      api?.setState("clipSelection", null);
+      api?.setState("clipOpen", false);
+      overlay?.destroy();
+      overlay = null;
+      dragging = false;
+      wasPlayingBeforeDrag = false;
+    }
+    function closeSession(reason) {
+      if (!sessionOpen) return;
+      endSession();
+      config.onCancel?.();
+      api?.emit("clip:cancelled", { reason });
+    }
+    function teardown() {
+      if (!api) return;
+      lifecycle += 1;
+      inFlight2 = false;
+      inFlightGeneration = -1;
+      closeSession("destroy");
+      clearToast();
+      releaseControls?.();
+      releaseControls = null;
+      releaseStyles?.();
+      releaseStyles = null;
+      clipControl = null;
+      preview?.stop();
+      preview = null;
+      while (disposers.length > 0) disposers.pop()?.();
+      api = null;
+    }
+    function clampSelection(sel) {
+      const b = currentBounds();
+      let next = moveEnd(sel, sel.end, cfg, b);
+      next = moveStart(next, next.start, cfg, b);
+      return next;
+    }
+    function commitSelection(sel, reason, retargetLoop = true) {
+      selection = sel;
+      api?.setState("clipSelection", { start: sel.start, end: sel.end });
+      if (retargetLoop) preview?.start(sel);
+      api?.emit("clip:changed", { start: sel.start, end: sel.end, reason });
+      overlay?.update(sel, currentBounds(), cfg);
+    }
+    function applySelectionFromSelector(sel) {
+      if (!api || !sessionOpen) return;
+      const step = cfg.step ?? 1;
+      const snapped = { start: snap(sel.start, step), end: snap(sel.end, step) };
+      commitSelection(clampSelection(snapped), "user", !dragging);
+    }
+    function applyTitle(raw) {
+      if (!api) return;
+      const configured = typeof cfg.title === "object" && cfg.title !== null ? cfg.title.maxLength : void 0;
+      const maxLength = configured ?? DEFAULT_TITLE_MAX_LENGTH3;
+      titleText = raw.trim().slice(0, Math.max(0, maxLength));
+      api.setState("clipTitle", titleText);
+    }
+    function mediaClippable() {
+      if (!api) return false;
+      if (api.getState("live")) return false;
+      if (api.getState("mediaType") !== "video") return false;
+      const duration = api.getState("duration");
+      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) return false;
+      try {
+        return resolveMediaId() !== null;
+      } catch {
+        return false;
+      }
+    }
+    function handleDragStart() {
+      dragging = true;
+      lastScrubSeek = 0;
+      const video = api ? getVideo2(api.container) : null;
+      wasPlayingBeforeDrag = video ? !video.paused : false;
+      video?.pause();
+      preview?.suspend();
+    }
+    function handleDragMove(_handle, time) {
+      const now2 = Date.now();
+      if (now2 - lastScrubSeek < SEEK_THROTTLE_MS) return;
+      lastScrubSeek = now2;
+      seekClamped(api, time);
+    }
+    function handleDragEnd(finalSelection) {
+      dragging = false;
+      seekClamped(api, finalSelection.start);
+      preview?.start(finalSelection);
+      restorePlayStateAfterDrag();
+    }
+    function restorePlayStateAfterDrag() {
+      if (!wasPlayingBeforeDrag || !api) return;
+      wasPlayingBeforeDrag = false;
+      const video = getVideo2(api.container);
+      if (video && video.paused) {
+        const resumePlayback = () => {
+          video.removeEventListener("seeked", resumePlayback);
+          if (!sessionOpen) return;
+          video.play().catch(() => {
+          });
+        };
+        video.addEventListener("seeked", resumePlayback);
+      }
+    }
+    function showToast() {
+      if (!api) return;
+      clearToast();
+      const el = document.createElement("div");
+      el.className = "sp-clip-toast";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.textContent = TOAST_MESSAGE;
+      api.container.appendChild(el);
+      toastEl = el;
+      requestAnimationFrame(() => el.classList.add("sp-clip-toast--visible"));
+      toastTimer = setTimeout(clearToast, TOAST_VISIBLE_MS);
+    }
+    function clearToast() {
+      if (toastTimer !== null) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+      toastEl?.remove();
+      toastEl = null;
+    }
+    function failureNoticeMessage(error) {
+      if (error instanceof ClipSubmitError && error.body && typeof error.body === "object") {
+        const message = error.body.message;
+        if (typeof message === "string" && message !== "") return message;
+      }
+      return GENERIC_FAILURE_MESSAGE;
+    }
+    function mountOverlay() {
+      if (!api || !selection) return;
+      overlay = new ClipOverlay({
+        container: api.container,
+        selection,
+        bounds: currentBounds(),
+        config: cfg,
+        title: titleText,
+        getReturnFocus: () => clipControl?.render() ?? null,
+        callbacks: {
+          onCancel: () => closeSession("user"),
+          onConfirm: () => {
+            void doCommit();
+          },
+          // Keystrokes stay raw in the field (mid-word spaces survive typing);
+          // the model side trims. No echo back - see applyTitle's note.
+          onTitleChange: (raw) => applyTitle(raw),
+          onSelectionChange: (sel) => applySelectionFromSelector(sel),
+          onDragStart: handleDragStart,
+          onDragMove: handleDragMove,
+          onDragEnd: handleDragEnd
+        }
+      });
+      overlay.open();
+    }
+    function doOpen() {
+      if (!api || sessionOpen) return;
+      if (api.getState("live")) {
+        reportError(clipError("live-unsupported", "clips: live media cannot be clipped in v1"));
+        return;
+      }
+      const mediaType = api.getState("mediaType");
+      if (mediaType !== "video") {
+        reportError(
+          clipError("media-type-unsupported", `clips: only video is clippable; media type is ${String(mediaType)}`)
+        );
+        return;
+      }
+      const duration = api.getState("duration");
+      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
+        reportError(clipError("duration-unknown", "clips: media duration is unknown; cannot open"));
+        return;
+      }
+      let mediaId = null;
+      try {
+        mediaId = resolveMediaId();
+      } catch (error) {
+        reportError(error);
+        return;
+      }
+      if (mediaId === null) {
+        reportError(clipError("media-id-unresolved", "clips: mediaId is unset or resolved to null; cannot open"));
+        return;
+      }
+      const currentTime = api.getState("currentTime") ?? 0;
+      sessionDuration = duration;
+      sessionMediaId = mediaId;
+      clientRequestId = newClientRequestId();
+      const sel = preroll(currentTime, cfg, bounds({ duration }));
+      selection = sel;
+      titleText = "";
+      sessionOpen = true;
+      api.setState("clipSelection", { start: sel.start, end: sel.end });
+      api.setState("clipOpen", true);
+      api.setState("clipTitle", "");
+      api.emit("clip:opened", { start: sel.start, end: sel.end });
+      preview?.start(sel);
+      if (cfg.ui !== "none") mountOverlay();
+    }
+    async function doCommit() {
+      if (!api || !sessionOpen || !selection) return;
+      if (inFlight2) {
+        api.logger.debug("clips: submission already in flight; ignoring commit()");
+        return;
+      }
+      let mediaId = null;
+      try {
+        mediaId = resolveMediaId();
+      } catch (error) {
+        reportError(error);
+        return;
+      }
+      if (mediaId === null) {
+        reportError(clipError("media-id-unresolved", "clips: mediaId could not be resolved at commit time"));
+        return;
+      }
+      const rangeCode = validate(selection, cfg, currentBounds());
+      if (rangeCode !== null) {
+        reportError(clipError(rangeCode, `clips: selection is not committable (${rangeCode})`));
+        return;
+      }
+      const titleCode = validateTitle(titleText, cfg);
+      if (titleCode !== null) {
+        reportError(clipError(titleCode, `clips: title is not acceptable (${titleCode})`));
+        return;
+      }
+      const range = buildRange(mediaId);
+      if (!range) return;
+      const generation = lifecycle;
+      const sessionKey = clientRequestId;
+      inFlight2 = true;
+      inFlightGeneration = generation;
+      overlay?.setSubmitting(true);
+      let failed = false;
+      let failure = null;
+      let result = null;
+      try {
+        result = config.onCreate ? await config.onCreate(range) : await submitViaEndpoint(range, config.endpoint);
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+      if (inFlightGeneration === generation) inFlight2 = false;
+      if (!api || generation !== lifecycle) return;
+      if (failed) {
+        reportError(failure);
+        if (overlay && clientRequestId === sessionKey) {
+          overlay.setSubmitting(false);
+          overlay.showNotice(failureNoticeMessage(failure), { type: "error" });
+        }
+        return;
+      }
+      api.emit("clip:created", { range, result });
+      if (sessionOpen && clientRequestId === sessionKey) {
+        if (cfg.ui !== "none") showToast();
+        endSession();
+      }
+    }
+    return {
+      id: "clips",
+      name: "Clips",
+      version: PKG_VERSION15,
+      type: "feature",
+      description: "Viewer-created clips with two-handle range selection, preview loop and host submission",
+      init(pluginApi) {
+        api = pluginApi;
+        lifecycle += 1;
+        api.logger.debug("Clips plugin initialized");
+        api.defineState("clipSelection", null);
+        api.defineState("clipOpen", false);
+        api.defineState("clipTitle", "");
+        preview = createPreviewLoop(api, { enabled: config.loopPreview !== false });
+        const closeOnSourceChange = () => closeSession("source-change");
+        disposers.push(
+          api.on("media:load-request", closeOnSourceChange),
+          api.on("playlist:change", closeOnSourceChange)
+        );
+        if (cfg.ui !== "none") {
+          releaseStyles = injectSharedStyles(STYLE_ID6, styles6);
+        }
+        if (cfg.ui !== "none") {
+          const generation = lifecycle;
+          const owner = api.container;
+          void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2, unregisterControl: unregisterControl2 }) => {
+            if (generation !== lifecycle) return;
+            registerControl2(
+              CONTROL_ID,
+              (controlApi) => {
+                clipControl = new ClipButton(controlApi, {
+                  icon: cfg.buttonIcon,
+                  label: cfg.buttonLabel,
+                  // Click toggles: opens when closed, closes when open. The
+                  // close routes through closeSession('user'), so the overlay
+                  // unmounts and returns focus to this button.
+                  onActivate: () => {
+                    if (sessionOpen) closeSession("user");
+                    else doOpen();
+                  },
+                  isOpen: () => sessionOpen,
+                  isAvailable: mediaClippable
+                });
+                return clipControl;
+              },
+              { owner }
+            );
+            releaseControls = () => {
+              unregisterControl2(CONTROL_ID, { owner });
+              clipControl = null;
+            };
+          }).catch(() => {
+            api?.logger.debug("@scarlett-player/ui not present, clip control not registered");
+          });
+        }
+        api.onDestroy(teardown);
+      },
+      destroy() {
+        teardown();
+      },
+      open() {
+        doOpen();
+      },
+      close() {
+        closeSession("user");
+      },
+      setRange(start, end) {
+        if (!api || !sessionOpen) return;
+        const step = cfg.step ?? 1;
+        const snapped = { start: snap(start, step), end: snap(end, step) };
+        commitSelection(clampSelection(snapped), "user", !dragging);
+      },
+      setTitle(title) {
+        if (!api) return;
+        applyTitle(title);
+        overlay?.setTitle(titleText);
+      },
+      getRange() {
+        if (!sessionOpen || sessionMediaId === null) return null;
+        return buildRange(sessionMediaId);
+      },
+      commit() {
+        return doCommit();
+      },
+      isOpen() {
+        return sessionOpen;
+      },
+      configure(patch) {
+        for (const key of ["minDuration", "maxDuration", "defaultDuration", "step"]) {
+          if (patch[key] !== void 0) cfg[key] = patch[key];
+        }
+        applyLimits();
+        if (!sessionOpen || !selection) return;
+        const previous = selection;
+        const clamped = clampSelection(selection);
+        if (clamped.start === previous.start && clamped.end === previous.end) return;
+        commitSelection(clamped, "clamp");
+        if (overlay) {
+          const limits = resolveLimits(cfg);
+          const length = clamped.end - clamped.start;
+          const reason = Math.abs(length - limits.maxDuration) < 1e-6 ? "max-duration" : Math.abs(length - limits.minDuration) < 1e-6 ? "min-duration" : "bounds";
+          overlay.showClampNotice(reason);
+        }
+      }
+    };
+  }
+
   // packages/plugins/analytics/src/helpers.ts
   function generateId2() {
     const timestamp = Date.now();
@@ -47115,10 +48892,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/analytics/src/version.ts
-  var PKG_VERSION15 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION16 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/analytics/src/index.ts
-  var PLUGIN_VERSION = PKG_VERSION15;
+  var PLUGIN_VERSION = PKG_VERSION16;
   var PLUGIN_NAME = "scarlett-player";
   var DEFAULT_CONFIG5 = {
     heartbeatInterval: 1e4,
@@ -47746,12 +49523,60 @@ Cada trampa se prueba una sola vez.
     if (!log) return;
     log.innerHTML = '<div class="analytics-empty">Beacons will appear here as you play the video...</div>';
   }
+  var CLIP_LOG_LIMIT = 30;
+  function appendClipRow(event, detail, json) {
+    const log = document.getElementById("clip-log");
+    if (!log) return;
+    log.querySelector(".clip-log-empty")?.remove();
+    const row = document.createElement("div");
+    row.className = "clip-row";
+    const head = document.createElement("div");
+    head.className = "clip-row-head";
+    const time = document.createElement("span");
+    time.className = "clip-time";
+    time.textContent = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    const eventName = document.createElement("span");
+    eventName.className = "clip-event";
+    eventName.textContent = event;
+    const detailEl = document.createElement("span");
+    detailEl.className = "clip-detail";
+    detailEl.textContent = detail;
+    head.append(time, eventName, detailEl);
+    row.append(head);
+    if (json !== void 0) {
+      const pre = document.createElement("pre");
+      pre.className = "clip-json";
+      pre.textContent = JSON.stringify(json, null, 2);
+      row.append(pre);
+    }
+    log.prepend(row);
+    while (log.childElementCount > CLIP_LOG_LIMIT) {
+      log.lastElementChild?.remove();
+    }
+  }
+  function clearClipLog() {
+    const log = document.getElementById("clip-log");
+    if (!log) return;
+    log.innerHTML = '<div class="clip-log-empty">Clips you create will appear here...</div>';
+  }
+  function fakeClipCreation(range) {
+    const uuid2 = crypto.randomUUID();
+    const clipUrl = `https://example.com/clips/${uuid2}`;
+    appendClipRow("clip:requested", `POST /api/clips (simulated)`, range);
+    window.setTimeout(() => appendClipRow("status", "rendering"), 2e3);
+    window.setTimeout(() => appendClipRow("status", `ready  url=${clipUrl}`), 4e3);
+    return Promise.resolve({ uuid: uuid2, status_url: clipUrl });
+  }
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
     if (!container) {
       console.error("Player container not found");
       return;
     }
+    const clipsPlugin = createClipsPlugin({
+      mediaId: "demo-bbb",
+      onCreate: fakeClipCreation
+    });
     const player = await createPlayer({
       container,
       src: VIDEO_URL,
@@ -47767,10 +49592,11 @@ Cada trampa se prueba una sola vez.
           theme: {
             accentColor: "#e50914"
           },
-          // Spelled out because 'share' and 'chapters' are not in the default
-          // layout - those plugins register their controls, but a layout has to
-          // ask for them. This is the default order with 'chapters' inserted
-          // before the settings menu and 'share' before the cast buttons.
+          // Spelled out because 'share', 'chapters' and 'clip' are not in the
+          // default layout - those plugins register their controls, but a layout
+          // has to ask for them. This is the default order with 'chapters'
+          // inserted before the settings menu, 'clip' before it too, and 'share'
+          // before the cast buttons.
           controls: [
             "play",
             "skip-backward",
@@ -47780,6 +49606,7 @@ Cada trampa se prueba una sola vez.
             "live-indicator",
             "bandwidth-indicator",
             "spacer",
+            "clip",
             "chapters",
             "settings",
             "captions",
@@ -47830,6 +49657,13 @@ Cada trampa se prueba una sola vez.
         createChaptersPlugin({
           chapters: VIDEO_CHAPTERS
         }),
+        // Viewer-created clips: the button above (in the 'clip' slot) opens a
+        // two-handle selector that loops the selection, and Confirm hands the
+        // captured range to fakeClipCreation - the stand-in for the highlights
+        // server. Video-only, so this plugin is deliberately absent from the
+        // audio player. The instance lives outside the array so the Clip
+        // Controls panel can reconfigure and open it.
+        clipsPlugin,
         // Nothing leaves the page: `customBeacon` replaces the transport, so the
         // plugin never calls navigator.sendBeacon or fetch, and `beaconUrl` -
         // required by the factory, and passed to the custom beacon as its first
@@ -47849,6 +49683,44 @@ Cada trampa se prueba una sola vez.
       ].filter(Boolean)
     });
     document.getElementById("analytics-clear")?.addEventListener("click", clearAnalyticsLog);
+    document.getElementById("clip-clear")?.addEventListener("click", clearClipLog);
+    const clipLimitInputs = {
+      minDuration: document.getElementById("clip-min"),
+      maxDuration: document.getElementById("clip-max"),
+      defaultDuration: document.getElementById("clip-preroll"),
+      step: document.getElementById("clip-step")
+    };
+    const clipLimitLabels = {
+      minDuration: document.getElementById("clip-min-value"),
+      maxDuration: document.getElementById("clip-max-value"),
+      defaultDuration: document.getElementById("clip-preroll-value"),
+      step: document.getElementById("clip-step-value")
+    };
+    function applyClipLimits() {
+      const raw = {
+        minDuration: Number(clipLimitInputs.minDuration?.value ?? 5),
+        maxDuration: Number(clipLimitInputs.maxDuration?.value ?? 60),
+        defaultDuration: Number(clipLimitInputs.defaultDuration?.value ?? 30),
+        step: Number(clipLimitInputs.step?.value ?? 1)
+      };
+      const maxDuration = raw.maxDuration;
+      const minDuration = Math.min(raw.minDuration, maxDuration);
+      const values = {
+        minDuration,
+        maxDuration,
+        defaultDuration: Math.min(Math.max(raw.defaultDuration, minDuration), maxDuration),
+        step: raw.step
+      };
+      for (const key of Object.keys(values)) {
+        const label = clipLimitLabels[key];
+        if (label) label.textContent = String(values[key]);
+      }
+      clipsPlugin.configure(values);
+    }
+    for (const input of Object.values(clipLimitInputs)) {
+      input?.addEventListener("input", applyClipLimits);
+    }
+    document.getElementById("clip-open-btn")?.addEventListener("click", () => clipsPlugin.open());
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
@@ -47857,8 +49729,14 @@ Cada trampa se prueba una sola vez.
     player.on("chapter:change", (e) => console.log("\u{1F516} Chapter:", e.chapter?.label ?? "none"));
     player.on("track:text", (e) => console.log("\u{1F4AC} Text track:", e.trackId ?? "off"));
     player.on("error", (e) => console.error("\u274C Error:", e));
+    player.on("clip:opened", (e) => console.log(`\u{1F3AC} Clip opened: ${e.start}s \u2013 ${e.end}s`));
+    player.on("clip:changed", (e) => console.log(`\u2702\uFE0F Clip range: ${e.start}s \u2013 ${e.end}s (${e.reason})`));
+    player.on("clip:created", (e) => console.log("\u2702\uFE0F Clip created:", e.result));
+    player.on("clip:cancelled", (e) => console.log(`\u{1F6AB} Clip cancelled (${e.reason})`));
+    player.on("clip:error", (e) => console.error("\u274C Clip error:", e.error?.message ?? e.error));
     window.player = player;
     window.watermarkPlugin = player.getPlugin("watermark");
+    window.clipsPlugin = clipsPlugin;
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");
     const audioContainer = document.getElementById("audio-player");

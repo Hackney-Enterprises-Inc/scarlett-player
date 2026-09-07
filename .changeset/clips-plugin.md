@@ -25,7 +25,9 @@ Clips: new `@scarlett-player/clips` plugin - viewer-created clips, player side.
   present) that opens a two-handle in/out selector anchored above the control bar:
   Pointer Events, touch and keyboard (arrows, Shift, Home/End), ARIA sliders with
   `formatTime` labels, an optional title field with a live counter, and clamp
-  feedback that never pushes the other handle.
+  feedback that never pushes the other handle. A drag is owned by the pointer
+  that started it: a second finger landing on the track is ignored until the
+  first lifts.
 - `minDuration` / `maxDuration` / `defaultDuration` / `step` are all host
   configuration (fallbacks 5 / 60 / 30 / 1s), enforced in a pure range model and
   adjustable at runtime via `configure()`; `open()` pre-rolls a selection behind
@@ -37,7 +39,9 @@ Clips: new `@scarlett-player/clips` plugin - viewer-created clips, player side.
   wall-clock mapping are designed and deferred to Phase 2.
 - Two submission paths, host picks one: `onCreate(range)` for hosts with their
   own HTTP client, or a built-in `endpoint` POST transport (per-request header
-  resolution, `AbortController` timeout, `same-origin` credentials by default).
+  resolution, `same-origin` credentials by default, and an `AbortController`
+  timeout that covers the response body as well as the headers - a stalled body
+  fails as a `status: 0` timeout instead of hanging).
   The wire contract is the `ClipRange` object verbatim, camelCase, with a
   `clientRequestId` minted per open session as the idempotency key and no `src`.
   The player never polls; `clip:created` hands the host the server's `result`.

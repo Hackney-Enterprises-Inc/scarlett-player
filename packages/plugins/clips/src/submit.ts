@@ -23,15 +23,23 @@ const DEFAULT_TIMEOUT_MS = 15000;
 /**
  * @internal
  * Read the response body as parsed JSON. An empty body, a body that is not
- * JSON, or a body-read failure all yield null - never a throw.
+ * JSON, or a body-read failure all yield a null `value` - never a throw.
+ * `failed` separates a read that broke off (the timeout aborting mid-body)
+ * from one that simply had nothing to parse, which is the only way the caller
+ * can tell a stalled body from an empty one.
  */
-async function parseBody(response: Response): Promise<unknown> {
+async function parseBody(response: Response): Promise<{ value: unknown; failed: boolean }> {
+  let text: string;
   try {
-    const text = await response.text();
-    if (text === '') return null;
-    return JSON.parse(text);
+    text = await response.text();
   } catch {
-    return null;
+    return { value: null, failed: true };
+  }
+  if (text === '') return { value: null, failed: false };
+  try {
+    return { value: JSON.parse(text), failed: false };
+  } catch {
+    return { value: null, failed: false };
   }
 }
 
@@ -58,37 +66,46 @@ export async function submitViaEndpoint(range: ClipRange, cfg: ClipEndpointConfi
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timedOut = (): ClipSubmitError =>
+    new ClipSubmitError(`clips: clip request to ${cfg.url} timed out after ${timeoutMs}ms`, 0, null);
 
-  let response: Response;
+  // The timer stays armed until the body has been consumed: a server that
+  // answers its headers and then stalls the body would otherwise hang forever
+  // on a budget everyone assumes covers the whole request.
   try {
-    // Headers are resolved per request so a function form re-reads the CSRF/
-    // Bearer token on every retry, not just the first.
-    const extra = typeof cfg.headers === 'function' ? await cfg.headers() : cfg.headers;
-    response = await fetchImpl(cfg.url, {
-      method: cfg.method ?? 'POST',
-      headers: { 'Content-Type': 'application/json', ...extra },
-      credentials: cfg.credentials ?? 'same-origin',
-      body: JSON.stringify(cfg.body ? cfg.body(range) : range),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    clearTimeout(timer);
-    if (controller.signal.aborted) {
-      throw new ClipSubmitError(`clips: clip request to ${cfg.url} timed out after ${timeoutMs}ms`, 0, null);
+    let response: Response;
+    try {
+      // Headers are resolved per request so a function form re-reads the CSRF/
+      // Bearer token on every retry, not just the first.
+      const extra = typeof cfg.headers === 'function' ? await cfg.headers() : cfg.headers;
+      response = await fetchImpl(cfg.url, {
+        method: cfg.method ?? 'POST',
+        headers: { 'Content-Type': 'application/json', ...extra },
+        credentials: cfg.credentials ?? 'same-origin',
+        body: JSON.stringify(cfg.body ? cfg.body(range) : range),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw timedOut();
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new ClipSubmitError(`clips: clip request to ${cfg.url} failed: ${reason}`, 0, null);
     }
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new ClipSubmitError(`clips: clip request to ${cfg.url} failed: ${reason}`, 0, null);
-  }
-  clearTimeout(timer);
 
-  if (response.ok) {
-    return parseBody(response);
-  }
+    const { value: body, failed } = await parseBody(response);
+    // parseBody never throws, so the abort signal plus a failed read is what
+    // tells a body the timeout cut off from an empty or non-JSON one. A 2xx is
+    // no exception: nothing was received, so it is a status-0 timeout, not the
+    // "unparseable 2xx is still a success" case.
+    if (failed && controller.signal.aborted) throw timedOut();
 
-  const body = await parseBody(response);
-  throw new ClipSubmitError(
-    `clips: clip request to ${cfg.url} failed with status ${response.status}`,
-    response.status,
-    body,
-  );
+    if (response.ok) return body;
+
+    throw new ClipSubmitError(
+      `clips: clip request to ${cfg.url} failed with status ${response.status}`,
+      response.status,
+      body,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
