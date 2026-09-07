@@ -12,6 +12,11 @@ Review fixes: AirPlay provider switches survive a disconnect mid-switch.
   switch left it null: the switch back that AirPlay asks for on disconnect
   bailed with 'No source loaded' and stranded the viewer on native HLS, and
   auto-reconnect stayed disabled for the rest of the session.
+- Both switches now cancel a pending auto-reconnect before tearing the old
+  pipeline down. `cleanup()` leaves the reconnect timer armed, so a reconnect
+  scheduled by the failure that preceded an AirPlay switch fired into the
+  pipeline that replaced it, destroying a healthy player and seeking it back
+  to the position captured before the switch.
 
 **AirPlay**
 

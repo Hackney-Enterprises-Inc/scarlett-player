@@ -1564,8 +1564,12 @@ export function createHLSPluginWith(
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
 
-      // Cleanup hls.js; the switch is a new session
+      // Cleanup hls.js; the switch is a new session. cancelReconnect() first:
+      // cleanup() leaves the reconnect timer armed, and a reconnect scheduled
+      // against the old pipeline would fire into the newly switched one,
+      // tearing down a healthy player and seeking it to a stale position.
       const session = ++loadSession;
+      cancelReconnect();
       cleanup(new Error('HLS load cancelled: switching to native HLS'));
 
       // Same source, different pipeline: cleanup() drops the source identity,
@@ -1625,8 +1629,10 @@ export function createHLSPluginWith(
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
 
-      // Cleanup native; the switch is a new session
+      // Cleanup native; the switch is a new session. cancelReconnect() first —
+      // see switchToNative().
       const session = ++loadSession;
+      cancelReconnect();
       cleanup(new Error('HLS load cancelled: switching to hls.js'));
 
       // Same source, different pipeline - see switchToNative().

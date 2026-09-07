@@ -6,6 +6,10 @@
  * path re-sets it, so the source had to be restored explicitly: without it
  * the switch back bailed with 'No source loaded' and the viewer stayed on
  * native HLS for the rest of the session.
+ *
+ * `cleanup()` also leaves the reconnect timer armed, so both switches cancel
+ * it: a reconnect scheduled against the pipeline being replaced would
+ * otherwise fire into the new one and tear down a healthy player.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -20,6 +24,7 @@ import {
   installMediaStubs,
   flush,
   fireManifest,
+  fireError,
 } from './helpers';
 
 describe('HLS provider switches', () => {
@@ -96,5 +101,45 @@ describe('HLS provider switches', () => {
     expect(created).toHaveLength(2);
     expect(created[1].instance.loadSource).toHaveBeenCalledWith(SRC);
     expect(api.logger.warn).not.toHaveBeenCalledWith('No source loaded');
+  });
+
+  it('drops a scheduled reconnect when a provider switch replaces the pipeline', async () => {
+    vi.useFakeTimers();
+    // maxNetworkRetries: 0 makes the first fatal network error terminal, so it
+    // goes straight to the reconnect scheduler instead of an in-pipeline retry
+    const reconnectPlugin = createHLSPlugin({ maxNetworkRetries: 0 });
+    await reconnectPlugin.init(api);
+
+    const load = reconnectPlugin.loadSource(SRC);
+    await flush();
+    fireManifest(created[0]);
+    await flush();
+    await load;
+
+    // Mid-playback fatal network error arms the reconnect timer
+    fireError(created[0], { type: 'networkError', details: 'levelLoadTimeOut', fatal: true });
+    await flush();
+    expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+    // AirPlay connects before the timer fires: the switch builds a fresh,
+    // healthy native pipeline on the same source
+    const toNative = reconnectPlugin.switchToNative();
+    await flush();
+    getVideo().dispatchEvent(new Event('loadedmetadata'));
+    await toNative;
+    expect(reconnectPlugin.isNativeHLS()).toBe(true);
+
+    (api.emit as ReturnType<typeof vi.fn>).mockClear();
+
+    // Past every backoff the scheduler could have picked: the abandoned
+    // reconnect must not fire into the pipeline that replaced it
+    await vi.advanceTimersByTimeAsync(120000);
+
+    expect(reconnectPlugin.isNativeHLS()).toBe(true);
+    expect(created).toHaveLength(1);
+    expect(api.emit).not.toHaveBeenCalledWith('error:reconnecting', expect.anything());
+    expect(api.emit).not.toHaveBeenCalledWith('error:recovered', expect.anything());
+
+    await reconnectPlugin.destroy();
   });
 });
