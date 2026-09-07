@@ -25,6 +25,7 @@
  * ```
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
 import type { IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
 import type { ShareContext, SharePluginConfig, ShareTarget } from './types';
 import { applyTimestamp, resolveBaseUrl, resolveTitle } from './url';
@@ -78,7 +79,8 @@ const STYLE_ID = 'sp-share-styles';
 export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
   let api: IPluginAPI | null = null;
   let sheet: ShareSheet | null = null;
-  let styleEl: HTMLStyleElement | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
 
   const configuredTargets = config.targets ?? DEFAULT_TARGETS;
 
@@ -218,12 +220,10 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
       api = pluginApi;
       api.logger.debug('Share plugin initialized');
 
-      if (!document.getElementById(STYLE_ID)) {
-        styleEl = document.createElement('style');
-        styleEl.id = STYLE_ID;
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
-      }
+      // Reference-counted: the sheet is shared by every player on the page, and
+      // an unguarded remove() on the first destroy stripped the styling from
+      // the players still mounted.
+      releaseStyles = injectSharedStyles(STYLE_ID, styles);
 
       sheet = new ShareSheet(api, {
         onSelect: (target) => {
@@ -243,8 +243,12 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
       // Registering does not place the button anywhere - the host opts in by
       // listing 'share' in its control layout. Done via a runtime import so a
       // headless host never needs @scarlett-player/ui installed.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
+        .then(({ registerControl, unregisterControlsFor }) => {
+          // Scoped to this player's container: the factory closes over THIS
+          // plugin instance's activate(), so a global registration would open
+          // one player's share sheet from another player's button.
           registerControl(
             'share',
             (controlApi) =>
@@ -252,7 +256,9 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
                 icon: config.buttonIcon,
                 label: config.buttonLabel,
               }),
+            { owner },
           );
+          releaseControls = () => unregisterControlsFor(owner);
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, share control not registered');
@@ -267,8 +273,10 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
     destroy(): void {
       sheet?.destroy();
       sheet = null;
-      styleEl?.remove();
-      styleEl = null;
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       api = null;
     },
 

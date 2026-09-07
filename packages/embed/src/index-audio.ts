@@ -30,7 +30,12 @@ import { PKG_VERSION } from './version';
 
 // Re-export types
 export type { EmbedConfig, EmbedPlayerOptions, ScarlettPlayerGlobal, PlayerType } from './types';
-export { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from './parser';
+export {
+  parseDataAttributes,
+  applyContainerStyles,
+  aspectRatioToPercent,
+  DEFAULT_ASPECT_RATIO,
+} from './parser';
 
 const VERSION = `${PKG_VERSION}-audio`;
 

@@ -670,3 +670,68 @@ describe('StateManager', () => {
     });
   });
 });
+
+describe('StateManager - previousValue on change events', () => {
+  it('reports the value the key held before the change', () => {
+    const state = new StateManager();
+    const events: Array<{ key: string; value: unknown; previousValue: unknown }> = [];
+
+    state.subscribe(event => {
+      events.push({ key: event.key, value: event.value, previousValue: event.previousValue });
+    });
+
+    state.set('volume', 0.5);
+    state.set('volume', 0.25);
+
+    expect(events).toEqual([
+      { key: 'volume', value: 0.5, previousValue: 1.0 },
+      { key: 'volume', value: 0.25, previousValue: 0.5 },
+    ]);
+  });
+
+  it('tracks previous values for writes made straight to the signal', () => {
+    const state = new StateManager();
+    const seen: Array<[unknown, unknown]> = [];
+
+    state.subscribe(event => {
+      if (event.key === 'currentTime') seen.push([event.previousValue, event.value]);
+    });
+
+    state.get('currentTime').set(10);
+    state.get('currentTime').set(20);
+
+    expect(seen).toEqual([
+      [0, 10],
+      [10, 20],
+    ]);
+  });
+
+  it('tracks previous values for plugin-defined keys', () => {
+    const state = new StateManager();
+    state.define('customKey' as never, 'a' as never);
+
+    const seen: Array<[unknown, unknown]> = [];
+    state.subscribe(event => {
+      if (event.key === 'customKey') seen.push([event.previousValue, event.value]);
+    });
+
+    state.set('customKey' as never, 'b' as never);
+
+    expect(seen).toEqual([['a', 'b']]);
+  });
+
+  it('reports previous values through batch updates', () => {
+    const state = new StateManager();
+    state.set('playing', true);
+
+    const seen = new Map<string, [unknown, unknown]>();
+    state.subscribe(event => {
+      seen.set(event.key, [event.previousValue, event.value]);
+    });
+
+    state.update({ playing: false, muted: true });
+
+    expect(seen.get('playing')).toEqual([true, false]);
+    expect(seen.get('muted')).toEqual([false, true]);
+  });
+});

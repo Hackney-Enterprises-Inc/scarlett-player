@@ -138,6 +138,13 @@ export class StateManager {
   private definedDefaults = new Map<StateKey, unknown>();
 
   /**
+   * Last value seen for each key, so a change event can report what the value
+   * was before it changed. Tracked here rather than in set() because a signal
+   * can also be written directly through get(key).set(value).
+   */
+  private lastValues = new Map<StateKey, unknown>();
+
+  /**
    * Set by destroy(). Kept so a read after teardown reports a lifecycle
    * problem instead of masquerading as an unknown-key typo.
    */
@@ -175,6 +182,7 @@ export class StateManager {
    */
   private createSignal(key: StateKey, value: unknown): void {
     const stateSignal = signal(value);
+    this.lastValues.set(key, value);
 
     // Subscribe to each signal to emit global change events
     stateSignal.subscribe(() => {
@@ -354,11 +362,16 @@ export class StateManager {
   private notifyChangeSubscribers<K extends StateKey>(key: K): void {
     const stateSignal = this.get(key);
     const value = stateSignal.get();
+    const previousValue = this.lastValues.get(key) as StateValue<K>;
+
+    // Record before dispatching: a subscriber may write more state, and the
+    // nested change event for this key must see the value we just published.
+    this.lastValues.set(key, value);
 
     const event: StateChangeEvent<K> = {
       key,
       value,
-      previousValue: value, // Note: We don't track previous values in this simple impl
+      previousValue,
     };
 
     this.changeSubscribers.forEach(subscriber => {
@@ -460,6 +473,7 @@ export class StateManager {
 
     // Clear change subscribers
     this.changeSubscribers.clear();
+    this.lastValues.clear();
 
     this.destroyed = true;
   }

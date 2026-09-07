@@ -6,6 +6,8 @@
 
 import {
   ref,
+  shallowRef,
+  markRaw,
   onMounted,
   onBeforeUnmount,
   computed,
@@ -43,9 +45,17 @@ export interface UseScarlettPlayerOptions extends Omit<PlayerOptions, 'container
  * @returns Reactive state refs, the player ref, and the control methods
  */
 export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
-  const player = ref<ScarlettPlayer | null>(null);
+  // shallowRef + markRaw, never a deep ref: `ref()` wraps the instance in a
+  // reactive Proxy that walks every property it touches, which costs on every
+  // access and breaks the private class fields the player reads through `this`.
+  // Nothing inside the instance is meant to drive rendering - the state refs
+  // below are - so there is nothing to gain from making it reactive.
+  const player = shallowRef<ScarlettPlayer | null>(null);
   const isReady = ref(false);
   const error = ref<Error | null>(null);
+
+  /** Drops the state subscription when the player goes away. */
+  let unsubscribeState: (() => void) | null = null;
 
   // Reactive state
   const playing = ref(false);
@@ -56,6 +66,11 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
   const muted = ref(options.muted ?? false);
   const bufferedAmount = ref(0);
   const fullscreen = ref(false);
+  // Fed by the state subscription, not computed off getState(): a computed
+  // over a snapshot has no reactive dependency to invalidate it, so it read
+  // false once and stayed there for the life of the player.
+  const isBuffering = ref(false);
+  const live = ref(false);
 
   // Track unmount during async init to prevent assigning a dead player
   let unmounted = false;
@@ -92,7 +107,7 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
         return;
       }
 
-      player.value = instance;
+      player.value = markRaw(instance);
 
       // Setup state sync
       setupStateSync(instance);
@@ -145,6 +160,18 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     // Handle errors
     playerInstance.on('error', (err) => {
       error.value = err as unknown as Error;
+    });
+
+    // Keys no event announces. Seeded from the current snapshot first, so a
+    // player that is already buffering (or already live) is reported correctly
+    // before the next change arrives.
+    const snapshot = playerInstance.getState();
+    isBuffering.value = snapshot.buffering ?? false;
+    live.value = snapshot.live ?? false;
+
+    unsubscribeState = playerInstance.subscribeToState((event) => {
+      if (event.key === 'buffering') isBuffering.value = Boolean(event.value);
+      if (event.key === 'live') live.value = Boolean(event.value);
     });
   }
 
@@ -240,12 +267,6 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     return (currentTime.value / duration.value) * 100;
   });
 
-  const isBuffering = computed(() => {
-    if (!player.value) return false;
-    const state = player.value.getState();
-    return state.buffering ?? false;
-  });
-
   // Lifecycle. Registered only inside a component's setup(): outside one, Vue
   // has no instance to attach the hooks to, so it warns and drops them, and
   // the caller is the one holding init() and destroy() anyway.
@@ -258,6 +279,8 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
 
     onBeforeUnmount(() => {
       unmounted = true;
+      unsubscribeState?.();
+      unsubscribeState = null;
       if (player.value) {
         player.value.destroy();
         player.value = null;
@@ -282,6 +305,7 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     fullscreen,
     progress,
     isBuffering,
+    live,
 
     // Methods
     init,

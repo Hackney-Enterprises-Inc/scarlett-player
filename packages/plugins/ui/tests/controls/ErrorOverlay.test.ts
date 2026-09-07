@@ -4,9 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorOverlay, getUserMessage } from '../../src/controls/ErrorOverlay';
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from '../mock-api';
 
-function createMockApi(): IPluginAPI {
+function createMockApi(): MockPluginAPI {
   const state: Record<string, unknown> = {
     playbackState: 'idle',
     playing: false,
@@ -33,6 +33,7 @@ function createMockApi(): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
   };

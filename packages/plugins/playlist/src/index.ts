@@ -22,6 +22,7 @@ import type {
 
 import { PlaylistPanel, PlaylistSkipButton } from './controls';
 import { injectStyles } from './styles';
+import type { ReleaseStyles } from '@scarlett-player/core';
 
 // Re-export types
 export type {
@@ -105,6 +106,8 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
   // Plugin state
   let api: IPluginAPI | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
   let tracks: PlaylistTrack[] = mergedConfig.tracks || [];
   let currentIndex = mergedConfig.initialIndex ?? -1;
   // Clamp initialIndex to valid range (-1 to tracks.length - 1)
@@ -361,27 +364,36 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       });
 
       // Register cleanup
-      injectStyles();
+      releaseStyles = injectStyles();
 
       // Registering does not place anything - the host opts in by listing
       // 'playlist-previous', 'playlist-next' or 'playlist' in its control
       // layout. Runtime import so a headless host never needs the UI package.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
+        .then(({ registerControl, unregisterControlsFor }) => {
           const self = plugin;
 
+          // Scoped to this player's container: every factory closes over THIS
+          // playlist instance, and a global registration let the next player on
+          // the page overwrite it and drive the wrong playlist.
           registerControl(
             'playlist-previous',
             () => new PlaylistSkipButton(self, 'previous') as never,
+            { owner },
           );
-          registerControl('playlist-next', () => new PlaylistSkipButton(self, 'next') as never);
+          registerControl('playlist-next', () => new PlaylistSkipButton(self, 'next') as never, {
+            owner,
+          });
           registerControl(
             'playlist',
             () =>
               new PlaylistPanel(self, {
                 onSelect: (index) => self.play(index),
               }) as never,
+            { owner },
           );
+          releaseControls = () => unregisterControlsFor(owner);
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, playlist controls not registered');
@@ -429,6 +441,10 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     async destroy(): Promise<void> {
       api?.logger.info('Playlist plugin destroying');
       persistPlaylist();
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       api = null;
     },
 

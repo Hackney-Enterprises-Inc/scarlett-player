@@ -8,6 +8,7 @@ import {
   isCastSDKLoaded,
   isCastSupported,
   resetCastLoader,
+  CAST_SDK_TIMEOUT_MS,
 } from '../src/cast-loader';
 
 describe('Cast Loader', () => {
@@ -197,5 +198,89 @@ describe('Cast Loader', () => {
 
       expect((window as any).__onGCastApiAvailable).toBeUndefined();
     });
+  });
+});
+
+describe('Cast Loader - load timeout', () => {
+  beforeEach(() => {
+    resetCastLoader();
+    delete (window as any).cast;
+    delete (window as any).__onGCastApiAvailable;
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    resetCastLoader();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects when the SDK never reports in', async () => {
+    const loadPromise = loadCastSDK();
+    const assertion = expect(loadPromise).rejects.toThrow(/did not load within/);
+
+    await vi.advanceTimersByTimeAsync(CAST_SDK_TIMEOUT_MS);
+
+    await assertion;
+  });
+
+  it('does not reject while still inside the window', async () => {
+    const loadPromise = loadCastSDK();
+    let settled = false;
+    void loadPromise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+
+    await vi.advanceTimersByTimeAsync(CAST_SDK_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+
+    (window as any).cast = { framework: { CastContext: {} } };
+    (window as any).__onGCastApiAvailable?.(true);
+
+    await expect(loadPromise).resolves.toBeUndefined();
+  });
+
+  it('allows a retry after a timeout', async () => {
+    const first = loadCastSDK();
+    const rejected = expect(first).rejects.toThrow(/did not load within/);
+    await vi.advanceTimersByTimeAsync(CAST_SDK_TIMEOUT_MS);
+    await rejected;
+
+    (window as any).cast = { framework: { CastContext: {} } };
+
+    // The failed promise must not be cached, or casting stays broken for the
+    // rest of the session even once the SDK is there.
+    await expect(loadCastSDK()).resolves.toBeUndefined();
+  });
+
+  it('chains an existing __onGCastApiAvailable callback', async () => {
+    const existing = vi.fn();
+    (window as any).__onGCastApiAvailable = existing;
+
+    const loadPromise = loadCastSDK();
+
+    (window as any).cast = { framework: { CastContext: {} } };
+    (window as any).__onGCastApiAvailable?.(true);
+
+    await expect(loadPromise).resolves.toBeUndefined();
+    expect(existing).toHaveBeenCalledWith(true);
+  });
+
+  it('survives a chained callback that throws', async () => {
+    (window as any).__onGCastApiAvailable = () => {
+      throw new Error('third-party sender blew up');
+    };
+
+    const loadPromise = loadCastSDK();
+
+    (window as any).cast = { framework: { CastContext: {} } };
+    (window as any).__onGCastApiAvailable?.(true);
+
+    await expect(loadPromise).resolves.toBeUndefined();
   });
 });

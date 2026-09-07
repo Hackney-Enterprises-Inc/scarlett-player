@@ -173,6 +173,18 @@ export class OverflowTray implements Control {
   }
 
   /**
+   * Whether the strip is open.
+   *
+   * Read by the UI plugin so the control bar's auto-hide waits for it: hiding
+   * the bar would take the open tray with it, mid-use.
+   *
+   * @returns True while the strip is showing
+   */
+  isMenuOpen(): boolean {
+    return this.isOpen;
+  }
+
+  /**
    * Show the button only while the tray holds something the viewer can see.
    *
    * A control that hid itself (no cast device on the network, no text tracks)

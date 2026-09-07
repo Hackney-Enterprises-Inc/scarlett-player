@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseDataAttributes, applyContainerStyles, aspectRatioToPercent } from '../src/parser';
+import {
+  parseDataAttributes,
+  applyContainerStyles,
+  aspectRatioToPercent,
+  DEFAULT_ASPECT_RATIO,
+} from '../src/parser';
 
 describe('parseDataAttributes', () => {
   let element: HTMLElement;
@@ -413,5 +418,57 @@ describe('applyContainerStyles', () => {
     expect(container.classList.contains('player-wrapper')).toBe(true);
     expect(container.style.width).toBe('800px');
     expect(container.style.paddingBottom).toBe('56.25%');
+  });
+});
+
+describe('applyContainerStyles - class tokenising and default ratio', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+  });
+
+  it('tolerates multiple spaces between class names', () => {
+    applyContainerStyles(container, { className: 'one   two' });
+
+    expect(container.classList.contains('one')).toBe(true);
+    expect(container.classList.contains('two')).toBe(true);
+    expect(container.classList.length).toBe(2);
+  });
+
+  it('tolerates leading, trailing and tab separators', () => {
+    expect(() =>
+      applyContainerStyles(container, { className: '  lead\ttab trail  ' })
+    ).not.toThrow();
+
+    expect(Array.from(container.classList)).toEqual(['lead', 'tab', 'trail']);
+  });
+
+  it('adds nothing for a whitespace-only class attribute', () => {
+    expect(() => applyContainerStyles(container, { className: '   ' })).not.toThrow();
+
+    expect(container.classList.length).toBe(0);
+  });
+
+  it('falls back to 16:9 when a video embed declares no dimensions', () => {
+    applyContainerStyles(container, { type: 'video' });
+
+    expect(container.style.paddingBottom).toBe(`${aspectRatioToPercent(DEFAULT_ASPECT_RATIO)}%`);
+    expect(container.style.height).toBe('0px');
+    expect(container.style.position).toBe('relative');
+  });
+
+  it('leaves an explicit height alone', () => {
+    applyContainerStyles(container, { type: 'video', height: '360px' });
+
+    expect(container.style.height).toBe('360px');
+    expect(container.style.paddingBottom).toBe('');
+  });
+
+  it('does not force a ratio onto an audio embed', () => {
+    applyContainerStyles(container, { type: 'audio' });
+
+    expect(container.style.paddingBottom).toBe('');
+    expect(container.style.height).toBe('120px');
   });
 });

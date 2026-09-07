@@ -183,6 +183,28 @@ export interface HlsInstance {
   liveSyncPosition?: number;
   bandwidthEstimate?: number;
   media: HTMLMediaElement | null;
+  /** Alternate audio renditions declared by the manifest. */
+  audioTracks: HlsAudioTrack[];
+  /** Index into {@link audioTracks} of the rendition currently playing. */
+  audioTrack: number;
+}
+
+/**
+ * One alternate audio rendition, as hls.js reports it.
+ *
+ * Only the fields this plugin reads; hls.js attaches several more.
+ */
+export interface HlsAudioTrack {
+  /** hls.js's own numeric id for the track. */
+  id?: number;
+  /** Human-readable NAME from the manifest, e.g. "Director Commentary". */
+  name?: string;
+  /** BCP 47 language tag from the manifest, when it declares one. */
+  lang?: string;
+  /** Whether the manifest marked this the default rendition. */
+  default?: boolean;
+  /** Rendition group the track belongs to. */
+  groupId?: string;
 }
 
 /** hls.js constructor type */

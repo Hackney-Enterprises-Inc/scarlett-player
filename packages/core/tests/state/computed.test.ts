@@ -537,14 +537,14 @@ describe('Computed', () => {
       count.set(5);
 
       expect(fn1).toHaveBeenCalledTimes(1);
-      // In our implementation, fn2 might be called during the same notification
-      // depending on Set iteration order - this is acceptable for a simple impl
-      // The important thing is both callbacks are subscribed
+      // Subscribers are snapshotted before dispatch, so a callback subscribed
+      // during a notification joins from the next one rather than this one.
+      expect(fn2).not.toHaveBeenCalled();
 
       count.set(10);
       // Both callbacks should be called on subsequent changes
       expect(fn1).toHaveBeenCalledTimes(2);
-      expect(fn2).toBeCalledTimes(2); // Called during first notification + this one
+      expect(fn2).toHaveBeenCalledTimes(1);
     });
   });
 });

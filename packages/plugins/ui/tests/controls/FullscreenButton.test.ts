@@ -9,9 +9,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FullscreenButton } from '../../src/controls/FullscreenButton';
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from '../mock-api';
 
-function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
+function createMockApi(overrides: Record<string, unknown> = {}): MockPluginAPI {
   const state: Record<string, unknown> = { fullscreen: false, ...overrides };
 
   const container = document.createElement('div');
@@ -31,16 +31,17 @@ function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
-  } as unknown as IPluginAPI;
+  } as unknown as MockPluginAPI;
 }
 
 /** Let the button's async toggle settle. */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('FullscreenButton', () => {
-  let api: IPluginAPI;
+  let api: MockPluginAPI;
   let btn: FullscreenButton;
 
   const video = (): HTMLVideoElement =>

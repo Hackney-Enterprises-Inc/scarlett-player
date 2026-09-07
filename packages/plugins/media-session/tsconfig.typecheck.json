@@ -1,0 +1,24 @@
+{
+  "//": "Type-checks src AND tests. The build config sets rootDir ./src while excluding (or simply not including) tests/**/*, so a plain `tsc --noEmit` never looked at a single test file; this config is what puts them in the program. `pnpm build` still uses tsconfig.json, so nothing here can change what the build emits.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "emitDeclarationOnly": false,
+    "composite": false,
+    "rootDir": ".",
+    "types": [
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*"
+  ],
+  "//exclude": "Restated on purpose. `exclude` is inherited from the extended config and filters `include`, so a package that later excludes \"tests\" there would silently drop every test file out of this program and each type guarantee in them would pass vacuously.",
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

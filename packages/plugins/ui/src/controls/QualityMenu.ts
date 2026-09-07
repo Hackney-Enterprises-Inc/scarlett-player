@@ -164,6 +164,17 @@ export class QualityMenu implements Control {
     this.btn.setAttribute('aria-expanded', 'false');
   }
 
+  /**
+   * Whether the dropdown is open.
+   *
+   * Read by the UI plugin so the control bar's auto-hide waits for it.
+   *
+   * @returns True while the menu is showing
+   */
+  isMenuOpen(): boolean {
+    return this.isOpen;
+  }
+
   destroy(): void {
     document.removeEventListener('click', this.closeHandler);
     this.el.remove();

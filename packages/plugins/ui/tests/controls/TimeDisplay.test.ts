@@ -4,9 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TimeDisplay } from '../../src/controls/TimeDisplay';
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from '../mock-api';
 
-function createMockApi(): IPluginAPI {
+function createMockApi(): MockPluginAPI {
   const state: Record<string, unknown> = {
     currentTime: 65,
     duration: 3665,
@@ -26,7 +26,9 @@ function createMockApi(): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
+    subscribeToState: vi.fn(() => vi.fn()),
   };
 }
 

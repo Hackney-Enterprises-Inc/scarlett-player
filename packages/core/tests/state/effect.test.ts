@@ -158,9 +158,10 @@ describe('effect', () => {
       b.set(30);
       expect(fn).toHaveBeenCalledTimes(4);
 
-      // In our simple implementation, effects stay subscribed to old dependencies
+      // `a` was read on an earlier run only. Dependencies are re-collected on
+      // every run, so the untaken branch's signal no longer wakes the effect.
       a.set(100);
-      expect(fn).toHaveBeenCalledTimes(5); // Will trigger (limitation)
+      expect(fn).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -336,8 +337,10 @@ describe('effect', () => {
 
       // Outer runs again and creates new inner effect
       expect(outerFn).toHaveBeenCalledTimes(2);
-      // Both old and new inner effects run, plus possible extra calls
-      expect(innerFn).toBeCalledTimes(4); // More calls due to multiple subscriptions
+      // The new inner effect runs on creation, and the previous one re-runs
+      // for the same change. It is not invoked twice: subscribers are
+      // snapshotted, so the effect created mid-notification waits for the next.
+      expect(innerFn).toHaveBeenCalledTimes(3);
     });
 
     it('should handle diamond dependency in effects', () => {
@@ -618,5 +621,115 @@ describe('effect', () => {
       count.set(10);
       expect(log[log.length - 1]).toBe('count=10, 4x=40'); // Final value is correct
     });
+  });
+});
+
+describe('effect - nested execution and dependency pruning', () => {
+  it('restores the outer tracking context after a nested effect finishes', () => {
+    const outerSignal = signal(0);
+    const innerSignal = signal(0);
+    const outerFn = vi.fn();
+    const innerFn = vi.fn();
+
+    let created = false;
+    effect(() => {
+      outerFn();
+      if (!created) {
+        created = true;
+        effect(() => {
+          innerSignal.get();
+          innerFn();
+        });
+      }
+      // Read AFTER the nested effect ran: only a stack-based context still
+      // attributes this dependency to the outer effect.
+      outerSignal.get();
+    });
+
+    expect(outerFn).toHaveBeenCalledTimes(1);
+    expect(innerFn).toHaveBeenCalledTimes(1);
+
+    outerSignal.set(1);
+    expect(outerFn).toHaveBeenCalledTimes(2);
+    expect(innerFn).toHaveBeenCalledTimes(1);
+
+    innerSignal.set(1);
+    expect(innerFn).toHaveBeenCalledTimes(2);
+    expect(outerFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not leak a nested effect dependency into the outer effect', () => {
+    const inner = signal(0);
+    const outerFn = vi.fn();
+
+    let created = false;
+    effect(() => {
+      outerFn();
+      if (!created) {
+        created = true;
+        effect(() => {
+          inner.get();
+        });
+      }
+    });
+
+    expect(outerFn).toHaveBeenCalledTimes(1);
+
+    // Only the inner effect reads `inner`, so the outer must stay put.
+    inner.set(1);
+    expect(outerFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('prunes a dependency the effect stops reading', () => {
+    const useA = signal(true);
+    const a = signal(0);
+    const b = signal(0);
+    const fn = vi.fn();
+
+    effect(() => {
+      if (useA.get()) {
+        a.get();
+      } else {
+        b.get();
+      }
+      fn();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    useA.set(false); // switch branches
+    expect(fn).toHaveBeenCalledTimes(2);
+
+    a.set(1); // no longer a dependency
+    expect(fn).toHaveBeenCalledTimes(2);
+
+    b.set(1);
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops re-running a pruned computed dependency', () => {
+    const useComputed = signal(true);
+    const source = signal(1);
+    const derived = computed(() => source.get() * 2);
+    const fn = vi.fn();
+
+    effect(() => {
+      if (useComputed.get()) {
+        derived.get();
+      }
+      fn();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    source.set(2);
+    expect(fn).toHaveBeenCalledTimes(2);
+
+    useComputed.set(false);
+    expect(fn).toHaveBeenCalledTimes(3);
+
+    // The effect no longer reads `derived`, so invalidating it is a no-op.
+    source.set(3);
+    expect(fn).toHaveBeenCalledTimes(3);
   });
 });

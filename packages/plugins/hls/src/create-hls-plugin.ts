@@ -28,7 +28,7 @@ import type {
   HlsInstance,
   HlsConstructor,
 } from './types';
-import { setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
 import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 import { createValidatingPlaylistLoader, PLAYLIST_INVALID_TEXT } from './playlist-validation';
 import { sanitizeUrl } from './sanitize-url';
@@ -1318,6 +1318,27 @@ export function createHLSPluginWith(
         }
       });
 
+      // Handle alternate audio rendition selection from the UI
+      const unsubAudioTrack = api.on('track:audio', ({ trackId }: { trackId: string | null }) => {
+        if (!hls || isNative) {
+          // Native HLS switches renditions through the element's own
+          // AudioTrackList, which the browser drives; there is nothing to do.
+          api?.logger.warn('Audio track selection not available');
+          return;
+        }
+
+        const index = audioTrackIndex(trackId);
+        const tracks = hls.audioTracks ?? [];
+
+        if (index < 0 || index >= tracks.length) {
+          api?.logger.warn('Ignoring unknown audio track selection', { trackId });
+          return;
+        }
+
+        hls.audioTrack = index;
+        api?.logger.debug(`Audio: queued switch to track ${index}`);
+      });
+
       // Reconnect immediately when the browser reports the network is back.
       // A viewer whose wifi dropped should not wait out a 30s backoff after
       // their connection has already returned.
@@ -1366,6 +1387,7 @@ export function createHLSPluginWith(
         unsubMute();
         unsubRate();
         unsubQuality();
+        unsubAudioTrack();
         unsubPoster();
         unsubLive();
       });

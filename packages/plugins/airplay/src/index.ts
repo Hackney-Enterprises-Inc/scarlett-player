@@ -10,6 +10,7 @@
 import type { IPluginAPI } from '@scarlett-player/core';
 import type {
   IAirPlayPlugin,
+  RemotePlaybackLike,
   WebkitVideoElement,
   WebkitPlaybackTargetAvailabilityEvent,
 } from './types';
@@ -53,6 +54,18 @@ export function airplayPlugin(): IAirPlayPlugin {
   let video: WebkitVideoElement | null = null;
   let unsubMediaLoaded: (() => void) | null = null;
 
+  /** The remote-playback watch currently held, so destroy() can cancel it. */
+  let availabilityWatch: { remote: RemotePlaybackLike; id: number } | null = null;
+
+  /**
+   * Bumped on every attach/detach.
+   *
+   * `watchAvailability()` resolves asynchronously, and by then the element it
+   * was started on may already have been replaced. The generation says whether
+   * the id coming back is still wanted or should be cancelled on arrival.
+   */
+  let watchGeneration = 0;
+
   const handleAvailabilityChange = (e: Event): void => {
     const event = e as WebkitPlaybackTargetAvailabilityEvent;
     const available = event.availability === 'available';
@@ -61,11 +74,45 @@ export function airplayPlugin(): IAirPlayPlugin {
     api.logger.debug('AirPlay availability changed', { available });
   };
 
+  /**
+   * Move to native HLS now that AirPlay is actually connected.
+   *
+   * Deliberately NOT done before opening the picker. Switching up front left a
+   * viewer who cancelled the picker stuck on native HLS - no quality menu, no
+   * hls.js recovery - for the rest of the session, with nothing to switch them
+   * back, because no connection event ever arrived.
+   */
+  const switchToNativeForAirPlay = (): void => {
+    const hlsPlugin = api?.getPlugin<{
+      isNativeHLS(): boolean;
+      switchToNative(): Promise<void>;
+    }>('hls-provider');
+
+    if (!hlsPlugin || hlsPlugin.isNativeHLS()) return;
+
+    api.logger.info('AirPlay connected, switching to native HLS');
+    hlsPlugin
+      .switchToNative()
+      .then(() => {
+        // The provider may have replaced the element.
+        attachToVideo();
+      })
+      .catch((err: unknown) => {
+        api.logger.warn('Failed to switch to native HLS for AirPlay', { error: err });
+      });
+  };
+
   const handleTargetChange = (): void => {
     const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
     const wasActive = api.getState('airplayActive');
     api.setState('airplayActive', active);
     api.emit(active ? 'airplay:connected' : 'airplay:disconnected', undefined);
+
+    // A real connection is the signal to hand playback to the native path.
+    if (!wasActive && active) {
+      switchToNativeForAirPlay();
+      return;
+    }
 
     // When AirPlay disconnects, switch back to hls.js for quality control
     if (wasActive && !active) {
@@ -78,7 +125,6 @@ export function airplayPlugin(): IAirPlayPlugin {
       if (hlsPlugin?.isNativeHLS()) {
         hlsPlugin.switchToHlsJs().then(() => {
           // Re-attach to the (potentially new) video element
-          video = null;
           attachToVideo();
         }).catch((err: unknown) => {
           api.logger.warn('Failed to switch back to hls.js', { error: err });
@@ -87,17 +133,58 @@ export function airplayPlugin(): IAirPlayPlugin {
     }
   };
 
+  /**
+   * Stop watching remote-playback availability, if a watch is held.
+   *
+   * Without this, every provider swap left another live callback on a detached
+   * element, each still writing `airplayAvailable`.
+   */
+  const cancelAvailabilityWatch = (): void => {
+    watchGeneration += 1;
+
+    const watch = availabilityWatch;
+    availabilityWatch = null;
+    if (!watch) return;
+
+    watch.remote.cancelWatchAvailability(watch.id).catch(() => {
+      // Cancelling a watch on an element the browser has already torn down
+      // rejects, and there is nothing to recover from.
+    });
+  };
+
+  /**
+   * Drop every listener held on the current element.
+   */
+  const detachFromVideo = (): void => {
+    if (!video) return;
+
+    video.removeEventListener('webkitplaybacktargetavailabilitychanged', handleAvailabilityChange);
+    video.removeEventListener('webkitcurrentplaybacktargetiswirelesschanged', handleTargetChange);
+    cancelAvailabilityWatch();
+    video = null;
+  };
+
+  /**
+   * Bind to the container's current video element.
+   *
+   * Re-queries every time rather than short-circuiting on a cached reference:
+   * a provider swap (hls.js to native, or a new source) replaces the element,
+   * and the old code held the first one forever, so AirPlay silently stopped
+   * reporting anything after the first `load()`.
+   */
   const attachToVideo = (): void => {
-    // Already attached?
-    if (video) return;
+    const el = api.container.querySelector('video') as WebkitVideoElement | null;
 
-    // Get the video element from container
-    video = api.container.querySelector('video') as WebkitVideoElement | null;
-
-    if (!video) {
+    if (!el) {
+      detachFromVideo();
       api.logger.debug('AirPlay: No video element yet');
       return;
     }
+
+    if (el === video) return;
+
+    detachFromVideo();
+    video = el;
 
     api.logger.debug('AirPlay: Attaching to video element');
 
@@ -114,17 +201,31 @@ export function airplayPlugin(): IAirPlayPlugin {
     );
 
     // Check if remote playback API is available (alternative detection)
-    if ('remote' in video && (video as any).remote) {
+    const remote = (video as unknown as { remote?: RemotePlaybackLike }).remote;
+    if (remote) {
       api.logger.debug('AirPlay: RemotePlayback API available');
-      (video as any).remote.watchAvailability((available: boolean) => {
-        api.logger.debug('AirPlay: RemotePlayback availability', { available });
-        if (available) {
-          api.setState('airplayAvailable', true);
-          api.emit('airplay:available', undefined);
-        }
-      }).catch((err: Error) => {
-        api.logger.debug('AirPlay: RemotePlayback watchAvailability not supported', { error: err.message });
-      });
+
+      const generation = watchGeneration;
+      remote
+        .watchAvailability((available: boolean) => {
+          api.logger.debug('AirPlay: RemotePlayback availability', { available });
+          if (available) {
+            api.setState('airplayAvailable', true);
+            api.emit('airplay:available', undefined);
+          }
+        })
+        .then((id: number) => {
+          if (generation !== watchGeneration) {
+            // Detached while the watch was starting up.
+            remote.cancelWatchAvailability(id).catch(() => {});
+            return;
+          }
+
+          availabilityWatch = { remote, id };
+        })
+        .catch((err: Error) => {
+          api.logger.debug('AirPlay: RemotePlayback watchAvailability not supported', { error: err.message });
+        });
     }
   };
 
@@ -149,7 +250,7 @@ export function airplayPlugin(): IAirPlayPlugin {
       // Try to attach now (video might already exist)
       attachToVideo();
 
-      // Also listen for media:loaded in case video is created later
+      // Re-attach on every load: the provider may have replaced the element.
       unsubMediaLoaded = api.on('media:loaded', () => {
         attachToVideo();
       });
@@ -162,15 +263,8 @@ export function airplayPlugin(): IAirPlayPlugin {
       unsubMediaLoaded?.();
       unsubMediaLoaded = null;
 
-      if (video && isAirPlaySupported()) {
-        video.removeEventListener(
-          'webkitplaybacktargetavailabilitychanged',
-          handleAvailabilityChange
-        );
-        video.removeEventListener(
-          'webkitcurrentplaybacktargetiswirelesschanged',
-          handleTargetChange
-        );
+      if (isAirPlaySupported()) {
+        detachFromVideo();
       }
       video = null;
       api.logger.debug('AirPlay plugin destroyed');
@@ -182,32 +276,20 @@ export function airplayPlugin(): IAirPlayPlugin {
         return;
       }
 
-      // Try to attach if not yet attached
-      if (!video) {
-        attachToVideo();
-      }
+      // Cheap, and picks up an element the provider replaced since the last load.
+      attachToVideo();
 
       if (!video) {
         api?.logger.warn('Cannot show AirPlay picker: no video element');
         return;
       }
 
-      // Switch to native HLS before showing picker (required for AirPlay)
-      const hlsPlugin = api?.getPlugin<{
-        isNativeHLS(): boolean;
-        switchToNative(): Promise<void>;
-      }>('hls-provider');
-
-      if (hlsPlugin && !hlsPlugin.isNativeHLS()) {
-        api?.logger.info('Switching to native HLS for AirPlay compatibility');
-        await hlsPlugin.switchToNative();
-
-        // Re-attach to video after switch (video element may be recreated)
-        video = null;
-        attachToVideo();
-      }
-
-      video?.webkitShowPlaybackTargetPicker?.();
+      // Opened with nothing awaited in front of it: Safari only honours the
+      // picker from inside the user's click gesture, and an awaited provider
+      // switch would have spent that gesture. The switch to native HLS now
+      // happens when a device actually connects, so cancelling the picker
+      // costs the viewer nothing.
+      video.webkitShowPlaybackTargetPicker?.();
     },
 
     isAvailable(): boolean {

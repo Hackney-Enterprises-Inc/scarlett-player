@@ -5,7 +5,8 @@
  */
 
 import type { IPluginAPI } from '@scarlett-player/core';
-import type { HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
+import type { AudioTrack } from '@scarlett-player/core';
+import type { HlsAudioTrack, HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
 import { formatLevel } from './quality';
 
 /** hls.js event names (avoiding import to keep bundle small) */
@@ -18,6 +19,8 @@ export const HLS_EVENTS = {
   LEVEL_LOADED: 'hlsLevelLoaded',
   LEVEL_SWITCHING: 'hlsLevelSwitching',
   LEVEL_SWITCHED: 'hlsLevelSwitched',
+  AUDIO_TRACKS_UPDATED: 'hlsAudioTracksUpdated',
+  AUDIO_TRACK_SWITCHED: 'hlsAudioTrackSwitched',
   FRAG_LOADING: 'hlsFragLoading',
   FRAG_LOADED: 'hlsFragLoaded',
   FRAG_BUFFERED: 'hlsFragBuffered',
@@ -62,6 +65,57 @@ export function parseHlsError(data: Record<string, unknown>): HLSError {
 }
 
 /**
+ * Stable id for an alternate audio rendition.
+ *
+ * Index-based, like the quality ids: hls.js switches renditions by index into
+ * `hls.audioTracks`, so an id that carries the index is what lets a selection
+ * round-trip without a lookup table.
+ *
+ * @param index - Position in `hls.audioTracks`
+ * @returns The id used in player state and in `track:audio` payloads
+ */
+export function audioTrackId(index: number): string {
+  return `audio-${index}`;
+}
+
+/**
+ * Parse an id produced by {@link audioTrackId} back to its index.
+ *
+ * @param id - Track id, or null
+ * @returns The index, or -1 when the id is not one of ours
+ */
+export function audioTrackIndex(id: string | null): number {
+  if (!id) return -1;
+
+  const index = Number.parseInt(id.replace('audio-', ''), 10);
+
+  return Number.isNaN(index) ? -1 : index;
+}
+
+/**
+ * Map an hls.js audio rendition onto the player's own AudioTrack shape.
+ *
+ * @param track - Rendition as hls.js reports it
+ * @param index - Its position in `hls.audioTracks`
+ * @param active - Whether it is the rendition currently playing
+ * @returns Player-facing audio track
+ */
+export function formatAudioTrack(
+  track: HlsAudioTrack,
+  index: number,
+  active: boolean
+): AudioTrack {
+  return {
+    id: audioTrackId(index),
+    // A manifest may declare neither NAME nor LANGUAGE; a numbered fallback
+    // still gives the viewer something selectable rather than a blank row.
+    label: track.name || track.lang || `Audio ${index + 1}`,
+    language: track.lang,
+    active,
+  };
+}
+
+/**
  * Setup hls.js event handlers that map to Scarlett events.
  *
  * @param hls - hls.js instance
@@ -80,6 +134,8 @@ export function setupHlsEventHandlers(
     onLiveUpdate?: () => void;
     onFragLoaded?: () => void;
     getIsAutoQuality?: () => boolean;
+    onAudioTracksUpdated?: (tracks: HlsAudioTrack[]) => void;
+    onAudioTrackSwitched?: (index: number) => void;
   }
 ): () => void {
   const handlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
@@ -141,6 +197,35 @@ export function setupHlsEventHandlers(
     });
 
     callbacks.onLevelSwitched?.(data.level);
+  });
+
+  /** Publish the current rendition list and selection to player state. */
+  const publishAudioTracks = (tracks: HlsAudioTrack[], activeIndex: number): void => {
+    const audioTracks = tracks.map((track, index) =>
+      formatAudioTrack(track, index, index === activeIndex)
+    );
+
+    api.setState('audioTracks', audioTracks);
+    api.setState('currentAudioTrack', audioTracks[activeIndex] ?? null);
+  };
+
+  // Alternate audio renditions became available (or changed with the manifest)
+  addHandler('hlsAudioTracksUpdated', (_event: string, data: { audioTracks: HlsAudioTrack[] }) => {
+    const tracks = data.audioTracks ?? [];
+    api.logger.debug('HLS audio tracks updated', { tracks: tracks.length });
+
+    publishAudioTracks(tracks, hls.audioTrack);
+    callbacks.onAudioTracksUpdated?.(tracks);
+  });
+
+  // Rendition switch completed
+  addHandler('hlsAudioTrackSwitched', (_event: string, data: { id: number }) => {
+    api.logger.debug('HLS audio track switched', { id: data.id });
+
+    // No event emitted back: `currentAudioTrack` state is the feedback channel,
+    // exactly as it is for text tracks, and `track:audio` is the request.
+    publishAudioTracks(hls.audioTracks ?? [], data.id);
+    callbacks.onAudioTrackSwitched?.(data.id);
   });
 
   // Fragment loaded - update bandwidth estimate

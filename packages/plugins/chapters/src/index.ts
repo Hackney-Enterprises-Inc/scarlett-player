@@ -31,6 +31,7 @@
  * ```
  */
 
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
 import type { Chapter, IPluginAPI, Plugin, PluginType } from '@scarlett-player/core';
 import type { ChaptersPluginConfig, ResolvedChapter } from './types';
 import {
@@ -80,7 +81,8 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
   let chapters: ResolvedChapter[] = [];
   let activeIndex = -1;
   let list: ChapterList | null = null;
-  let styleEl: HTMLStyleElement | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
+  let releaseControls: (() => void) | null = null;
   let trackCleanup: (() => void) | null = null;
 
   const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
@@ -173,12 +175,10 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     init(pluginApi: IPluginAPI): void {
       api = pluginApi;
 
-      if (!document.getElementById(STYLE_ID)) {
-        styleEl = document.createElement('style');
-        styleEl.id = STYLE_ID;
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
-      }
+      // Reference-counted: the sheet is shared by every player on the page, and
+      // an unguarded remove() on the first destroy stripped the styling from
+      // the players still mounted.
+      releaseStyles = injectSharedStyles(STYLE_ID, styles);
 
       list = new ChapterList({
         onSelect: (index) => seekToChapter(index),
@@ -187,12 +187,21 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
       // Registering does not place the control anywhere - the host opts in by
       // listing 'chapters' in its control layout. Runtime import so a headless
       // host never needs @scarlett-player/ui installed.
+      const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl }) => {
-          registerControl('chapters', (controlApi) => {
-            list?.attach(controlApi);
-            return list as unknown as ReturnType<Parameters<typeof registerControl>[1]>;
-          });
+        .then(({ registerControl, unregisterControlsFor }) => {
+          // Scoped to this player's container: the factory hands back THIS
+          // plugin instance's list, and a global registration let the next
+          // player on the page overwrite it and drive the wrong element.
+          registerControl(
+            'chapters',
+            (controlApi) => {
+              list?.attach(controlApi);
+              return list as unknown as ReturnType<Parameters<typeof registerControl>[1]>;
+            },
+            { owner }
+          );
+          releaseControls = () => unregisterControlsFor(owner);
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, chapters control not registered');
@@ -225,8 +234,10 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
       trackCleanup = null;
       list?.destroy();
       list = null;
-      styleEl?.remove();
-      styleEl = null;
+      releaseStyles?.();
+      releaseStyles = null;
+      releaseControls?.();
+      releaseControls = null;
       chapters = [];
       activeIndex = -1;
       api = null;

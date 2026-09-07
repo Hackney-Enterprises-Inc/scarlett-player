@@ -16,7 +16,7 @@ import { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 import { sanitizeUrl } from './utils/url';
 import type { Plugin } from './types/plugin';
 import type { EventName, EventHandler as EventHandlerFn } from './types/events';
-import type { StateStore } from './types/state';
+import type { StateChangeEvent, StateStore } from './types/state';
 
 /**
  * Player configuration options.
@@ -840,6 +840,29 @@ export class ScarlettPlayer {
   getState(): Readonly<StateStore> {
     this.checkDestroyed();
     return this.stateManager.snapshot();
+  }
+
+  /**
+   * Subscribe to every state change.
+   *
+   * `getState()` is a snapshot, so a framework binding built on it never
+   * updates. This is the push side: one callback per changed key, carrying the
+   * new and previous values, which is what a reactive wrapper needs to keep a
+   * ref in step with state no event announces (`buffering`, `live`).
+   *
+   * @param callback - Called with a change event for every state write
+   * @returns Unsubscribe function
+   *
+   * @example
+   * ```ts
+   * const unsubscribe = player.subscribeToState((event) => {
+   *   if (event.key === 'buffering') showSpinner(event.value as boolean);
+   * });
+   * ```
+   */
+  subscribeToState(callback: (event: StateChangeEvent) => void): () => void {
+    this.checkDestroyed();
+    return this.stateManager.subscribe(callback);
   }
 
   // ===== Quality Methods (proxied to provider) =====

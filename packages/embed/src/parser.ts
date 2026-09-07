@@ -202,6 +202,11 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
 }
 
 /**
+ * Aspect ratio used when a video embed declares neither height nor ratio.
+ */
+export const DEFAULT_ASPECT_RATIO = '16:9';
+
+/**
  * Convert aspect ratio string (e.g., "16:9") to percentage
  */
 export function aspectRatioToPercent(ratio: string): number {
@@ -223,9 +228,14 @@ export function applyContainerStyles(
 ): void {
   const type = config.type || 'video';
 
-  // Apply custom class
+  // Apply custom class. Split on runs of whitespace and drop the empties:
+  // `split(' ')` on "a  b" yields an empty token, and `classList.add('')`
+  // throws a SyntaxError that takes the whole embed down.
   if (config.className) {
-    container.classList.add(...config.className.split(' '));
+    const classNames = config.className.split(/\s+/).filter(Boolean);
+    if (classNames.length > 0) {
+      container.classList.add(...classNames);
+    }
   }
 
   // Apply width
@@ -234,12 +244,18 @@ export function applyContainerStyles(
   }
 
   if (type === 'video') {
-    // Video: use aspect ratio padding technique
+    // Video: use aspect ratio padding technique.
+    //
+    // An explicit height wins; otherwise the padding technique always runs,
+    // falling back to 16:9. Without the fallback a host that gave neither
+    // dimension got a container of zero height and an invisible player.
     if (config.height) {
       container.style.height = config.height;
-    } else if (config.aspectRatio) {
+    } else {
       container.style.position = 'relative';
-      container.style.paddingBottom = `${aspectRatioToPercent(config.aspectRatio)}%`;
+      container.style.paddingBottom = `${aspectRatioToPercent(
+        config.aspectRatio || DEFAULT_ASPECT_RATIO
+      )}%`;
       container.style.height = '0';
     }
   } else if (type === 'audio') {

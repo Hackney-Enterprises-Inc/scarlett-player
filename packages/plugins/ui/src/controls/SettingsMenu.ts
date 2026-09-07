@@ -11,12 +11,12 @@
  * reachable once the other controls have left.
  */
 
-import type { IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';
+import type { AudioTrack, IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
 import { createElement, createButton } from '../utils';
 
-type Panel = 'main' | 'quality' | 'speed' | 'captions';
+type Panel = 'main' | 'quality' | 'speed' | 'captions' | 'audio';
 
 const SPEED_OPTIONS = [
   { label: '0.5x', value: 0.5 },
@@ -61,10 +61,11 @@ export class SettingsMenu implements Control {
     this.el.appendChild(this.btn);
     this.el.appendChild(this.panel);
 
-    // Close on outside click
+    // Close on outside click. No focus restore: the viewer just clicked
+    // something else, and yanking focus back to the gear would fight them.
     this.closeHandler = (e: MouseEvent) => {
       if (!this.el.contains(e.target as Node)) {
-        this.close();
+        this.close(false);
       }
     };
     document.addEventListener('click', this.closeHandler);
@@ -80,7 +81,6 @@ export class SettingsMenu implements Control {
           this.showPanel('main');
         } else {
           this.close();
-          this.btn.focus();
         }
         return;
       }
@@ -126,6 +126,8 @@ export class SettingsMenu implements Control {
         this.updateSpeedActiveStates();
       } else if (this.currentPanel === 'captions') {
         this.updateCaptionsActiveStates();
+      } else if (this.currentPanel === 'audio') {
+        this.updateAudioActiveStates();
       }
     }
   }
@@ -143,11 +145,27 @@ export class SettingsMenu implements Control {
     this.focusFirstItem();
   }
 
-  close(): void {
+  /**
+   * Close the panel.
+   *
+   * Choosing an item tears down the row that had focus, which drops focus to
+   * `<body>` and strands keyboard viewers outside the player entirely. Hand it
+   * back to the button that opened the menu instead.
+   *
+   * @param restoreFocus - Return focus to the gear button. The outside-click
+   *   handler passes false, so a click elsewhere is not pulled back into the bar.
+   */
+  close(restoreFocus = true): void {
+    const wasOpen = this.isOpen;
+
     this.isOpen = false;
     this.currentPanel = 'main';
     this.panel.classList.remove('sp-settings-panel--open');
     this.btn.setAttribute('aria-expanded', 'false');
+
+    if (wasOpen && restoreFocus) {
+      this.btn.focus();
+    }
   }
 
   private showPanel(panel: Panel): void {
@@ -164,6 +182,9 @@ export class SettingsMenu implements Control {
         break;
       case 'captions':
         this.renderCaptionsPanel();
+        break;
+      case 'audio':
+        this.renderAudioPanel();
         break;
     }
     this.focusFirstItem();
@@ -198,6 +219,20 @@ export class SettingsMenu implements Control {
         () => this.showPanel('captions')
       );
       this.panel.appendChild(captionsRow);
+    }
+
+    // Audio row. Only worth a row when there is a choice to make: a single
+    // rendition is what every stream has, and a menu row that leads to one
+    // option is noise.
+    const audioTracks: AudioTrack[] = this.api.getState('audioTracks') || [];
+    if (audioTracks.length > 1) {
+      const currentAudioTrack: AudioTrack | null = this.api.getState('currentAudioTrack');
+      const audioRow = this.createMainRow(
+        'Audio',
+        currentAudioTrack?.label || 'Default',
+        () => this.showPanel('audio')
+      );
+      this.panel.appendChild(audioRow);
     }
 
     // Speed row
@@ -333,6 +368,43 @@ export class SettingsMenu implements Control {
       });
       this.panel.appendChild(item);
     }
+  }
+
+  private renderAudioPanel(): void {
+    this.panel.innerHTML = '';
+    this.panel.className = 'sp-settings-panel sp-settings-panel--open sp-settings-panel--sub';
+
+    // Back header
+    const header = this.createSubHeader('Audio');
+    this.panel.appendChild(header);
+
+    const audioTracks: AudioTrack[] = this.api.getState('audioTracks') || [];
+    const currentAudioTrack: AudioTrack | null = this.api.getState('currentAudioTrack');
+    const activeId = currentAudioTrack?.id ?? null;
+
+    for (const track of audioTracks) {
+      const item = this.createMenuItem(track.label, track.id, track.id === activeId);
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.selectAudioTrack(track.id);
+      });
+      this.panel.appendChild(item);
+    }
+  }
+
+  private selectAudioTrack(trackId: string): void {
+    this.api.emit('track:audio', { trackId });
+    this.close();
+  }
+
+  private updateAudioActiveStates(): void {
+    const currentAudioTrack: AudioTrack | null = this.api.getState('currentAudioTrack');
+    const activeId = currentAudioTrack?.id ?? null;
+    const items = this.panel.querySelectorAll('.sp-settings-panel__item');
+    items.forEach((item) => {
+      const id = item.getAttribute('data-id');
+      item.classList.toggle('sp-settings-panel__item--active', id === activeId);
+    });
   }
 
   private selectCaption(trackId: string | null): void {

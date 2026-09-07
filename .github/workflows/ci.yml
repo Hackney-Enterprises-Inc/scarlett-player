@@ -53,6 +53,14 @@ jobs:
       - name: Check embed chunks
         run: node scripts/check-embed-chunks.mjs
 
+      # Catches a declaration file that exists but does not compile for a
+      # consumer: @scarlett-player/vue@1.8.1 shipped a dist/index.d.ts opening
+      # with `import ... from './ScarlettPlayer.vue'`, a path the package does
+      # not publish, so every consumer TypeScript build broke while the file
+      # itself was present and every check above stayed green.
+      - name: Check package types
+        run: node scripts/check-package-types.mjs
+
       # Catches a package with no `typecheck` or `test` script. pnpm's recursive
       # run skips those silently, so the two steps below would pass vacuously
       # for it, which is how ten packages went unchecked.

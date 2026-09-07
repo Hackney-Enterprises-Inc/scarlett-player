@@ -26,7 +26,7 @@
     "dev": "tsup --watch",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
     "@scarlett-player/core": "^1.8.0",

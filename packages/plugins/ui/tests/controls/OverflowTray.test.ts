@@ -3,15 +3,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockPluginAPI } from '../mock-api';
 import { OverflowTray } from '../../src/controls/OverflowTray';
 import { CaptionsButton } from '../../src/controls/CaptionsButton';
-import type { IPluginAPI, TextTrack } from '@scarlett-player/core';
+import type { TextTrack } from '@scarlett-player/core';
 
 const MOCK_TRACKS: TextTrack[] = [
   { id: 'en', label: 'English', language: 'en', kind: 'subtitles', active: false },
 ];
 
-function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
+function createMockApi(overrides: Record<string, unknown> = {}): MockPluginAPI {
   const state: Record<string, unknown> = {
     textTracks: [],
     currentTextTrack: null,
@@ -33,13 +34,14 @@ function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
-  } as unknown as IPluginAPI;
+  } as unknown as MockPluginAPI;
 }
 
 describe('OverflowTray', () => {
-  let api: IPluginAPI;
+  let api: MockPluginAPI;
   let tray: OverflowTray;
 
   const el = (): HTMLElement => tray.render();

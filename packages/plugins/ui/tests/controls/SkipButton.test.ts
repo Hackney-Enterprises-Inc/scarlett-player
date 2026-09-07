@@ -4,9 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SkipButton } from '../../src/controls/SkipButton';
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { MockPluginAPI } from '../mock-api';
 
-function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
+function createMockApi(overrides: Record<string, unknown> = {}): MockPluginAPI {
   const state: Record<string, unknown> = {
     live: false,
     duration: 120,
@@ -34,6 +34,7 @@ function createMockApi(overrides: Record<string, unknown> = {}): IPluginAPI {
     off: vi.fn(),
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
+    defineState: vi.fn(),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
   };

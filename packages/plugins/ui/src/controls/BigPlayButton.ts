@@ -27,6 +27,16 @@ export class BigPlayButton implements Control {
   /** Whether an error overlay is currently on screen, asked of its owner. */
   private isOverlayVisible: () => boolean;
   /**
+   * Whether an owner supplied that probe.
+   *
+   * When one did, it is the only authority on who owns the picture: `error`
+   * state survives a dismissal, so trusting it as well would hide this button
+   * for the rest of the session after a viewer closed an error they had
+   * already read. With no probe there is no overlay to defer to, and `error`
+   * is the only signal available.
+   */
+  private hasOverlayProbe: boolean;
+  /**
    * Latched on the first `playing`.
    *
    * "Hidden from the first playing onward" cannot be read off `currentTime`
@@ -46,9 +56,10 @@ export class BigPlayButton implements Control {
    *   must not sit on top of it, and `error` state alone does not say (a
    *   dismissed overlay leaves the error behind)
    */
-  constructor(api: IPluginAPI, isOverlayVisible: () => boolean = () => false) {
+  constructor(api: IPluginAPI, isOverlayVisible?: () => boolean) {
     this.api = api;
-    this.isOverlayVisible = isOverlayVisible;
+    this.hasOverlayProbe = typeof isOverlayVisible === 'function';
+    this.isOverlayVisible = isOverlayVisible ?? ((): boolean => false);
 
     const btn = document.createElement('button');
     btn.className = 'sp-big-play';
@@ -84,9 +95,11 @@ export class BigPlayButton implements Control {
 
     let visible: boolean;
 
-    if (error || this.isOverlayVisible()) {
+    if (this.hasOverlayProbe ? this.isOverlayVisible() : Boolean(error)) {
       // The overlay owns the picture while it is up, and its Try Again is the
       // action the viewer needs, not a play button that would fail again.
+      // Once it is dismissed the picture is the viewer's again, even though
+      // `error` is still set.
       visible = false;
     } else if (playbackState === 'loading') {
       // The spinner owns this state; two things fighting over the middle of

@@ -7,8 +7,13 @@
  * @packageDocumentation
  */
 
-import type { IPluginAPI } from '@scarlett-player/core';
-import { enterFullscreen, exitFullscreen, isFullscreen } from '@scarlett-player/core';
+import type { IPluginAPI, ReleaseStyles } from '@scarlett-player/core';
+import {
+  enterFullscreen,
+  exitFullscreen,
+  injectSharedStyles,
+  isFullscreen,
+} from '@scarlett-player/core';
 import type {
   IUIPlugin,
   ControlSlot,
@@ -55,8 +60,10 @@ export type {
 export {
   registerControl,
   unregisterControl,
+  unregisterControlsFor,
   getControlFactory,
   resetControlRegistry,
+  type RegisterControlOptions,
 } from './control-registry';
 export { icons } from './icons';
 export { styles } from './styles';
@@ -89,8 +96,26 @@ const DEFAULT_LAYOUT: ControlSlot[] = [
   'fullscreen',
 ];
 
+/** Id of the shared control stylesheet, injected once per document. */
+const STYLE_ID = 'sp-ui-styles';
+
 /** Default hide delay in ms */
 const DEFAULT_HIDE_DELAY = 3000;
+
+/** Keys a focused button or menu item activates itself. */
+const ACTIVATION_KEYS = new Set([' ', 'Enter']);
+
+/** Keys a focused slider moves itself with. */
+const SLIDER_KEYS = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+]);
 
 /**
  * Width assumed for a control that has never been measured inside the bar.
@@ -200,7 +225,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let bufferingIndicator: HTMLDivElement | null = null;
   let errorOverlay: ErrorOverlay | null = null;
   let bigPlayButton: BigPlayButton | null = null;
-  let styleEl: HTMLStyleElement | null = null;
+  let releaseStyles: ReleaseStyles | null = null;
   let controls: Control[] = [];
   let hideTimeout: ReturnType<typeof setTimeout> | null = null;
   let stateUnsubscribe: (() => void) | null = null;
@@ -208,6 +233,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let errorUnsubscribe: (() => void) | null = null;
   let reconnectingUnsubscribe: (() => void) | null = null;
   let recoveredUnsubscribe: (() => void) | null = null;
+  let loadedUnsubscribe: (() => void) | null = null;
   let controlsVisible = true;
   let rafHandle: number | null = null;
   let tray: OverflowTray | null = null;
@@ -274,7 +300,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         return new Spacer();
       default: {
         // Not a built-in - fall through to whatever a plugin registered.
-        const factory = getControlFactory(slot);
+        // Scoped by container so a factory another player owns is never used.
+        const factory = getControlFactory(slot, api.container);
         if (factory) {
           try {
             return factory(api);
@@ -768,6 +795,19 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   };
 
   /**
+   * Whether any control currently has a menu open.
+   *
+   * Duck-typed rather than instance-checked so a host-registered control can
+   * take part simply by exposing `isMenuOpen()`.
+   */
+  const hasOpenMenu = (): boolean =>
+    controls.some((control) => {
+      const menu = control as Control & { isMenuOpen?: () => boolean };
+
+      return typeof menu.isMenuOpen === 'function' && menu.isMenuOpen();
+    });
+
+  /**
    * Show the control bar.
    */
   const showControls = (): void => {
@@ -793,6 +833,14 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     const paused = api?.getState('paused');
     // Don't hide when paused or when not playing
     if (paused) return;
+
+    // An open settings panel, quality menu or overflow tray lives inside the
+    // bar, so hiding the bar takes it with it while the viewer is still
+    // reading it. Wait and try again once it is closed.
+    if (hasOpenMenu()) {
+      resetHideTimer();
+      return;
+    }
 
     controlsVisible = false;
     controlBar?.classList.remove('sp-controls--visible');
@@ -842,13 +890,28 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
    * gesture plugin's hide would fight it. Mouse and hover behaviour is
    * untouched, and with no gestures plugin registered this is exactly as before.
    */
-  const handleInteraction = (): void => {
-    if (last_pointer_type === 'touch') {
+  const handleInteraction = (event?: Event): void => {
+    if (last_pointer_type === 'touch' && !isOnControls(event)) {
       const gestures = api?.getPlugin<{ ownsTapInteraction(): boolean }>('gestures');
       if (gestures?.ownsTapInteraction()) return;
     }
 
     showControls();
+  };
+
+  /**
+   * Whether an interaction landed on the controls themselves.
+   *
+   * A tap on the picture is a gesture, but a tap on a button or the scrubber
+   * is the viewer using the bar, and it has to restart the auto-hide timer.
+   * Handing those to the gestures plugin dropped them entirely, so the bar
+   * kept vanishing three seconds after it appeared, mid-use.
+   */
+  const isOnControls = (event?: Event): boolean => {
+    const target = event?.target;
+    if (!(target instanceof Node)) return false;
+
+    return Boolean(controlBar?.contains(target)) || Boolean(progressBar?.render().contains(target));
   };
 
   /**
@@ -866,6 +929,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     // Only handle when focused on container or its children
     if (!api.container.contains(document.activeElement)) return;
 
+    // Something closer to the target already acted on this key - a slider's own
+    // arrow handler, the settings menu's Escape - so acting again would double
+    // it (one ArrowLeft seeking 10s instead of 5s on the progress bar).
+    if (e.defaultPrevented) return;
+
+    // A modifier means the chord belongs to the browser or the OS: Cmd+R,
+    // Ctrl+F, Alt+ArrowLeft. Never steal those.
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
     // Don't intercept keys when user is typing in an input field
     const activeEl = document.activeElement;
     if (
@@ -876,6 +948,17 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     ) {
       return;
     }
+
+    // A focused widget owns the keys it acts on. Space and Enter activate a
+    // button or menu item; the arrows and Home/End move a slider. Native
+    // activation sets no `defaultPrevented`, so the check above cannot see it.
+    // Scoped to those keys rather than every key, so tabbing to the play
+    // button does not also cost the viewer 'f', 'm' and 'k'.
+    const role = activeEl?.getAttribute('role');
+    const isActivatable =
+      activeEl instanceof HTMLButtonElement || role === 'button' || role === 'menuitem';
+    if (isActivatable && ACTIVATION_KEYS.has(e.key)) return;
+    if (role === 'slider' && SLIDER_KEYS.has(e.key)) return;
 
     const video = api.container.querySelector('video');
     if (!video) return;
@@ -951,10 +1034,11 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
 
-      // Inject styles
-      styleEl = document.createElement('style');
-      styleEl.textContent = styles;
-      document.head.appendChild(styleEl);
+      // Inject styles. Reference-counted and shared: the sheet is identical for
+      // every player (themes are container-scoped custom properties), so a
+      // second player reuses it, and the first to be destroyed must not take it
+      // away from the ones still mounted.
+      releaseStyles = injectSharedStyles(STYLE_ID, styles);
 
       // Apply initial theme
       if (config.theme) {
@@ -1027,6 +1111,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         errorOverlay?.hide();
       });
 
+      // A new source is a clean slate: the previous source's error is no
+      // longer about anything on screen, and leaving the overlay up hides the
+      // video that just loaded behind a stale message.
+      loadedUnsubscribe = api.on('media:loaded', () => {
+        errorOverlay?.hide();
+      });
+
       // Big play button, over the poster. Rendered into the container like
       // the error overlay rather than into a control-bar slot: it is an
       // overlay on the picture, not a control in the bar. It asks the overlay
@@ -1077,8 +1168,14 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
       // Plugin init order is not guaranteed, so a control this layout asks for
       // may register after the bar was already built. Rebuild when that happens.
-      controlRegistryUnsubscribe = onControlRegistered((id) => {
+      controlRegistryUnsubscribe = onControlRegistered((id, owner) => {
         if (!layout.includes(id)) {
+          return;
+        }
+
+        // A registration another player scoped to itself is none of this
+        // player's business, and rebuilding for it would only churn the bar.
+        if (owner && owner !== api.container) {
           return;
         }
 
@@ -1161,6 +1258,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       reconnectingUnsubscribe = null;
       recoveredUnsubscribe?.();
       recoveredUnsubscribe = null;
+      loadedUnsubscribe?.();
+      loadedUnsubscribe = null;
 
       // Remove event listeners
       if (api?.container) {
@@ -1203,8 +1302,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       gradient = null;
       bufferingIndicator?.remove();
       bufferingIndicator = null;
-      styleEl?.remove();
-      styleEl = null;
+      releaseStyles?.();
+      releaseStyles = null;
 
       // Remove the container class we added at init
       if (addedContainerClass) {

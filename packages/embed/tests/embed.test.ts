@@ -5,17 +5,34 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createEmbedPlayer, initElement, initAll, createScarlettPlayerAPI, type PluginCreators } from '../src/create-embed';
 import type { PlayerType } from '../src/types';
+import { createPlayer, type Plugin, type PlayerOptions, type ScarlettPlayer } from '@scarlett-player/core';
+
+/**
+ * Build a stand-in plugin.
+ *
+ * A full `Plugin`, not just an id and a name: the embed only ever passes these
+ * through to `createPlayer`, but typing them properly is what stops this
+ * fixture drifting away from the interface the real plugins implement.
+ */
+const mockPlugin = (id: string, name: string): Plugin => ({
+  id,
+  name,
+  version: '0.0.0-test',
+  type: 'feature',
+  init: vi.fn(),
+  destroy: vi.fn(),
+});
 
 // Mock plugins
-const mockHLSPlugin = { id: 'hls-provider', name: 'HLS Provider' };
-const mockNativePlugin = { id: 'native-provider', name: 'Native Media Provider' };
-const mockVideoUIPlugin = { id: 'ui', name: 'Video UI Plugin' };
-const mockAudioUIPlugin = { id: 'audio-ui', name: 'Audio UI Plugin' };
-const mockAnalyticsPlugin = { id: 'analytics', name: 'Analytics Plugin' };
-const mockPlaylistPlugin = { id: 'playlist', name: 'Playlist Plugin' };
-const mockMediaSessionPlugin = { id: 'media-session', name: 'Media Session Plugin' };
-const mockGesturesPlugin = { id: 'gestures', name: 'Gestures Plugin' };
-const mockSharePlugin = { id: 'share', name: 'Share Plugin' };
+const mockHLSPlugin = mockPlugin('hls-provider', 'HLS Provider');
+const mockNativePlugin = mockPlugin('native-provider', 'Native Media Provider');
+const mockVideoUIPlugin = mockPlugin('ui', 'Video UI Plugin');
+const mockAudioUIPlugin = mockPlugin('audio-ui', 'Audio UI Plugin');
+const mockAnalyticsPlugin = mockPlugin('analytics', 'Analytics Plugin');
+const mockPlaylistPlugin = mockPlugin('playlist', 'Playlist Plugin');
+const mockMediaSessionPlugin = mockPlugin('media-session', 'Media Session Plugin');
+const mockGesturesPlugin = mockPlugin('gestures', 'Gestures Plugin');
+const mockSharePlugin = mockPlugin('share', 'Share Plugin');
 
 // Mock plugin creators
 const fullPluginCreators: PluginCreators = {
@@ -99,6 +116,9 @@ vi.mock('@scarlett-player/core', () => ({
       container: config.container,
       config,
       destroy: vi.fn(),
+      seek: vi.fn(),
+      // Records handlers so a suite can fire the event the player would.
+      once: vi.fn(),
     };
   }),
 }));
@@ -708,6 +728,137 @@ describe('initAll', () => {
     await initAll(fullPluginCreators, fullAvailableTypes);
 
     expect(element.hasAttribute('data-scarlett-initialized')).toBe(true);
+  });
+
+  it('starts every player concurrently rather than one after another', async () => {
+    const started: number[] = [];
+    // A holder, not a bare `let`: TS narrows a variable only assigned inside a
+    // callback to its initialiser, and would then reject the call below.
+    const gateControl: { release?: () => void } = {};
+    const gate = new Promise<void>((resolve) => {
+      gateControl.release = resolve;
+    });
+
+    vi.mocked(createPlayer).mockImplementation(async (config: PlayerOptions) => {
+      started.push(started.length);
+      await gate;
+
+      return { container: config.container, destroy: vi.fn() } as unknown as ScarlettPlayer;
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const element = document.createElement('div');
+      element.setAttribute('data-scarlett-player', '');
+      element.setAttribute('data-src', `video${i}.m3u8`);
+      document.body.appendChild(element);
+    }
+
+    const pending = initAll(fullPluginCreators, fullAvailableTypes);
+
+    // All three are in flight before any of them finishes. Sequentially this
+    // would be 1, and the last embed on the page would wait out the others.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started.length).toBe(3);
+
+    gateControl.release?.();
+    await pending;
+  });
+
+  it('initializes the healthy players when one throws', async () => {
+    vi.mocked(createPlayer).mockImplementation(async (config: PlayerOptions) => {
+      if (config.src === 'bad.m3u8') throw new Error('boom');
+
+      return { container: config.container, destroy: vi.fn() } as unknown as ScarlettPlayer;
+    });
+
+    const good = document.createElement('div');
+    good.setAttribute('data-scarlett-player', '');
+    good.setAttribute('data-src', 'good.m3u8');
+
+    const bad = document.createElement('div');
+    bad.setAttribute('data-scarlett-player', '');
+    bad.setAttribute('data-src', 'bad.m3u8');
+
+    const alsoGood = document.createElement('div');
+    alsoGood.setAttribute('data-scarlett-player', '');
+    alsoGood.setAttribute('data-src', 'also-good.m3u8');
+
+    document.body.append(good, bad, alsoGood);
+
+    await initAll(fullPluginCreators, fullAvailableTypes);
+
+    expect(good.hasAttribute('data-scarlett-initialized')).toBe(true);
+    expect(alsoGood.hasAttribute('data-scarlett-initialized')).toBe(true);
+    expect(bad.hasAttribute('data-scarlett-initialized')).toBe(false);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Initialized 2 player(s)'));
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('1 player(s) failed to initialize')
+    );
+  });
+});
+
+describe('startTime', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('waits for metadata before seeking', async () => {
+    const player = (await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/video.m3u8', startTime: 42 },
+      fullPluginCreators,
+      fullAvailableTypes
+    )) as unknown as { seek: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> };
+
+    // Nothing yet: seeking before the duration is parsed is silently dropped.
+    expect(player.seek).not.toHaveBeenCalled();
+    expect(player.once).toHaveBeenCalledWith('media:loadedmetadata', expect.any(Function));
+
+    // Fire the event the player would have fired.
+    const [, onMetadata] = player.once.mock.calls[0] as [string, () => void];
+    onMetadata();
+
+    expect(player.seek).toHaveBeenCalledWith(42);
+  });
+
+  it('seeks straight away when metadata is already parsed', async () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'readyState', { value: 1, configurable: true });
+    container.appendChild(video);
+
+    const player = (await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/video.m3u8', startTime: 12 },
+      fullPluginCreators,
+      fullAvailableTypes
+    )) as unknown as { seek: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> };
+
+    expect(player.seek).toHaveBeenCalledWith(12);
+    expect(player.once).not.toHaveBeenCalled();
+  });
+
+  it('does not touch playback position without a startTime', async () => {
+    const player = (await createEmbedPlayer(
+      container,
+      { src: 'https://example.com/video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    )) as unknown as { seek: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> };
+
+    expect(player.seek).not.toHaveBeenCalled();
+    expect(player.once).not.toHaveBeenCalled();
   });
 });
 

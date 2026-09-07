@@ -97,7 +97,9 @@ export class Signal<T> {
    * @internal
    */
   private notify(): void {
-    this.subscribers.forEach(subscriber => {
+    // Snapshot first: a subscribing effect clears and re-adds itself while it
+    // re-runs, and a Set delete+re-add during forEach would visit it twice.
+    Array.from(this.subscribers).forEach(subscriber => {
       try {
         subscriber();
       } catch (error) {

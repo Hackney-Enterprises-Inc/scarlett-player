@@ -140,6 +140,47 @@ init(api) { registerControl('example', factory); } // or during init
 
 A factory that throws is caught and logged; the rest of the control bar still builds.
 
+### Scope the registration when the factory closes over your plugin
+
+The registry is module-level, so a factory registered without an owner is shared
+by every player on the page. That is right for a stateless factory - it receives
+the per-player `api` and builds a fresh control from it.
+
+It is wrong the moment your factory captures the plugin instance: a chapter
+list, a playlist panel, a share sheet. Every player that installs your plugin
+registers again and overwrites the last, so the next rebuild in player A hands
+it player B's control, and the two players drive one element. Pass the player's
+container as the owner instead, and give the registration back on teardown:
+
+```ts
+init(api) {
+  const owner = api.container;
+
+  registerControl('example', () => new ExampleButton(this), { owner });
+
+  api.onDestroy(() => unregisterControlsFor(owner));
+}
+```
+
+A player prefers a factory it owns over a global one of the same id, so the two
+forms coexist.
+
+### Shared stylesheets
+
+If your plugin injects one `<style id="...">` per document, claim it through
+core's `injectSharedStyles()` rather than injecting and removing it yourself.
+It reference-counts holders, so two players share one sheet and the first
+teardown does not strip the styling from the second:
+
+```ts
+import { injectSharedStyles, type ReleaseStyles } from '@scarlett-player/core';
+
+let releaseStyles: ReleaseStyles | null = null;
+
+init() { releaseStyles = injectSharedStyles('sp-example-styles', styles); }
+destroy() { releaseStyles?.(); releaseStyles = null; }
+```
+
 ### The control bar can move your control
 
 The bar measures itself and moves low-priority controls into an overflow tray
