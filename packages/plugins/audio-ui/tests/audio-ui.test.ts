@@ -626,6 +626,9 @@ describe('progress bar interaction', () => {
         if (k === 'currentTime') return at;
         return 0;
       });
+      // Each press must be judged on its own emission, not on whatever an
+      // earlier key in the same test happened to emit.
+      mockApi.emit.mockClear();
       bar().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
     };
 
@@ -652,6 +655,14 @@ describe('progress bar interaction', () => {
 
       pressLive('ArrowRight', 98, null, 100);
       expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    });
+
+    it('clamps a stale playhead outside the window back into it', () => {
+      pressLive('ArrowLeft', 5000, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 3600 });
+
+      pressLive('ArrowRight', 100, { start: 600, end: 3600 });
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:seeking', { time: 600 });
     });
   });
 });

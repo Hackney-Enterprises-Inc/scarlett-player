@@ -655,11 +655,16 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       const max = seekableRange?.end ?? duration;
       let time: number | null = null;
 
-      if (key === 'ArrowLeft') time = Math.max(min, currentTime - SEEK_STEP_SECONDS);
-      else if (key === 'ArrowRight') time = Math.min(max, currentTime + SEEK_STEP_SECONDS);
+      if (key === 'ArrowLeft') time = currentTime - SEEK_STEP_SECONDS;
+      else if (key === 'ArrowRight') time = currentTime + SEEK_STEP_SECONDS;
       else if (key === 'Home') time = min;
       else if (key === 'End') time = max;
       if (time === null) return;
+
+      // A stale currentTime can sit outside the live window (e.g. after the
+      // window slides past the last reported playhead), so every computed
+      // seek is clamped into [min, max] before emitting.
+      time = Math.min(max, Math.max(min, time));
 
       e.preventDefault();
       api?.emit('playback:seeking', { time });
