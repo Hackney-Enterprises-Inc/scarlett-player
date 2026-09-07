@@ -81,6 +81,17 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
   let sheet: ShareSheet | null = null;
   let releaseStyles: ReleaseStyles | null = null;
   let releaseControls: (() => void) | null = null;
+  /**
+   * Bumped by every init() and destroy().
+   *
+   * The UI package is pulled in with a runtime import, so its `.then()` can
+   * land after the plugin was torn down (or after a re-init). Registering then
+   * hands a later rebuild a control wired to a dead instance, and overwrites
+   * the registration the current lifecycle just made. The callback captures the
+   * generation it was scheduled under and skips when it no longer matches.
+   */
+  let lifecycle = 0;
+
 
   const configuredTargets = config.targets ?? DEFAULT_TARGETS;
 
@@ -217,6 +228,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
     description: 'Native share sheet, copy link, timestamps and embed codes',
 
     init(pluginApi: IPluginAPI): void {
+      const generation = ++lifecycle;
       api = pluginApi;
       api.logger.debug('Share plugin initialized');
 
@@ -245,7 +257,11 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
       // headless host never needs @scarlett-player/ui installed.
       const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl, unregisterControlsFor }) => {
+        .then(({ registerControl, unregisterControl }) => {
+          // Destroyed (or re-initialised) while the import was in flight: this
+          // registration belongs to a lifecycle that is over.
+          if (generation !== lifecycle) return;
+
           // Scoped to this player's container: the factory closes over THIS
           // plugin instance's activate(), so a global registration would open
           // one player's share sheet from another player's button.
@@ -258,7 +274,12 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
               }),
             { owner },
           );
-          releaseControls = () => unregisterControlsFor(owner);
+          // Only the id this plugin registered. unregisterControlsFor(owner)
+          // drops every control scoped to the container, so destroying share
+          // also unregistered the chapters and playlist controls sharing it.
+          releaseControls = () => {
+            unregisterControl('share', { owner });
+          };
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, share control not registered');
@@ -271,6 +292,7 @@ export function createSharePlugin(config: SharePluginConfig = {}): SharePlugin {
     },
 
     destroy(): void {
+      lifecycle++;
       sheet?.destroy();
       sheet = null;
       releaseStyles?.();

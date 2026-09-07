@@ -78,4 +78,22 @@ describe('injectSharedStyles', () => {
     release();
     expect(document.getElementById(ID)).toBeNull();
   });
+
+  it('does not remove a replacement sheet the host injected under the same id', () => {
+    const release = injectSharedStyles(ID, CSS);
+    const claimed = document.getElementById(ID);
+
+    // The host swaps our sheet for its own, keeping the id.
+    claimed?.remove();
+    const replacement = document.createElement('style');
+    replacement.id = ID;
+    replacement.textContent = '.sp-test { color: blue; }';
+    document.head.appendChild(replacement);
+
+    // Releasing must take back only what this claim took. Resolving the id
+    // again at this point would delete the host's element instead.
+    release();
+
+    expect(document.getElementById(ID)).toBe(replacement);
+  });
 });

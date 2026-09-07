@@ -374,7 +374,11 @@ export class StateManager {
       previousValue,
     };
 
-    this.changeSubscribers.forEach(subscriber => {
+    // Snapshot before dispatch: a subscriber that unsubscribes and resubscribes
+    // while handling the event would otherwise be re-added mid-iteration, and a
+    // Set's forEach visits entries added during iteration - so it would be
+    // notified twice for one change. Same reason Signal.notify() snapshots.
+    Array.from(this.changeSubscribers).forEach(subscriber => {
       try {
         subscriber(event);
       } catch (error) {

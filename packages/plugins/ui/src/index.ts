@@ -1086,10 +1086,17 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Listen for fatal errors to show the overlay. The event payload is the
       // structured PlayerError itself; the state key is populated by the core
       // from the same event, so either source carries the error code.
+      // Every handler that changes the overlay's visibility schedules a render
+      // with it. The big play button reads `errorOverlay.isVisible()` rather
+      // than state - `error` state alone cannot tell a live error from one the
+      // viewer dismissed - so nothing else brings it back in step. Relying on
+      // the state write core makes alongside the event is not enough: it is a
+      // separate ordering, and 'media:loaded' has no state write at all.
       errorUnsubscribe = api.on('error', (payload: { fatal?: boolean; message?: string; code?: string }) => {
         if (payload?.fatal) {
           const error = api.getState('error') || payload;
           errorOverlay?.show(error);
+          scheduleUpdate();
         }
       });
 
@@ -1104,11 +1111,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // and re-enables Try Again.
       reconnectingUnsubscribe = api.on('error:reconnecting', () => {
         errorOverlay?.showReconnecting();
+        scheduleUpdate();
       });
 
       // Hide the overlay as soon as playback recovers
       recoveredUnsubscribe = api.on('error:recovered', () => {
         errorOverlay?.hide();
+        scheduleUpdate();
       });
 
       // A new source is a clean slate: the previous source's error is no
@@ -1116,6 +1125,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // video that just loaded behind a stale message.
       loadedUnsubscribe = api.on('media:loaded', () => {
         errorOverlay?.hide();
+        scheduleUpdate();
       });
 
       // Big play button, over the poster. Rendered into the container like

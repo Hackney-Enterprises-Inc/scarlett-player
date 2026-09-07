@@ -60,6 +60,20 @@ describe('audio track ids', () => {
     expect(audioTrackIndex('level-1')).toBe(-1);
     expect(audioTrackIndex('')).toBe(-1);
   });
+
+  it('rejects an id that only starts like one of ours', () => {
+    // Stripping the prefix and calling parseInt took the leading digits of
+    // whatever was left, so these all parsed as a real rendition index.
+    expect(audioTrackIndex('audio-2invalid')).toBe(-1);
+    expect(audioTrackIndex('audio-02')).toBe(-1);
+    expect(audioTrackIndex('audio-2.5')).toBe(-1);
+    expect(audioTrackIndex('audio-')).toBe(-1);
+    expect(audioTrackIndex('audio--1')).toBe(-1);
+
+    // ...while the canonical form still round-trips.
+    expect(audioTrackIndex('audio-0')).toBe(0);
+    expect(audioTrackIndex('audio-12')).toBe(12);
+  });
 });
 
 describe('formatAudioTrack', () => {
@@ -149,6 +163,32 @@ describe('audio rendition events', () => {
 
     expect(onAudioTracksUpdated).toHaveBeenCalledWith(TRACKS);
     expect(onAudioTrackSwitched).toHaveBeenCalledWith(2);
+  });
+
+  it('clears the rendition state when the handlers are torn down', () => {
+    const mockApi = createMockApi();
+    const handlers = new Map<string, (event: string, data: unknown) => void>();
+    const mockHls = {
+      on: vi.fn((event: string, handler: (e: string, d: unknown) => void) => {
+        handlers.set(event, handler);
+      }),
+      off: vi.fn(),
+      audioTrack: 1,
+    } as never;
+
+    const cleanup = setupHlsEventHandlers(mockHls, mockApi, {});
+    handlers.get('hlsAudioTracksUpdated')?.('hlsAudioTracksUpdated', { audioTracks: TRACKS });
+
+    expect(mockApi.getState('audioTracks')).toHaveLength(TRACKS.length);
+    expect(mockApi.getState('currentAudioTrack')).not.toBeNull();
+
+    // Renditions belong to the manifest we just detached from. Left behind,
+    // the next source - or the native provider, which clears `qualities` and
+    // has never touched these - shows the previous stream's audio menu.
+    cleanup();
+
+    expect(mockApi.getState('audioTracks')).toEqual([]);
+    expect(mockApi.getState('currentAudioTrack')).toBeNull();
   });
 });
 

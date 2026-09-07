@@ -53,9 +53,53 @@ function packageDirs() {
   return dirs;
 }
 
-const packages = packageDirs()
+const workspacePackages = packageDirs()
   .map((dir) => ({ dir, manifest: JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) }))
-  .filter(({ manifest }) => manifest.name && manifest.types);
+  .filter(({ manifest }) => manifest.name);
+
+/** Every workspace package by name, including those that publish no types. */
+const byName = new Map(workspacePackages.map((pkg) => [pkg.manifest.name, pkg]));
+
+const packages = workspacePackages.filter(({ manifest }) => manifest.types);
+
+/**
+ * What a consumer of one package can actually resolve.
+ *
+ * A consumer installs the package and, through it, whatever the package
+ * declares - nothing else. Mapping every workspace package for every consumer
+ * would hide the failure this script exists to catch: a declaration file
+ * importing a sibling the manifest never declares resolves fine here and
+ * breaks the moment someone installs the package on its own.
+ *
+ * @param name - Package under test
+ * @returns Workspace names it may resolve, and the external ones it declares
+ */
+function dependencyClosure(name) {
+  const workspace = new Set();
+  const external = new Set();
+  const queue = [name];
+
+  while (queue.length > 0) {
+    const current = queue.pop();
+    if (workspace.has(current)) continue;
+    workspace.add(current);
+
+    const pkg = byName.get(current);
+    if (!pkg) continue;
+
+    const declared = {
+      ...(pkg.manifest.dependencies ?? {}),
+      ...(pkg.manifest.peerDependencies ?? {}),
+    };
+
+    for (const dep of Object.keys(declared)) {
+      if (byName.has(dep)) queue.push(dep);
+      else external.add(dep);
+    }
+  }
+
+  return { workspace, external };
+}
 
 const missing = packages.filter(({ dir, manifest }) => !existsSync(join(dir, manifest.types)));
 if (missing.length > 0) {
@@ -68,19 +112,27 @@ const scratch = mkdtempSync(join(tmpdir(), 'sp-types-'));
 let failed = false;
 
 try {
-  // Every package name resolves to its directory, so TypeScript reads the
-  // manifest's own `types`/`exports` the way a consumer's resolver would.
-  const paths = Object.fromEntries(
-    packages.flatMap(({ dir, manifest }) => [
-      [manifest.name, [dir]],
-      [`${manifest.name}/*`, [join(dir, '*')]],
-    ])
-  );
-  // Peer dependencies a consumer would have installed themselves.
-  paths.vue = [join(ROOT, 'node_modules', 'vue')];
-
   for (const { manifest } of packages) {
     const file = `consumer-${manifest.name.replace(/[^a-z0-9]+/gi, '-')}.ts`;
+
+    // Scoped to this consumer: the package under test plus its declared
+    // dependency closure, so an undeclared sibling stays unresolvable and the
+    // import fails here rather than in someone's build.
+    const { workspace, external } = dependencyClosure(manifest.name);
+    const paths = Object.fromEntries(
+      [...workspace].flatMap((name) => {
+        const dep = byName.get(name);
+        if (!dep) return [];
+
+        return [
+          [name, [dep.dir]],
+          [`${name}/*`, [join(dep.dir, '*')]],
+        ];
+      })
+    );
+
+    // Peer dependencies a consumer would have installed themselves.
+    if (external.has('vue')) paths.vue = [join(ROOT, 'node_modules', 'vue')];
 
     writeFileSync(
       join(scratch, file),

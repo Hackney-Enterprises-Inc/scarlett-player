@@ -571,8 +571,6 @@ describe('UI Plugin', () => {
       const calls = (api.on as unknown as { mock: { calls: [string, (p: unknown) => void][] } }).mock
         .calls;
       calls.filter(([name]) => name === event).forEach(([, handler]) => handler(payload));
-      notify?.();
-      flushFrame();
     };
 
     /** The error overlay's Go Back button. */
@@ -664,6 +662,7 @@ describe('UI Plugin', () => {
 
       setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
       fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
 
       expect(isVisible()).toBe(false);
 
@@ -676,6 +675,7 @@ describe('UI Plugin', () => {
 
       setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
       fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
       expect(isVisible()).toBe(false);
 
       // Dismissing leaves `error` state populated. The button must still come
@@ -695,9 +695,11 @@ describe('UI Plugin', () => {
 
       setState('error', { code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
       fire('error', { fatal: true, code: 'MEDIA_NETWORK_ERROR', message: 'gone' });
+      flushFrame();
       expect(isVisible()).toBe(false);
 
       fire('media:loaded', { src: 'next.mp4', type: 'video/mp4' });
+      flushFrame();
 
       expect(overlay()?.classList.contains('sp-error-overlay--visible')).toBe(false);
       expect(isVisible()).toBe(true);

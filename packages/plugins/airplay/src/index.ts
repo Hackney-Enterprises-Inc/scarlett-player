@@ -263,9 +263,11 @@ export function airplayPlugin(): IAirPlayPlugin {
       unsubMediaLoaded?.();
       unsubMediaLoaded = null;
 
-      if (isAirPlaySupported()) {
-        detachFromVideo();
-      }
+      // Unconditional: detachFromVideo() already no-ops when nothing is
+      // attached, and gating it on support meant a stub removed between init
+      // and destroy (which is exactly what a test teardown does) left the
+      // listeners on the element.
+      detachFromVideo();
       video = null;
       api.logger.debug('AirPlay plugin destroyed');
     },

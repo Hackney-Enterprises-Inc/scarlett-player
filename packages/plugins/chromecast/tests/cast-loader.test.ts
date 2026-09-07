@@ -283,4 +283,25 @@ describe('Cast Loader - load timeout', () => {
 
     await expect(loadPromise).resolves.toBeUndefined();
   });
+
+  it('rejects an in-flight load when the loader is reset', async () => {
+    // Nothing resolves this one: the SDK never arrives.
+    const loadPromise = loadCastSDK();
+
+    // resetCastLoader() drops `loadPromise`, so this caller's handle is the
+    // only one left. Muting the timeout without settling left it pending for
+    // the life of the page, and every awaiting caller with it.
+    resetCastLoader();
+
+    await expect(loadPromise).rejects.toThrow('Cast SDK load cancelled');
+  });
+
+  it('lets a load start again after a reset cancelled the last one', async () => {
+    const cancelled = loadCastSDK();
+    resetCastLoader();
+    await expect(cancelled).rejects.toThrow('Cast SDK load cancelled');
+
+    (window as any).cast = { framework: { CastContext: {} } };
+    await expect(loadCastSDK()).resolves.toBeUndefined();
+  });
 });

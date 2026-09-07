@@ -77,6 +77,13 @@ export class QualityMenu implements Control {
     // Hide if no quality levels
     this.el.style.display = qualities.length > 0 ? '' : 'none';
 
+    // A hidden control must not report an open menu: the control bar's
+    // auto-hide waits on isMenuOpen(), so a menu left open behind a
+    // display:none wrapper kept the bar on screen for the rest of the session.
+    if (qualities.length === 0 && this.isOpen) {
+      this.close();
+    }
+
     // Update button label to show current quality
     this.btnLabel.textContent = currentQuality?.label || 'Auto';
 

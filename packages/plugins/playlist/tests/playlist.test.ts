@@ -6,6 +6,11 @@ import type { Mock } from 'vitest';
 import { createPlaylistPlugin, type PlaylistTrack, type IPlaylistPlugin } from '../src/index';
 import { PKG_VERSION } from '../src/version';
 import type { IPluginAPI } from '@scarlett-player/core';
+import {
+  getControlFactory,
+  registerControl,
+  resetControlRegistry,
+} from '@scarlett-player/ui';
 
 /**
  * A stubbed `IPluginAPI` whose methods are vitest mocks.
@@ -984,5 +989,57 @@ describe('title state on track change (#45)', () => {
     // Empty write clears the media element's poster attribute instead of
     // leaving the previous track's image over the next one
     expect(mockApi.setState).toHaveBeenCalledWith('poster', '');
+  });
+});
+
+describe('playlist control registration', () => {
+  /** Let the plugin's runtime `import('@scarlett-player/ui')` settle. */
+  const flushImport = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const IDS = ['playlist-previous', 'playlist-next', 'playlist'] as const;
+
+  beforeEach(() => {
+    resetControlRegistry();
+  });
+
+  it('gives back only its own controls on destroy', async () => {
+    const api = createMockApi();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+
+    await plugin.init(api as never);
+    await flushImport();
+
+    // A neighbour scoped to the same player.
+    registerControl('chapters', (() => ({})) as never, { owner: api.container });
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).not.toBeNull();
+    }
+
+    await plugin.destroy();
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).toBeNull();
+    }
+    // unregisterControlsFor(owner) took every registration on the container,
+    // so tearing down the playlist also removed the chapters control.
+    expect(getControlFactory('chapters', api.container)).not.toBeNull();
+
+    resetControlRegistry();
+  });
+
+  it('does not register when destroyed before the UI import resolves', async () => {
+    const api = createMockApi();
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks });
+
+    await plugin.init(api as never);
+    await plugin.destroy();
+    await flushImport();
+
+    for (const id of IDS) {
+      expect(getControlFactory(id, api.container)).toBeNull();
+    }
+
+    resetControlRegistry();
   });
 });

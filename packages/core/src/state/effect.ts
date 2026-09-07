@@ -64,19 +64,39 @@ export function popEffect(): void {
 /**
  * Set the current effect context (used internally by computed).
  *
- * Retained for backwards compatibility with the pre-stack API: passing an
- * effect pushes it, passing `null` pops the innermost one. New code should
- * call {@link pushEffect}/{@link popEffect} directly.
+ * Retained for backwards compatibility with the pre-stack API, which was a
+ * single slot: a non-null effect REPLACES the innermost frame, and `null` pops
+ * it. New code should call {@link pushEffect}/{@link popEffect} directly.
  *
- * @param effect - Effect to push, or `null` to pop the innermost effect
+ * Replacing rather than pushing is what makes the save/restore idiom work:
+ *
+ * ```ts
+ * const prev = getCurrentEffect();
+ * setCurrentEffect(inner);
+ * // ...
+ * setCurrentEffect(prev);
+ * ```
+ *
+ * Pushing would leave `inner` buried under the restored effect, so the
+ * enclosing `effect()`'s own popEffect() would unwind to `inner` instead of
+ * clearing the context, and the stack would grow by one frame per restore.
+ *
+ * @param effect - Effect to make current, or `null` to pop the innermost one
  * @internal
  */
 export function setCurrentEffect(effect: (() => void) | null): void {
   if (effect === null) {
     popEffect();
-  } else {
-    pushEffect(effect);
+    return;
   }
+
+  if (effectStack.length > 0) {
+    effectStack[effectStack.length - 1] = effect;
+  } else {
+    effectStack.push(effect);
+  }
+
+  syncCurrentEffect();
 }
 
 /**

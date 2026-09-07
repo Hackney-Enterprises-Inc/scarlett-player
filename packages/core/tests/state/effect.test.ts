@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { effect, currentEffect } from '../../src/state/effect';
+import { effect, currentEffect, getCurrentEffect, setCurrentEffect } from '../../src/state/effect';
 import { signal } from '../../src/state/signal';
 import { computed } from '../../src/state/computed';
 
@@ -621,6 +621,49 @@ describe('effect', () => {
       count.set(10);
       expect(log[log.length - 1]).toBe('count=10, 4x=40'); // Final value is correct
     });
+  });
+});
+
+describe('setCurrentEffect - legacy single-slot semantics', () => {
+  it('restores the outer effect without retaining the inner one', () => {
+    const outer = signal(0);
+    const outerFn = vi.fn();
+
+    effect(() => {
+      outer.get();
+      outerFn();
+
+      // The pre-stack save/restore idiom, as an external caller writes it.
+      const prev = getCurrentEffect();
+      const inner = (): void => {};
+      setCurrentEffect(inner);
+      expect(getCurrentEffect()).toBe(inner);
+      setCurrentEffect(prev);
+
+      // Restoring must put the enclosing effect back, not bury `inner`
+      // underneath it.
+      expect(getCurrentEffect()).toBe(prev);
+    });
+
+    expect(outerFn).toHaveBeenCalledTimes(1);
+
+    // If the restore had pushed instead of replaced, the effect's own
+    // popEffect() would have unwound to `inner` and left the context dirty.
+    expect(getCurrentEffect()).toBeNull();
+
+    outer.set(1);
+    expect(outerFn).toHaveBeenCalledTimes(2);
+    expect(getCurrentEffect()).toBeNull();
+  });
+
+  it('clears the context when the outermost slot is set and released', () => {
+    const fn = (): void => {};
+
+    expect(getCurrentEffect()).toBeNull();
+    setCurrentEffect(fn);
+    expect(getCurrentEffect()).toBe(fn);
+    setCurrentEffect(null);
+    expect(getCurrentEffect()).toBeNull();
   });
 });
 

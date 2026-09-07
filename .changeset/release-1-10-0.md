@@ -18,8 +18,8 @@
 '@scarlett-player/gestures': minor
 ---
 
-Phase 2 (1.10): accessibility, multi-player safety, casting stability, audio
-renditions and reactive Vue bindings.
+Accessibility, multi-player safety, casting stability, audio renditions and
+reactive Vue bindings.
 
 **UI controls and accessibility**
 

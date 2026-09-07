@@ -83,6 +83,17 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
   let list: ChapterList | null = null;
   let releaseStyles: ReleaseStyles | null = null;
   let releaseControls: (() => void) | null = null;
+  /**
+   * Bumped by every init() and destroy().
+   *
+   * The UI package is pulled in with a runtime import, so its `.then()` can
+   * land after the plugin was torn down (or after a re-init). Registering then
+   * hands a later rebuild a control wired to a dead instance, and overwrites
+   * the registration the current lifecycle just made. The callback captures the
+   * generation it was scheduled under and skips when it no longer matches.
+   */
+  let lifecycle = 0;
+
   let trackCleanup: (() => void) | null = null;
 
   const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
@@ -173,6 +184,7 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     type: 'feature' as PluginType,
 
     init(pluginApi: IPluginAPI): void {
+      const generation = ++lifecycle;
       api = pluginApi;
 
       // Reference-counted: the sheet is shared by every player on the page, and
@@ -189,7 +201,11 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
       // host never needs @scarlett-player/ui installed.
       const owner = api.container;
       void import('@scarlett-player/ui')
-        .then(({ registerControl, unregisterControlsFor }) => {
+        .then(({ registerControl, unregisterControl }) => {
+          // Destroyed (or re-initialised) while the import was in flight: this
+          // registration belongs to a lifecycle that is over.
+          if (generation !== lifecycle) return;
+
           // Scoped to this player's container: the factory hands back THIS
           // plugin instance's list, and a global registration let the next
           // player on the page overwrite it and drive the wrong element.
@@ -201,7 +217,12 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
             },
             { owner }
           );
-          releaseControls = () => unregisterControlsFor(owner);
+          // Only the id this plugin registered. unregisterControlsFor(owner)
+          // drops every control scoped to the container, so destroying chapters
+          // also unregistered the playlist and share controls sharing it.
+          releaseControls = () => {
+            unregisterControl('chapters', { owner });
+          };
         })
         .catch(() => {
           api?.logger.debug('@scarlett-player/ui not present, chapters control not registered');
@@ -230,6 +251,7 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     },
 
     destroy(): void {
+      lifecycle++;
       trackCleanup?.();
       trackCleanup = null;
       list?.destroy();

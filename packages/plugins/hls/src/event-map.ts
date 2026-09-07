@@ -87,9 +87,12 @@ export function audioTrackId(index: number): string {
 export function audioTrackIndex(id: string | null): number {
   if (!id) return -1;
 
-  const index = Number.parseInt(id.replace('audio-', ''), 10);
+  // Anchored, and the whole id must match. parseInt on a stripped prefix
+  // accepted anything with a leading number - 'audio-2invalid' parsed as 2,
+  // and so did 'audio-02', which is not an id audioTrackId() can produce.
+  const match = /^audio-(0|[1-9]\d*)$/.exec(id);
 
-  return Number.isNaN(index) ? -1 : index;
+  return match ? Number.parseInt(match[1]!, 10) : -1;
 }
 
 /**
@@ -317,6 +320,13 @@ export function setupHlsEventHandlers(
       hls.off(event, handler);
     }
     handlers.length = 0;
+
+    // Renditions belong to the manifest these handlers were bound to. Leaving
+    // them in state outlives that: the next source, or a switch to the native
+    // provider (which clears `qualities` but has never touched these two),
+    // would show the previous stream's audio menu.
+    api.setState('audioTracks', []);
+    api.setState('currentAudioTrack', null);
   };
 }
 

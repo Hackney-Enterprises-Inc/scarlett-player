@@ -22,10 +22,12 @@ export const CAST_SDK_TIMEOUT_MS = 10_000;
 let loadPromise: Promise<void> | null = null;
 
 /**
- * Cancels the in-flight load's timeout without settling it.
+ * Rejects the in-flight load and drops its timeout.
  *
- * Set while a load is pending so {@link resetCastLoader} can drop it without
- * leaving a timer that would later reject a promise nobody holds.
+ * Set while a load is pending so {@link resetCastLoader} can cancel it. It has
+ * to settle the promise, not merely mute it: callers hold the promise returned
+ * by {@link loadCastSDK}, and clearing `loadPromise` without rejecting left
+ * every one of them awaiting a promise nothing would ever resolve.
  */
 let abortPendingLoad: (() => void) | null = null;
 
@@ -73,8 +75,10 @@ export function loadCastSDK(): Promise<void> {
     };
 
     abortPendingLoad = () => {
+      if (settled) return;
       settled = true;
       clearPendingTimeout();
+      reject(new Error('Cast SDK load cancelled'));
     };
 
     const settle = (error?: Error): void => {
@@ -130,6 +134,11 @@ export function loadCastSDK(): Promise<void> {
       settle(new Error(`Cast SDK did not load within ${CAST_SDK_TIMEOUT_MS}ms`));
     }, CAST_SDK_TIMEOUT_MS);
   });
+
+  // Cancellation and timeout both reject. Marking the promise handled here
+  // keeps a load nobody awaited from surfacing as an unhandled rejection;
+  // callers that did take it still see the rejection on their own copy.
+  void loadPromise.catch(() => {});
 
   return loadPromise;
 }

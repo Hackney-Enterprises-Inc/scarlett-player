@@ -27,6 +27,15 @@ interface StyleClaim {
   generation: number;
   /** Holders that have not released yet. */
   holders: number;
+  /**
+   * The element this generation actually claimed.
+   *
+   * Held rather than re-resolved by id at release time. A host that swaps the
+   * sheet for its own `<style>` under the same id leaves the claim pointing at
+   * the element it took, so the last release removes that one - already
+   * detached, so a no-op - instead of deleting the replacement it never owned.
+   */
+  element: Element | null;
 }
 
 /**
@@ -75,7 +84,7 @@ export function injectSharedStyles(id: string, css: string): ReleaseStyles {
   // still holds a release function. Start a fresh generation and let those
   // lapse rather than counting them against the sheet about to be created.
   if (!claim || !existing) {
-    claim = { generation: (claim?.generation ?? 0) + 1, holders: 0 };
+    claim = { generation: (claim?.generation ?? 0) + 1, holders: 0, element: existing };
     claims.set(id, claim);
   }
 
@@ -87,6 +96,7 @@ export function injectSharedStyles(id: string, css: string): ReleaseStyles {
     el.id = id;
     el.textContent = css;
     document.head.appendChild(el);
+    claim.element = el;
   }
 
   let released = false;
@@ -107,7 +117,10 @@ export function injectSharedStyles(id: string, css: string): ReleaseStyles {
     }
 
     claims.delete(id);
-    document.getElementById(id)?.remove();
+    // Exactly the element this generation claimed, never whatever answers to
+    // the id now: removing by id would take out a replacement the host injected
+    // and this claim never held.
+    current.element?.remove();
   };
 }
 
