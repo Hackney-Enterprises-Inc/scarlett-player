@@ -81,11 +81,11 @@ export interface IPluginAPI {
    * ```ts
    * declare module '@scarlett-player/core' {
    *   interface StateStore {
-   *     highlightSelection: { start: number; end: number } | null;
+   *     clipSelection: { start: number; end: number } | null;
    *   }
    * }
    *
-   * api.defineState('highlightSelection', null);
+   * api.defineState('clipSelection', null);
    * ```
    *
    * @param key - State property key

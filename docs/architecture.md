@@ -61,14 +61,14 @@ ever carried a `plugin-` prefix), the name here is the one the code uses.
 ```
 
 Nothing outside the core layer is required: a host can build a player with a
-provider and nothing else. The three plugins that contribute control-bar
-controls (playlist, chapters, share) declare `@scarlett-player/ui` as an
+provider and nothing else. The four plugins that contribute control-bar
+controls (playlist, chapters, share, clips) declare `@scarlett-player/ui` as an
 OPTIONAL peer and register their controls through a dynamic import, so they keep
 working when no UI package is installed.
 
 ## Packages
 
-Seventeen packages, all published at one version by a fixed Changesets group.
+Eighteen packages, all published at one version by a fixed Changesets group.
 
 | Path | Package |
 |---|---|
@@ -84,6 +84,7 @@ Seventeen packages, all published at one version by a fixed Changesets group.
 | `packages/plugins/chapters` | `@scarlett-player/chapters` |
 | `packages/plugins/gestures` | `@scarlett-player/gestures` |
 | `packages/plugins/share` | `@scarlett-player/share` |
+| `packages/plugins/clips` | `@scarlett-player/clips` |
 | `packages/plugins/watermark` | `@scarlett-player/watermark` |
 | `packages/plugins/media-session` | `@scarlett-player/media-session` |
 | `packages/plugins/airplay` | `@scarlett-player/airplay` |
@@ -91,7 +92,7 @@ Seventeen packages, all published at one version by a fixed Changesets group.
 | `packages/plugins/analytics` | `@scarlett-player/analytics` |
 
 There is no React package and no presets package. Every directory under
-`packages/plugins/` is one of the fourteen plugin packages above; the empty
+`packages/plugins/` is one of the fifteen plugin packages above; the empty
 placeholder directories that used to sit beside them were deleted on
 2026-09-02. A name under `packages/plugins/` means a package only when it has a
 `package.json`.
@@ -519,7 +520,7 @@ caused state to drift from the element.
 - The playlist plugin registers its control-bar controls through
   `void import('@scarlett-player/ui')` and logs and continues when the UI package
   is absent, which is what makes it work headless.
-- Versioning is Changesets in fixed mode: all seventeen packages share one
+- Versioning is Changesets in fixed mode: all eighteen packages share one
   version number.
 
 ## Testing

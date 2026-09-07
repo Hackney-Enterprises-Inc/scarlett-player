@@ -21,6 +21,7 @@
 - **Sharing** - Native share sheet on mobile, copy link, social targets, embed codes, timestamped links
 - **Chapters** - Markers on the progress bar, a chapter list, and seek to chapter
 - **Touch Gestures** - Double-tap left or right to seek, keep tapping to go further
+- **Clips** - Two-handle in/out range selection, loop preview, and host submission (callback or built-in POST); the player captures the range, the server renders the clip
 - **Captions** - WebVTT subtitles and closed captions, HLS subtitle extraction, auto-select by language
 - **Watermark** - Anti-piracy text or image overlay with dynamic repositioning
 - **Audio Player** - Compact audio UI with artwork, progress, and media session integration
@@ -52,6 +53,7 @@ npm install @scarlett-player/watermark     # Anti-piracy watermark overlay
 npm install @scarlett-player/share         # Share sheet, copy link, social targets, embed codes
 npm install @scarlett-player/chapters      # Chapter markers, chapter list, seek to chapter
 npm install @scarlett-player/gestures      # Double-tap to seek, tap to toggle controls (touch)
+npm install @scarlett-player/clips         # Viewer-created clips: range selection, loop preview, host submission
 
 # Vue 3 wrapper
 npm install @scarlett-player/vue
@@ -226,6 +228,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/share` | Share - native share sheet on mobile, copy link, social targets, embed codes, playback timestamps |
 | `@scarlett-player/chapters` | Chapters - markers on the progress bar, chapter list, seek to chapter, WebVTT chapters track support |
 | `@scarlett-player/gestures` | Gestures - double-tap left/right to seek with accumulation, tap to toggle controls, touch only |
+| `@scarlett-player/clips` | Clips - two-handle in/out range selection, loop preview, submission through a host callback or a built-in POST. VOD only in v1; the player captures the range, the server produces the clip |
 | `@scarlett-player/vue` | Vue 3 - `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
 | `@scarlett-player/embed` | CDN embed - auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
 
@@ -354,7 +357,7 @@ node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture on
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 17 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 18 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -382,6 +385,7 @@ packages/
     share/          # Share sheet, copy link, social targets, embed codes
     chapters/       # Chapter markers, list and seek
     gestures/       # Double-tap seek, tap to toggle controls
+    clips/          # Viewer-created clips (range selection, loop preview, host submission)
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
