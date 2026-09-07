@@ -190,13 +190,40 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
       beacons = [];
 
-      // First play triggers playRequest and videoStart together
       (api as any)._trigger('playback:play');
 
       const videoStartEvent = beacons.find((b) => b.event === 'videoStart');
       expect(videoStartEvent).toBeDefined();
-      // Startup time should be 0 or very small since we trigger immediately
-      expect(videoStartEvent?.startupTime).toBeDefined();
+
+      // The previous assertion here was `toBeDefined()`, which passes for null
+      // as readily as for a number: it could not tell a working metric from a
+      // broken one, and the metric is in fact degenerate.
+      //
+      // `playback:play` runs onPlayRequest() and onPlaying() back to back in
+      // one handler, so the two Date.now() reads that bracket the measurement
+      // are one synchronous tick apart no matter how long startup actually
+      // took. startupTime therefore measures the handler, not the viewer's
+      // wait. Asserted as a real number in single-digit milliseconds rather
+      // than waved through, so that wiring videoStart to an actual first-frame
+      // signal fails here and this expectation gets updated with it.
+      expect(typeof videoStartEvent?.startupTime).toBe('number');
+      expect(videoStartEvent?.startupTime).toBeLessThan(10);
+    });
+
+    it('should send exactly one videoStart per view', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      beacons = [];
+
+      (api as any)._trigger('playback:play');
+      (api as any)._trigger('playback:pause');
+      (api as any)._trigger('playback:play');
+
+      expect(beacons.filter((b) => b.event === 'videoStart')).toHaveLength(1);
     });
 
     it('should track pause events', async () => {

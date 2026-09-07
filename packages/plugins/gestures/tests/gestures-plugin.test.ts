@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createGesturesPlugin } from '../src/index';
 
+type StateListener = (event: { key: string; value: unknown }) => void;
+
 /**
  * Pretend the device has a coarse pointer, which is what enables 'auto'.
  *
@@ -61,6 +63,7 @@ function createMockApi(state: Record<string, unknown> = {}) {
   };
 
   const uiPlugin = { show: vi.fn(), hide: vi.fn() };
+  const listeners: StateListener[] = [];
 
   return {
     pluginId: 'gestures',
@@ -76,7 +79,15 @@ function createMockApi(state: Record<string, unknown> = {}) {
     emit: vi.fn(),
     getPlugin: vi.fn((name: string) => (name === 'ui-controls' ? uiPlugin : null)),
     onDestroy: vi.fn(),
-    subscribeToState: vi.fn(() => vi.fn()),
+    subscribeToState: vi.fn((listener: StateListener) => {
+      listeners.push(listener);
+      return vi.fn();
+    }),
+    /** Write a state key and fire the subscription the plugin listens on. */
+    setStateAndNotify(key: string, value: unknown) {
+      store[key] = value;
+      listeners.forEach((listener) => listener({ key, value }));
+    },
     store,
   };
 }
@@ -189,6 +200,57 @@ describe('createGesturesPlugin', () => {
 
     expect(api.container.querySelector('.sp-gestures')).toBeNull();
     expect(plugin.ownsTapInteraction()).toBe(false);
+  });
+
+  it('tears the surface down when the source turns out to be audio', () => {
+    // mediaType defaults to 'unknown' and is written when the source loads, so
+    // a plugin that sampled it once during init() left the tap surface over an
+    // audio player.
+    const api = createMockApi({ mediaType: 'unknown' });
+    const plugin = createGesturesPlugin();
+    plugin.init(api as never);
+
+    expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+    expect(plugin.ownsTapInteraction()).toBe(true);
+
+    api.setStateAndNotify('mediaType', 'audio');
+
+    expect(api.container.querySelector('.sp-gestures')).toBeNull();
+    expect(plugin.ownsTapInteraction()).toBe(false);
+  });
+
+  it('rebuilds the surface when the source turns back into video', () => {
+    const api = createMockApi({ mediaType: 'audio' });
+    const plugin = createGesturesPlugin();
+    plugin.init(api as never);
+
+    expect(api.container.querySelector('.sp-gestures')).toBeNull();
+
+    api.setStateAndNotify('mediaType', 'video');
+
+    expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+    expect(plugin.ownsTapInteraction()).toBe(true);
+  });
+
+  it('destroys cleanly after the surface was torn down for audio', () => {
+    const api = createMockApi();
+    const plugin = createGesturesPlugin();
+    plugin.init(api as never);
+
+    api.setStateAndNotify('mediaType', 'audio');
+
+    expect(() => plugin.destroy()).not.toThrow();
+  });
+
+  it('ignores state changes for other keys', () => {
+    const api = createMockApi();
+    const plugin = createGesturesPlugin();
+    plugin.init(api as never);
+    const surface = api.container.querySelector('.sp-gestures');
+
+    api.setStateAndNotify('currentTime', 42);
+
+    expect(api.container.querySelector('.sp-gestures')).toBe(surface);
   });
 
   it('seeks forward on a double tap to the right', () => {

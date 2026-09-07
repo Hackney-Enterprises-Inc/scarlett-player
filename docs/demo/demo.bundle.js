@@ -277,7 +277,10 @@
          * untouched. Plugins commonly re-run setup after a source change, and that
          * must not reset state that is already live.
          *
-         * Namespace plugin keys with the plugin's own name to avoid collisions.
+         * Namespace plugin keys with the plugin's own name to avoid collisions. A
+         * redefinition with a *different* default is a collision rather than a
+         * re-run, so it warns: the first definition still wins, but silently
+         * diverging state was previously impossible to diagnose.
          *
          * @param key - State property key
          * @param initialValue - Value used only when the key is new
@@ -289,6 +292,12 @@
          */
         define(key, initialValue) {
           if (this.signals.has(key)) {
+            const existing = this.definedDefaults.get(key);
+            if (existing !== void 0 && !Object.is(existing, initialValue)) {
+              console.warn(
+                `[StateManager] State key "${String(key)}" is already defined with a different default. Keeping: ${JSON.stringify(existing)}, ignoring: ${JSON.stringify(initialValue)}`
+              );
+            }
             return;
           }
           this.definedDefaults.set(key, initialValue);
@@ -1816,6 +1825,12 @@
           this.seekingWhilePlaying = false;
           /** Seek resume timeout */
           this.seekResumeTimeout = null;
+          /**
+           * True once `initialSrc` has been handed to `load()`, or once the host has
+           * loaded a source of its own. Guards `init()`'s initial load so a second
+           * `init()` cannot clobber active playback.
+           */
+          this.initialSrcLoaded = false;
           /** Counter to detect stale load() calls */
           this.loadGeneration = 0;
           /** True once the lifecycle listeners have been wired (they are wired once) */
@@ -1987,14 +2002,16 @@
          * Initialises non-provider plugins, wires the lifecycle listeners and loads
          * `initialSrc` when one was given. Idempotent: calling it twice, or calling
          * it after a `load()` has already initialised the player, wires nothing a
-         * second time and re-emits nothing.
+         * second time, re-emits nothing, and does not reload `initialSrc` over
+         * whatever is playing.
          *
          * @returns Promise resolving when initialisation (and any initial load) is done
          */
         async init() {
           this.checkDestroyed();
           await this.ensureInitialized();
-          if (this.initialSrc) {
+          if (this.initialSrc && !this.initialSrcLoaded) {
+            this.initialSrcLoaded = true;
             await this.load(this.initialSrc);
           }
         }
@@ -2025,6 +2042,7 @@
          */
         async load(source) {
           this.checkDestroyed();
+          this.initialSrcLoaded = true;
           const generation = ++this.loadGeneration;
           try {
             this.logger.info("Loading source", { source });
@@ -2774,6 +2792,52 @@
     }
   });
 
+  // packages/core/src/utils/format.ts
+  function pad(n) {
+    return n < 10 ? `0${n}` : `${n}`;
+  }
+  function formatTime(seconds) {
+    if (!isFinite(seconds) || isNaN(seconds)) {
+      return "0:00";
+    }
+    const absSeconds = Math.abs(seconds);
+    const h = Math.floor(absSeconds / 3600);
+    const m = Math.floor(absSeconds % 3600 / 60);
+    const s = Math.floor(absSeconds % 60);
+    const sign = seconds < 0 ? "-" : "";
+    if (h > 0) {
+      return `${sign}${h}:${pad(m)}:${pad(s)}`;
+    }
+    return `${sign}${m}:${pad(s)}`;
+  }
+  function formatLiveTime(behindLive) {
+    if (behindLive <= 0) {
+      return "LIVE";
+    }
+    return `-${formatTime(behindLive)}`;
+  }
+  var init_format = __esm({
+    "packages/core/src/utils/format.ts"() {
+      "use strict";
+    }
+  });
+
+  // packages/core/src/utils/icon-paths.ts
+  var SHARED_ICON_PATHS;
+  var init_icon_paths = __esm({
+    "packages/core/src/utils/icon-paths.ts"() {
+      "use strict";
+      SHARED_ICON_PATHS = {
+        /** Solid right-pointing triangle. */
+        play: "M8 5v14l11-7z",
+        /** Speaker with three arcs. */
+        volumeHigh: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
+        /** Speaker struck through. */
+        volumeMuted: "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"
+      };
+    }
+  });
+
   // packages/core/src/utils/shared-styles.ts
   function injectSharedStyles(id, css) {
     if (typeof document === "undefined") {
@@ -2834,6 +2898,8 @@
       init_scarlett_player();
       init_fullscreen();
       init_url();
+      init_format();
+      init_icon_paths();
       init_shared_styles();
     }
   });
@@ -37015,14 +37081,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
 /* ============================================
    CSS Custom Properties (Theming)
+   ============================================
+
+   Token defaults live at the use sites as var() fallbacks, not in a :root
+   block. A :root declaration wrote --sp-accent, --sp-color, --sp-bg,
+   --sp-control-height and --sp-icon-size into the HOST document, so mounting a
+   player changed variables the page may own. A .sp-container declaration would
+   be no better: the container rule wins for every descendant, so it would
+   override a host that themes the player from its own :root. A var() fallback
+   does neither - it applies only where nothing else defines the token.
+
+   setTheme() writes the same names onto the player's container, which still
+   wins over the fallbacks.
    ============================================ */
-:root {
-  --sp-accent: #e50914;
-  --sp-color: #fff;
-  --sp-bg: rgba(0, 0, 0, 0.8);
-  --sp-control-height: 48px;
-  --sp-icon-size: 24px;
-}
 `;
     }
   });
@@ -37032,13 +37103,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var init_icons = __esm({
     "packages/plugins/ui/src/icons.ts"() {
       "use strict";
+      init_src();
       icons = {
-        play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
+        play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="${SHARED_ICON_PATHS.play}"/></svg>`,
         pause: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`,
         replay: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`,
-        volumeHigh: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
+        volumeHigh: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="${SHARED_ICON_PATHS.volumeHigh}"/></svg>`,
         volumeLow: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`,
-        volumeMute: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
+        volumeMute: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="${SHARED_ICON_PATHS.volumeMuted}"/></svg>`,
         fullscreen: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`,
         exitFullscreen: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>`,
         pip: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/></svg>`,
@@ -37119,32 +37191,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
 
   // packages/plugins/ui/src/utils/format.ts
-  function formatTime(seconds) {
-    if (!isFinite(seconds) || isNaN(seconds)) {
-      return "0:00";
-    }
-    const absSeconds = Math.abs(seconds);
-    const h = Math.floor(absSeconds / 3600);
-    const m = Math.floor(absSeconds % 3600 / 60);
-    const s = Math.floor(absSeconds % 60);
-    const sign = seconds < 0 ? "-" : "";
-    if (h > 0) {
-      return `${sign}${h}:${pad(m)}:${pad(s)}`;
-    }
-    return `${sign}${m}:${pad(s)}`;
-  }
-  function pad(n) {
-    return n < 10 ? `0${n}` : `${n}`;
-  }
-  function formatLiveTime(behindLive) {
-    if (behindLive <= 0) {
-      return "LIVE";
-    }
-    return `-${formatTime(behindLive)}`;
-  }
-  var init_format = __esm({
+  var init_format2 = __esm({
     "packages/plugins/ui/src/utils/format.ts"() {
       "use strict";
+      init_src();
     }
   });
 
@@ -37153,7 +37203,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "packages/plugins/ui/src/utils/index.ts"() {
       "use strict";
       init_dom();
-      init_format();
+      init_format2();
     }
   });
 
@@ -37489,7 +37539,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                   video.addEventListener("seeked", resumePlayback);
                 }
               }
-              this.tooltip.style.opacity = "0";
+              this.tooltip.style.opacity = "";
               this.thumbnailPreview.hide();
             }
           };
@@ -37498,7 +37548,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           };
           this.onMouseLeave = () => {
             if (!this.isDragging) {
-              this.tooltip.style.opacity = "0";
+              this.tooltip.style.opacity = "";
               this.thumbnailPreview.hide();
             }
           };
@@ -37770,6 +37820,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.wrapper.removeEventListener("mousemove", this.onMouseMove);
           this.wrapper.removeEventListener("mouseleave", this.onMouseLeave);
           this.wrapper.removeEventListener("touchstart", this.onTouchStart);
+          this.el.removeEventListener("keydown", this.onKeyDown);
           document.removeEventListener("mousemove", this.onDocMouseMove);
           document.removeEventListener("mouseup", this.onMouseUp);
           document.removeEventListener("touchmove", this.onDocTouchMove);
@@ -39504,6 +39555,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let entries = [];
     let timeEntry = null;
     let resizeObserver = null;
+    let windowResizeTimer = null;
+    let onWindowResize = null;
     let barPaddingX = FALLBACK_BAR_PADDING_X;
     let barGap = FALLBACK_BAR_GAP;
     let volumeSliderWidth = FALLBACK_VOLUME_SLIDER_WIDTH;
@@ -39982,6 +40035,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             scheduleUpdate();
           });
           resizeObserver.observe(container);
+        } else if (responsive && typeof window !== "undefined") {
+          onWindowResize = () => {
+            if (windowResizeTimer) clearTimeout(windowResizeTimer);
+            windowResizeTimer = setTimeout(() => {
+              windowResizeTimer = null;
+              applyMenuBounds(container.clientHeight);
+              fitPending = true;
+              scheduleUpdate();
+            }, RESIZE_FALLBACK_DEBOUNCE_MS);
+          };
+          window.addEventListener("resize", onWindowResize);
         }
         controlRegistryUnsubscribe = onControlRegistered((id, owner) => {
           if (!layout.includes(id)) {
@@ -40024,6 +40088,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         resizeObserver?.disconnect();
         resizeObserver = null;
+        if (onWindowResize) {
+          window.removeEventListener("resize", onWindowResize);
+          onWindowResize = null;
+        }
+        if (windowResizeTimer) {
+          clearTimeout(windowResizeTimer);
+          windowResizeTimer = null;
+        }
         api?.container?.style.removeProperty("--sp-menu-max-height");
         stateUnsubscribe?.();
         stateUnsubscribe = null;
@@ -40107,7 +40179,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
   }
-  var DEFAULT_LAYOUT, STYLE_ID, DEFAULT_HIDE_DELAY, ACTIVATION_KEYS, SLIDER_KEYS, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
+  var DEFAULT_LAYOUT, STYLE_ID, DEFAULT_HIDE_DELAY, ACTIVATION_KEYS, SLIDER_KEYS, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, RESIZE_FALLBACK_DEBOUNCE_MS, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
   var init_src2 = __esm({
     "packages/plugins/ui/src/index.ts"() {
       "use strict";
@@ -40157,6 +40229,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       OVERFLOW_BUTTON_WIDTH = 44;
       FALLBACK_BAR_PADDING_X = 24;
       FALLBACK_BAR_GAP = 4;
+      RESIZE_FALLBACK_DEBOUNCE_MS = 100;
       MENU_HEIGHT_RESERVE = 16;
       FALLBACK_BAR_HEIGHT = 56;
       MIN_MENU_HEIGHT = 120;
@@ -40176,7 +40249,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     isHlsJsSupported: () => isHlsJsSupported,
     loadHlsJs: () => loadHlsJs,
     resetLoader: () => resetLoader,
-    shouldPreferNativeHLS: () => shouldPreferNativeHLS,
     supportsNativeHLS: () => supportsNativeHLS
   });
   var hlsConstructor = null;
@@ -40185,13 +40257,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     if (typeof document === "undefined") return false;
     const video = document.createElement("video");
     return video.canPlayType("application/vnd.apple.mpegurl") !== "";
-  }
-  function shouldPreferNativeHLS() {
-    if (!supportsNativeHLS()) return false;
-    if (typeof navigator === "undefined") return false;
-    const ua = navigator.userAgent;
-    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua) && !/CriOS/.test(ua);
-    return isSafari;
   }
   function isHlsJsSupported() {
     if (hlsConstructor) {
@@ -40303,6 +40368,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return HLS_DEFAULT_ESTIMATE;
   }
 
+  // packages/plugins/hls/src/sanitize-url.ts
+  init_src();
+
   // packages/plugins/hls/src/event-map.ts
   var HLS_ERROR_TYPES = {
     NETWORK_ERROR: "networkError",
@@ -40324,11 +40392,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   }
   function parseHlsError(data) {
+    const frag = data.frag;
+    const response = data.response;
+    const context = data.context;
     return {
       type: mapErrorType(data.type),
       details: data.details || "Unknown error",
       fatal: data.fatal || false,
-      url: data.url,
+      // hls.js puts the request URL in a different place per error type:
+      // playlist errors set data.url, while fragment and key load errors set
+      // data.url not at all and carry it on data.frag.url and data.response.url.
+      // Reading only data.url dropped the failing segment from every diagnostic
+      // an origin outage produces - which is the case the diagnostics exist for.
+      url: data.url ?? frag?.url ?? response?.url ?? context?.url,
       reason: data.reason,
       response: data.response
     };
@@ -40458,14 +40534,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.logger.error(`HLS fatal error: ${error.details} (type=${error.type})`, {
           type: error.type,
           details: error.details,
-          url: error.url
+          status: error.response?.code,
+          url: sanitizeUrl(error.url)
         });
       } else {
         api.logger.warn(`HLS error: ${error.details} (type=${error.type}, fatal=${error.fatal})`, {
           type: error.type,
           details: error.details,
           fatal: error.fatal,
-          url: error.url
+          status: error.response?.code,
+          url: sanitizeUrl(error.url)
         });
       }
       callbacks.onError?.(error);
@@ -40671,17 +40749,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
-  // packages/plugins/hls/src/sanitize-url.ts
-  function sanitizeUrl2(url) {
-    if (!url) return void 0;
-    try {
-      const parsed = new URL(url);
-      return `${parsed.origin}${parsed.pathname}`;
-    } catch {
-      return void 0;
-    }
-  }
-
   // packages/plugins/hls/src/version.ts
   var PKG_VERSION2 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
@@ -40871,7 +40938,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (typeof error.response?.code === "number" && error.response.code > 0) {
         detail.httpStatus = error.response.code;
       }
-      const url = sanitizeUrl2(error.url);
+      const url = sanitizeUrl(error.url);
       if (url) {
         detail.url = url;
       }
@@ -41186,7 +41253,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             if (resolved || session !== loadSession) return;
             resolved = true;
             releaseAbort();
-            api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src: sanitizeUrl2(src) });
+            api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src: sanitizeUrl(src) });
             const timeoutError = {
               type: "network",
               details: "Video took too long to load (network timeout)",
@@ -41339,7 +41406,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const was_live = api.getState("live");
       const was_native = isNative;
       const resume_position = reconnectResumePosition;
-      api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: sanitizeUrl2(saved_src) });
+      api.logger.info(`Auto-reconnect attempt ${reconnectAttempts}`, { src: sanitizeUrl(saved_src) });
       try {
         teardownPipeline(new Error("HLS load cancelled: reconnecting"));
         networkRetryCount = 0;
@@ -41543,7 +41610,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       async loadSource(src) {
         if (!api) throw new Error("Plugin not initialized");
-        api.logger.info(`Loading HLS source${variant.logSuffix}`, { src: sanitizeUrl2(src) });
+        api.logger.info(`Loading HLS source${variant.logSuffix}`, { src: sanitizeUrl(src) });
         const session = ++loadSession;
         cancelReconnect();
         hasPlayedContent = false;
@@ -43089,18 +43156,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.logger.warn("Failed to persist playlist", e);
       }
     };
+    const isTrack = (t) => typeof t === "object" && t !== null && typeof t.src === "string";
     const loadPersistedPlaylist = () => {
       if (!mergedConfig.persist) return;
+      if (mergedConfig.tracks?.length) return;
       try {
         const data = localStorage.getItem(mergedConfig.persistKey);
-        if (data) {
-          const parsed = JSON.parse(data);
-          tracks = parsed.tracks || [];
-          currentIndex = parsed.currentIndex ?? -1;
-          shuffle = parsed.shuffle ?? false;
-          repeat = parsed.repeat ?? "none";
-          shuffleOrder = parsed.shuffleOrder || [];
-        }
+        if (!data) return;
+        const parsed = JSON.parse(data);
+        const restored = Array.isArray(parsed.tracks) ? parsed.tracks.filter(isTrack) : [];
+        if (restored.length === 0) return;
+        tracks = restored;
+        const index = typeof parsed.currentIndex === "number" ? parsed.currentIndex : -1;
+        currentIndex = index >= 0 ? Math.min(index, tracks.length - 1) : -1;
+        shuffle = parsed.shuffle === true;
+        repeat = parsed.repeat === "one" || parsed.repeat === "all" ? parsed.repeat : "none";
+        shuffleOrder = Array.isArray(parsed.shuffleOrder) ? parsed.shuffleOrder.filter(
+          (n) => typeof n === "number" && n >= 0 && n < tracks.length
+        ) : [];
       } catch (e) {
         api?.logger.warn("Failed to load persisted playlist", e);
       }
@@ -43110,7 +43183,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.emit("playlist:change", { track, index: currentIndex });
       persistPlaylist();
     };
-    const setCurrentTrack = (index) => {
+    const setCurrentTrack = (index, options = {}) => {
       if (index < 0 || index >= tracks.length) {
         api?.logger.warn("Invalid track index", { index });
         return;
@@ -43123,7 +43196,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.setState("mediaType", track.type || "audio");
       emitChange();
       if (mergedConfig.autoLoad !== false && track.src) {
-        api?.emit("media:load-request", { src: track.src, autoplay: true });
+        api?.emit("media:load-request", { src: track.src, autoplay: options.autoplay ?? true });
       }
     };
     const plugin = {
@@ -43145,11 +43218,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (!mergedConfig.autoAdvance) return;
           const nextIdx = getNextIndex();
           if (nextIdx >= 0) {
+            const wasPlaying = !api?.getState("paused");
             const advance = () => {
               api?.logger.debug("Auto-advancing to next track", { nextIdx });
-              setCurrentTrack(nextIdx);
+              setCurrentTrack(nextIdx, { autoplay: wasPlaying });
             };
             if (mergedConfig.advanceDelay) {
+              if (advanceTimeout) clearTimeout(advanceTimeout);
               advanceTimeout = setTimeout(advance, mergedConfig.advanceDelay);
             } else {
               advance();
@@ -43463,6 +43538,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const setupActionHandlers = () => {
       if (!isMediaSessionSupported()) return;
       const seekOffset = mergedConfig.seekOffset || 10;
+      const seekBounds = () => {
+        const live = api?.getState("live");
+        const seekable = api?.getState("seekableRange");
+        if (live && Number.isFinite(seekable?.start) && Number.isFinite(seekable?.end)) {
+          return { min: seekable.start, max: seekable.end };
+        }
+        const duration = api?.getState("duration") || 0;
+        return {
+          min: 0,
+          max: Number.isFinite(duration) && duration > 0 ? duration : Infinity
+        };
+      };
       if (mergedConfig.enablePlayPause) {
         try {
           navigator.mediaSession.setActionHandler("play", () => {
@@ -43474,9 +43561,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("playback:pause", void 0);
           });
           navigator.mediaSession.setActionHandler("stop", () => {
-            api?.logger.debug("Media session: stop");
+            const { min } = seekBounds();
+            api?.logger.debug("Media session: stop", { time: min });
             api?.emit("playback:pause", void 0);
-            api?.emit("playback:seeking", { time: 0 });
+            api?.emit("playback:seeking", { time: min });
           });
         } catch (e) {
           api?.logger.debug("Some play/pause actions not supported", e);
@@ -43487,22 +43575,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           navigator.mediaSession.setActionHandler("seekbackward", (details) => {
             const offset = details.seekOffset || seekOffset;
             const currentTime = api?.getState("currentTime") || 0;
-            const newTime = Math.max(0, currentTime - offset);
+            const newTime = Math.max(seekBounds().min, currentTime - offset);
             api?.logger.debug("Media session: seekbackward", { offset, newTime });
             api?.emit("playback:seeking", { time: newTime });
           });
           navigator.mediaSession.setActionHandler("seekforward", (details) => {
             const offset = details.seekOffset || seekOffset;
             const currentTime = api?.getState("currentTime") || 0;
-            const duration = api?.getState("duration") || 0;
-            const newTime = Math.min(duration, currentTime + offset);
+            const newTime = Math.min(seekBounds().max, currentTime + offset);
             api?.logger.debug("Media session: seekforward", { offset, newTime });
             api?.emit("playback:seeking", { time: newTime });
           });
           navigator.mediaSession.setActionHandler("seekto", (details) => {
             if (details.seekTime !== void 0) {
-              api?.logger.debug("Media session: seekto", { time: details.seekTime });
-              api?.emit("playback:seeking", { time: details.seekTime });
+              const { min, max } = seekBounds();
+              const newTime = Math.max(min, Math.min(max, details.seekTime));
+              api?.logger.debug("Media session: seekto", { time: newTime });
+              api?.emit("playback:seeking", { time: newTime });
             }
           });
         } catch (e) {
@@ -43666,10 +43755,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/plugins/audio-ui/src/index.ts
+  init_src();
+
   // packages/plugins/audio-ui/src/version.ts
   var PKG_VERSION9 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/audio-ui/src/index.ts
+  var SEEK_STEP_SECONDS = 5;
+  var VOLUME_STEP = 0.05;
   var DEFAULT_THEME = {
     primary: "#6366f1",
     background: "#18181b",
@@ -43694,16 +43788,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     autoHide: 0,
     theme: DEFAULT_THEME
   };
-  function formatTime2(seconds) {
-    if (!isFinite(seconds) || seconds < 0) return "0:00";
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor(seconds % 3600 / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    }
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
   function createStyles(prefix, theme) {
     return `
     .${prefix} {
@@ -43972,7 +44056,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   `;
   }
   var ICONS = {
-    play: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`,
+    play: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.play}"/></svg>`,
     pause: `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
     previous: `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`,
     next: `<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>`,
@@ -43980,8 +44064,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     repeatOff: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
     repeatAll: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
     repeatOne: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg>`,
-    volumeHigh: `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
-    volumeMuted: `<svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
+    volumeHigh: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.volumeHigh}"/></svg>`,
+    volumeMuted: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.volumeMuted}"/></svg>`,
     music: `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`
   };
   function createAudioUIPlugin(config) {
@@ -44027,7 +44111,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           progressFill.style.transform = `scaleX(${scale})`;
         }
         if (currentTimeEl) {
-          currentTimeEl.textContent = formatTime2(interpolatedTime);
+          currentTimeEl.textContent = formatTime(interpolatedTime);
         }
         animationFrameId = requestAnimationFrame(animate);
       };
@@ -44192,6 +44276,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const time = percent * duration;
         api?.emit("playback:seeking", { time });
       });
+      progressBar?.addEventListener("keydown", (e) => {
+        const key = e.key;
+        const duration = api?.getState("duration") || 0;
+        const currentTime = api?.getState("currentTime") || 0;
+        let time = null;
+        if (key === "ArrowLeft") time = Math.max(0, currentTime - SEEK_STEP_SECONDS);
+        else if (key === "ArrowRight") time = Math.min(duration, currentTime + SEEK_STEP_SECONDS);
+        else if (key === "Home") time = 0;
+        else if (key === "End") time = duration;
+        if (time === null) return;
+        e.preventDefault();
+        api?.emit("playback:seeking", { time });
+      });
       const volumeSlider = container.querySelector(`.${prefix}__volume-slider`);
       volumeSlider?.addEventListener("click", (e) => {
         const mouseEvent = e;
@@ -44199,6 +44296,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const percent = Math.max(0, Math.min(1, (mouseEvent.clientX - rect.left) / rect.width));
         api?.emit("volume:change", { volume: percent, muted: false });
       });
+      volumeSlider?.addEventListener("keydown", (e) => {
+        const key = e.key;
+        const current = api?.getState("volume") ?? 1;
+        let volume = null;
+        if (key === "ArrowLeft" || key === "ArrowDown") {
+          volume = Math.max(0, current - VOLUME_STEP);
+        } else if (key === "ArrowRight" || key === "ArrowUp") {
+          volume = Math.min(1, current + VOLUME_STEP);
+        } else if (key === "Home") {
+          volume = 0;
+        } else if (key === "End") {
+          volume = 1;
+        }
+        if (volume === null) return;
+        e.preventDefault();
+        api?.emit("volume:change", { volume, muted: false });
+      });
+    };
+    const setIcon = (el, icon) => {
+      if (!el || el.dataset.icon === icon) return;
+      el.dataset.icon = icon;
+      el.innerHTML = icon;
     };
     const updateUI = () => {
       if (!api || !container) return;
@@ -44206,7 +44325,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const wasPlaying = isPlaying;
       isPlaying = playing;
       if (playPauseBtn) {
-        playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
+        setIcon(playPauseBtn, playing ? ICONS.pause : ICONS.play);
         playPauseBtn.title = playing ? "Pause" : "Play";
         playPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
       }
@@ -44225,17 +44344,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           progressFill.style.transform = `scaleX(${scale})`;
         }
         if (currentTimeEl) {
-          currentTimeEl.textContent = formatTime2(currentTime);
+          currentTimeEl.textContent = formatTime(currentTime);
         }
       }
       if (durationEl) {
-        durationEl.textContent = formatTime2(duration);
+        durationEl.textContent = formatTime(duration);
       }
       const progressBar = container?.querySelector(`.${prefix}__progress-bar`);
       if (progressBar) {
         progressBar.setAttribute("aria-valuemax", String(Math.floor(duration)));
         progressBar.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
-        progressBar.setAttribute("aria-valuetext", formatTime2(currentTime));
+        progressBar.setAttribute("aria-valuetext", formatTime(currentTime));
       }
       const title = api.getState("title");
       const poster = api.getState("poster");
@@ -44260,7 +44379,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         volumeFill.style.width = `${(muted ? 0 : volume) * 100}%`;
       }
       if (volumeBtn) {
-        volumeBtn.innerHTML = muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh;
+        setIcon(volumeBtn, muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh);
         volumeBtn.setAttribute("aria-label", muted || volume === 0 ? "Unmute" : "Mute");
       }
       const volumeSlider = container?.querySelector(`.${prefix}__volume-slider`);
@@ -44281,13 +44400,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           repeatBtn.classList.toggle(`${prefix}__btn--active`, state.repeat !== "none");
           repeatBtn.setAttribute("aria-pressed", String(state.repeat !== "none"));
           if (state.repeat === "one") {
-            repeatBtn.innerHTML = ICONS.repeatOne;
+            setIcon(repeatBtn, ICONS.repeatOne);
             repeatBtn.setAttribute("aria-label", "Repeat one");
           } else if (state.repeat === "all") {
-            repeatBtn.innerHTML = ICONS.repeatAll;
+            setIcon(repeatBtn, ICONS.repeatAll);
             repeatBtn.setAttribute("aria-label", "Repeat all");
           } else {
-            repeatBtn.innerHTML = ICONS.repeatOff;
+            setIcon(repeatBtn, ICONS.repeatOff);
             repeatBtn.setAttribute("aria-label", "Repeat off");
           }
         }
@@ -44657,10 +44776,41 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     return fallback();
   }
+  var CREDENTIAL_PARAMS = /* @__PURE__ */ new Set([
+    "token",
+    "access_token",
+    "auth",
+    "authorization",
+    "jwt",
+    "sig",
+    "signature",
+    "hmac",
+    "key",
+    "apikey",
+    "api_key",
+    "session",
+    "sessionid",
+    "expires",
+    "policy"
+  ]);
+  function stripCredentials(href) {
+    try {
+      const parsed = new URL(href);
+      for (const name of [...parsed.searchParams.keys()]) {
+        if (CREDENTIAL_PARAMS.has(name.toLowerCase())) {
+          parsed.searchParams.delete(name);
+        }
+      }
+      parsed.hash = "";
+      return parsed.toString();
+    } catch {
+      return href;
+    }
+  }
   function resolveBaseUrl(config) {
     return resolve(
       config.url,
-      () => typeof window === "undefined" ? "" : window.location.href
+      () => typeof window === "undefined" ? "" : stripCredentials(window.location.href)
     );
   }
   function resolveTitle(config) {
@@ -45932,6 +46082,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       }
     };
+    const syncSurface = () => {
+      if (!active || !api) return;
+      const wantsSurface = api.getState("mediaType") !== "audio";
+      if (wantsSurface && !overlay) {
+        overlay = new GestureOverlay(api.container, { onPointer, feedback });
+        overlay.setZoneWidths(leftZone, rightZone);
+      } else if (!wantsSurface && overlay) {
+        clearPendingHide();
+        overlay.destroy();
+        overlay = null;
+        recognizer?.reset();
+      }
+    };
     return {
       id: "gestures",
       name: "Gestures",
@@ -45945,10 +46108,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.logger.debug("[gestures] no coarse pointer, gesture surface not installed");
           return;
         }
-        if (api.getState("mediaType") === "audio") {
-          active = false;
-          return;
-        }
         recognizer = createRecognizer({
           doubleTapWindowMs,
           accumulationWindowMs: config.accumulationWindowMs,
@@ -45956,9 +46115,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           rightZone,
           slopPx: config.slopPx
         });
-        overlay = new GestureOverlay(api.container, { onPointer, feedback });
-        overlay.setZoneWidths(leftZone, rightZone);
+        syncSurface();
+        const unsubscribe = api.subscribeToState((event) => {
+          if (event.key === "mediaType") syncSurface();
+        });
         api.onDestroy(() => {
+          unsubscribe();
           clearPendingHide();
           overlay?.destroy();
           overlay = null;
@@ -45977,7 +46139,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = null;
       },
       ownsTapInteraction() {
-        return active && tapToToggleControls;
+        return active && tapToToggleControls && overlay !== null;
       }
     };
   }
@@ -45987,12 +46149,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/captions/src/index.ts
   var HLS_SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated";
+  var HLS_SUBTITLE_TRACK_SWITCH = "hlsSubtitleTrackSwitch";
   var HLS_INSTANCE_RETRY_MS = 500;
   function createCaptionsPlugin(config = {}) {
     let api = null;
     let video = null;
     let addedTrackElements = [];
     let hlsSubtitleHandler = null;
+    let hlsSubtitleSwitchHandler = null;
     let observedTextTracks = null;
     let hlsRetryTimer = null;
     let hlsRetryUsed = false;
@@ -46122,10 +46286,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         clearTimeout(hlsRetryTimer);
         hlsRetryTimer = null;
       }
-      if (!hlsSubtitleHandler) return;
+      if (!hlsSubtitleHandler && !hlsSubtitleSwitchHandler) return;
       const hlsInstance = api?.getPlugin("hls-provider")?.getHlsInstance();
-      hlsInstance?.off(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
-      hlsSubtitleHandler = null;
+      if (hlsSubtitleHandler) {
+        hlsInstance?.off(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+        hlsSubtitleHandler = null;
+      }
+      if (hlsSubtitleSwitchHandler) {
+        hlsInstance?.off(HLS_SUBTITLE_TRACK_SWITCH, hlsSubtitleSwitchHandler);
+        hlsSubtitleSwitchHandler = null;
+      }
     };
     const syncFromHls = () => {
       if (!extractFromHLS || !api) return;
@@ -46145,6 +46315,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       unsubscribeFromHls();
       hlsSubtitleHandler = () => extractHlsSubtitles();
       hlsInstance.on(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+      hlsSubtitleSwitchHandler = () => syncTracksToState();
+      hlsInstance.on(HLS_SUBTITLE_TRACK_SWITCH, hlsSubtitleSwitchHandler);
       extractHlsSubtitles();
     };
     const initSources = () => {
@@ -46559,6 +46731,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let releaseControls = null;
     let lifecycle = 0;
     let trackCleanup = null;
+    let unsubLoaded = null;
     const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
     const publish = (next) => {
       chapters = normaliseChapters(next);
@@ -46569,6 +46742,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.emit("chapter:loaded", { chapters });
       list?.setChapters(chapters);
       syncActive();
+    };
+    const attachChapterTrack = () => {
+      if (trackCleanup || !config.src) return;
+      if (!api?.container.querySelector("video, audio")) return;
+      trackCleanup = loadChaptersFromTrack(api.container, config.src, {
+        onLoad: (loaded) => publish(loaded),
+        onError: (message) => api?.logger.warn(`[chapters] ${message}`)
+      });
     };
     const syncActive = () => {
       if (!api) return;
@@ -46635,10 +46816,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (config.chapters?.length) {
           publish(config.chapters);
         } else if (config.src) {
-          trackCleanup = loadChaptersFromTrack(api.container, config.src, {
-            onLoad: (loaded) => publish(loaded),
-            onError: (message) => api?.logger.warn(`[chapters] ${message}`)
-          });
+          attachChapterTrack();
+          unsubLoaded = api.on("media:loadedmetadata", attachChapterTrack);
         }
         const unsubscribe = api.subscribeToState((event) => {
           if (event.key === "currentTime") {
@@ -46647,12 +46826,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         api.onDestroy(() => {
           unsubscribe();
+          unsubLoaded?.();
+          unsubLoaded = null;
           trackCleanup?.();
           trackCleanup = null;
         });
       },
       destroy() {
         lifecycle++;
+        unsubLoaded?.();
+        unsubLoaded = null;
         trackCleanup?.();
         trackCleanup = null;
         list?.destroy();

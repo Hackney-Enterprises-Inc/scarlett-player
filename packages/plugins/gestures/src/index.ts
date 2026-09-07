@@ -255,6 +255,31 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
     }
   };
 
+  /**
+   * Build or tear down the gesture surface to match the current media type.
+   *
+   * `mediaType` defaults to `'unknown'` and is written when the source loads,
+   * so sampling it once during `init()` left the tap surface installed over an
+   * audio player whose type arrived a moment later. `GestureOverlay` has no
+   * show/hide, so the surface is constructed and destroyed rather than toggled.
+   */
+  const syncSurface = (): void => {
+    if (!active || !api) return;
+
+    // Audio has its own compact surface with no picture to tap.
+    const wantsSurface = api.getState('mediaType') !== 'audio';
+
+    if (wantsSurface && !overlay) {
+      overlay = new GestureOverlay(api.container, { onPointer, feedback });
+      overlay.setZoneWidths(leftZone, rightZone);
+    } else if (!wantsSurface && overlay) {
+      clearPendingHide();
+      overlay.destroy();
+      overlay = null;
+      recognizer?.reset();
+    }
+  };
+
   return {
     id: 'gestures',
     name: 'Gestures',
@@ -272,12 +297,6 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
         return;
       }
 
-      // Audio has its own compact surface with no picture to tap.
-      if (api.getState('mediaType') === 'audio') {
-        active = false;
-        return;
-      }
-
       recognizer = createRecognizer({
         doubleTapWindowMs,
         accumulationWindowMs: config.accumulationWindowMs,
@@ -286,10 +305,14 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
         slopPx: config.slopPx,
       });
 
-      overlay = new GestureOverlay(api.container, { onPointer, feedback });
-      overlay.setZoneWidths(leftZone, rightZone);
+      syncSurface();
+
+      const unsubscribe = api.subscribeToState((event) => {
+        if (event.key === 'mediaType') syncSurface();
+      });
 
       api.onDestroy(() => {
+        unsubscribe();
         clearPendingHide();
         overlay?.destroy();
         overlay = null;
@@ -310,7 +333,9 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
     },
 
     ownsTapInteraction(): boolean {
-      return active && tapToToggleControls;
+      // Tied to the surface, not just to `active`: on an audio source the
+      // overlay is torn down and the UI must take its taps back.
+      return active && tapToToggleControls && overlay !== null;
     },
   };
 }

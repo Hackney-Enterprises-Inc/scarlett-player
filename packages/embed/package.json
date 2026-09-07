@@ -59,7 +59,9 @@
   },
   "homepage": "https://scarlettplayer.com",
   "dependencies": {
-    "@scarlett-player/core": "workspace:*",
+    "@scarlett-player/core": "workspace:*"
+  },
+  "devDependencies": {
     "@scarlett-player/hls": "workspace:*",
     "@scarlett-player/native": "workspace:*",
     "@scarlett-player/ui": "workspace:*",
@@ -71,9 +73,7 @@
     "@scarlett-player/captions": "workspace:*",
     "@scarlett-player/gestures": "workspace:*",
     "@scarlett-player/share": "workspace:*",
-    "hls.js": "^1.6.0"
-  },
-  "devDependencies": {
+    "hls.js": "^1.6.0",
     "@types/node": "^20.0.0",
     "@vitest/ui": "^1.1.0",
     "jsdom": "^23.0.0",

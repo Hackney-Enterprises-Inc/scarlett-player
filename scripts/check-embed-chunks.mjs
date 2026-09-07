@@ -21,7 +21,9 @@
  *
  * The second assertion guards the naming rule itself. `chunkFileNames` prefixes
  * every chunk with its build name and leaves exactly two names unprefixed,
- * `hls.js` and `hls.light.js`, because those are shared on purpose. A third
+ * `hls.<version>.js` and `hls.light.<version>.js`, because those are shared on
+ * purpose (the version stamp is what keeps a cached `latest/embed.js` from
+ * pairing with a newer chunk; see the vite config). A third
  * unprefixed name in the three-build dist means the prefixing regressed, and
  * the next build to emit the same name would silently overwrite it: the file
  * would still exist, so the import check above would still pass. That is the
@@ -57,11 +59,18 @@ const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio'];
 
 /**
  * The chunk names `chunkFileNames` deliberately leaves unprefixed, kept in
- * step with SHARED_CHUNK_NAMES in packages/embed/vite.config.ts. `hls.js` is
- * the full hls.js bundle the full and video builds both emit; `hls.light.js`
- * is the audio build's lighter one.
+ * step with SHARED_CHUNK_NAMES in packages/embed/vite.config.ts.
+ * `hls.<version>.js` is the full hls.js bundle the full and video builds both
+ * emit; `hls.light.<version>.js` is the audio build's lighter one.
+ *
+ * Derived from the same package.json version the vite config reads, so the two
+ * lists cannot drift: `latest/` is mutable and cached for an hour, and the
+ * version stamp is what stops a stale cached bundle pairing with a newer chunk.
  */
-const SHARED_CHUNKS = ['hls.js', 'hls.light.js'];
+const EMBED_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, 'packages', 'embed', 'package.json'), 'utf8')
+).version;
+const SHARED_CHUNKS = [`hls.${EMBED_VERSION}.js`, `hls.light.${EMBED_VERSION}.js`];
 
 /**
  * Every relative module specifier a bundle references.
@@ -166,4 +175,4 @@ if (unexpected.length > 0 || absent.length > 0) {
   process.exit(1);
 }
 
-console.log('OK: the only unprefixed chunks in dist are hls.js and hls.light.js.');
+console.log(`OK: the only unprefixed chunks in dist are ${SHARED_CHUNKS.join(' and ')}.`);

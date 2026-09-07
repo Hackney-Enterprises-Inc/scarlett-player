@@ -12,6 +12,7 @@
  */
 
 import type { IPluginAPI, PluginType } from '@scarlett-player/core';
+import { formatTime, SHARED_ICON_PATHS } from '@scarlett-player/core';
 import type {
   AudioUIPluginConfig,
   AudioUILayout,
@@ -29,6 +30,12 @@ export type {
 import { PKG_VERSION } from './version';
 
 /** Default theme */
+/** Seconds an arrow key moves the progress bar, matching the video UI. */
+const SEEK_STEP_SECONDS = 5;
+
+/** Volume an arrow key moves the slider, as a fraction of full scale. */
+const VOLUME_STEP = 0.05;
+
 const DEFAULT_THEME: AudioUITheme = {
   primary: '#6366f1',
   background: '#18181b',
@@ -55,22 +62,6 @@ const DEFAULT_CONFIG: AudioUIPluginConfig = {
   autoHide: 0,
   theme: DEFAULT_THEME,
 };
-
-/**
- * Format time in MM:SS or HH:MM:SS
- */
-function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || seconds < 0) return '0:00';
-
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 /**
  * Create styles for the audio UI
@@ -346,8 +337,15 @@ function createStyles(prefix: string, theme: AudioUITheme): string {
 /**
  * SVG Icons
  */
+/**
+ * Icon markup for this package's buttons.
+ *
+ * The three glyphs `ui` draws identically come from core's SHARED_ICON_PATHS;
+ * this package's `<svg>` wrapper carries no `fill`, so it inherits colour from
+ * the audio stylesheet instead.
+ */
 const ICONS = {
-  play: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`,
+  play: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.play}"/></svg>`,
   pause: `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
   previous: `<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>`,
   next: `<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>`,
@@ -355,8 +353,8 @@ const ICONS = {
   repeatOff: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
   repeatAll: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>`,
   repeatOne: `<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg>`,
-  volumeHigh: `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
-  volumeMuted: `<svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
+  volumeHigh: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.volumeHigh}"/></svg>`,
+  volumeMuted: `<svg viewBox="0 0 24 24"><path d="${SHARED_ICON_PATHS.volumeMuted}"/></svg>`,
   music: `<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`,
 };
 
@@ -640,6 +638,38 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       api?.emit('playback:seeking', { time });
     });
 
+    // Progress bar keyboard seek. Both sliders carry role="slider" and
+    // tabindex="0" already, so a keyboard viewer could focus them and then had
+    // nothing to press.
+    progressBar?.addEventListener('keydown', (e: Event) => {
+      const key = (e as KeyboardEvent).key;
+      const duration = api?.getState('duration') || 0;
+      const currentTime = api?.getState('currentTime') || 0;
+      // On live DVR the seekable window, not [0, duration], bounds a seek - the
+      // same rule the chapters plugin's seekTo applies. Home and ArrowLeft must
+      // not target a time before the window start, and End rides the window
+      // edge rather than duration, which a live stream reports as Infinity.
+      const live = api?.getState('live') === true;
+      const seekableRange = live ? api?.getState('seekableRange') : null;
+      const min = seekableRange?.start ?? 0;
+      const max = seekableRange?.end ?? duration;
+      let time: number | null = null;
+
+      if (key === 'ArrowLeft') time = currentTime - SEEK_STEP_SECONDS;
+      else if (key === 'ArrowRight') time = currentTime + SEEK_STEP_SECONDS;
+      else if (key === 'Home') time = min;
+      else if (key === 'End') time = max;
+      if (time === null) return;
+
+      // A stale currentTime can sit outside the live window (e.g. after the
+      // window slides past the last reported playhead), so every computed
+      // seek is clamped into [min, max] before emitting.
+      time = Math.min(max, Math.max(min, time));
+
+      e.preventDefault();
+      api?.emit('playback:seeking', { time });
+    });
+
     // Volume slider
     const volumeSlider = container.querySelector(`.${prefix}__volume-slider`);
     volumeSlider?.addEventListener('click', (e: Event) => {
@@ -648,6 +678,46 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
       const percent = Math.max(0, Math.min(1, (mouseEvent.clientX - rect.left) / rect.width));
       api?.emit('volume:change', { volume: percent, muted: false });
     });
+
+    volumeSlider?.addEventListener('keydown', (e: Event) => {
+      const key = (e as KeyboardEvent).key;
+      const current = api?.getState('volume') ?? 1;
+      let volume: number | null = null;
+
+      if (key === 'ArrowLeft' || key === 'ArrowDown') {
+        volume = Math.max(0, current - VOLUME_STEP);
+      } else if (key === 'ArrowRight' || key === 'ArrowUp') {
+        volume = Math.min(1, current + VOLUME_STEP);
+      } else if (key === 'Home') {
+        volume = 0;
+      } else if (key === 'End') {
+        volume = 1;
+      }
+      if (volume === null) return;
+
+      e.preventDefault();
+      // Any deliberate volume change unmutes: a viewer pressing ArrowUp on a
+      // muted player means "louder", not "louder but still silent".
+      api?.emit('volume:change', { volume, muted: false });
+    });
+  };
+
+  /**
+   * Write an icon into a button, but only when it actually changed.
+   *
+   * `updateUI()` runs on every state change, including every `currentTime`
+   * tick, and each `innerHTML` write reparses the SVG and discards the live
+   * node. Keyed by the icon string itself rather than by a remembered state
+   * flag, so it cannot go stale after a layout rebuild replaces the elements.
+   *
+   * @param el - Button to update, if it exists in the current layout
+   * @param icon - Icon markup to render
+   */
+  const setIcon = (el: HTMLElement | null, icon: string): void => {
+    if (!el || el.dataset.icon === icon) return;
+
+    el.dataset.icon = icon;
+    el.innerHTML = icon;
   };
 
   /**
@@ -662,7 +732,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
     isPlaying = playing;
 
     if (playPauseBtn) {
-      playPauseBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
+      setIcon(playPauseBtn, playing ? ICONS.pause : ICONS.play);
       playPauseBtn.title = playing ? 'Pause' : 'Play';
       playPauseBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     }
@@ -738,7 +808,7 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
     }
 
     if (volumeBtn) {
-      volumeBtn.innerHTML = muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh;
+      setIcon(volumeBtn, muted || volume === 0 ? ICONS.volumeMuted : ICONS.volumeHigh);
       volumeBtn.setAttribute('aria-label', muted || volume === 0 ? 'Unmute' : 'Mute');
     }
 
@@ -765,13 +835,13 @@ export function createAudioUIPlugin(config?: Partial<AudioUIPluginConfig>): IAud
         repeatBtn.classList.toggle(`${prefix}__btn--active`, state.repeat !== 'none');
         repeatBtn.setAttribute('aria-pressed', String(state.repeat !== 'none'));
         if (state.repeat === 'one') {
-          repeatBtn.innerHTML = ICONS.repeatOne;
+          setIcon(repeatBtn, ICONS.repeatOne);
           repeatBtn.setAttribute('aria-label', 'Repeat one');
         } else if (state.repeat === 'all') {
-          repeatBtn.innerHTML = ICONS.repeatAll;
+          setIcon(repeatBtn, ICONS.repeatAll);
           repeatBtn.setAttribute('aria-label', 'Repeat all');
         } else {
-          repeatBtn.innerHTML = ICONS.repeatOff;
+          setIcon(repeatBtn, ICONS.repeatOff);
           repeatBtn.setAttribute('aria-label', 'Repeat off');
         }
       }

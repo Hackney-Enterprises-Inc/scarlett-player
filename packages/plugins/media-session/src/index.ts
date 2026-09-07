@@ -134,6 +134,35 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
 
     const seekOffset = mergedConfig.seekOffset || 10;
 
+    /**
+     * Bounds for a seek: the DVR window on live, `[0, duration]` otherwise.
+     *
+     * Read per handler call rather than captured: a live window slides, and the
+     * handlers are registered once per source. On a live stream `duration` is
+     * `Infinity` or arbitrary and the window starts at `seekableRange.start`,
+     * so clamping against `[0, duration]` seeks outside the buffer.
+     *
+     * An unknown duration yields an open upper bound rather than `0`: before
+     * metadata arrives, clamping an OS scrubber's request to the start of the
+     * stream is worse than not clamping it.
+     *
+     * @returns The lowest and highest seekable positions, in seconds
+     */
+    const seekBounds = (): { min: number; max: number } => {
+      const live = api?.getState('live');
+      const seekable = api?.getState('seekableRange');
+
+      if (live && Number.isFinite(seekable?.start) && Number.isFinite(seekable?.end)) {
+        return { min: seekable!.start, max: seekable!.end };
+      }
+
+      const duration = api?.getState('duration') || 0;
+      return {
+        min: 0,
+        max: Number.isFinite(duration) && duration > 0 ? duration : Infinity,
+      };
+    };
+
     // Play/Pause actions
     if (mergedConfig.enablePlayPause) {
       try {
@@ -148,9 +177,12 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
         });
 
         navigator.mediaSession.setActionHandler('stop', () => {
-          api?.logger.debug('Media session: stop');
+          // The start of the seekable window, not 0: on a live DVR stream 0 is
+          // outside the buffer entirely.
+          const { min } = seekBounds();
+          api?.logger.debug('Media session: stop', { time: min });
           api?.emit('playback:pause', undefined as any);
-          api?.emit('playback:seeking', { time: 0 });
+          api?.emit('playback:seeking', { time: min });
         });
       } catch (e) {
         api?.logger.debug('Some play/pause actions not supported', e);
@@ -163,7 +195,12 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
         navigator.mediaSession.setActionHandler('seekbackward', (details) => {
           const offset = details.seekOffset || seekOffset;
           const currentTime = api?.getState('currentTime') || 0;
-          const newTime = Math.max(0, currentTime - offset);
+          const { min, max } = seekBounds();
+          // Clamped at both ends, not just the one the seek moves toward: a
+          // currentTime recorded before the DVR window slid can already sit
+          // outside the range, and a one-sided clamp would leave the target
+          // outside it too.
+          const newTime = Math.min(max, Math.max(min, currentTime - offset));
           api?.logger.debug('Media session: seekbackward', { offset, newTime });
           api?.emit('playback:seeking', { time: newTime });
         });
@@ -171,16 +208,20 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
         navigator.mediaSession.setActionHandler('seekforward', (details) => {
           const offset = details.seekOffset || seekOffset;
           const currentTime = api?.getState('currentTime') || 0;
-          const duration = api?.getState('duration') || 0;
-          const newTime = Math.min(duration, currentTime + offset);
+          const { min, max } = seekBounds();
+          const newTime = Math.max(min, Math.min(max, currentTime + offset));
           api?.logger.debug('Media session: seekforward', { offset, newTime });
           api?.emit('playback:seeking', { time: newTime });
         });
 
         navigator.mediaSession.setActionHandler('seekto', (details) => {
           if (details.seekTime !== undefined) {
-            api?.logger.debug('Media session: seekto', { time: details.seekTime });
-            api?.emit('playback:seeking', { time: details.seekTime });
+            // The OS scrubber reports a position against the duration it was
+            // told about, which on live is not the seekable window.
+            const { min, max } = seekBounds();
+            const newTime = Math.max(min, Math.min(max, details.seekTime));
+            api?.logger.debug('Media session: seekto', { time: newTime });
+            api?.emit('playback:seeking', { time: newTime });
           }
         });
       } catch (e) {

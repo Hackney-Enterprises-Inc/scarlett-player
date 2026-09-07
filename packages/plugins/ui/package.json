@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.8.0"
+    "@scarlett-player/core": "^1.10.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",

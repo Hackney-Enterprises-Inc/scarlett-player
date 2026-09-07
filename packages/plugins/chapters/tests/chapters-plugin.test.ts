@@ -295,6 +295,47 @@ describe('createChaptersPlugin', () => {
     expect(plugin.getChapters()).toEqual([]);
   });
 
+  it('defers a config.src attach until a media element exists', () => {
+    const api = createMockApi();
+    api.container.querySelector('video')?.remove();
+
+    // Capture the loadedmetadata handler the plugin registers.
+    const handlers: Record<string, () => void> = {};
+    api.on = vi.fn((event: string, cb: () => void) => {
+      handlers[event] = cb;
+      return vi.fn();
+    }) as never;
+
+    const plugin = createChaptersPlugin({ src: 'chapters.vtt' });
+    plugin.init(api as never);
+
+    // vtt.ts returns a no-op cleanup and never retries when the element is
+    // missing, so init() must not burn its single attempt here.
+    expect(api.container.querySelector('track')).toBeNull();
+    expect(api.logger.warn).not.toHaveBeenCalled();
+
+    const video = document.createElement('video');
+    api.container.appendChild(video);
+    handlers['media:loadedmetadata']?.();
+
+    const track = api.container.querySelector('track');
+    expect(track).not.toBeNull();
+    expect(track?.getAttribute('kind')).toBe('chapters');
+
+    // A second loadedmetadata must not stack a second track element.
+    handlers['media:loadedmetadata']?.();
+    expect(api.container.querySelectorAll('track')).toHaveLength(1);
+  });
+
+  it('attaches config.src immediately when the element is already there', () => {
+    const api = createMockApi();
+    const plugin = createChaptersPlugin({ src: 'chapters.vtt' });
+
+    plugin.init(api as never);
+
+    expect(api.container.querySelector('track[kind="chapters"]')).not.toBeNull();
+  });
+
   it('survives a chapter seek when the container has no media element', () => {
     const api = createMockApi();
     api.container.querySelector('video')?.remove();

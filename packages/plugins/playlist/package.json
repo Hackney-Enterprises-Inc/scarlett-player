@@ -29,8 +29,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
-    "@scarlett-player/core": "^1.8.0",
-    "@scarlett-player/ui": "^1.8.0"
+    "@scarlett-player/core": "^1.9.0",
+    "@scarlett-player/ui": "^1.9.0"
   },
   "devDependencies": {
     "@scarlett-player/core": "workspace:*",

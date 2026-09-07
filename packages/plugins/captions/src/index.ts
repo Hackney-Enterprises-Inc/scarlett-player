@@ -4,7 +4,8 @@
  * Provides WebVTT subtitle/caption support with:
  * - External WebVTT file loading via <track> elements
  * - HLS.js subtitle track extraction, driven by Hls.Events.SUBTITLE_TRACKS_UPDATED
- *   (emitted as 'hlsSubtitleTracksUpdated')
+ *   (emitted as 'hlsSubtitleTracksUpdated'), and state resync on
+ *   Hls.Events.SUBTITLE_TRACK_SWITCH (emitted as 'hlsSubtitleTrackSwitch')
  * - Native HLS support (Safari/iOS) by observing the video's TextTrackList
  * - Browser-native rendering (no custom VTT parser)
  * - State sync with core textTracks/currentTextTrack
@@ -52,6 +53,17 @@ interface HlsPluginLike {
  */
 const HLS_SUBTITLE_TRACKS_UPDATED = 'hlsSubtitleTracksUpdated';
 
+/**
+ * hls.js emits this when it switches subtitle rendition itself - an automatic
+ * switch, or Safari's own subtitle menu. Neither routes through selectTrack(),
+ * so without this the player's `currentTextTrack` state goes stale and the UI
+ * keeps a checkmark on the wrong entry.
+ *
+ * The emitted value of `Hls.Events.SUBTITLE_TRACK_SWITCH`, not the enum key -
+ * same rule as {@link HLS_SUBTITLE_TRACKS_UPDATED} above.
+ */
+const HLS_SUBTITLE_TRACK_SWITCH = 'hlsSubtitleTrackSwitch';
+
 /** Only used when the HLS instance isn't reachable yet at media:loaded. */
 const HLS_INSTANCE_RETRY_MS = 500;
 
@@ -86,6 +98,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   let video: HTMLVideoElement | null = null;
   let addedTrackElements: HTMLTrackElement[] = [];
   let hlsSubtitleHandler: ((...args: unknown[]) => void) | null = null;
+  let hlsSubtitleSwitchHandler: ((...args: unknown[]) => void) | null = null;
   let observedTextTracks: TextTrackList | null = null;
   let hlsRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let hlsRetryUsed = false;
@@ -333,11 +346,19 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       hlsRetryTimer = null;
     }
 
-    if (!hlsSubtitleHandler) return;
+    if (!hlsSubtitleHandler && !hlsSubtitleSwitchHandler) return;
 
     const hlsInstance = api?.getPlugin<HlsPluginLike>('hls-provider')?.getHlsInstance();
-    hlsInstance?.off(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
-    hlsSubtitleHandler = null;
+
+    if (hlsSubtitleHandler) {
+      hlsInstance?.off(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+      hlsSubtitleHandler = null;
+    }
+
+    if (hlsSubtitleSwitchHandler) {
+      hlsInstance?.off(HLS_SUBTITLE_TRACK_SWITCH, hlsSubtitleSwitchHandler);
+      hlsSubtitleSwitchHandler = null;
+    }
   };
 
   /**
@@ -373,6 +394,14 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     unsubscribeFromHls();
     hlsSubtitleHandler = (): void => extractHlsSubtitles();
     hlsInstance.on(HLS_SUBTITLE_TRACKS_UPDATED, hlsSubtitleHandler);
+
+    // Follow the switch, but only to re-read the element. Writing back to
+    // hlsInstance.subtitleTrack from here would put us back in the territory of
+    // the 2026-08-10 duplicate-track incident documented in
+    // extractHlsSubtitles(); syncTracksToState() is the single writer of
+    // textTracks/currentTextTrack and stays that way.
+    hlsSubtitleSwitchHandler = (): void => syncTracksToState();
+    hlsInstance.on(HLS_SUBTITLE_TRACK_SWITCH, hlsSubtitleSwitchHandler);
 
     extractHlsSubtitles();
   };

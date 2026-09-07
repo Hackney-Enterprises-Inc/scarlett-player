@@ -67,6 +67,12 @@ export { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 // Re-export URL sanitizer for telemetry-safe logging across packages
 export { sanitizeUrl } from './utils/url';
 
+// Re-export the shared clock so ui and audio-ui render identical times
+export { formatTime, formatLiveTime } from './utils/format';
+
+// Re-export the SVG path data ui and audio-ui both draw
+export { SHARED_ICON_PATHS } from './utils/icon-paths';
+
 // Re-export the shared stylesheet helper so plugins that inject one <style>
 // per document all reference-count it the same way
 export {

@@ -136,14 +136,28 @@
         })
         .catch((error) => {
           console.error('Failed to load Scarlett Player:', error);
-          document.body.innerHTML = `
-            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: white; font-family: sans-serif; text-align: center; padding: 20px;">
-              <div>
-                <h1 style="margin-bottom: 10px;">Error Loading Player</h1>
-                <p>${error.message}</p>
-              </div>
-            </div>
-          `;
+
+          // Built as nodes, not interpolated into innerHTML: error.message can
+          // carry the src from the query string, and this page is served from
+          // the CDN origin, so an injected <img onerror> would run there.
+          document.body.textContent = '';
+
+          const wrap = document.createElement('div');
+          wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;' +
+            'height:100%;color:white;font-family:sans-serif;text-align:center;padding:20px';
+
+          const inner = document.createElement('div');
+
+          const heading = document.createElement('h1');
+          heading.style.marginBottom = '10px';
+          heading.textContent = 'Error Loading Player';
+
+          const message = document.createElement('p');
+          message.textContent = error && error.message ? error.message : 'Unknown error';
+
+          inner.append(heading, message);
+          wrap.appendChild(inner);
+          document.body.appendChild(wrap);
         });
     }
   </script>

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSharePlugin } from '../src/index';
-import { applyTimestamp, resolveBaseUrl } from '../src/url';
+import { applyTimestamp, resolveBaseUrl, stripCredentials } from '../src/url';
 import { resolveTargets } from '../src/targets';
 import { ShareButton } from '../src/ShareButton';
 import { sanitizeIcon } from '../src/sanitize';
@@ -97,6 +97,54 @@ describe('URL resolution', () => {
     expect(resolveBaseUrl(config)).toBe('https://tsp.test/watch/one');
     current = 'https://tsp.test/watch/two';
     expect(resolveBaseUrl(config)).toBe('https://tsp.test/watch/two');
+  });
+
+  it('drops credential query params from the page URL', () => {
+    const href = 'https://tsp.test/watch?v=abc123&token=xyz&Signature=sig';
+    const result = stripCredentials(href);
+
+    expect(result).toBe('https://tsp.test/watch?v=abc123');
+  });
+
+  it('drops OAuth id and refresh tokens', () => {
+    expect(stripCredentials('https://tsp.test/watch?v=abc&id_token=jwt&refresh_token=r')).toBe(
+      'https://tsp.test/watch?v=abc',
+    );
+  });
+
+  it('drops AWS presigned and CloudFront signed-URL params', () => {
+    // A page served straight out of S3 carries the whole SigV4 set in its
+    // query, in the vendor's own capitalisation.
+    const href =
+      'https://tsp.test/watch?v=abc&X-Amz-Algorithm=AWS4-HMAC-SHA256' +
+      '&X-Amz-Credential=AKIA%2F20260907%2Fus-east-1%2Fs3%2Faws4_request' +
+      '&X-Amz-Date=20260907T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host' +
+      '&X-Amz-Signature=deadbeef&X-Amz-Security-Token=tok&Key-Pair-Id=KP';
+
+    expect(stripCredentials(href)).toBe('https://tsp.test/watch?v=abc');
+  });
+
+  it('keeps page identity params, which is why this is a denylist', () => {
+    // origin + pathname would share the wrong video from /watch?v=abc123.
+    expect(stripCredentials('https://tsp.test/watch?v=abc123')).toBe(
+      'https://tsp.test/watch?v=abc123',
+    );
+  });
+
+  it('drops the fragment, where implicit-flow tokens land', () => {
+    expect(stripCredentials('https://tsp.test/watch?v=abc#access_token=xyz')).toBe(
+      'https://tsp.test/watch?v=abc',
+    );
+  });
+
+  it('returns an unparseable URL unchanged rather than throwing', () => {
+    expect(stripCredentials('not a url')).toBe('not a url');
+  });
+
+  it('returns an explicit config.url verbatim, credentials and all', () => {
+    // The host said what to share; filtering it would be second-guessing.
+    const url = 'https://tsp.test/watch?v=abc&token=xyz#frag';
+    expect(resolveBaseUrl({ url })).toBe(url);
   });
 
   it('never shares the media src', async () => {

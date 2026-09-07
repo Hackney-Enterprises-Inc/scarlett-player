@@ -17,6 +17,7 @@ declare module '../../src/types/state' {
   interface StateStore {
     testPluginValue: number;
     testPluginSelection: { start: number; end: number } | null;
+    testPluginGraph: unknown;
   }
 }
 
@@ -63,6 +64,79 @@ describe('StateManager.define', () => {
     state.define('testPluginValue', 1);
 
     expect(state.getValue('testPluginValue')).toBe(42);
+  });
+
+  it('stays silent when a re-define passes the same default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    state.define('testPluginValue', 1);
+    state.define('testPluginValue', 1);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns once and keeps the first value when two defaults conflict', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    state.define('testPluginValue', 1);
+    state.define('testPluginValue', 2);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('testPluginValue');
+    expect(state.getValue('testPluginValue')).toBe(1);
+    warn.mockRestore();
+  });
+
+  it('warns when a plugin claims a core key with a different default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Core keys never reach definedDefaults, so the comparison has to fall
+    // back to DEFAULT_STATE - without that, a plugin quietly taking over
+    // `volume` looked like a first definition and never warned.
+    state.define('volume', 0.5);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('volume');
+    expect(state.getValue('volume')).toBe(1.0);
+    warn.mockRestore();
+  });
+
+  it('stays silent when a core key is redefined with its own default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    state.define('volume', 1.0);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns when a key defined as undefined is later claimed with a value', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // `undefined` is a default like any other; testing the stored value for
+    // undefined instead of testing for membership hid this collision.
+    state.define('testPluginGraph', undefined);
+    state.define('testPluginGraph', 5);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(state.getValue('testPluginGraph')).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it('warns without throwing on a default JSON cannot serialise', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    state.define('testPluginGraph', circular);
+
+    // A circular default or a BigInt threw out of the diagnostic, which turned
+    // a warning into a broken define().
+    expect(() => state.define('testPluginGraph', { other: true })).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(state.getValue('testPluginGraph')).toBe(circular);
+    warn.mockRestore();
   });
 
   it('does not resubscribe on re-define', () => {

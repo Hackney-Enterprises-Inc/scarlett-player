@@ -3,6 +3,11 @@
  *
  * Lazily loads hls.js only when needed (not in Safari which uses native HLS).
  * This keeps bundle size small when hls.js isn't required.
+ *
+ * hls.js is the standard playback path. Native HLS is chosen only when
+ * AirPlay is active (hls.js uses MSE, which AirPlay cannot mirror) or when
+ * MSE is unsupported - both decisions live in `create-hls-plugin.ts`, not
+ * here.
  */
 
 import type { HlsConstructor, HlsInstance } from './types';
@@ -21,22 +26,6 @@ export function supportsNativeHLS(): boolean {
   if (typeof document === 'undefined') return false;
   const video = document.createElement('video');
   return video.canPlayType('application/vnd.apple.mpegurl') !== '';
-}
-
-/**
- * Check if we should prefer native HLS over hls.js.
- * Safari should use native HLS for AirPlay compatibility.
- * hls.js uses MSE which doesn't work with AirPlay.
- */
-export function shouldPreferNativeHLS(): boolean {
-  if (!supportsNativeHLS()) return false;
-
-  // Detect Safari (but not Chrome on iOS which also has native HLS)
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent;
-  const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua) && !/CriOS/.test(ua);
-
-  return isSafari;
 }
 
 /**

@@ -203,7 +203,10 @@ export class StateManager {
    * untouched. Plugins commonly re-run setup after a source change, and that
    * must not reset state that is already live.
    *
-   * Namespace plugin keys with the plugin's own name to avoid collisions.
+   * Namespace plugin keys with the plugin's own name to avoid collisions. A
+   * redefinition with a *different* default is a collision rather than a
+   * re-run, so it warns: the first definition still wins, but silently
+   * diverging state was previously impossible to diagnose.
    *
    * @param key - State property key
    * @param initialValue - Value used only when the key is new
@@ -215,6 +218,31 @@ export class StateManager {
    */
   define<K extends StateKey>(key: K, initialValue: StateValue<K>): void {
     if (this.signals.has(key)) {
+      // Membership, not a truthy value: a key defined with an explicit
+      // `undefined` default is still defined, and a second plugin claiming it
+      // with a real default is still a collision. Core keys never reach
+      // definedDefaults, so theirs comes from DEFAULT_STATE instead - without
+      // that, redefining `volume` or `muted` passed unnoticed.
+      const isPluginKey = this.definedDefaults.has(key);
+      const isCoreKey = key in DEFAULT_STATE;
+      const existing = isPluginKey
+        ? this.definedDefaults.get(key)
+        : (DEFAULT_STATE as unknown as Record<string, unknown>)[key as string];
+
+      // A re-run of the same plugin's setup passes the same default and stays
+      // quiet; two plugins claiming one key with different defaults do not.
+      if ((isPluginKey || isCoreKey) && !Object.is(existing, initialValue)) {
+        // The values go to console.warn as arguments rather than through
+        // JSON.stringify: a circular default or a BigInt would throw out of
+        // the diagnostic and turn a warning into a broken define().
+        console.warn(
+          `[StateManager] State key "${String(key)}" is already defined with a ` +
+            `different default. Keeping:`,
+          existing,
+          'ignoring:',
+          initialValue
+        );
+      }
       return;
     }
 

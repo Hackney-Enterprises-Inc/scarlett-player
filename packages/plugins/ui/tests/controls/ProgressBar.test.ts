@@ -297,13 +297,26 @@ describe('ProgressBar', () => {
     expect(el.classList.contains('sp-progress--dragging')).toBe(false);
   });
 
-  it('should hide tooltip on mouse leave when not dragging', () => {
+  it('should clear the inline tooltip opacity on mouse leave, not zero it', () => {
+    // This test used to assert '0', which encoded the bug: an inline style
+    // outranks `.sp-progress-wrapper:hover .sp-progress__tooltip { opacity: 1 }`,
+    // so the tooltip never came back on a later hover.
     const wrapper = progressBar.render();
     const tooltip = wrapper.querySelector('.sp-progress__tooltip') as HTMLElement;
 
+    wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 50 }));
     wrapper.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
 
-    expect(tooltip.style.opacity).toBe('0');
+    expect(tooltip.style.opacity).toBe('');
+  });
+
+  it('should leave the stylesheet in charge after a touch ends', () => {
+    const wrapper = progressBar.render();
+    const tooltip = wrapper.querySelector('.sp-progress__tooltip') as HTMLElement;
+
+    document.dispatchEvent(new TouchEvent('touchend', { bubbles: true }));
+
+    expect(tooltip.style.opacity).toBe('');
   });
 
   // --- Show / Hide ---
@@ -322,6 +335,16 @@ describe('ProgressBar', () => {
   });
 
   // --- Cleanup ---
+
+  it('should remove the keydown listener on destroy', () => {
+    const wrapper = progressBar.render();
+    const el = wrapper.querySelector('.sp-progress') as HTMLElement;
+    const removeSpy = vi.spyOn(el, 'removeEventListener');
+
+    progressBar.destroy();
+
+    expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
+  });
 
   it('should remove document-level event listeners on destroy', () => {
     progressBar.render();
