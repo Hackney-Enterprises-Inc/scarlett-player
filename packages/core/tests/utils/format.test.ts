@@ -46,4 +46,16 @@ describe('formatLiveTime', () => {
     expect(formatLiveTime(65)).toBe('-1:05');
     expect(formatLiveTime(3665)).toBe('-1:01:05');
   });
+
+  it('should return LIVE for a non-finite distance', () => {
+    // formatTime maps NaN and Infinity to '0:00', so falling through rendered
+    // '-0:00' - a precise-looking offset built from an unknown seekable end.
+    expect(formatLiveTime(NaN)).toBe('LIVE');
+    expect(formatLiveTime(Infinity)).toBe('LIVE');
+    expect(formatLiveTime(-Infinity)).toBe('LIVE');
+  });
+
+  it('should still render a finite sub-second distance', () => {
+    expect(formatLiveTime(0.4)).toBe('-0:00');
+  });
 });

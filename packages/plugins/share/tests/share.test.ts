@@ -106,6 +106,24 @@ describe('URL resolution', () => {
     expect(result).toBe('https://tsp.test/watch?v=abc123');
   });
 
+  it('drops OAuth id and refresh tokens', () => {
+    expect(stripCredentials('https://tsp.test/watch?v=abc&id_token=jwt&refresh_token=r')).toBe(
+      'https://tsp.test/watch?v=abc',
+    );
+  });
+
+  it('drops AWS presigned and CloudFront signed-URL params', () => {
+    // A page served straight out of S3 carries the whole SigV4 set in its
+    // query, in the vendor's own capitalisation.
+    const href =
+      'https://tsp.test/watch?v=abc&X-Amz-Algorithm=AWS4-HMAC-SHA256' +
+      '&X-Amz-Credential=AKIA%2F20260907%2Fus-east-1%2Fs3%2Faws4_request' +
+      '&X-Amz-Date=20260907T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host' +
+      '&X-Amz-Signature=deadbeef&X-Amz-Security-Token=tok&Key-Pair-Id=KP';
+
+    expect(stripCredentials(href)).toBe('https://tsp.test/watch?v=abc');
+  });
+
   it('keeps page identity params, which is why this is a denylist', () => {
     // origin + pathname would share the wrong video from /watch?v=abc123.
     expect(stripCredentials('https://tsp.test/watch?v=abc123')).toBe(

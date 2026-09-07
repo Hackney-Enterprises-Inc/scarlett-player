@@ -618,6 +618,22 @@ describe('action handlers', () => {
       expect(lastSeek()).toBe(200);
     });
 
+    it('seekbackward clamps a currentTime that sits ahead of the window', () => {
+      // A position recorded before the window slid can be outside it; clamping
+      // only at the start left the target outside it too.
+      liveWindow(400);
+      actionHandlers['seekbackward']({ seekOffset: 10 });
+
+      expect(lastSeek()).toBe(200);
+    });
+
+    it('seekforward clamps a currentTime that sits behind the window', () => {
+      liveWindow(50);
+      actionHandlers['seekforward']({ seekOffset: 10 });
+
+      expect(lastSeek()).toBe(100);
+    });
+
     it('seekto clamps to the window at both ends', () => {
       liveWindow(150);
 

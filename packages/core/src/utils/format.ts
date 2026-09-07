@@ -54,17 +54,22 @@ export function formatTime(seconds: number): string {
 /**
  * Format a live stream position as a distance behind the live edge.
  *
- * @param behindLive - Seconds behind the live edge; zero or less means live
+ * @param behindLive - Seconds behind the live edge; zero, less, or non-finite
+ *                     means live
  * @returns `'LIVE'` at the edge, otherwise a negative offset such as `'-0:12'`
  *
  * @example
  * ```ts
- * formatLiveTime(0);  // 'LIVE'
- * formatLiveTime(12); // '-0:12'
+ * formatLiveTime(0);   // 'LIVE'
+ * formatLiveTime(12);  // '-0:12'
+ * formatLiveTime(NaN); // 'LIVE'
  * ```
  */
 export function formatLiveTime(behindLive: number): string {
-  if (behindLive <= 0) {
+  // A non-finite distance means the seekable end is not known yet. Falling
+  // through would render `-0:00`, since formatTime maps NaN and Infinity to
+  // '0:00' - a precise-looking offset built from nothing.
+  if (!Number.isFinite(behindLive) || behindLive <= 0) {
     return 'LIVE';
   }
 

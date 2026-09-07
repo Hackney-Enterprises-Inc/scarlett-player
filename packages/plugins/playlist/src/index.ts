@@ -280,8 +280,10 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     if (!mergedConfig.persist) return;
 
     // Config wins: a caller that supplied tracks did not ask for whatever this
-    // browser happens to have in storage under a shared key.
-    if (mergedConfig.tracks?.length) return;
+    // browser happens to have in storage under a shared key. `tracks: []` is a
+    // supplied value too - an explicitly empty playlist, not "no preference" -
+    // so the test is whether the key was passed, not how long it is.
+    if (mergedConfig.tracks !== undefined) return;
 
     try {
       const data = localStorage.getItem(mergedConfig.persistKey!);
@@ -293,7 +295,9 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
       tracks = restored;
 
-      const index = typeof parsed.currentIndex === 'number' ? parsed.currentIndex : -1;
+      // Only an integer can address a track: a fractional index survives the
+      // clamp and then indexes nothing, leaving the playlist on a null track.
+      const index = Number.isInteger(parsed.currentIndex) ? (parsed.currentIndex as number) : -1;
       currentIndex = index >= 0 ? Math.min(index, tracks.length - 1) : -1;
       shuffle = parsed.shuffle === true;
       repeat = parsed.repeat === 'one' || parsed.repeat === 'all' ? parsed.repeat : 'none';
@@ -377,8 +381,11 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       // Load persisted playlist
       loadPersistedPlaylist();
 
-      // Generate initial shuffle order if needed
-      if (shuffle && tracks.length > 0) {
+      // Generate initial shuffle order if needed. A restored order that still
+      // covers every track is the permutation the listener was part-way
+      // through, so it is kept: regenerating unconditionally reshuffled a
+      // persisted session on every reload.
+      if (shuffle && tracks.length > 0 && shuffleOrder.length !== tracks.length) {
         generateShuffleOrder();
       }
 

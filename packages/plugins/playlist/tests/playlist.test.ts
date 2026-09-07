@@ -855,6 +855,66 @@ describe('persistence', () => {
     expect(plugin.getState().tracks[0].title).toBe('Track 1');
   });
 
+  it('treats tracks: [] as a supplied empty playlist, not as no preference', async () => {
+    // An explicitly empty list is still the caller speaking; the length test
+    // let storage refill a playlist the host had deliberately emptied.
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({ tracks: [{ id: 'saved', src: 'saved.mp3', title: 'Saved Track' }] })
+    );
+
+    const plugin = createPlaylistPlugin({
+      persist: true,
+      persistKey: 'test-playlist',
+      tracks: [],
+    });
+    await plugin.init(createMockApi());
+
+    expect(plugin.getState().tracks).toEqual([]);
+  });
+
+  it('rejects a fractional persisted currentIndex', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({
+        tracks: [
+          { id: 'a', src: 'a.mp3' },
+          { id: 'b', src: 'b.mp3' },
+        ],
+        currentIndex: 1.5,
+      })
+    );
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    // 1.5 passes a >= 0 test and survives the clamp, then indexes nothing.
+    expect(plugin.getState().currentIndex).toBe(-1);
+    expect(plugin.getCurrentTrack()).toBeNull();
+  });
+
+  it('keeps a restored shuffle order that still covers every track', async () => {
+    localStorageMock.clear();
+    localStorageMock.getItem.mockReturnValue(
+      JSON.stringify({
+        tracks: [
+          { id: 'a', src: 'a.mp3' },
+          { id: 'b', src: 'b.mp3' },
+          { id: 'c', src: 'c.mp3' },
+        ],
+        shuffle: true,
+        shuffleOrder: [2, 0, 1],
+      })
+    );
+
+    const plugin = createPlaylistPlugin({ persist: true, persistKey: 'test-playlist' });
+    await plugin.init(createMockApi());
+
+    // Regenerating unconditionally reshuffled a persisted session on reload,
+    // so the order was persisted and then immediately discarded.
+    expect(plugin.getState().shuffleOrder).toEqual([2, 0, 1]);
+  });
+
   it('survives corrupt JSON in storage', async () => {
     localStorageMock.clear();
     localStorageMock.getItem.mockReturnValue('{not json');

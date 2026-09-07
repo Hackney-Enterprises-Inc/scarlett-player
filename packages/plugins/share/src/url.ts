@@ -32,6 +32,8 @@ function resolve(value: string | (() => string) | undefined, fallback: () => str
 const CREDENTIAL_PARAMS = new Set([
   'token',
   'access_token',
+  'id_token',
+  'refresh_token',
   'auth',
   'authorization',
   'jwt',
@@ -45,6 +47,19 @@ const CREDENTIAL_PARAMS = new Set([
   'sessionid',
   'expires',
   'policy',
+  // CloudFront signed URLs. `signature`, `expires` and `policy` above cover
+  // the rest of the canned-policy set.
+  'key-pair-id',
+  // AWS SigV4 presigned URLs, which a page served straight out of S3 carries.
+  // The whole set goes, not just the signature: the remainder is unusable
+  // without it and only makes the shared link unreadable.
+  'x-amz-signature',
+  'x-amz-credential',
+  'x-amz-security-token',
+  'x-amz-expires',
+  'x-amz-algorithm',
+  'x-amz-date',
+  'x-amz-signedheaders',
 ]);
 
 /**

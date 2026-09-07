@@ -195,7 +195,12 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
         navigator.mediaSession.setActionHandler('seekbackward', (details) => {
           const offset = details.seekOffset || seekOffset;
           const currentTime = api?.getState('currentTime') || 0;
-          const newTime = Math.max(seekBounds().min, currentTime - offset);
+          const { min, max } = seekBounds();
+          // Clamped at both ends, not just the one the seek moves toward: a
+          // currentTime recorded before the DVR window slid can already sit
+          // outside the range, and a one-sided clamp would leave the target
+          // outside it too.
+          const newTime = Math.min(max, Math.max(min, currentTime - offset));
           api?.logger.debug('Media session: seekbackward', { offset, newTime });
           api?.emit('playback:seeking', { time: newTime });
         });
@@ -203,7 +208,8 @@ export function createMediaSessionPlugin(config?: Partial<MediaSessionPluginConf
         navigator.mediaSession.setActionHandler('seekforward', (details) => {
           const offset = details.seekOffset || seekOffset;
           const currentTime = api?.getState('currentTime') || 0;
-          const newTime = Math.min(seekBounds().max, currentTime + offset);
+          const { min, max } = seekBounds();
+          const newTime = Math.max(min, Math.min(max, currentTime + offset));
           api?.logger.debug('Media session: seekforward', { offset, newTime });
           api?.emit('playback:seeking', { time: newTime });
         });
