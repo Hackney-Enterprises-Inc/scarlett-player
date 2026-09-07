@@ -103,7 +103,7 @@
          * @internal
          */
         notify() {
-          this.subscribers.forEach((subscriber) => {
+          Array.from(this.subscribers).forEach((subscriber) => {
             try {
               subscriber();
             } catch (error) {
@@ -228,6 +228,12 @@
           /** Initial values for keys registered via define(), for reset support */
           this.definedDefaults = /* @__PURE__ */ new Map();
           /**
+           * Last value seen for each key, so a change event can report what the value
+           * was before it changed. Tracked here rather than in set() because a signal
+           * can also be written directly through get(key).set(value).
+           */
+          this.lastValues = /* @__PURE__ */ new Map();
+          /**
            * Set by destroy(). Kept so a read after teardown reports a lifecycle
            * problem instead of masquerading as an unknown-key typo.
            */
@@ -254,6 +260,7 @@
          */
         createSignal(key, value) {
           const stateSignal = signal(value);
+          this.lastValues.set(key, value);
           stateSignal.subscribe(() => {
             this.notifyChangeSubscribers(key);
           });
@@ -411,13 +418,14 @@
         notifyChangeSubscribers(key) {
           const stateSignal = this.get(key);
           const value = stateSignal.get();
+          const previousValue = this.lastValues.get(key);
+          this.lastValues.set(key, value);
           const event = {
             key,
             value,
-            previousValue: value
-            // Note: We don't track previous values in this simple impl
+            previousValue
           };
-          this.changeSubscribers.forEach((subscriber) => {
+          Array.from(this.changeSubscribers).forEach((subscriber) => {
             try {
               subscriber(event);
             } catch (error) {
@@ -498,6 +506,7 @@
           this.signals.forEach((stateSignal) => stateSignal.destroy());
           this.signals.clear();
           this.changeSubscribers.clear();
+          this.lastValues.clear();
           this.destroyed = true;
         }
       };
@@ -641,9 +650,12 @@
           if (onceHandlers) {
             const handlersArray = Array.from(onceHandlers);
             handlersArray.forEach((handler) => {
+              onceHandlers.delete(handler);
               this.safeCallHandler(handler, interceptedPayload);
             });
-            this.onceListeners.delete(event);
+            if (onceHandlers.size === 0) {
+              this.onceListeners.delete(event);
+            }
           }
         }
         /**
@@ -673,11 +685,14 @@
           const onceHandlers = this.onceListeners.get(event);
           if (onceHandlers) {
             const handlersArray = Array.from(onceHandlers);
-            const promises = handlersArray.map(
-              (handler) => this.safeCallHandlerAsync(handler, interceptedPayload)
-            );
+            const promises = handlersArray.map((handler) => {
+              onceHandlers.delete(handler);
+              return this.safeCallHandlerAsync(handler, interceptedPayload);
+            });
             await Promise.all(promises);
-            this.onceListeners.delete(event);
+            if (onceHandlers.size === 0) {
+              this.onceListeners.delete(event);
+            }
           }
         }
         /**
@@ -1475,6 +1490,8 @@
       PluginManager = class {
         constructor(eventBus, stateManager, logger2, options) {
           this.plugins = /* @__PURE__ */ new Map();
+          this.initPromises = /* @__PURE__ */ new Map();
+          this.initializingStack = /* @__PURE__ */ new Set();
           this.eventBus = eventBus;
           this.stateManager = stateManager;
           this.logger = logger2;
@@ -1527,41 +1544,61 @@
             throw new Error(`Plugin "${id}" not found`);
           }
           if (record.state === "ready") return;
-          if (record.state === "initializing") {
+          if (this.initializingStack.has(id)) {
             throw new Error(`Plugin "${id}" is already initializing (possible circular dependency)`);
           }
-          for (const depId of record.plugin.dependencies || []) {
-            const dep = this.plugins.get(depId);
-            if (!dep) {
-              throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
-            }
-            if (dep.state !== "ready") {
-              await this.initPlugin(depId);
-            }
+          const inFlight2 = this.initPromises.get(id);
+          if (inFlight2) {
+            return inFlight2;
           }
-          try {
-            record.state = "initializing";
-            if (record.plugin.onStateChange) {
-              const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
-              record.api.onDestroy(unsub);
-            }
-            if (record.plugin.onError) {
-              const unsub = this.eventBus.on("error", (err) => {
-                record.plugin.onError?.(err.originalError || new Error(err.message));
-              });
-              record.api.onDestroy(unsub);
-            }
-            await record.plugin.init(record.api, record.config);
-            record.state = "ready";
-            this.logger.info(`Plugin ready: ${id}`);
-            this.eventBus.emit("plugin:active", { name: id });
-          } catch (error) {
-            record.state = "error";
-            record.error = error;
-            this.logger.error(`Plugin init failed: ${id}`, { error });
-            this.eventBus.emit("plugin:error", { name: id, error });
-            throw error;
+          if (record.state === "initializing") {
+            const promise = this.initPromises.get(id);
+            if (promise) return promise;
+            return;
           }
+          const initPromise = (async () => {
+            this.initializingStack.add(id);
+            try {
+              for (const depId of record.plugin.dependencies || []) {
+                const dep = this.plugins.get(depId);
+                if (!dep) {
+                  throw new Error(`Plugin "${id}" depends on missing plugin "${depId}"`);
+                }
+                if (dep.state !== "ready") {
+                  await this.initPlugin(depId);
+                }
+              }
+            } finally {
+              this.initializingStack.delete(id);
+            }
+            try {
+              record.state = "initializing";
+              if (record.plugin.onStateChange) {
+                const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
+                record.api.onDestroy(unsub);
+              }
+              if (record.plugin.onError) {
+                const unsub = this.eventBus.on("error", (err) => {
+                  record.plugin.onError?.(err.originalError || new Error(err.message));
+                });
+                record.api.onDestroy(unsub);
+              }
+              await record.plugin.init(record.api, record.config);
+              record.state = "ready";
+              this.logger.info(`Plugin ready: ${id}`);
+              this.eventBus.emit("plugin:active", { name: id });
+            } catch (error) {
+              record.state = "error";
+              record.error = error;
+              this.logger.error(`Plugin init failed: ${id}`, { error });
+              this.eventBus.emit("plugin:error", { name: id, error });
+              throw error;
+            } finally {
+              this.initPromises.delete(id);
+            }
+          })();
+          this.initPromises.set(id, initPromise);
+          return initPromise;
         }
         /** Destroy all plugins in reverse dependency order. */
         async destroyAll() {
@@ -1576,13 +1613,12 @@
           if (!record || record.state !== "ready") return;
           try {
             await record.plugin.destroy();
-            record.api.runCleanups();
-            record.state = "registered";
-            this.logger.info(`Plugin destroyed: ${id}`);
-            this.eventBus.emit("plugin:destroyed", { name: id });
           } catch (error) {
             this.logger.error(`Plugin destroy failed: ${id}`, { error });
+          } finally {
+            record.api.runCleanups();
             record.state = "registered";
+            this.eventBus.emit("plugin:destroyed", { name: id });
           }
         }
         /** Get a plugin by ID (returns any registered plugin). */
@@ -1800,6 +1836,8 @@
           this.fullscreenAnnounced = false;
           /** Removes the four fullscreen listeners; assigned in the constructor. */
           this.unwireFullscreen = null;
+          /** In-flight teardown promise, returned to concurrent destroy() callers. */
+          this.destroyPromise = null;
           /**
            * In-flight initialisation pass, shared by concurrent callers.
            *
@@ -1999,7 +2037,8 @@
               duration: 0,
               bufferedAmount: 0,
               playbackState: "loading",
-              error: null
+              error: null,
+              live: false
             });
             if (this._currentProvider) {
               const previousProviderId = this._currentProvider.id;
@@ -2321,6 +2360,28 @@
           this.checkDestroyed();
           return this.stateManager.snapshot();
         }
+        /**
+         * Subscribe to every state change.
+         *
+         * `getState()` is a snapshot, so a framework binding built on it never
+         * updates. This is the push side: one callback per changed key, carrying the
+         * new and previous values, which is what a reactive wrapper needs to keep a
+         * ref in step with state no event announces (`buffering`, `live`).
+         *
+         * @param callback - Called with a change event for every state write
+         * @returns Unsubscribe function
+         *
+         * @example
+         * ```ts
+         * const unsubscribe = player.subscribeToState((event) => {
+         *   if (event.key === 'buffering') showSpinner(event.value as boolean);
+         * });
+         * ```
+         */
+        subscribeToState(callback) {
+          this.checkDestroyed();
+          return this.stateManager.subscribe(callback);
+        }
         // ===== Quality Methods (proxied to provider) =====
         /**
          * Get available quality levels from the current provider.
@@ -2538,29 +2599,41 @@
         /**
          * Destroy the player and cleanup all resources.
          *
+         * Awaits asynchronous plugin teardowns before releasing core systems.
+         *
          * @example
          * ```ts
-         * player.destroy();
+         * await player.destroy();
          * ```
          */
         destroy() {
+          if (this.destroyPromise) {
+            return this.destroyPromise;
+          }
           if (this.destroyed) {
-            return;
+            return Promise.resolve();
           }
-          this.logger.info("Destroying player");
-          this.loadGeneration++;
-          if (this.seekResumeTimeout !== null) {
-            clearTimeout(this.seekResumeTimeout);
-            this.seekResumeTimeout = null;
-          }
-          this.unwireFullscreen?.();
-          this.unwireFullscreen = null;
-          this.eventBus.emit("player:destroy", void 0);
-          this.pluginManager.destroyAll();
-          this.eventBus.destroy();
-          this.stateManager.destroy();
-          this.destroyed = true;
-          this.logger.info("Player destroyed");
+          this.destroyPromise = (async () => {
+            this.logger.info("Destroying player");
+            this.destroyed = true;
+            this.loadGeneration++;
+            if (this.seekResumeTimeout !== null) {
+              clearTimeout(this.seekResumeTimeout);
+              this.seekResumeTimeout = null;
+            }
+            this.unwireFullscreen?.();
+            this.unwireFullscreen = null;
+            this.eventBus.emit("player:destroy", void 0);
+            try {
+              await this.pluginManager.destroyAll();
+            } catch (err) {
+              this.logger.error("Error during plugin destruction", err);
+            }
+            this.eventBus.destroy();
+            this.stateManager.destroy();
+            this.logger.info("Player destroyed");
+          })();
+          return this.destroyPromise;
         }
         // ===== State Getters =====
         /**
@@ -2701,6 +2774,51 @@
     }
   });
 
+  // packages/core/src/utils/shared-styles.ts
+  function injectSharedStyles(id, css) {
+    if (typeof document === "undefined") {
+      return () => {
+      };
+    }
+    const existing = document.getElementById(id);
+    let claim = claims.get(id);
+    if (!claim || !existing) {
+      claim = { generation: (claim?.generation ?? 0) + 1, holders: 0, element: existing };
+      claims.set(id, claim);
+    }
+    claim.holders += 1;
+    const { generation } = claim;
+    if (!existing) {
+      const el = document.createElement("style");
+      el.id = id;
+      el.textContent = css;
+      document.head.appendChild(el);
+      claim.element = el;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const current = claims.get(id);
+      if (!current || current.generation !== generation) {
+        return;
+      }
+      current.holders -= 1;
+      if (current.holders > 0) {
+        return;
+      }
+      claims.delete(id);
+      current.element?.remove();
+    };
+  }
+  var claims;
+  var init_shared_styles = __esm({
+    "packages/core/src/utils/shared-styles.ts"() {
+      "use strict";
+      claims = /* @__PURE__ */ new Map();
+    }
+  });
+
   // packages/core/src/index.ts
   var init_src = __esm({
     "packages/core/src/index.ts"() {
@@ -2716,6 +2834,7 @@
       init_scarlett_player();
       init_fullscreen();
       init_url();
+      init_shared_styles();
     }
   });
 
@@ -35570,10 +35689,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         /**
          * selects an audio track, based on its index in audio track lists
          */
-        set audioTrack(audioTrackId) {
+        set audioTrack(audioTrackId2) {
           const audioTrackController = this.audioTrackController;
           if (audioTrackController) {
-            audioTrackController.audioTrack = audioTrackId;
+            audioTrackController.audioTrack = audioTrackId2;
           }
         }
         /**
@@ -35816,6 +35935,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
    ============================================ */
 .sp-container {
   position: relative;
+  /* Own stacking context: the control bar, menus and overlays all carry
+     z-index, and without this they compete with the host page's own layers
+     instead of staying inside the player. */
+  isolation: isolate;
   width: 100%;
   height: 100%;
   background: #000;
@@ -37108,7 +37231,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          *   must not sit on top of it, and `error` state alone does not say (a
          *   dismissed overlay leaves the error behind)
          */
-        constructor(api, isOverlayVisible = () => false) {
+        constructor(api, isOverlayVisible) {
           /**
            * Latched on the first `playing`.
            *
@@ -37122,7 +37245,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.start();
           };
           this.api = api;
-          this.isOverlayVisible = isOverlayVisible;
+          this.hasOverlayProbe = typeof isOverlayVisible === "function";
+          this.isOverlayVisible = isOverlayVisible ?? (() => false);
           const btn = document.createElement("button");
           btn.className = "sp-big-play";
           btn.setAttribute("type", "button");
@@ -37151,7 +37275,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.hasStarted = true;
           }
           let visible;
-          if (error || this.isOverlayVisible()) {
+          if (this.hasOverlayProbe ? this.isOverlayVisible() : Boolean(error)) {
             visible = false;
           } else if (playbackState === "loading") {
             visible = false;
@@ -37948,6 +38072,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const qualities = this.api.getState("qualities") || [];
           const currentQuality = this.api.getState("currentQuality");
           this.el.style.display = qualities.length > 0 ? "" : "none";
+          if (qualities.length === 0 && this.isOpen) {
+            this.close();
+          }
           this.btnLabel.textContent = currentQuality?.label || "Auto";
           const qualitiesJson = JSON.stringify(qualities.map((q) => q.id));
           const currentId = currentQuality?.id || "auto";
@@ -38011,6 +38138,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.isOpen = false;
           this.menu.classList.remove("sp-quality-menu--open");
           this.btn.setAttribute("aria-expanded", "false");
+        }
+        /**
+         * Whether the dropdown is open.
+         *
+         * Read by the UI plugin so the control bar's auto-hide waits for it.
+         *
+         * @returns True while the menu is showing
+         */
+        isMenuOpen() {
+          return this.isOpen;
         }
         destroy() {
           document.removeEventListener("click", this.closeHandler);
@@ -38482,7 +38619,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.appendChild(this.panel);
           this.closeHandler = (e) => {
             if (!this.el.contains(e.target)) {
-              this.close();
+              this.close(false);
             }
           };
           document.addEventListener("click", this.closeHandler);
@@ -38495,7 +38632,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                 this.showPanel("main");
               } else {
                 this.close();
-                this.btn.focus();
               }
               return;
             }
@@ -38532,6 +38668,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.updateSpeedActiveStates();
             } else if (this.currentPanel === "captions") {
               this.updateCaptionsActiveStates();
+            } else if (this.currentPanel === "audio") {
+              this.updateAudioActiveStates();
             }
           }
         }
@@ -38546,11 +38684,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.btn.setAttribute("aria-expanded", "true");
           this.focusFirstItem();
         }
-        close() {
+        /**
+         * Close the panel.
+         *
+         * Choosing an item tears down the row that had focus, which drops focus to
+         * `<body>` and strands keyboard viewers outside the player entirely. Hand it
+         * back to the button that opened the menu instead.
+         *
+         * @param restoreFocus - Return focus to the gear button. The outside-click
+         *   handler passes false, so a click elsewhere is not pulled back into the bar.
+         */
+        close(restoreFocus = true) {
+          const wasOpen = this.isOpen;
           this.isOpen = false;
           this.currentPanel = "main";
           this.panel.classList.remove("sp-settings-panel--open");
           this.btn.setAttribute("aria-expanded", "false");
+          if (wasOpen && restoreFocus) {
+            this.btn.focus();
+          }
         }
         showPanel(panel) {
           this.currentPanel = panel;
@@ -38566,6 +38718,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               break;
             case "captions":
               this.renderCaptionsPanel();
+              break;
+            case "audio":
+              this.renderAudioPanel();
               break;
           }
           this.focusFirstItem();
@@ -38594,6 +38749,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               () => this.showPanel("captions")
             );
             this.panel.appendChild(captionsRow);
+          }
+          const audioTracks = this.api.getState("audioTracks") || [];
+          if (audioTracks.length > 1) {
+            const currentAudioTrack = this.api.getState("currentAudioTrack");
+            const audioRow = this.createMainRow(
+              "Audio",
+              currentAudioTrack?.label || "Default",
+              () => this.showPanel("audio")
+            );
+            this.panel.appendChild(audioRow);
           }
           const speedLabel = playbackRate === 1 ? "Normal" : `${playbackRate}x`;
           const speedRow = this.createMainRow(
@@ -38694,6 +38859,36 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             });
             this.panel.appendChild(item);
           }
+        }
+        renderAudioPanel() {
+          this.panel.innerHTML = "";
+          this.panel.className = "sp-settings-panel sp-settings-panel--open sp-settings-panel--sub";
+          const header = this.createSubHeader("Audio");
+          this.panel.appendChild(header);
+          const audioTracks = this.api.getState("audioTracks") || [];
+          const currentAudioTrack = this.api.getState("currentAudioTrack");
+          const activeId = currentAudioTrack?.id ?? null;
+          for (const track of audioTracks) {
+            const item = this.createMenuItem(track.label, track.id, track.id === activeId);
+            item.addEventListener("click", (e) => {
+              e.preventDefault();
+              this.selectAudioTrack(track.id);
+            });
+            this.panel.appendChild(item);
+          }
+        }
+        selectAudioTrack(trackId) {
+          this.api.emit("track:audio", { trackId });
+          this.close();
+        }
+        updateAudioActiveStates() {
+          const currentAudioTrack = this.api.getState("currentAudioTrack");
+          const activeId = currentAudioTrack?.id ?? null;
+          const items = this.panel.querySelectorAll(".sp-settings-panel__item");
+          items.forEach((item) => {
+            const id = item.getAttribute("data-id");
+            item.classList.toggle("sp-settings-panel__item--active", id === activeId);
+          });
         }
         selectCaption(trackId) {
           this.api.emit("track:text", { trackId });
@@ -39116,6 +39311,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.btn.setAttribute("aria-expanded", "false");
         }
         /**
+         * Whether the strip is open.
+         *
+         * Read by the UI plugin so the control bar's auto-hide waits for it: hiding
+         * the bar would take the open tray with it, mid-use.
+         *
+         * @returns True while the strip is showing
+         */
+        isMenuOpen() {
+          return this.isOpen;
+        }
+        /**
          * Show the button only while the tray holds something the viewer can see.
          *
          * A control that hid itself (no cast device on the network, no text tracks)
@@ -39181,17 +39387,50 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
 
   // packages/plugins/ui/src/control-registry.ts
-  function registerControl(id, factory) {
-    registry.set(id, factory);
+  function registerControl(id, factory, options = {}) {
+    const { owner } = options;
+    if (owner) {
+      let scoped = scopedRegistries.get(owner);
+      if (!scoped) {
+        scoped = /* @__PURE__ */ new Map();
+        scopedRegistries.set(owner, scoped);
+      }
+      scoped.set(id, factory);
+    } else {
+      globalRegistry.set(id, factory);
+    }
     for (const listener of listeners) {
-      listener(id);
+      listener(id, owner);
     }
   }
-  function unregisterControl(id) {
-    return registry.delete(id);
+  function unregisterControl(id, options = {}) {
+    const { owner } = options;
+    if (!owner) {
+      return globalRegistry.delete(id);
+    }
+    const scoped = scopedRegistries.get(owner);
+    if (!scoped) {
+      return false;
+    }
+    const removed = scoped.delete(id);
+    if (scoped.size === 0) {
+      scopedRegistries.delete(owner);
+    }
+    return removed;
   }
-  function getControlFactory(id) {
-    return registry.get(id) ?? null;
+  function unregisterControlsFor(owner) {
+    const removed = scopedRegistries.get(owner)?.size ?? 0;
+    scopedRegistries.delete(owner);
+    return removed;
+  }
+  function getControlFactory(id, owner) {
+    if (owner) {
+      const scoped = scopedRegistries.get(owner)?.get(id);
+      if (scoped) {
+        return scoped;
+      }
+    }
+    return globalRegistry.get(id) ?? null;
   }
   function onControlRegistered(listener) {
     listeners.add(listener);
@@ -39200,14 +39439,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
   function resetControlRegistry() {
-    registry.clear();
+    globalRegistry.clear();
+    scopedRegistries.clear();
     listeners.clear();
   }
-  var registry, listeners;
+  var globalRegistry, scopedRegistries, listeners;
   var init_control_registry = __esm({
     "packages/plugins/ui/src/control-registry.ts"() {
       "use strict";
-      registry = /* @__PURE__ */ new Map();
+      globalRegistry = /* @__PURE__ */ new Map();
+      scopedRegistries = /* @__PURE__ */ new Map();
       listeners = /* @__PURE__ */ new Set();
     }
   });
@@ -39237,7 +39478,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     resolveFitItems: () => resolveFitItems,
     styles: () => styles,
     uiPlugin: () => uiPlugin,
-    unregisterControl: () => unregisterControl
+    unregisterControl: () => unregisterControl,
+    unregisterControlsFor: () => unregisterControlsFor
   });
   function uiPlugin(config = {}) {
     let api;
@@ -39247,7 +39489,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let bufferingIndicator = null;
     let errorOverlay = null;
     let bigPlayButton = null;
-    let styleEl = null;
+    let releaseStyles = null;
     let controls = [];
     let hideTimeout = null;
     let stateUnsubscribe = null;
@@ -39255,6 +39497,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let errorUnsubscribe = null;
     let reconnectingUnsubscribe = null;
     let recoveredUnsubscribe = null;
+    let loadedUnsubscribe = null;
     let controlsVisible = true;
     let rafHandle = null;
     let tray = null;
@@ -39309,7 +39552,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         case "spacer":
           return new Spacer();
         default: {
-          const factory = getControlFactory(slot);
+          const factory = getControlFactory(slot, api.container);
           if (factory) {
             try {
               return factory(api);
@@ -39536,6 +39779,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         updateControls();
       });
     };
+    const hasOpenMenu = () => controls.some((control) => {
+      const menu = control;
+      return typeof menu.isMenuOpen === "function" && menu.isMenuOpen();
+    });
     const showControls = () => {
       if (controlsVisible) {
         resetHideTimer();
@@ -39552,6 +39799,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const hideControls = () => {
       const paused = api?.getState("paused");
       if (paused) return;
+      if (hasOpenMenu()) {
+        resetHideTimer();
+        return;
+      }
       controlsVisible = false;
       controlBar?.classList.remove("sp-controls--visible");
       controlBar?.classList.add("sp-controls--hidden");
@@ -39569,22 +39820,33 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const handlePointerActivity = (event) => {
       last_pointer_type = event.pointerType;
     };
-    const handleInteraction = () => {
-      if (last_pointer_type === "touch") {
+    const handleInteraction = (event) => {
+      if (last_pointer_type === "touch" && !isOnControls(event)) {
         const gestures = api?.getPlugin("gestures");
         if (gestures?.ownsTapInteraction()) return;
       }
       showControls();
+    };
+    const isOnControls = (event) => {
+      const target = event?.target;
+      if (!(target instanceof Node)) return false;
+      return Boolean(controlBar?.contains(target)) || Boolean(progressBar?.render().contains(target));
     };
     const handleMouseLeave = () => {
       hideControls();
     };
     const handleKeyDown = (e) => {
       if (!api.container.contains(document.activeElement)) return;
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const activeEl = document.activeElement;
       if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLSelectElement || activeEl?.isContentEditable) {
         return;
       }
+      const role = activeEl?.getAttribute("role");
+      const isActivatable = activeEl instanceof HTMLButtonElement || role === "button" || role === "menuitem";
+      if (isActivatable && ACTIVATION_KEYS.has(e.key)) return;
+      if (role === "slider" && SLIDER_KEYS.has(e.key)) return;
       const video = api.container.querySelector("video");
       if (!video) return;
       const live = api.getState("live");
@@ -39651,9 +39913,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PKG_VERSION4,
       async init(pluginApi) {
         api = pluginApi;
-        styleEl = document.createElement("style");
-        styleEl.textContent = styles;
-        document.head.appendChild(styleEl);
+        releaseStyles = injectSharedStyles(STYLE_ID, styles);
         if (config.theme) {
           this.setTheme(config.theme);
         }
@@ -39685,13 +39945,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (payload?.fatal) {
             const error = api.getState("error") || payload;
             errorOverlay?.show(error);
+            scheduleUpdate();
           }
         });
         reconnectingUnsubscribe = api.on("error:reconnecting", () => {
           errorOverlay?.showReconnecting();
+          scheduleUpdate();
         });
         recoveredUnsubscribe = api.on("error:recovered", () => {
           errorOverlay?.hide();
+          scheduleUpdate();
+        });
+        loadedUnsubscribe = api.on("media:loaded", () => {
+          errorOverlay?.hide();
+          scheduleUpdate();
         });
         if (showBigPlayButton) {
           bigPlayButton = new BigPlayButton(api, () => errorOverlay?.isVisible() ?? false);
@@ -39716,8 +39983,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
           resizeObserver.observe(container);
         }
-        controlRegistryUnsubscribe = onControlRegistered((id) => {
+        controlRegistryUnsubscribe = onControlRegistered((id, owner) => {
           if (!layout.includes(id)) {
+            return;
+          }
+          if (owner && owner !== api.container) {
             return;
           }
           api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
@@ -39763,6 +40033,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         reconnectingUnsubscribe = null;
         recoveredUnsubscribe?.();
         recoveredUnsubscribe = null;
+        loadedUnsubscribe?.();
+        loadedUnsubscribe = null;
         if (api?.container) {
           api.container.removeEventListener("pointerdown", handlePointerActivity);
           api.container.removeEventListener("pointermove", handlePointerActivity);
@@ -39792,8 +40064,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         gradient = null;
         bufferingIndicator?.remove();
         bufferingIndicator = null;
-        styleEl?.remove();
-        styleEl = null;
+        releaseStyles?.();
+        releaseStyles = null;
         if (addedContainerClass) {
           api?.container?.classList.remove("sp-container");
           addedContainerClass = false;
@@ -39835,7 +40107,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
   }
-  var DEFAULT_LAYOUT, DEFAULT_HIDE_DELAY, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
+  var DEFAULT_LAYOUT, STYLE_ID, DEFAULT_HIDE_DELAY, ACTIVATION_KEYS, SLIDER_KEYS, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
   var init_src2 = __esm({
     "packages/plugins/ui/src/index.ts"() {
       "use strict";
@@ -39867,7 +40139,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "pip",
         "fullscreen"
       ];
+      STYLE_ID = "sp-ui-styles";
       DEFAULT_HIDE_DELAY = 3e3;
+      ACTIVATION_KEYS = /* @__PURE__ */ new Set([" ", "Enter"]);
+      SLIDER_KEYS = /* @__PURE__ */ new Set([
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown"
+      ]);
       UNMEASURED_CONTROL_WIDTH = 48;
       FALLBACK_VOLUME_SLIDER_WIDTH = 64;
       OVERFLOW_BUTTON_WIDTH = 44;
@@ -40049,6 +40333,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       response: data.response
     };
   }
+  function audioTrackId(index) {
+    return `audio-${index}`;
+  }
+  function audioTrackIndex(id) {
+    if (!id) return -1;
+    const match = /^audio-(0|[1-9]\d*)$/.exec(id);
+    return match ? Number.parseInt(match[1], 10) : -1;
+  }
+  function formatAudioTrack(track, index, active) {
+    return {
+      id: audioTrackId(index),
+      // A manifest may declare neither NAME nor LANGUAGE; a numbered fallback
+      // still gives the viewer something selectable rather than a blank row.
+      label: track.name || track.lang || `Audio ${index + 1}`,
+      language: track.lang,
+      active
+    };
+  }
   function setupHlsEventHandlers(hls, api, callbacks) {
     const handlers = [];
     const addHandler = (event, handler) => {
@@ -40092,6 +40394,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       callbacks.onLevelSwitched?.(data.level);
     });
+    const publishAudioTracks = (tracks, activeIndex) => {
+      const audioTracks = tracks.map(
+        (track, index) => formatAudioTrack(track, index, index === activeIndex)
+      );
+      api.setState("audioTracks", audioTracks);
+      api.setState("currentAudioTrack", audioTracks[activeIndex] ?? null);
+    };
+    addHandler("hlsAudioTracksUpdated", (_event, data) => {
+      const tracks = data.audioTracks ?? [];
+      api.logger.debug("HLS audio tracks updated", { tracks: tracks.length });
+      publishAudioTracks(tracks, hls.audioTrack);
+      callbacks.onAudioTracksUpdated?.(tracks);
+    });
+    addHandler("hlsAudioTrackSwitched", (_event, data) => {
+      api.logger.debug("HLS audio track switched", { id: data.id });
+      publishAudioTracks(hls.audioTracks ?? [], data.id);
+      callbacks.onAudioTrackSwitched?.(data.id);
+    });
     let lastBandwidthUpdate = 0;
     addHandler("hlsFragLoaded", () => {
       const now2 = Date.now();
@@ -40112,16 +40432,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (data.details?.live !== void 0) {
         api.setState("live", data.details.live);
         if (data.details.live) {
+          const details = data.details;
+          const start = details.fragmentStart ?? (details.fragments?.[0]?.start ?? 0);
+          const end = details.edge ?? details.totalduration ?? 0;
+          api.setState("seekableRange", { start, end });
           const video = hls.media;
-          if (video && video.seekable && video.seekable.length > 0) {
-            const start = video.seekable.start(0);
-            const end = video.seekable.end(video.seekable.length - 1);
-            api.setState("seekableRange", { start, end });
-            const threshold = (data.details.targetduration ?? 3) * 3;
-            const isAtLiveEdge = end - video.currentTime < threshold;
-            api.setState("liveEdge", isAtLiveEdge);
-            const latency = end - video.currentTime;
-            api.setState("liveLatency", Math.max(0, latency));
+          if (video) {
+            const latency = Math.max(0, end - video.currentTime);
+            api.setState("liveLatency", latency);
+            api.setState("liveEdge", latency < (details.targetduration ?? 3) * 3);
           }
         }
         callbacks.onLiveUpdate?.();
@@ -40156,6 +40475,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         hls.off(event, handler);
       }
       handlers.length = 0;
+      api.setState("audioTracks", []);
+      api.setState("currentAudioTrack", null);
     };
   }
   function setupVideoEventHandlers(video, api) {
@@ -40406,7 +40727,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
     let loadSession = 0;
-    let abortPendingLoad = null;
+    let abortPendingLoad2 = null;
     let networkRetryCount = 0;
     let mediaRetryCount = 0;
     let retryTimeout = null;
@@ -40422,6 +40743,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let onlineListener = null;
     let reconnectTriggerError = null;
     let reconnectExhausted = false;
+    let isReconnecting = false;
+    let isLiveClassified = false;
+    let stallWatchdogTimer = null;
+    let lastStallCheckTime = 0;
+    let lastStallCheckPosition = 0;
     const applyPoster = () => {
       if (!video) return;
       video.poster = api?.getState("poster") || "";
@@ -40443,8 +40769,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return video;
     };
     const teardownPipeline = (reason) => {
-      abortPendingLoad?.(reason ?? new Error("HLS load cancelled"));
-      abortPendingLoad = null;
+      abortPendingLoad2?.(reason ?? new Error("HLS load cancelled"));
+      abortPendingLoad2 = null;
       cleanupHlsEvents?.();
       cleanupHlsEvents = null;
       cleanupVideoEvents?.();
@@ -40452,6 +40778,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (retryTimeout) {
         clearTimeout(retryTimeout);
         retryTimeout = null;
+      }
+      if (stallWatchdogTimer) {
+        clearTimeout(stallWatchdogTimer);
+        stallWatchdogTimer = null;
       }
       if (hls) {
         hls.destroy();
@@ -40702,8 +41032,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         let settled = false;
         const settle = () => {
           settled = true;
-          if (abortPendingLoad === abort) {
-            abortPendingLoad = null;
+          if (abortPendingLoad2 === abort) {
+            abortPendingLoad2 = null;
           }
           videoEl.removeEventListener("loadedmetadata", onLoaded);
           videoEl.removeEventListener("error", onError);
@@ -40717,7 +41047,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           settle();
           reject(reason);
         };
-        abortPendingLoad = abort;
+        abortPendingLoad2 = abort;
         const onLoaded = () => {
           if (settled) return;
           if (session !== loadSession) {
@@ -40809,10 +41139,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           clearWatchdog();
           reject(reason);
         };
-        abortPendingLoad = abort;
+        abortPendingLoad2 = abort;
         const releaseAbort = () => {
-          if (abortPendingLoad === abort) {
-            abortPendingLoad = null;
+          if (abortPendingLoad2 === abort) {
+            abortPendingLoad2 = null;
           }
         };
         cleanupHlsEvents = setupHlsEventHandlers(hls, api, {
@@ -40881,6 +41211,51 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       reconnectResumePosition = 0;
       reconnectTriggerError = null;
       reconnectExhausted = false;
+      isReconnecting = false;
+    };
+    const startStallWatchdog = () => {
+      if (!video || stallWatchdogTimer) return;
+      lastStallCheckTime = Date.now();
+      lastStallCheckPosition = video.currentTime;
+      const levelTargetDuration = hls?.targetDuration ?? hls?.levels?.[hls?.currentLevel]?.details?.targetduration ?? 0;
+      const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
+      const checkInterval = Math.min(targetDuration, 3e4);
+      const check = () => {
+        if (!video || !api) return;
+        const isPlaying = api.getState("playing");
+        const isSeeking = api.getState("seeking");
+        if (!isPlaying || isSeeking) {
+          stallWatchdogTimer = setTimeout(check, checkInterval);
+          return;
+        }
+        const elapsed = Date.now() - lastStallCheckTime;
+        const positionDelta = video.currentTime - lastStallCheckPosition;
+        if (positionDelta > 0.5) {
+          lastStallCheckTime = Date.now();
+          lastStallCheckPosition = video.currentTime;
+        } else if (elapsed > targetDuration * 1e3) {
+          api.logger.warn("Playback stall detected \u2014 no timeupdate progress", {
+            elapsed: Math.round(elapsed),
+            currentTime: video.currentTime,
+            targetDuration: Math.round(targetDuration)
+          });
+          const stallError = {
+            type: "network",
+            details: "Playback stalled \u2014 no data received",
+            fatal: true
+          };
+          maybeScheduleReconnect(stallError);
+          return;
+        }
+        stallWatchdogTimer = setTimeout(check, checkInterval);
+      };
+      stallWatchdogTimer = setTimeout(check, checkInterval);
+    };
+    const stopStallWatchdog = () => {
+      if (stallWatchdogTimer) {
+        clearTimeout(stallWatchdogTimer);
+        stallWatchdogTimer = null;
+      }
     };
     const emitReconnectExhausted = (elapsedMs, windowMs) => {
       if (reconnectExhausted) return;
@@ -40906,17 +41281,30 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const scheduleReconnectAttempt = () => {
       if (reconnectExhausted) return;
       if (reconnectTimer) return;
-      const window_ms = mergedConfig.reconnectWindowMs ?? 3e5;
+      const isLive = (api?.getState("live") ?? false) && isLiveClassified;
+      const configWindowMs = mergedConfig.reconnectWindowMs ?? 3e5;
+      const window_ms = isLive ? Infinity : configWindowMs;
       const elapsed_ms = Date.now() - reconnectWindowStart;
       if (elapsed_ms > window_ms) {
         api?.logger.warn(`Auto-reconnect window exhausted after ${reconnectAttempts} attempts`);
         emitReconnectExhausted(elapsed_ms, window_ms);
         return;
       }
+      const LONG_OUTAGE_MS = 6e5;
+      if (isLive && elapsed_ms > LONG_OUTAGE_MS) {
+        api?.emit("error:reconnecting", {
+          attempt: reconnectAttempts + 1,
+          delayMs: 0,
+          elapsedMs: elapsed_ms,
+          windowMs: window_ms,
+          longOutage: true
+        });
+      }
       const base_delay = mergedConfig.reconnectBaseDelayMs ?? 2e3;
       const max_delay = mergedConfig.reconnectMaxDelayMs ?? 3e4;
       const backoff = Math.min(base_delay * Math.pow(2, reconnectAttempts), max_delay);
-      const delay = Math.round(backoff * (0.7 + Math.random() * 0.3));
+      const isAtCap = backoff >= max_delay;
+      const delay = isLive && isAtCap ? 3e4 : Math.round(backoff * (0.7 + Math.random() * 0.3));
       api?.logger.info(`Scheduling auto-reconnect attempt ${reconnectAttempts + 1} in ${delay}ms`);
       api?.emit("error:reconnecting", {
         attempt: reconnectAttempts + 1,
@@ -40931,7 +41319,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const maybeScheduleReconnect = (error) => {
       if (mergedConfig.autoReconnect === false) return;
-      if (!hasPlayedContent || !currentSrc) return;
+      if (!currentSrc) return;
+      const isLive = (api?.getState("live") ?? false) && isLiveClassified;
+      if (!isLive && !hasPlayedContent) return;
       if (error.type !== "network" && error.type !== "media") return;
       if (reconnectWindowStart === 0) {
         reconnectWindowStart = Date.now();
@@ -40942,6 +41332,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const attemptReconnect = async () => {
       if (!api || !currentSrc) return;
+      isReconnecting = true;
       const session = ++loadSession;
       reconnectAttempts++;
       const saved_src = currentSrc;
@@ -40974,14 +41365,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         api.logger.info("Auto-reconnect succeeded");
         cancelReconnect();
-        try {
-          await video?.play();
-        } catch {
+        const wasPaused = api.getState("paused");
+        if (!wasPaused) {
+          try {
+            await video?.play();
+          } catch {
+          }
+        } else {
+          api.logger.info("Stream reconnected while paused; maintaining pause at live edge");
         }
       } catch {
         if (session !== loadSession) return;
         api?.logger.warn(`Auto-reconnect attempt ${reconnectAttempts} failed`);
         scheduleReconnectAttempt();
+      } finally {
+        isReconnecting = false;
       }
     };
     const plugin = {
@@ -41068,19 +41466,42 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           }
         });
+        const unsubAudioTrack = api.on("track:audio", ({ trackId }) => {
+          if (!hls || isNative) {
+            api?.logger.warn("Audio track selection not available");
+            return;
+          }
+          const index = audioTrackIndex(trackId);
+          const tracks = hls.audioTracks ?? [];
+          if (index < 0 || index >= tracks.length) {
+            api?.logger.warn("Ignoring unknown audio track selection", { trackId });
+            return;
+          }
+          hls.audioTrack = index;
+          api?.logger.debug(`Audio: queued switch to track ${index}`);
+        });
         if (typeof window !== "undefined") {
           onlineListener = () => {
+            const hasActiveReconnect = reconnectTimer !== null || reconnectWindowStart > 0 || isReconnecting || reconnectAttempts > 0 && !reconnectExhausted;
+            if (!hasActiveReconnect) {
+              return;
+            }
             if (reconnectTimer) {
               api?.logger.info("Browser back online, reconnecting immediately");
               clearTimeout(reconnectTimer);
               reconnectTimer = null;
-              void attemptReconnect();
             }
+            void attemptReconnect();
           };
           window.addEventListener("online", onlineListener);
         }
         const unsubPoster = api.subscribeToState((event) => {
           if (event.key === "poster") applyPoster();
+        });
+        const unsubLive = api.subscribeToState((event) => {
+          if (event.key === "live") {
+            isLiveClassified = true;
+          }
         });
         api.onDestroy(() => {
           unsubPlay();
@@ -41090,8 +41511,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubMute();
           unsubRate();
           unsubQuality();
+          unsubAudioTrack();
           unsubPoster();
+          unsubLive();
         });
+        const unsubPlayState = api.subscribeToState((event) => {
+          if (event.key === "playing") {
+            if (event.value) {
+              startStallWatchdog();
+            } else {
+              stopStallWatchdog();
+            }
+          }
+        });
+        api.onDestroy(unsubPlayState);
       },
       async destroy() {
         api?.logger.info(`HLS plugin${variant.logSuffix} destroying`);
@@ -41114,6 +41547,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const session = ++loadSession;
         cancelReconnect();
         hasPlayedContent = false;
+        isLiveClassified = false;
+        api.setState("live", false);
         cleanup(new Error("HLS load cancelled: superseded by a new load"));
         currentSrc = src;
         applyPoster();
@@ -41206,7 +41641,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
         const session = ++loadSession;
+        cancelReconnect();
         cleanup(new Error("HLS load cancelled: switching to native HLS"));
+        currentSrc = savedSrc;
         await loadNative(savedSrc);
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
@@ -41243,7 +41680,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
         const session = ++loadSession;
+        cancelReconnect();
         cleanup(new Error("HLS load cancelled: switching to hls.js"));
+        currentSrc = savedSrc;
         await loadWithHlsJs(savedSrc);
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
@@ -41286,6 +41725,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "mkv", "ogv", "m4v"];
   var AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus", "weba"];
   var SUPPORTED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
+  var MEDIA_ERR = {
+    ABORTED: 1,
+    NETWORK: 2,
+    DECODE: 3,
+    SRC_NOT_SUPPORTED: 4
+  };
   var MIME_TYPES = {
     // Video
     mp4: "video/mp4",
@@ -41312,6 +41757,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupEvents = null;
     let derived_title = null;
     let is_audio_source = false;
+    let isCorePlayRequested = false;
+    let loadSession = 0;
+    let abortPendingLoad2 = null;
+    let has_parsed_source = false;
     const getExtension = (src) => {
       try {
         const url = new URL(src, window.location.href);
@@ -41359,11 +41808,33 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.container.appendChild(video);
       return video;
     };
+    const classifyMediaError = (error) => {
+      switch (error?.code) {
+        case MEDIA_ERR.ABORTED:
+          return { code: "PLAYBACK_FAILED" /* PLAYBACK_FAILED */, message: "Playback aborted" };
+        case MEDIA_ERR.NETWORK:
+          return { code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */, message: "Network error" };
+        case MEDIA_ERR.DECODE:
+          return {
+            code: "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */,
+            message: "Decode error - format may not be supported"
+          };
+        case MEDIA_ERR.SRC_NOT_SUPPORTED:
+          return has_parsed_source ? { code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */, message: "Network error" } : { code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */, message: "Format not supported" };
+        default:
+          return { code: "PLAYBACK_FAILED" /* PLAYBACK_FAILED */, message: "Unknown video error" };
+      }
+    };
     const setupEventListeners = (videoEl) => {
       const handlers = [];
+      const session = loadSession;
       const on = (event, handler) => {
-        videoEl.addEventListener(event, handler);
-        handlers.push([event, handler]);
+        const guarded = (event_object) => {
+          if (session !== loadSession) return;
+          handler(event_object);
+        };
+        videoEl.addEventListener(event, guarded);
+        handlers.push([event, guarded]);
       };
       const syncEndedFromElement = () => {
         if (videoEl.ended || !api?.getState("ended")) return;
@@ -41378,14 +41849,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("playing", true);
         api?.setState("paused", false);
         api?.setState("playbackState", "playing");
-        api?.emit("playback:play", void 0);
         syncEndedFromElement();
+        if (isCorePlayRequested) {
+          isCorePlayRequested = false;
+        } else {
+          api?.emit("playback:play", void 0);
+        }
       });
       on("pause", () => {
+        isCorePlayRequested = false;
         api?.setState("playing", false);
         api?.setState("paused", true);
         api?.setState("playbackState", "paused");
-        api?.emit("playback:pause", void 0);
       });
       on("ended", () => {
         api?.setState("playing", false);
@@ -41454,26 +41929,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       on("error", () => {
         const error = videoEl.error;
-        let message = "Unknown video error";
-        if (error) {
-          switch (error.code) {
-            case MediaError.MEDIA_ERR_ABORTED:
-              message = "Playback aborted";
-              break;
-            case MediaError.MEDIA_ERR_NETWORK:
-              message = "Network error";
-              break;
-            case MediaError.MEDIA_ERR_DECODE:
-              message = "Decode error - format may not be supported";
-              break;
-            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-              message = "Format not supported";
-              break;
-          }
-        }
-        api?.logger.error("Video error", { code: error?.code, message });
+        const { code, message } = classifyMediaError(error);
+        api?.logger.error("Video error", { mediaErrorCode: error?.code, code, message });
         api?.emit("error", {
-          code: "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
+          code,
           message,
           fatal: true,
           timestamp: Date.now()
@@ -41536,17 +41995,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = pluginApi;
         api.logger.info("Native video plugin initialized");
         const unsubPlay = api.on("playback:play", async () => {
+          if (api?.getState("chromecastActive")) return;
           if (!video) return;
+          if (!video.paused) return;
           try {
+            isCorePlayRequested = true;
             await video.play();
           } catch (e) {
+            isCorePlayRequested = false;
             api?.logger.error("Play failed", e);
           }
         });
         const unsubPause = api.on("playback:pause", () => {
+          if (api?.getState("chromecastActive")) return;
+          isCorePlayRequested = false;
           video?.pause();
         });
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
+          if (api?.getState("chromecastActive")) return;
           if (!video) return;
           if (!Number.isFinite(time)) return;
           const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
@@ -41579,6 +42045,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       async destroy() {
         api?.logger.info("Native video plugin destroying");
+        loadSession++;
+        const pending = abortPendingLoad2;
+        abortPendingLoad2 = null;
+        pending?.(new Error("Player destroyed during load"));
         cleanup();
         if (video?.parentNode) {
           video.parentNode.removeChild(video);
@@ -41587,6 +42057,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = null;
         derived_title = null;
         is_audio_source = false;
+        has_parsed_source = false;
       },
       async loadSource(src) {
         if (!api) throw new Error("Plugin not initialized");
@@ -41595,6 +42066,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const isAudio = isAudioExtension(ext);
         is_audio_source = isAudio;
         api.logger.info("Loading native media source", { src: sanitizeUrl(src), mimeType, isAudio });
+        const session = ++loadSession;
+        const superseded = abortPendingLoad2;
+        abortPendingLoad2 = null;
+        superseded?.(new Error("Load superseded by a newer source"));
+        has_parsed_source = false;
         cleanup();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
@@ -41629,9 +42105,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               clearTimeout(watchdog);
               watchdog = null;
             }
+            if (abortPendingLoad2 === abort) {
+              abortPendingLoad2 = null;
+            }
           };
-          const onLoaded = () => {
+          const abort = (reason) => {
             settle();
+            reject(reason);
+          };
+          abortPendingLoad2 = abort;
+          const onLoaded = () => {
+            if (session !== loadSession) return;
+            settle();
+            has_parsed_source = true;
             const muted = api?.getState("muted");
             const volume = api?.getState("volume");
             if (muted !== void 0) videoEl.muted = muted;
@@ -41643,12 +42129,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             resolve2();
           };
           const onError = () => {
+            if (session !== loadSession) return;
             settle();
             const error = videoEl.error;
             reject(new Error(error?.message || "Failed to load video source"));
           };
           if (load_timeout_ms > 0) {
             watchdog = setTimeout(() => {
+              if (session !== loadSession) return;
               settle();
               reject(new Error("Video took too long to load (network timeout)"));
             }, load_timeout_ms);
@@ -41677,6 +42165,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let api;
     let video = null;
     let unsubMediaLoaded = null;
+    let availabilityWatch = null;
+    let watchGeneration = 0;
     const handleAvailabilityChange = (e) => {
       const event = e;
       const available = event.availability === "available";
@@ -41684,31 +42174,61 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.emit(available ? "airplay:available" : "airplay:unavailable", void 0);
       api.logger.debug("AirPlay availability changed", { available });
     };
+    let providerSwitchInFlight = false;
+    const syncProviderToAirPlay = () => {
+      if (providerSwitchInFlight) return;
+      const hlsPlugin = api?.getPlugin("hls-provider");
+      if (!hlsPlugin) return;
+      const active = api.getState("airplayActive") === true;
+      if (active === hlsPlugin.isNativeHLS()) return;
+      const target = active ? "native HLS" : "hls.js";
+      api.logger.info(`AirPlay ${active ? "connected" : "disconnected"}, switching to ${target}`);
+      providerSwitchInFlight = true;
+      (active ? hlsPlugin.switchToNative() : hlsPlugin.switchToHlsJs()).then(() => {
+        attachToVideo();
+      }).catch((err) => {
+        api.logger.warn(`Failed to switch to ${target} for AirPlay`, { error: err });
+      }).finally(() => {
+        providerSwitchInFlight = false;
+        if (api.getState("airplayActive") === true !== active) {
+          syncProviderToAirPlay();
+        }
+      });
+    };
     const handleTargetChange = () => {
       const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
-      const wasActive = api.getState("airplayActive");
+      const wasActive = api.getState("airplayActive") === true;
       api.setState("airplayActive", active);
       api.emit(active ? "airplay:connected" : "airplay:disconnected", void 0);
-      if (wasActive && !active) {
-        api.logger.info("AirPlay disconnected, restoring hls.js");
-        const hlsPlugin = api.getPlugin("hls-provider");
-        if (hlsPlugin?.isNativeHLS()) {
-          hlsPlugin.switchToHlsJs().then(() => {
-            video = null;
-            attachToVideo();
-          }).catch((err) => {
-            api.logger.warn("Failed to switch back to hls.js", { error: err });
-          });
-        }
+      if (wasActive !== active) {
+        syncProviderToAirPlay();
       }
     };
+    const cancelAvailabilityWatch = () => {
+      watchGeneration += 1;
+      const watch = availabilityWatch;
+      availabilityWatch = null;
+      if (!watch) return;
+      watch.remote.cancelWatchAvailability(watch.id).catch(() => {
+      });
+    };
+    const detachFromVideo = () => {
+      if (!video) return;
+      video.removeEventListener("webkitplaybacktargetavailabilitychanged", handleAvailabilityChange);
+      video.removeEventListener("webkitcurrentplaybacktargetiswirelesschanged", handleTargetChange);
+      cancelAvailabilityWatch();
+      video = null;
+    };
     const attachToVideo = () => {
-      if (video) return;
-      video = api.container.querySelector("video");
-      if (!video) {
+      const el = api.container.querySelector("video");
+      if (!el) {
+        detachFromVideo();
         api.logger.debug("AirPlay: No video element yet");
         return;
       }
+      if (el === video) return;
+      detachFromVideo();
+      video = el;
       api.logger.debug("AirPlay: Attaching to video element");
       video.addEventListener(
         "webkitplaybacktargetavailabilitychanged",
@@ -41718,14 +42238,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "webkitcurrentplaybacktargetiswirelesschanged",
         handleTargetChange
       );
-      if ("remote" in video && video.remote) {
+      const remote = video.remote;
+      if (remote) {
         api.logger.debug("AirPlay: RemotePlayback API available");
-        video.remote.watchAvailability((available) => {
+        const generation = watchGeneration;
+        remote.watchAvailability((available) => {
           api.logger.debug("AirPlay: RemotePlayback availability", { available });
           if (available) {
             api.setState("airplayAvailable", true);
             api.emit("airplay:available", void 0);
           }
+        }).then((id) => {
+          if (generation !== watchGeneration) {
+            remote.cancelWatchAvailability(id).catch(() => {
+            });
+            return;
+          }
+          availabilityWatch = { remote, id };
         }).catch((err) => {
           api.logger.debug("AirPlay: RemotePlayback watchAvailability not supported", { error: err.message });
         });
@@ -41753,16 +42282,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       async destroy() {
         unsubMediaLoaded?.();
         unsubMediaLoaded = null;
-        if (video && isAirPlaySupported2()) {
-          video.removeEventListener(
-            "webkitplaybacktargetavailabilitychanged",
-            handleAvailabilityChange
-          );
-          video.removeEventListener(
-            "webkitcurrentplaybacktargetiswirelesschanged",
-            handleTargetChange
-          );
-        }
+        detachFromVideo();
         video = null;
         api.logger.debug("AirPlay plugin destroyed");
       },
@@ -41771,21 +42291,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api?.logger.warn("AirPlay not supported in this browser");
           return;
         }
-        if (!video) {
-          attachToVideo();
-        }
+        attachToVideo();
         if (!video) {
           api?.logger.warn("Cannot show AirPlay picker: no video element");
           return;
         }
-        const hlsPlugin = api?.getPlugin("hls-provider");
-        if (hlsPlugin && !hlsPlugin.isNativeHLS()) {
-          api?.logger.info("Switching to native HLS for AirPlay compatibility");
-          await hlsPlugin.switchToNative();
-          video = null;
-          attachToVideo();
-        }
-        video?.webkitShowPlaybackTargetPicker?.();
+        video.webkitShowPlaybackTargetPicker?.();
       },
       isAvailable() {
         return api?.getState("airplayAvailable") === true;
@@ -41801,7 +42312,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/chromecast/src/cast-loader.ts
   var CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+  var CAST_SDK_TIMEOUT_MS = 1e4;
   var loadPromise = null;
+  var abortPendingLoad = null;
   function loadCastSDK() {
     if (loadPromise) {
       return loadPromise;
@@ -41815,21 +42328,56 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         reject(new Error("Cast SDK requires browser environment"));
         return;
       }
+      let settled = false;
+      let timeoutId = null;
+      const clearPendingTimeout = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      };
+      abortPendingLoad = () => {
+        if (settled) return;
+        settled = true;
+        clearPendingTimeout();
+        reject(new Error("Cast SDK load cancelled"));
+      };
+      const settle = (error) => {
+        if (settled) return;
+        settled = true;
+        abortPendingLoad = null;
+        clearPendingTimeout();
+        if (error) {
+          loadPromise = null;
+          reject(error);
+          return;
+        }
+        resolve2();
+      };
+      const previousCallback = window.__onGCastApiAvailable;
       window.__onGCastApiAvailable = (isAvailable) => {
+        try {
+          previousCallback?.(isAvailable);
+        } catch {
+        }
         if (isAvailable && isCastSDKLoaded()) {
-          resolve2();
+          settle();
         } else {
-          reject(new Error("Cast SDK reported not available"));
+          settle(new Error("Cast SDK reported not available"));
         }
       };
       const script = document.createElement("script");
       script.src = CAST_SDK_URL;
       script.async = true;
       script.onerror = () => {
-        loadPromise = null;
-        reject(new Error("Failed to load Cast SDK script"));
+        settle(new Error("Failed to load Cast SDK script"));
       };
       document.head.appendChild(script);
+      timeoutId = setTimeout(() => {
+        settle(new Error(`Cast SDK did not load within ${CAST_SDK_TIMEOUT_MS}ms`));
+      }, CAST_SDK_TIMEOUT_MS);
+    });
+    void loadPromise.catch(() => {
     });
     return loadPromise;
   }
@@ -41858,7 +42406,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let remotePlayerController = null;
     let localTimeBeforeCast = 0;
     let localSrcBeforeCast = "";
-    let previousIsMediaLoaded = false;
     let castStateHandler = null;
     let sessionStateHandler = null;
     let remotePlayerHandler = null;
@@ -41959,8 +42506,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("chromecastActive", false);
       api.emit("chromecast:disconnected", void 0);
       api.logger.info("Chromecast disconnected", { resumeTime: castTime });
+      const isLive = api.getState("live");
       const video = api.container.querySelector("video");
-      if (video && castTime > 0) {
+      if (video && castTime > 0 && !isLive) {
         video.currentTime = castTime;
         video.play().catch(() => {
           api.logger.debug("Autoplay blocked on cast disconnect");
@@ -41993,12 +42541,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const handleRemotePlayerChange = () => {
       if (!remotePlayer) return;
       if (!api.getState("chromecastActive")) return;
-      const isMediaLoaded = remotePlayer.isMediaLoaded;
-      if (previousIsMediaLoaded && !isMediaLoaded) {
-        api.logger.debug("Cast media ended (isMediaLoaded transition)");
+      const mediaSession = currentSession?.getMediaSession();
+      if (mediaSession?.playerState === "IDLE" && mediaSession?.idleReason === "FINISHED") {
+        api.logger.debug("Cast media ended (IDLE + FINISHED)");
         api.emit("playback:ended", void 0);
       }
-      previousIsMediaLoaded = isMediaLoaded;
       api.setState("currentTime", remotePlayer.currentTime);
       api.setState("duration", remotePlayer.duration);
       api.setState("playing", !remotePlayer.isPaused);
@@ -42019,8 +42566,30 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (!api.getState("chromecastActive")) return;
           await loadMediaOnCast(src, 0);
         });
+        const unsubPlay = api.on("playback:play", () => {
+          if (!api.getState("chromecastActive")) return;
+          if (remotePlayer?.isPaused && remotePlayerController) {
+            remotePlayerController.playOrPause();
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          if (!api.getState("chromecastActive")) return;
+          if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
+            remotePlayerController.playOrPause();
+          }
+        });
+        const unsubSeek = api.on("playback:seeking", ({ time }) => {
+          if (!api.getState("chromecastActive")) return;
+          if (remotePlayer && remotePlayerController) {
+            remotePlayer.currentTime = time;
+            remotePlayerController.seek();
+          }
+        });
         api.onDestroy(() => {
           unsubLoadRequest();
+          unsubPlay();
+          unsubPause();
+          unsubSeek();
         });
         if (!isCastSupported()) {
           api.logger.debug("Chromecast not supported in this browser");
@@ -42038,7 +42607,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       async destroy() {
         if (currentSession) {
           try {
-            currentSession.endSession(true);
+            currentSession.endSession(false);
           } catch {
           }
         }
@@ -42290,7 +42859,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   };
 
   // packages/plugins/playlist/src/styles.ts
-  var STYLE_ID = "sp-playlist-styles";
+  init_src();
+  var STYLE_ID2 = "sp-playlist-styles";
   var styles2 = `
 .sp-playlist-skip[disabled] {
   opacity: 0.4;
@@ -42391,14 +42961,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 `;
   function injectStyles() {
-    if (typeof document === "undefined" || document.getElementById(STYLE_ID)) {
-      return null;
-    }
-    const el = document.createElement("style");
-    el.id = STYLE_ID;
-    el.textContent = styles2;
-    document.head.appendChild(el);
-    return el;
+    return injectSharedStyles(STYLE_ID2, styles2);
   }
 
   // packages/plugins/playlist/src/version.ts
@@ -42429,6 +42992,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   function createPlaylistPlugin(config) {
     const mergedConfig = { ...DEFAULT_CONFIG2, ...config };
     let api = null;
+    let releaseStyles = null;
+    let releaseControls = null;
+    let lifecycle = 0;
     let tracks = mergedConfig.tracks || [];
     let currentIndex = mergedConfig.initialIndex ?? -1;
     if (currentIndex < -1 || currentIndex >= tracks.length) {
@@ -42567,6 +43133,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       type: "feature",
       description: "Playlist management with shuffle, repeat, and gapless playback",
       async init(pluginApi) {
+        const generation = ++lifecycle;
         api = pluginApi;
         api.logger.info("Playlist plugin initialized");
         loadPersistedPlaylist();
@@ -42592,20 +43159,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("playlist:ended", void 0);
           }
         });
-        injectStyles();
-        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
+        releaseStyles = injectStyles();
+        const owner = api.container;
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2, unregisterControl: unregisterControl2 }) => {
+          if (generation !== lifecycle) return;
           const self2 = plugin;
           registerControl2(
             "playlist-previous",
-            () => new PlaylistSkipButton(self2, "previous")
+            () => new PlaylistSkipButton(self2, "previous"),
+            { owner }
           );
-          registerControl2("playlist-next", () => new PlaylistSkipButton(self2, "next"));
+          registerControl2("playlist-next", () => new PlaylistSkipButton(self2, "next"), {
+            owner
+          });
           registerControl2(
             "playlist",
             () => new PlaylistPanel(self2, {
               onSelect: (index) => self2.play(index)
-            })
+            }),
+            { owner }
           );
+          releaseControls = () => {
+            unregisterControl2("playlist-previous", { owner });
+            unregisterControl2("playlist-next", { owner });
+            unregisterControl2("playlist", { owner });
+          };
         }).catch(() => {
           api?.logger.debug("@scarlett-player/ui not present, playlist controls not registered");
         });
@@ -42636,8 +43214,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       },
       async destroy() {
+        lifecycle++;
         api?.logger.info("Playlist plugin destroying");
         persistPlaylist();
+        releaseStyles?.();
+        releaseStyles = null;
+        releaseControls?.();
+        releaseControls = null;
         api = null;
       },
       add(trackOrTracks) {
@@ -43848,6 +44431,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const dynamic = config.dynamic ?? false;
     const dynamicInterval = config.dynamicInterval ?? 1e4;
     const showDelay = config.showDelay ?? 0;
+    let currentImageUrl = config.imageUrl;
+    let currentText = config.text;
+    let mutationObserver = null;
     let positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
     const createElement2 = () => {
       const el = document.createElement("div");
@@ -43858,8 +44444,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return el;
     };
     const updateContent = (el, imageUrl, text) => {
-      const img = imageUrl || config.imageUrl;
-      const txt = text || config.text;
+      if (imageUrl !== void 0) {
+        currentImageUrl = imageUrl;
+        currentText = void 0;
+      }
+      if (text !== void 0) {
+        currentText = text;
+        currentImageUrl = void 0;
+      }
+      const img = currentImageUrl;
+      const txt = currentText;
       el.innerHTML = "";
       if (img) {
         const imgEl = document.createElement("img");
@@ -43925,6 +44519,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         clearTimeout(showDelayTimer);
         showDelayTimer = null;
       }
+      if (mutationObserver) {
+        mutationObserver.disconnect();
+        mutationObserver = null;
+      }
       if (element?.parentNode) {
         element.parentNode.removeChild(element);
       }
@@ -43941,7 +44539,35 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.logger.debug("Watermark plugin initialized");
         element = createElement2();
         api.container.appendChild(element);
+        mutationObserver = new MutationObserver((mutations) => {
+          if (!element || !api) return;
+          for (const mutation of mutations) {
+            if (mutation.type === "childList") {
+              if (mutation.removedNodes.length > 0) {
+                let wasRemoved = false;
+                mutation.removedNodes.forEach((node) => {
+                  if (node === element) wasRemoved = true;
+                });
+                if (wasRemoved && api) {
+                  api.container.appendChild(element);
+                }
+              }
+            } else if (mutation.type === "attributes" && mutation.attributeName === "style") {
+              if (element) {
+                element.style.opacity = String(opacity);
+                element.style.pointerEvents = "none";
+                element.style.position = "absolute";
+                element.style.zIndex = "10";
+              }
+            }
+          }
+        });
+        mutationObserver.observe(api.container, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
         const unsubPlay = api.on("playback:play", () => {
+          if (showDelayTimer) {
+            clearTimeout(showDelayTimer);
+            showDelayTimer = null;
+          }
           if (showDelay > 0) {
             showDelayTimer = setTimeout(() => {
               show();
@@ -43953,7 +44579,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         });
         const unsubPause = api.on("playback:pause", () => {
-          hide();
           stopDynamic();
           if (showDelayTimer) {
             clearTimeout(showDelayTimer);
@@ -44007,7 +44632,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       setPadding(value) {
         currentPadding = Math.max(0, value);
-        currentBottomPadding = currentPadding;
+        currentBottomPadding = Math.max(value, config.padding ?? 40);
         positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
         setPosition(currentPosition);
       },
@@ -44018,6 +44643,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
   }
+
+  // packages/plugins/share/src/index.ts
+  init_src();
 
   // packages/plugins/share/src/url.ts
   function resolve(value, fallback) {
@@ -44670,11 +45298,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PKG_VERSION11 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/share/src/index.ts
-  var STYLE_ID2 = "sp-share-styles";
+  var STYLE_ID3 = "sp-share-styles";
   function createSharePlugin(config = {}) {
     let api = null;
     let sheet = null;
-    let styleEl = null;
+    let releaseStyles = null;
+    let releaseControls = null;
+    let lifecycle = 0;
     const configuredTargets = config.targets ?? DEFAULT_TARGETS;
     const buildContext = () => {
       const currentTime = api?.getState("currentTime") ?? 0;
@@ -44780,14 +45410,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       type: "feature",
       description: "Native share sheet, copy link, timestamps and embed codes",
       init(pluginApi) {
+        const generation = ++lifecycle;
         api = pluginApi;
         api.logger.debug("Share plugin initialized");
-        if (!document.getElementById(STYLE_ID2)) {
-          styleEl = document.createElement("style");
-          styleEl.id = STYLE_ID2;
-          styleEl.textContent = styles3;
-          document.head.appendChild(styleEl);
-        }
+        releaseStyles = injectSharedStyles(STYLE_ID3, styles3);
         sheet = new ShareSheet(api, {
           onSelect: (target) => {
             const context = buildContext();
@@ -44800,14 +45426,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             api?.emit("share:closed", void 0);
           }
         });
-        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
+        const owner = api.container;
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2, unregisterControl: unregisterControl2 }) => {
+          if (generation !== lifecycle) return;
           registerControl2(
             "share",
             (controlApi) => new ShareButton(controlApi, () => void activate(), {
               icon: config.buttonIcon,
               label: config.buttonLabel
-            })
+            }),
+            { owner }
           );
+          releaseControls = () => {
+            unregisterControl2("share", { owner });
+          };
         }).catch(() => {
           api?.logger.debug("@scarlett-player/ui not present, share control not registered");
         });
@@ -44817,10 +45449,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       },
       destroy() {
+        lifecycle++;
         sheet?.destroy();
         sheet = null;
-        styleEl?.remove();
-        styleEl = null;
+        releaseStyles?.();
+        releaseStyles = null;
+        releaseControls?.();
+        releaseControls = null;
         api = null;
       },
       async share(targetId) {
@@ -44998,7 +45633,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/gestures/src/overlay.ts
-  var STYLE_ID3 = "sp-gestures-styles";
+  init_src();
+  var STYLE_ID4 = "sp-gestures-styles";
   var styles4 = `
 .sp-gestures {
   position: absolute;
@@ -45070,7 +45706,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     constructor(container, options) {
       this.container = container;
       this.options = options;
-      this.styleEl = null;
+      this.releaseStyles = null;
       this.hideTimer = null;
       this.pointerHandler = (event) => {
         if (event.pointerType !== "touch") return;
@@ -45145,8 +45781,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.el.removeEventListener("pointerup", this.pointerHandler);
       this.el.removeEventListener("pointercancel", this.pointerHandler);
       this.el.remove();
-      this.styleEl?.remove();
-      this.styleEl = null;
+      this.releaseStyles?.();
+      this.releaseStyles = null;
     }
     /** Exposed for tests and for hosts that want to inspect the surface. */
     getElement() {
@@ -45161,12 +45797,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       zone.appendChild(label);
       return { zone, label };
     }
+    /**
+     * Claim the shared gesture stylesheet.
+     *
+     * Reference-counted: two players on one page share the sheet, and destroying
+     * either used to take it away from the other.
+     */
     injectStyles() {
-      if (document.getElementById(STYLE_ID3)) return;
-      this.styleEl = document.createElement("style");
-      this.styleEl.id = STYLE_ID3;
-      this.styleEl.textContent = styles4;
-      document.head.appendChild(this.styleEl);
+      this.releaseStyles = injectSharedStyles(STYLE_ID4, styles4);
     }
   };
 
@@ -45568,6 +46206,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/chapters/src/index.ts
+  init_src();
+
   // packages/plugins/chapters/src/normalise.ts
   function normaliseChapters(chapters) {
     const valid = chapters.filter(
@@ -45907,14 +46548,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PKG_VERSION14 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/chapters/src/index.ts
-  var STYLE_ID4 = "sp-chapters-styles";
+  var STYLE_ID5 = "sp-chapters-styles";
   var DEFAULT_PREVIOUS_THRESHOLD = 3;
   function createChaptersPlugin(config = {}) {
     let api = null;
     let chapters = [];
     let activeIndex = -1;
     let list = null;
-    let styleEl = null;
+    let releaseStyles = null;
+    let releaseControls = null;
+    let lifecycle = 0;
     let trackCleanup = null;
     const previousThreshold = config.previousThreshold ?? DEFAULT_PREVIOUS_THRESHOLD;
     const publish = (next) => {
@@ -45966,21 +46609,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PKG_VERSION14,
       type: "feature",
       init(pluginApi) {
+        const generation = ++lifecycle;
         api = pluginApi;
-        if (!document.getElementById(STYLE_ID4)) {
-          styleEl = document.createElement("style");
-          styleEl.id = STYLE_ID4;
-          styleEl.textContent = styles5;
-          document.head.appendChild(styleEl);
-        }
+        releaseStyles = injectSharedStyles(STYLE_ID5, styles5);
         list = new ChapterList({
           onSelect: (index) => seekToChapter(index)
         });
-        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2 }) => {
-          registerControl2("chapters", (controlApi) => {
-            list?.attach(controlApi);
-            return list;
-          });
+        const owner = api.container;
+        void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2, unregisterControl: unregisterControl2 }) => {
+          if (generation !== lifecycle) return;
+          registerControl2(
+            "chapters",
+            (controlApi) => {
+              list?.attach(controlApi);
+              return list;
+            },
+            { owner }
+          );
+          releaseControls = () => {
+            unregisterControl2("chapters", { owner });
+          };
         }).catch(() => {
           api?.logger.debug("@scarlett-player/ui not present, chapters control not registered");
         });
@@ -46004,12 +46652,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       },
       destroy() {
+        lifecycle++;
         trackCleanup?.();
         trackCleanup = null;
         list?.destroy();
         list = null;
-        styleEl?.remove();
-        styleEl = null;
+        releaseStyles?.();
+        releaseStyles = null;
+        releaseControls?.();
+        releaseControls = null;
         chapters = [];
         activeIndex = -1;
         api = null;
@@ -46345,26 +46996,77 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
         return;
       }
-      if (navigator.sendBeacon) {
-        const blob = new Blob([safeStringify(payload)], {
-          type: "application/json"
-        });
-        navigator.sendBeacon(mergedConfig.beaconUrl, blob);
-      } else {
-        const shouldAttachApiKey = Boolean(
-          mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-        );
-        fetch(mergedConfig.beaconUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
-          },
-          body: safeStringify(payload),
-          keepalive: true
-        }).catch(() => {
-        });
+      const body = safeStringify(payload);
+      const shouldAttachApiKey = Boolean(
+        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+      );
+      fetch(mergedConfig.beaconUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
+        },
+        body,
+        keepalive: true
+      }).catch(() => {
+      });
+    }
+    function sendUnloadBeacon(eventType, data = {}) {
+      if (mergedConfig.disableInDev && isDevelopment()) return;
+      if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) return;
+      const payload = {
+        event: eventType,
+        timestamp: Date.now(),
+        viewId: session.viewId,
+        sessionId: session.sessionId,
+        viewerId: session.viewerId,
+        videoId: mergedConfig.videoId,
+        videoTitle: mergedConfig.videoTitle,
+        isLive: mergedConfig.isLive ?? api?.getState("live") ?? false,
+        playerVersion: PLUGIN_VERSION,
+        playerName: PLUGIN_NAME,
+        browser: getBrowserInfo().name,
+        os: getOSInfo().name,
+        deviceType: getDeviceType(),
+        screenSize: getScreenSize(),
+        playerSize: getPlayerSize(api?.container ?? null),
+        connectionType: getConnectionType(),
+        ...mergedConfig.customDimensions,
+        ...data
+      };
+      if (mergedConfig.customBeacon) {
+        mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
+        return;
       }
+      const body = safeStringify(payload);
+      if (navigator.sendBeacon) {
+        let urlWithApiKey = mergedConfig.beaconUrl;
+        if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
+          try {
+            const urlObj = new URL(mergedConfig.beaconUrl);
+            urlObj.searchParams.set("api_key", mergedConfig.apiKey);
+            urlWithApiKey = urlObj.toString();
+          } catch {
+            urlWithApiKey = `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
+          }
+        }
+        const blob = new Blob([body], { type: "application/json" });
+        const sent = navigator.sendBeacon(urlWithApiKey, blob);
+        if (sent) return;
+      }
+      const shouldAttachApiKey = Boolean(
+        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
+      );
+      fetch(mergedConfig.beaconUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
+        },
+        body,
+        keepalive: true
+      }).catch(() => {
+      });
     }
     function sendHeartbeat() {
       if (!api) return;
@@ -46411,6 +47113,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function sendViewEnd() {
       if (!api) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       session.viewEnd = Date.now();
       const state = {
         currentTime: api.getState("currentTime"),
@@ -46477,7 +47183,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onWaiting() {
       if (!api) return;
-      if (session.firstFrameTime !== null && !isRebuffering) {
+      if (session.firstFrameTime !== null && !isRebuffering && !api.getState("seeking")) {
         isRebuffering = true;
         rebufferStartTime = Date.now();
         session.rebufferCount++;
@@ -46525,6 +47231,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         sendViewEnd();
       }
     }
+    function onCoreError(err) {
+      if (!err) return;
+      const error = err.originalError || err;
+      if (!(error instanceof Error)) return;
+      session.errorCount++;
+      const errorEvent = {
+        time: Date.now(),
+        type: error.name || "CoreError",
+        message: error.message || "Unknown core error",
+        fatal: err.fatal ?? false
+      };
+      session.errors.push(errorEvent);
+      if (session.errors.length > 100) {
+        session.errors = session.errors.slice(-100);
+      }
+      sendBeacon("error", {
+        errorType: errorEvent.type,
+        errorMessage: errorEvent.message,
+        fatal: errorEvent.fatal
+      });
+      if (errorEvent.fatal) {
+        session.playbackState = "error";
+        session.exitType = "error";
+        sendViewEnd();
+      }
+    }
     function onQualityChange(payload) {
       if (!api) return;
       const now2 = Date.now();
@@ -46557,13 +47289,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (document.hidden) {
         session.exitType = "background";
         sendHeartbeat();
+      } else {
+        session.exitType = null;
       }
     }
     function onBeforeUnload() {
+      if (session.viewEnd) return;
+      session.viewEnd = Date.now();
       if (!session.exitType) {
         session.exitType = "abandoned";
       }
-      sendViewEnd();
+      sendUnloadBeacon("viewEnd", {
+        watchTime: session.watchTime,
+        playTime: session.playTime,
+        startupTime: session.startupTime,
+        rebufferCount: session.rebufferCount,
+        rebufferDuration: session.rebufferDuration,
+        avgBitrate: session.avgBitrate,
+        maxBitrate: session.maxBitrate,
+        exitType: session.exitType
+      });
     }
     return {
       id: "analytics",
@@ -46585,6 +47330,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubSeeking = api.on("playback:seeking", onSeeking);
         const unsubEnded = api.on("playback:ended", onEnded);
         const unsubError = api.on("media:error", onError);
+        const unsubCoreError = api.on("error", onCoreError);
         const unsubQuality = api.on("quality:change", onQualityChange);
         cleanupFns.push(
           unsubPlay,
@@ -46593,13 +47339,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubSeeking,
           unsubEnded,
           unsubError,
+          unsubCoreError,
           unsubQuality
         );
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("beforeunload", onBeforeUnload);
+        window.addEventListener("pagehide", onBeforeUnload);
         cleanupFns.push(() => {
           document.removeEventListener("visibilitychange", onVisibilityChange);
           window.removeEventListener("beforeunload", onBeforeUnload);
+          window.removeEventListener("pagehide", onBeforeUnload);
         });
         heartbeatTimer = setInterval(
           sendHeartbeat,
@@ -46644,7 +47393,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.8.1" : "dev";
+  var VERSION = true ? "1.9.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
