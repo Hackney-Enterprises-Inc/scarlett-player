@@ -1,5 +1,114 @@
 # @scarlett-player/hls
 
+## 1.10.0
+
+### Minor Changes
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - HLS: recover the request URL from fragment and key load errors so error
+  diagnostics and logs carry the failing segment and its HTTP status.
+
+  `parseHlsError` read only `data.url`, which hls.js sets on playlist errors and
+  never sets on a fragment or key load failure - it carries the URL on
+  `data.frag.url` and `data.response.url` instead. So the diagnostic block on
+  fatal errors, which exists because the 2026-08-29 origin outage could not be
+  diagnosed without a status and a URL, has never carried a URL for exactly the
+  error class an origin outage produces. The URL is now read from whichever field
+  the originating error type populated, and both log sites report the HTTP status
+  that was already being parsed and thrown away.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Playlist: validate persisted state, respect caller tracks, stop double-arming
+  auto-advance and carry an explicit autoplay intent. Chapters: load `config.src`
+  once a media element exists. Gestures: follow `mediaType` changes. HLS: remove
+  the unused `shouldPreferNativeHLS` helper.
+
+  **Playlist**
+  - Restored state is validated. Storage is untrusted input - another tab, an
+    older release, a hand-edited key - and a non-array `tracks`, entries without a
+    `src`, an out-of-range `currentIndex` or an unknown `repeat` mode were all
+    restored as-is.
+  - A caller that supplied `config.tracks` now keeps them. Storage silently
+    overrode them, so two players sharing a `persistKey` could replace each
+    other's list.
+  - Auto-advance clears a pending timer before arming the next one. Two `ended`
+    events inside `advanceDelay` armed two timers and loaded the track twice.
+  - `setCurrentTrack` takes an explicit `{ autoplay }`. Auto-advance passes
+    whether playback was actually running, so a paused playlist no longer starts
+    playing on its own; manual selection still passes `true`.
+
+  **Chapters**
+
+  `config.src` was attached during `init()`, and the WebVTT loader returns a no-op
+  cleanup and never retries when the container has no media element yet. A
+  provider that had not attached its element lost its chapters permanently. The
+  attach is now retried on `media:loadedmetadata`, and is idempotent.
+
+  **Gestures**
+
+  `mediaType` was sampled once during `init()`, where it still defaults to
+  `'unknown'`, so an audio source that loaded a moment later kept a tap surface
+  over an audio player. The surface is now built and torn down as `mediaType`
+  changes, and `ownsTapInteraction()` follows the surface rather than the enabled
+  flag.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Testing: the browser harness runs on bundled Chromium against local fixtures
+  and runs in CI, and an HLS integration suite loads the real hls.js.
+  - `scripts/verify-browser.mjs` launches Playwright's bundled Chromium instead
+    of requiring a system Google Chrome, which is what kept it out of CI. Every
+    scenario now plays the local HLS fixture, and each page hard-blocks
+    non-local origins, so a run cannot depend on the demo origin being up - the
+    503 that produced the URL-recovery fix above would otherwise have taken the
+    harness down with it. Scenario 7 also waits for the control bar to settle
+    before measuring, rather than racing the rebuild that follows a late control
+    registration.
+  - CI installs Chromium, generates the fixture and runs the harness after the
+    unit tests. `scripts/hls-fixture.mjs` now reports a missing ffmpeg instead of
+    surfacing a raw spawn error.
+  - New `packages/plugins/hls/tests/integration.test.ts` imports hls.js itself
+    and asserts what the mocks cannot: that the event names and error-detail
+    strings the plugin switches on still exist, that `parseHlsError` recovers the
+    URL from a fragment error built the way hls.js builds it, and that the
+    `MANIFEST_PARSED` and `LEVEL_LOADED` payloads carry the fields `event-map.ts`
+    reads - checked against manifests hls.js actually parsed.
+  - Two tests that encoded current behaviour were rewritten: analytics'
+    `startupTime` assertion no longer passes for `null`, and `seekToLive()` now
+    covers the fallback chain a real provider reaches instead of only the mocked
+    `getLiveInfo()` branch.
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - UI: the progress tooltip returns after a mouse leave, a leaked keydown listener
+  is removed, `--sp-*` is no longer declared on `:root`, and a window-resize
+  fallback covers viewports without `ResizeObserver`. Audio UI: keyboard support
+  on the progress and volume sliders, and no more per-tick `innerHTML` rewrites.
+
+  **UI**
+  - `ProgressBar` set `tooltip.style.opacity = '0'` on mouse leave and touch end.
+    An inline style outranks the stylesheet's hover rule, so the tooltip never
+    came back on a later hover. The inline value is now cleared instead.
+  - `ProgressBar.destroy()` removes its `keydown` listener, which was the only
+    one it left attached.
+  - The stylesheet no longer declares `--sp-accent`, `--sp-color`, `--sp-bg`,
+    `--sp-control-height` and `--sp-icon-size` on `:root`, which wrote five names
+    into the host document. Defaults live at the use sites as `var()` fallbacks,
+    so a host theming through its own `:root` keeps working and `setTheme()`
+    still wins on the container.
+  - Where `ResizeObserver` is unavailable the bar refits on a debounced window
+    resize. It was previously fitted at init and on control changes and never
+    again.
+
+  **Audio UI**
+  - The progress bar and volume slider respond to arrow keys, Home and End. Both
+    already carried `role="slider"` and `tabindex="0"`, so a keyboard viewer
+    could focus them and had nothing to press.
+  - Button icons are only rewritten when they change. `updateUI()` runs on every
+    `currentTime` tick and each `innerHTML` write reparsed the SVG.
+
+  **Shared code**
+
+  `formatTime`/`formatLiveTime` and the SVG paths both UI packages draw now live
+  in `@scarlett-player/core`, which is already a peer dependency of both. `ui`
+  re-exports the formatters, so its public surface is unchanged.
+  `@scarlett-player/hls`'s `sanitizeUrl` re-exports core's implementation rather
+  than duplicating it; it remains exported from both HLS entries.
+
 ## 1.9.0
 
 ### Minor Changes

@@ -1,5 +1,20 @@
 # @scarlett-player/captions
 
+## 1.10.0
+
+### Minor Changes
+
+- [#86](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/86) [`9b04fc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9b04fc4408821eff0ce3d11cfba6c70784c2a9e8) Thanks [@alexhackney](https://github.com/alexhackney)! - Captions: follow hls.js subtitle track switches so the player's caption state
+  stays in sync when hls.js or Safari changes the track.
+
+  An automatic rendition switch, or Safari's own subtitle menu, never routes
+  through `selectTrack()`, so `currentTextTrack` went stale and the UI kept a
+  checkmark on the wrong entry. The plugin now also listens for
+  `hlsSubtitleTrackSwitch` and re-reads the element's `textTracks` through the
+  existing single writer of that state. It deliberately does not write back to
+  `hlsInstance.subtitleTrack`: creating player-owned tracks for hls.js renditions
+  is what caused the duplicate-caption incident of 2026-08-10.
+
 ## 1.9.0
 
 ### Minor Changes
