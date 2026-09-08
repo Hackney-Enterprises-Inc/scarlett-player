@@ -153,9 +153,17 @@ jobs:
           node scripts/verify-browser.mjs
           kill "$(cat /tmp/http.pid)"
 
-      # The harness needs a built demo bundle, and CI's demo-bundle commit
-      # belongs to release.yml alone. Leaving the rebuild in the working tree
-      # here would let a later step pick it up.
-      - name: Discard the rebuilt demo bundle
+      # The harness needs a built demo, and CI's demo commit belongs to
+      # release.yml alone. Leaving the rebuild in the working tree here would
+      # let a later step pick it up. Covers every TRACKED file build.cjs
+      # writes: the two bundles, the version stamp on demo/index.html, and the
+      # generated docs/demo/index.html. The .map files are gitignored, and
+      # naming an untracked path here would make git checkout reject the whole
+      # pathspec list and restore nothing.
+      - name: Discard the rebuilt demo
         if: always() && github.event_name == 'push'
-        run: git checkout -- demo/demo.bundle.js docs/demo/demo.bundle.js || true
+        run: |
+          git checkout -- \
+            demo/demo.bundle.js demo/index.html \
+            docs/demo/demo.bundle.js docs/demo/index.html \
+            || true

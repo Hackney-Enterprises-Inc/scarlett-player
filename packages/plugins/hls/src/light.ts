@@ -30,6 +30,12 @@ export type {
 // Telemetry helper used to build the `detail.url` on emitted fatal errors
 export { sanitizeUrl } from './sanitize-url';
 
+// Live/LL-HLS measurement: the single writer for `liveLatency`, `liveEdge`,
+// `seekableRange` and `lowLatencyMode`. Exported so a host can reuse the same
+// edge definition the control bar does.
+export { computeLiveMetrics, DEFAULT_TARGET_LATENCY } from './live-metrics';
+export type { LiveMetrics, LiveMetricsSource, HlsLevelDetails } from './live-metrics';
+
 /**
  * Create an HLS Provider Plugin instance (Light build).
  *

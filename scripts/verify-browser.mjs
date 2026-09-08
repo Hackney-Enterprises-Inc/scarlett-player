@@ -32,6 +32,12 @@
  *      still seeks the video, the progress bar is a 44px touch target, and the
  *      settings speed panel fits inside its bound and scrolls inside a 375x211
  *      player rather than overflowing it. Repeated at 375 and 414.
+ *   8. LL-HLS: a rolling low-latency playlist assembled from the same fixture
+ *      segments, sliced into 0.5s parts and served the way an LL origin serves
+ *      them (blocking part delivery, blocking playlist reloads). Parts load,
+ *      effective LL is reported, the edge threshold flips to GO LIVE when the
+ *      viewer drifts back, and clicking it lands on the live SYNC POSITION
+ *      rather than past the edge, without stalling.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -55,11 +61,12 @@
  * exercised here (headless Chromium cannot enter PiP); the readiness gate is
  * covered by unit tests in @scarlett-player/ui.
  */
+import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { ensureHlsFixture } from './hls-fixture.mjs';
+import { ensureHlsFixture, ensureLlHlsFixture } from './hls-fixture.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -83,6 +90,7 @@ const EMBED_UMD = 'http://127.0.0.1:8899/packages/embed/dist/embed.umd.cjs';
 const EMBED_DIST = 'http://127.0.0.1:8899/packages/embed/dist/';
 
 ensureHlsFixture();
+const LL_FIXTURE = ensureLlHlsFixture();
 
 const browser = await chromium.launch({ headless: true });
 
@@ -823,6 +831,468 @@ const state = (page) => page.evaluate(() => {
     );
 
     await p.close();
+  }
+}
+
+// ============================================================ SCENARIO 8
+// LL-HLS against a rolling low-latency playlist. The fixture segments are
+// sliced into 0.5s parts on the fly and served the way a real LL origin
+// serves them - the playlist advances with wall clock, a part request blocks
+// until that part exists, and a blocking playlist reload (_HLS_msn/_HLS_part)
+// is held until the requested part is available.
+//
+// Rolling rather than static on purpose: hls.js measures latency as
+// `levelDetails.edge + age`, and `age` grows without bound on a playlist that
+// never advances, so a fixed document would report latency climbing forever
+// and nothing about the edge threshold could be asserted.
+{
+  console.log('\n--- Scenario 8: LL-HLS parts, latency and GO LIVE (local fixture) ---');
+
+  const LL_PART_DURATION = LL_FIXTURE.partDuration; // 0.5s
+  const LL_PARTS_PER_SEG = 4;
+  const LL_SEG_DURATION = LL_PART_DURATION * LL_PARTS_PER_SEG; // 2s
+  const LL_WINDOW_SEGS = 10;
+  const LL_TOTAL_PARTS = LL_FIXTURE.partCount;
+  const LL_TOTAL_SEGS = Math.floor(LL_TOTAL_PARTS / LL_PARTS_PER_SEG);
+  // Pretend the stream has been running a while, so a joining viewer sees a
+  // real DVR window instead of a two-segment playlist. Kept modest because
+  // the fixture is only 60s long and the scenario spends ~40s of it.
+  const LL_PRIME_SECONDS = 12;
+  const LL_PART_HOLD_BACK = 1.5; // 3 x PART-TARGET, the spec minimum
+
+  /**
+   * One part, read from the fixture's 0.5s rendition.
+   *
+   * A real 0.5s segment on a keyframe boundary, not a byte-range slice of the
+   * 2s one: hls.js appends each part into the transmuxer as its own chunk, and
+   * a slice ending mid-frame produces a truncated access unit that Chromium
+   * rejects with PIPELINE_ERROR_DECODE a few seconds into part-driven
+   * playback. (Measured - that is exactly what the first version of this
+   * scenario did.)
+   */
+  const partBytes = (seg, part) =>
+    readFileSync(
+      join(LL_FIXTURE.dir, `part${seg * LL_PARTS_PER_SEG + part}.ts`)
+    );
+
+  /**
+   * The parent segment an LL playlist advertises alongside its parts.
+   *
+   * Byte-exactly the concatenation of its four parts, because that is what
+   * they are: consecutive complete TS files off one encode. hls.js loads this
+   * only when a part fails, and a mismatch there would show up as a decode
+   * error rather than as the recovery it is meant to be.
+   */
+  const segBytes = (seg) =>
+    Buffer.concat(
+      Array.from({ length: LL_PARTS_PER_SEG }, (_, p) => partBytes(seg, p))
+    );
+
+  /**
+   * Serve a rolling LL-HLS origin to one page.
+   *
+   * Each page gets its own clock, because the fixture is finite: two pages
+   * sharing one would put the second one past the end of the stream.
+   *
+   * @param {import('playwright').Page} page - Page to serve
+   * @returns {Promise<object>} Request counters plus a part-failure injector
+   */
+  const installLlOrigin = async (page) => {
+    const llStart = Date.now();
+    const counters = { partRequests: 0, segmentRequests: 0, blockingReloads: 0, dropped: 0 };
+    // Part responses still owed a 404, for the edge-blip case below
+    let dropParts = 0;
+
+  /** Parts published so far, capped at the length of the fixture. */
+  const publishedParts = () =>
+    Math.min(
+      LL_TOTAL_PARTS,
+      Math.floor((LL_PRIME_SECONDS + (Date.now() - llStart) / 1000) / LL_PART_DURATION)
+    );
+
+  /** Wait (up to 4s) until the given part has been published. */
+  const waitForPart = async (seg, part) => {
+    const index = seg * LL_PARTS_PER_SEG + part;
+    for (let i = 0; i < 80; i++) {
+      if (publishedParts() > index) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+
+  /** Build the current LL media playlist. */
+  const llPlaylist = () => {
+    const total = publishedParts();
+    const completeSegs = Math.floor(total / LL_PARTS_PER_SEG);
+    const partialParts = total % LL_PARTS_PER_SEG;
+    const first = Math.max(0, completeSegs - LL_WINDOW_SEGS);
+
+    const part = (seg, p) =>
+      `#EXT-X-PART:DURATION=${LL_PART_DURATION.toFixed(5)},URI="/ll-part-${seg}-${p}.ts"` +
+      (p === 0 ? ',INDEPENDENT=YES' : '');
+
+    const lines = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:9',
+      `#EXT-X-TARGETDURATION:${LL_SEG_DURATION}`,
+      `#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=${LL_PART_HOLD_BACK.toFixed(1)}`,
+      `#EXT-X-PART-INF:PART-TARGET=${LL_PART_DURATION.toFixed(5)}`,
+      `#EXT-X-MEDIA-SEQUENCE:${first}`,
+    ];
+
+    for (let seg = first; seg < completeSegs; seg++) {
+      // A real LL playlist only enumerates parts inside the hold-back window
+      if (seg >= completeSegs - 2) {
+        for (let p = 0; p < LL_PARTS_PER_SEG; p++) lines.push(part(seg, p));
+      }
+      lines.push(`#EXTINF:${LL_SEG_DURATION}.000000,`);
+      lines.push(`/ll-seg-${seg}.ts`);
+    }
+
+    for (let p = 0; p < partialParts; p++) lines.push(part(completeSegs, p));
+    if (completeSegs < LL_TOTAL_SEGS) {
+      lines.push(`#EXT-X-PRELOAD-HINT:TYPE=PART,URI="/ll-part-${completeSegs}-${partialParts}.ts"`);
+    }
+
+    return lines.join('\n');
+  };
+
+    await page.route('**/ll-test.m3u8*', async (r) => {
+      // Blocking reload: hold the response until the requested part exists,
+      // which is what stops hls.js polling a stale document in a hot loop
+      const url = new global.URL(r.request().url());
+      // Both params have to be PRESENT: Number(null) is 0, so a plain
+      // (non-blocking) playlist fetch would otherwise be counted as a blocking
+      // reload and made to wait for part 0 of segment 0
+      const msnParam = url.searchParams.get('_HLS_msn');
+      const partParam = url.searchParams.get('_HLS_part');
+      const msn = Number(msnParam);
+      const partIndex = Number(partParam);
+      const isBlocking =
+        msnParam !== null &&
+        partParam !== null &&
+        Number.isFinite(msn) &&
+        Number.isFinite(partIndex);
+      if (isBlocking) {
+        counters.blockingReloads++;
+        await waitForPart(msn, partIndex);
+      }
+      return r.fulfill({
+        status: 200,
+        contentType: 'application/vnd.apple.mpegurl',
+        body: llPlaylist(),
+      });
+    });
+
+    await page.route('**/ll-seg-*.ts', async (r) => {
+      const match = /ll-seg-(\d+)\.ts/.exec(r.request().url());
+      if (!match) return r.fulfill({ status: 404, body: 'no such segment' });
+      counters.segmentRequests++;
+      return r.fulfill({
+        status: 200,
+        contentType: 'video/mp2t',
+        body: segBytes(Number(match[1])),
+      });
+    });
+
+    await page.route('**/ll-part-*.ts', async (r) => {
+      const match = /ll-part-(\d+)-(\d+)\.ts/.exec(r.request().url());
+      if (!match) return r.fulfill({ status: 404, body: 'no such part' });
+
+      const seg = Number(match[1]);
+      const part = Number(match[2]);
+      counters.partRequests++;
+
+      // An injected edge blip: the part exists, the origin just fails to
+      // serve it. Retries count against the same budget, which is the point.
+      if (dropParts > 0) {
+        dropParts--;
+        counters.dropped++;
+        return r.fulfill({ status: 404, body: 'part unavailable' });
+      }
+
+      if (!(await waitForPart(seg, part))) {
+        return r.fulfill({ status: 404, body: 'part not published' });
+      }
+      return r.fulfill({
+        status: 200,
+        contentType: 'video/mp2t',
+        body: partBytes(seg, part),
+      });
+    });
+
+    return {
+      counters,
+      /**
+       * Fail the next `n` part responses with a 404.
+       * @param {number} n - How many responses to drop
+       */
+      dropNextParts: (n) => {
+        dropParts = n;
+      },
+    };
+  };
+
+  // --- 8a: the low-latency happy path -------------------------------------
+  const { page, collect } = await newTrackedPage();
+  const { counters } = await installLlOrigin(page);
+
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('video', { timeout: 30000 });
+  await page.waitForFunction(
+    () => window.player && typeof window.player.load === 'function',
+    { timeout: 30000 }
+  );
+  await page.evaluate(async () => {
+    await window.player.load('http://127.0.0.1:8899/ll-test.m3u8').catch(() => {});
+    await document.querySelector('video').play().catch(() => {});
+  });
+  await page.waitForTimeout(8000);
+
+  const live = await page.evaluate(() => {
+    const state = window.player.getState();
+    const provider = window.player.getPlugin('hls-provider');
+    const hls = provider?.getHlsInstance?.();
+    return {
+      live: state.live,
+      lowLatencyMode: state.lowLatencyMode,
+      liveLatency: state.liveLatency,
+      liveEdge: state.liveEdge,
+      seekableRange: state.seekableRange,
+      info: provider?.getLiveInfo?.() ?? null,
+      catchUpRate: hls?.config?.maxLiveSyncPlaybackRate ?? null,
+      paused: document.querySelector('video').paused,
+      t: +document.querySelector('video').currentTime.toFixed(2),
+    };
+  });
+
+  record('LL playlist classified live', live.live === true, JSON.stringify(live.seekableRange));
+  record(
+    'parts actually requested and served',
+    counters.partRequests > 0,
+    `${counters.partRequests} part requests`
+  );
+  record(
+    'blocking playlist reloads issued',
+    counters.blockingReloads > 0,
+    `${counters.blockingReloads} blocking reloads`
+  );
+  record(
+    'lowLatencyMode state reports effective LL',
+    live.lowLatencyMode === true,
+    String(live.lowLatencyMode)
+  );
+  record(
+    'getLiveInfo reports low latency and the manifest PART-HOLD-BACK',
+    live.info?.lowLatency === true && Math.abs((live.info?.targetLatency ?? 0) - 1.5) < 0.6,
+    JSON.stringify(live.info)
+  );
+  record(
+    'latency catch-up is enabled (hls.js disables it by default)',
+    live.catchUpRate === 1.1,
+    String(live.catchUpRate)
+  );
+  record('LL playback started', !live.paused && live.t > 0, `t=${live.t}`);
+
+  // Drift the viewer back into the DVR window. On the pre-LL tree liveEdge was
+  // recomputed every timeupdate as `latency < 10`, so on a 1.5s-target stream
+  // this could never flip and "GO LIVE" could never appear.
+  await page.evaluate(() => {
+    const state = window.player.getState();
+    document.querySelector('video').currentTime = state.seekableRange.start + 2;
+  });
+  await page.waitForTimeout(2500);
+
+  const behind = await page.evaluate(() => {
+    const indicator = document.querySelector('.sp-live');
+    return {
+      liveEdge: window.player.getState().liveEdge,
+      liveLatency: +window.player.getState().liveLatency.toFixed(2),
+      behindClass: indicator?.classList.contains('sp-live--behind') ?? null,
+      label: indicator?.textContent ?? '',
+      syncPosition: window.player.getPlugin('hls-provider')?.getLiveInfo?.()?.liveSyncPosition,
+      seekableEnd: window.player.getState().seekableRange?.end,
+    };
+  });
+
+  record(
+    'liveEdge flips to behind after drifting back',
+    behind.liveEdge === false,
+    `latency=${behind.liveLatency}`
+  );
+  record(
+    'the indicator offers GO LIVE',
+    behind.behindClass === true && behind.label.includes('GO LIVE'),
+    `${behind.label} (behind=${behind.behindClass})`
+  );
+
+  // Click it. The target must be the provider's sync position, not the end of
+  // the seekable range - which under LL is past the last loaded part.
+  await page.evaluate(() => document.querySelector('.sp-live').click());
+  await page.waitForTimeout(500);
+
+  const jumped = await page.evaluate(() => ({
+    t: +document.querySelector('video').currentTime.toFixed(2),
+    seekableEnd: window.player.getState().seekableRange?.end,
+  }));
+
+  record(
+    'GO LIVE lands at the live sync position, not past the edge',
+    behind.syncPosition !== undefined &&
+      Math.abs(jumped.t - behind.syncPosition) < 1.5 &&
+      jumped.t <= (behind.seekableEnd ?? Infinity) + 0.1,
+    JSON.stringify({ landed: jumped.t, sync: behind.syncPosition, end: behind.seekableEnd })
+  );
+
+  // ...and it must not stall there, which is the whole point of preferring
+  // the sync position over seekableRange.end.
+  await page.waitForTimeout(2000);
+  const after = await page.evaluate(() => {
+    const overlay = document.querySelector('.sp-error-overlay');
+    return {
+      paused: document.querySelector('video').paused,
+      t: +document.querySelector('video').currentTime.toFixed(2),
+      overlay: overlay?.classList.contains('sp-error-overlay--visible') ?? false,
+    };
+  });
+
+  record(
+    'playback continues after GO LIVE (no stall at the edge)',
+    !after.paused && after.t > jumped.t && after.overlay === false,
+    JSON.stringify(after)
+  );
+
+  // Waited for rather than sampled: a round trip to the back of the DVR window
+  // and out again costs a rebuffer, so the position is still catching up for a
+  // few seconds after the seek. What the edge threshold has to get right is
+  // that it reports the edge once the player is actually there.
+  const backAtEdge = await page
+    .waitForFunction(() => window.player.getState().liveEdge === true, { timeout: 12000 })
+    .then(() => true)
+    .catch(() => false);
+  const settled = await page.evaluate(() => ({
+    liveEdge: window.player.getState().liveEdge,
+    liveLatency: +window.player.getState().liveLatency.toFixed(2),
+    rate: document.querySelector('video').playbackRate,
+  }));
+
+  record('back at the live edge after GO LIVE', backAtEdge, JSON.stringify(settled));
+  // The DVR seek above left the part window, so the whole segments the
+  // playlist advertises had to be fetched and decoded. That is what proves the
+  // synthesised parents really are their four parts concatenated.
+  record(
+    'the DVR seek played the parent segments',
+    counters.segmentRequests > 0,
+    `${counters.segmentRequests} parent segment requests`
+  );
+
+  const errs = await collect();
+  record(
+    'zero uncaught errors across the LL session',
+    errs.pageErrors.length === 0,
+    errs.pageErrors.slice(0, 3).join(' | ')
+  );
+  record(
+    'zero unhandled rejections across the LL session',
+    errs.rejections.length === 0,
+    errs.rejections.slice(0, 3).join(' | ')
+  );
+
+  await page.close();
+
+  // --- 8b: a part blip at the edge must not look like an outage -----------
+  //
+  // LL-HLS requests parts at 4x the segment rate and the part at the very edge
+  // is the one most likely to miss, so the question this answers is whether a
+  // routine miss can reach the viewer as an outage: a fatal error, the
+  // reconnect overlay, or a stall.
+  //
+  // It cannot, and notably it is not the hls.js retry budget that saves it,
+  // nor a fallback to the parent segment (hls.js requests none: measured).
+  // A single 404 punches a `fragGap` whatever `fragLoadingMaxRetry` is set to
+  // (hls.js counts fragment errors cumulatively per level, so a bigger budget
+  // only delays the level switch) - measured both ways while writing this.
+  // What holds is the gap handling underneath: playback rides over it, no
+  // error is emitted, and the viewer sees nothing. That is the invariant.
+  {
+    const { page: blipPage, collect: blipCollect } = await newTrackedPage();
+    const { counters: blipCounters, dropNextParts } = await installLlOrigin(blipPage);
+
+    let sawReconnecting = false;
+    let sawOverlay = false;
+    const watchOverlay = setInterval(() => {
+      blipPage
+        .evaluate(() => {
+          const overlay = document.querySelector('.sp-error-overlay');
+          return {
+            visible: overlay?.classList.contains('sp-error-overlay--visible') ?? false,
+            reconnecting: overlay?.classList.contains('sp-error-overlay--reconnecting') ?? false,
+          };
+        })
+        .then((s) => {
+          sawOverlay = sawOverlay || s.visible;
+          sawReconnecting = sawReconnecting || s.reconnecting;
+        })
+        .catch(() => {});
+    }, 250);
+
+    await blipPage.goto(URL, { waitUntil: 'domcontentloaded' });
+    await blipPage.waitForSelector('video', { timeout: 30000 });
+    await blipPage.waitForFunction(
+      () => window.player && typeof window.player.load === 'function',
+      { timeout: 30000 }
+    );
+    await blipPage.evaluate(async () => {
+      await window.player.load('http://127.0.0.1:8899/ll-test.m3u8').catch(() => {});
+      await document.querySelector('video').play().catch(() => {});
+    });
+    await blipPage.waitForTimeout(6000);
+
+    const beforeBlip = await blipPage.evaluate(() => ({
+      t: +document.querySelector('video').currentTime.toFixed(2),
+      paused: document.querySelector('video').paused,
+    }));
+    record(
+      'LL playing before the part blip',
+      !beforeBlip.paused && beforeBlip.t > 0,
+      `t=${beforeBlip.t}`
+    );
+
+    dropNextParts(3);
+    await blipPage.waitForTimeout(9000);
+    clearInterval(watchOverlay);
+
+    const afterBlip = await blipPage.evaluate(() => ({
+      t: +document.querySelector('video').currentTime.toFixed(2),
+      paused: document.querySelector('video').paused,
+      liveLatency: +window.player.getState().liveLatency.toFixed(2),
+      errorCode: window.player.getState().error?.code ?? null,
+    }));
+
+    record(
+      'part 404s at the edge were actually injected',
+      blipCounters.dropped === 3,
+      `${blipCounters.dropped} dropped of ${blipCounters.partRequests} part requests`
+    );
+    record(
+      'the blip never surfaced as an error to the viewer',
+      !sawOverlay && !sawReconnecting && afterBlip.errorCode === null,
+      JSON.stringify({ sawOverlay, sawReconnecting, errorCode: afterBlip.errorCode })
+    );
+    record(
+      'playback rode straight through the part blip',
+      !afterBlip.paused && afterBlip.t > beforeBlip.t,
+      JSON.stringify(afterBlip)
+    );
+
+    const blipErrs = await blipCollect();
+    record(
+      'zero uncaught errors across the part blip',
+      blipErrs.pageErrors.length === 0,
+      blipErrs.pageErrors.slice(0, 3).join(' | ')
+    );
+
+    await blipPage.close();
   }
 }
 

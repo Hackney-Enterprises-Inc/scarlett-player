@@ -29,6 +29,13 @@ import type {
   HlsConstructor,
 } from './types';
 import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import {
+  computeLiveMetrics,
+  DEFAULT_TARGET_LATENCY,
+  resetLiveMetrics,
+  type HlsLevelDetails,
+  type LiveMetrics,
+} from './live-metrics';
 import { mapLevels, formatLevel, getInitialBandwidthEstimate } from './quality';
 import { createValidatingPlaylistLoader, PLAYLIST_INVALID_TEXT } from './playlist-validation';
 import { sanitizeUrl } from './sanitize-url';
@@ -92,6 +99,14 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   validatePlaylists: true,
 };
 
+/**
+ * Playback rate ceiling used to catch back up to the live edge when low
+ * latency was requested. hls.js defaults `maxLiveSyncPlaybackRate` to 1, which
+ * disables catch-up entirely; this single default is the difference between
+ * "LL-HLS parses" and "LL-HLS works". Overridable per host.
+ */
+const LL_CATCH_UP_PLAYBACK_RATE = 1.1;
+
 /** hls.js error details that occur before a manifest has ever parsed */
 const MANIFEST_PHASE_ERRORS = [
   'manifestLoadError',
@@ -125,6 +140,16 @@ export function createHLSPluginWith(
   let cleanupHlsEvents: (() => void) | null = null;
   let cleanupVideoEvents: (() => void) | null = null;
   let isAutoQuality = true; // Track if user has selected auto quality
+
+  // Live metrics bookkeeping. `lastLevelDetails` is the most recent live
+  // playlist hls.js reported: the timeupdate path and getLiveInfo() measure
+  // against it so every live reading in the plugin comes from one playlist
+  // rather than from whatever video.seekable happens to say. The target
+  // latency survives a switchToNative() handoff, which is the only way the
+  // native path can ever know a stream's real hold-back.
+  let lastLevelDetails: HlsLevelDetails | null = null;
+  let lastLiveMetrics: LiveMetrics | null = null;
+  let lastKnownTargetLatency: number | null = null;
 
   // Load-session guard. Bumped by every entry point that starts or stops a
   // pipeline (loadSource, destroy, provider switches, reconnect attempts).
@@ -168,6 +193,47 @@ export function createHLSPluginWith(
   let stallWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let lastStallCheckTime = 0;
   let lastStallCheckPosition = 0;
+
+  /**
+   * Measure the live state of the active pipeline.
+   *
+   * The single entry point every live reading in this plugin goes through:
+   * the `timeupdate` handler (via the callback handed to
+   * `setupVideoEventHandlers`) and `getLiveInfo()`. Which source it measures
+   * from follows the pipeline - hls.js when it owns playback, the media
+   * element on the native path.
+   *
+   * Remembers the snapshot, and the target latency inside it, so a
+   * `switchToNative()` handoff keeps measuring against the manifest's real
+   * hold-back instead of falling back to the 3s default.
+   *
+   * @returns The snapshot, or null when nothing measurable is available
+   */
+  const readLiveMetrics = (): LiveMetrics | null => {
+    const metrics =
+      hls && !isNative
+        ? computeLiveMetrics({
+            kind: 'hls',
+            hls,
+            details: lastLevelDetails,
+            lowLatencyRequested: mergedConfig.lowLatencyMode === true,
+          })
+        : video
+          ? computeLiveMetrics({
+              kind: 'media',
+              media: video,
+              targetLatency: lastKnownTargetLatency ?? undefined,
+              lowLatency: lastLiveMetrics?.lowLatency,
+            })
+          : null;
+
+    if (metrics) {
+      lastLiveMetrics = metrics;
+      if (hls && !isNative) lastKnownTargetLatency = metrics.targetLatency;
+    }
+
+    return metrics;
+  };
 
   /**
    * Mirror the `poster` state key onto the media element.
@@ -267,6 +333,14 @@ export function createHLSPluginWith(
     mediaRetryCount = 0;
     errorCount = 0;
     errorWindowStart = 0;
+
+    // Live bookkeeping belongs to the playlist being abandoned. Left behind,
+    // the next source (or the other side of a provider switch) inherits the
+    // previous stream's LL badge, latency readout and DVR window.
+    lastLevelDetails = null;
+    lastLiveMetrics = null;
+    lastKnownTargetLatency = null;
+    if (api) resetLiveMetrics(api);
   };
 
   /** Build hls.js config */
@@ -285,27 +359,118 @@ export function createHLSPluginWith(
     return config;
   };
 
-  /** Base hls.js config values (everything except the pLoader wrapper) */
-  const buildBaseHlsConfig = (): Record<string, unknown> => ({
-    debug: mergedConfig.debug,
-    autoStartLoad: mergedConfig.autoStartLoad,
-    startPosition: mergedConfig.startPosition,
-    startLevel: -1, // Auto quality selection (ABR)
-    abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate as number | undefined),
-    lowLatencyMode: mergedConfig.lowLatencyMode,
-    maxBufferLength: mergedConfig.maxBufferLength,
-    maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
-    backBufferLength: mergedConfig.backBufferLength,
-    enableWorker: mergedConfig.enableWorker,
-    capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
-    // Minimize hls.js internal retries - we handle retries ourselves
-    fragLoadingMaxRetry: 1,
-    manifestLoadingMaxRetry: 1,
-    levelLoadingMaxRetry: 1,
-    fragLoadingRetryDelay: 500,
-    manifestLoadingRetryDelay: 500,
-    levelLoadingRetryDelay: 500,
-  });
+  /**
+   * Build the hls.js live-latency block.
+   *
+   * Only keys the host actually set are emitted. hls.js merges config by
+   * assignment, so handing it `liveSyncDurationCount: undefined` OVERRIDES its
+   * own default with undefined - spreading these blindly would silently break
+   * standard live playback while adding a low-latency feature.
+   *
+   * `maxLiveSyncPlaybackRate` is the one key with a Scarlett default: hls.js
+   * ships 1, which disables latency catch-up entirely, so LL-HLS would parse
+   * and load parts and then let latency settle wherever the buffer landed.
+   * 1.1 applies only when low latency was requested, and only when the host
+   * did not pick its own value.
+   *
+   * The seconds-based keys (`liveSyncDuration`, `liveMaxLatencyDuration`) and
+   * the count-based ones (`liveSyncDurationCount`,
+   * `liveMaxLatencyDurationCount`) are mutually exclusive: hls.js THROWS on a
+   * config carrying both ("don't mix up ..."), which would take the load down
+   * inside `new Hls()` before a frame plays. Either group is forwarded on its
+   * own, including explicit host overrides; a config mixing them forwards one
+   * group and logs which half was dropped.
+   *
+   * @returns Live config keys, with no key present holding `undefined`
+   */
+  const buildLiveHlsConfig = (): Record<string, unknown> => {
+    const live: Record<string, unknown> = {};
+
+    const set = (key: string, value: number | boolean | undefined): void => {
+      if (value !== undefined) live[key] = value;
+    };
+
+    const syncDuration = mergedConfig.liveSyncDuration as number | undefined;
+    const syncCount = mergedConfig.liveSyncDurationCount as number | undefined;
+    const maxDuration = mergedConfig.liveMaxLatencyDuration as number | undefined;
+    const maxCount = mergedConfig.liveMaxLatencyDurationCount as number | undefined;
+
+    // Which group survives a mixed config: the seconds-based one when it can
+    // stand alone, matching hls.js's own precedence (it reads `liveSyncDuration`
+    // before `liveSyncDurationCount`). Without `liveSyncDuration` the seconds
+    // group cannot stand alone - hls.js rejects a `liveMaxLatencyDuration` with
+    // no sync duration beside it - so the count group wins instead.
+    const mixed =
+      (syncDuration !== undefined || maxDuration !== undefined) &&
+      (syncCount !== undefined || maxCount !== undefined);
+    const dropCount = mixed && syncDuration !== undefined;
+    const dropDuration = mixed && !dropCount;
+
+    if (mixed) {
+      api?.logger.warn(
+        `Ignoring ${
+          dropCount
+            ? 'liveSyncDurationCount/liveMaxLatencyDurationCount'
+            : 'liveSyncDuration/liveMaxLatencyDuration'
+        }: hls.js rejects a config mixing seconds-based and count-based live latency options`
+      );
+    }
+
+    set('liveSyncDuration', dropDuration ? undefined : syncDuration);
+    set('liveSyncDurationCount', dropCount ? undefined : syncCount);
+    set('liveMaxLatencyDuration', dropDuration ? undefined : maxDuration);
+    set('liveMaxLatencyDurationCount', dropCount ? undefined : maxCount);
+    set('liveDurationInfinity', mergedConfig.liveDurationInfinity as boolean | undefined);
+    set(
+      'maxLiveSyncPlaybackRate',
+      (mergedConfig.maxLiveSyncPlaybackRate as number | undefined) ??
+        (mergedConfig.lowLatencyMode === true ? LL_CATCH_UP_PLAYBACK_RATE : undefined)
+    );
+
+    return live;
+  };
+
+  /**
+   * Base hls.js config values (everything except the pLoader wrapper).
+   *
+   * The retry budgets below are deliberately NOT widened under low latency,
+   * although LL-HLS issues part requests at several times the segment rate
+   * and a miss at the edge is routine. Measured against the harness's LL
+   * fixture (verify-browser.mjs scenario 8b), a single part 404 punches a
+   * `fragGap` regardless of `fragLoadingMaxRetry`: hls.js counts fragment
+   * errors cumulatively per level rather than per request
+   * (`getFragRetryOrSwitchAction`), so a larger budget delays the level
+   * switch without preventing the gap. Raising it changed nothing a viewer
+   * could see, and would have changed ABR level-switch behaviour on
+   * multi-rendition streams for no measured benefit.
+   *
+   * What matters is that the gap IS absorbed - no fatal error, no
+   * auto-reconnect, no error overlay, playback continues - and that is what
+   * scenario 8b pins. Revisit against a real LL origin.
+   */
+  const buildBaseHlsConfig = (): Record<string, unknown> => {
+    return {
+      debug: mergedConfig.debug,
+      autoStartLoad: mergedConfig.autoStartLoad,
+      startPosition: mergedConfig.startPosition,
+      startLevel: -1, // Auto quality selection (ABR)
+      abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate as number | undefined),
+      lowLatencyMode: mergedConfig.lowLatencyMode,
+      maxBufferLength: mergedConfig.maxBufferLength,
+      maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
+      backBufferLength: mergedConfig.backBufferLength,
+      enableWorker: mergedConfig.enableWorker,
+      capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
+      // Minimize hls.js internal retries - we handle retries ourselves
+      fragLoadingMaxRetry: 1,
+      manifestLoadingMaxRetry: 1,
+      levelLoadingMaxRetry: 1,
+      fragLoadingRetryDelay: 500,
+      manifestLoadingRetryDelay: 500,
+      levelLoadingRetryDelay: 500,
+      ...buildLiveHlsConfig(),
+    };
+  };
 
   /** Calculate retry delay with exponential backoff and jitter */
   const getRetryDelay = (retryCount: number): number => {
@@ -657,9 +822,11 @@ export function createHLSPluginWith(
     const videoEl = getOrCreateVideo();
     isNative = true;
 
-    // Setup video event handlers
+    // Same single entry point as the hls.js path below: readLiveMetrics()
+    // picks its source from the live pipeline, so on this branch it measures
+    // the element's own `seekable` range - the only source there is here.
     if (api) {
-      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api);
+      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
     }
 
     return new Promise((resolve, reject) => {
@@ -789,9 +956,12 @@ export function createHLSPluginWith(
     // Create hls.js instance
     hls = loader.createHlsInstance(buildHlsConfig());
 
-    // Setup video event handlers
+    // Setup video event handlers. hls.js owns latency truth here, so the
+    // timeupdate handler measures through readLiveMetrics() rather than off
+    // video.seekable, which under MSE reports neither the sliding window nor
+    // anything resembling wall-clock latency.
     if (api) {
-      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api);
+      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
     }
 
     return new Promise((resolve, reject) => {
@@ -847,6 +1017,16 @@ export function createHLSPluginWith(
         onLevelSwitched: () => {
           // Already handled in event-map
         },
+        onLevelDetails: (details) => {
+          if (session !== loadSession) return;
+          lastLevelDetails = details;
+          // Refresh the cache from the playlist that just arrived, rather than
+          // waiting for the next timeupdate. It is what carries the stream's
+          // target latency across a switchToNative() handoff, and an AirPlay
+          // switch can happen before any timeupdate fires.
+          readLiveMetrics();
+        },
+        isLowLatencyRequested: () => mergedConfig.lowLatencyMode === true,
         onError: (error) => {
           if (session !== loadSession) return;
           // Reject the pending load once recovery is exhausted (or the error
@@ -1506,33 +1686,57 @@ export function createHLSPluginWith(
       return isNative;
     },
 
+    /**
+     * Report the live state of the stream.
+     *
+     * `latency` and `targetLatency` come from hls.js on the MSE path, where
+     * they are measured against `EXT-X-PROGRAM-DATE-TIME` drift when the
+     * manifest carries it. On the native path there is no latency API, so both
+     * are approximations: latency is the distance to `seekable.end`, and the
+     * target is whatever an earlier hls.js session on this source measured
+     * (an AirPlay handoff) before it falls back to 3 seconds. Parking a viewer
+     * of a 2-second-target stream 3 seconds back was the previous behaviour,
+     * and it is a full target latency of drift.
+     *
+     * @returns Live info, or null for VOD and before a pipeline exists
+     */
     getLiveInfo(): HLSLiveInfo | null {
       const live = api?.getState('live') || false;
       if (!live) return null;
 
+      const metrics = readLiveMetrics();
+
       if (isNative) {
+        const targetLatency = metrics?.targetLatency ?? DEFAULT_TARGET_LATENCY;
+        const seekableEnd = video?.seekable?.length
+          ? video.seekable.end(video.seekable.length - 1)
+          : undefined;
+
         return {
           isLive: true,
-          latency: 0,
-          targetLatency: 3,
+          latency: metrics?.latency ?? 0,
+          targetLatency,
           drift: 0,
-          liveSyncPosition: video?.seekable?.length
-            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3)
-            : undefined,
+          liveSyncPosition:
+            seekableEnd !== undefined ? Math.max(0, seekableEnd - targetLatency) : undefined,
+          lowLatency: metrics?.lowLatency ?? false,
         };
       }
 
       if (!hls) return null;
 
+      const targetLatency = hls.targetLatency || metrics?.targetLatency || DEFAULT_TARGET_LATENCY;
+
       return {
         isLive: true,
         latency: hls.latency || 0,
-        targetLatency: hls.targetLatency || 3,
+        targetLatency,
         drift: hls.drift || 0,
         liveSyncPosition: hls.liveSyncPosition ??
           (video?.seekable?.length
-            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3)
+            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - targetLatency)
             : undefined),
+        lowLatency: metrics?.lowLatency ?? false,
       };
     },
 
@@ -1559,10 +1763,14 @@ export function createHLSPluginWith(
 
       api?.logger.info('Switching to native HLS for AirPlay');
 
-      // Save current state
+      // Save current state. The target latency goes with it: the switch keeps
+      // the SAME source, and its hold-back is the only thing that lets the
+      // native branch measure against the stream's real target instead of the
+      // 3s default. cleanup() clears it along with the rest of the pipeline.
       const wasPlaying = api?.getState('playing') || false;
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
+      const savedTargetLatency = lastKnownTargetLatency;
 
       // Cleanup hls.js; the switch is a new session. cancelReconnect() first:
       // cleanup() leaves the reconnect timer armed, and a reconnect scheduled
@@ -1578,6 +1786,7 @@ export function createHLSPluginWith(
       // stranded the viewer on native HLS, and auto-reconnect stayed disabled
       // for the rest of the session.
       currentSrc = savedSrc;
+      lastKnownTargetLatency = savedTargetLatency;
 
       // Load with native HLS
       await loadNative(savedSrc);
@@ -1624,10 +1833,11 @@ export function createHLSPluginWith(
 
       api?.logger.info('Switching back to hls.js');
 
-      // Save current state
+      // Save current state - see switchToNative() for the target latency
       const wasPlaying = api?.getState('playing') || false;
       const currentTime = video?.currentTime || 0;
       const savedSrc = currentSrc;
+      const savedTargetLatency = lastKnownTargetLatency;
 
       // Cleanup native; the switch is a new session. cancelReconnect() first —
       // see switchToNative().
@@ -1637,6 +1847,7 @@ export function createHLSPluginWith(
 
       // Same source, different pipeline - see switchToNative().
       currentSrc = savedSrc;
+      lastKnownTargetLatency = savedTargetLatency;
 
       // Load with hls.js
       await loadWithHlsJs(savedSrc);

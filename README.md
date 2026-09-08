@@ -427,9 +427,9 @@ configs), so no transpilation below that is applied.
 - [x] Chapter markers (progress bar dividers, chapter list, seek to chapter)
 - [x] Mobile gesture controls (double-tap seek)
 - [x] Viewer-created clips (range selection, loop preview, host submission)
+- [x] Low-latency HLS (LL-HLS) - part loading, latency catch-up, live metrics, GO LIVE
 - [ ] Mobile gesture controls (swipe for volume and brightness) - Sprint 2
 - [ ] DRM support - Sprint 2
-- [ ] Low-latency HLS (LL-HLS) - Sprint 2
 - [ ] Internationalization (i18n) - Sprint 2
 - [ ] React component wrapper
 - [ ] Web Component wrapper - Sprint 3

@@ -171,6 +171,130 @@
     .console-line.warn { color: #ffb74d; }
     .console-line.error { color: #ef5350; }
 
+    /* Live panel (LL-HLS): latency readout, effective-LL badge, GO LIVE */
+    .live-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .live-header h2 {
+      margin-bottom: 0;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 999px;
+      color: #888;
+      padding: 4px 12px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .live-badge--on {
+      border-color: #e50914;
+      color: #fff;
+    }
+
+    .live-golive-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+
+    .live-golive-btn:hover:not(:disabled) {
+      border-color: #e50914;
+    }
+
+    .live-golive-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .live-hint {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+
+    .analytics-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .analytics-header h2 {
+      margin-bottom: 0;
+    }
+
+    .analytics-clear-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+
+    .analytics-clear-btn:hover {
+      border-color: #e50914;
+    }
+
+    .analytics-log {
+      background: #0d0d0d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.7rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .analytics-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    .analytics-time {
+      color: #666;
+      flex: 0 0 auto;
+    }
+
+    .analytics-event {
+      color: #e50914;
+      flex: 0 0 110px;
+    }
+
+    .analytics-detail {
+      color: #888;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .analytics-empty {
+      color: #888;
+    }
+
     .url-bar {
       width: 100%;
       max-width: 960px;
@@ -557,6 +681,60 @@
       color: #e0e0e0;
     }
 
+    /* Watermark controls */
+    .watermark-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+
+    .watermark-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .watermark-row label {
+      min-width: 80px;
+      font-size: 0.875rem;
+      color: #aaa;
+    }
+
+    .watermark-positions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .position-btn {
+      padding: 6px 12px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #333;
+      color: #ccc;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .position-btn:hover {
+      background: #444;
+      color: #fff;
+    }
+
+    .position-btn.active {
+      background: #e50914;
+      border-color: #e50914;
+      color: #fff;
+    }
+
+    #watermark-opacity {
+      flex: 1;
+    }
+
     /* Clip controls panel (modelled on Watermark Controls) */
     .clip-controls {
       display: flex;
@@ -754,55 +932,61 @@
         <span class="feature active">UI Controls</span>
         <span class="feature active">AirPlay</span>
         <span class="feature active">Chromecast</span>
+        <span class="feature active">Watermark</span>
+        <span class="feature active">Share</span>
+        <span class="feature active">Gestures</span>
+        <span class="feature active">Captions</span>
+        <span class="feature active">Chapters</span>
+        <span class="feature active">Analytics</span>
         <span class="feature active">Clips</span>
       </div>
     </div>
 
-    <div class="code-toggle">
-      <button class="code-toggle-btn" data-target="video-code">
-        <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
-        Show Code
-      </button>
-    </div>
-
-    <div id="video-code" class="code-example">
-      <div class="code-header">
-        <span class="code-lang">TypeScript</span>
-        <button class="code-copy-btn" data-code="video-code">Copy</button>
-      </div>
-      <div class="code-content">
-        <pre><span class="keyword">import</span> { ScarlettPlayer } <span class="keyword">from</span> <span class="string">'@scarlett-player/core'</span>;
-<span class="keyword">import</span> { createHLSPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/hls'</span>;
-<span class="keyword">import</span> { createNativePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/native'</span>;
-<span class="keyword">import</span> { uiPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/ui'</span>;
-<span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
-<span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
-<span class="keyword">import</span> { createClipsPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/clips'</span>;
-
-<span class="comment">// Create the player</span>
-<span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
-  <span class="property">container</span>: document.<span class="function">getElementById</span>(<span class="string">'player'</span>),
-  <span class="property">src</span>: <span class="string">'https://example.com/video.m3u8'</span>,
-  <span class="property">plugins</span>: [
-    <span class="function">createHLSPlugin</span>(),
-    <span class="function">createNativePlugin</span>(),
-    <span class="function">uiPlugin</span>({
-      <span class="property">hideDelay</span>: <span class="number">3000</span>,
-      <span class="property">theme</span>: { <span class="property">accentColor</span>: <span class="string">'#e50914'</span> }
-    }),
-    <span class="function">airplayPlugin</span>(),
-    <span class="function">chromecastPlugin</span>(),
-    <span class="comment">// Viewer-created clips: what a real host running the clips</span>
-    <span class="comment">// server writes - the plugin POSTs the captured range as JSON.</span>
-    <span class="function">createClipsPlugin</span>({
-      <span class="property">mediaId</span>: <span class="string">'video-42'</span>,
-      <span class="property">endpoint</span>: { <span class="property">url</span>: <span class="string">'/api/clips'</span> },
-    }),
-  ],
-});
-
-<span class="comment">// Initialize and start playback</span>
-<span class="keyword">await</span> player.<span class="function">init</span>();</pre>
+    <div class="info">
+      <h2>Watermark Controls</h2>
+      <div class="watermark-controls">
+        <div class="watermark-row">
+          <label>Image URL</label>
+          <div class="url-bar" style="margin: 0;">
+            <input type="text" id="watermark-image-input"
+              placeholder="Enter image URL"
+              value="https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png">
+            <button id="watermark-image-btn">Apply</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Or Text</label>
+          <div class="url-bar" style="margin: 0;">
+            <input type="text" id="watermark-text-input" placeholder="Enter watermark text">
+            <button id="watermark-text-btn">Apply</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Position</label>
+          <div class="watermark-positions">
+            <button class="position-btn" data-pos="top-left">Top Left</button>
+            <button class="position-btn" data-pos="top-right">Top Right</button>
+            <button class="position-btn" data-pos="center">Center</button>
+            <button class="position-btn" data-pos="bottom-left">Bottom Left</button>
+            <button class="position-btn active" data-pos="bottom-right">Bottom Right</button>
+          </div>
+        </div>
+        <div class="watermark-row">
+          <label>Opacity: <span id="opacity-value">0.5</span></label>
+          <input type="range" id="watermark-opacity" min="0" max="1" step="0.1" value="0.5">
+        </div>
+        <div class="watermark-row">
+          <label>Size: <span id="imageheight-value">64</span>px</label>
+          <input type="range" id="watermark-imageheight" min="20" max="200" step="5" value="64">
+        </div>
+        <div class="watermark-row">
+          <label>Padding: <span id="padding-value">10</span>px</label>
+          <input type="range" id="watermark-padding" min="0" max="100" step="5" value="10">
+        </div>
+        <div class="watermark-row">
+          <button id="watermark-show-btn" class="position-btn">Show</button>
+          <button id="watermark-hide-btn" class="position-btn">Hide</button>
+        </div>
       </div>
     </div>
 
@@ -829,6 +1013,74 @@
           <button id="clip-open-btn" class="clip-btn">Open selector</button>
           <span class="clip-hint">opens pre-rolled behind the playhead, VOD only - the sliders re-run plugin.configure()</span>
         </div>
+      </div>
+    </div>
+
+    <div class="code-toggle">
+      <button class="code-toggle-btn" data-target="video-code">
+        <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+        Show Code
+      </button>
+    </div>
+
+    <div id="video-code" class="code-example">
+      <div class="code-header">
+        <span class="code-lang">TypeScript</span>
+        <button class="code-copy-btn" data-code="video-code">Copy</button>
+      </div>
+      <div class="code-content">
+        <pre><span class="keyword">import</span> { ScarlettPlayer } <span class="keyword">from</span> <span class="string">'@scarlett-player/core'</span>;
+<span class="keyword">import</span> { createHLSPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/hls'</span>;
+<span class="keyword">import</span> { createNativePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/native'</span>;
+<span class="keyword">import</span> { uiPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/ui'</span>;
+<span class="keyword">import</span> { airplayPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/airplay'</span>;
+<span class="keyword">import</span> { chromecastPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/chromecast'</span>;
+<span class="keyword">import</span> { createWatermarkPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/watermark'</span>;
+<span class="keyword">import</span> { createSharePlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/share'</span>;
+<span class="keyword">import</span> { createClipsPlugin } <span class="keyword">from</span> <span class="string">'@scarlett-player/clips'</span>;
+
+<span class="comment">// Create the player</span>
+<span class="keyword">const</span> player = <span class="keyword">new</span> <span class="function">ScarlettPlayer</span>({
+  <span class="property">container</span>: document.<span class="function">getElementById</span>(<span class="string">'player'</span>),
+  <span class="property">src</span>: <span class="string">'https://example.com/video.m3u8'</span>,
+  <span class="property">plugins</span>: [
+    <span class="function">createHLSPlugin</span>(),
+    <span class="function">createNativePlugin</span>(),
+    <span class="function">uiPlugin</span>({
+      <span class="property">hideDelay</span>: <span class="number">3000</span>,
+      <span class="property">theme</span>: { <span class="property">accentColor</span>: <span class="string">'#e50914'</span> },
+      <span class="comment">// 'share' and 'clip' are not in the default layout, so ask for them</span>
+      <span class="property">controls</span>: [<span class="string">'play'</span>, <span class="string">'volume'</span>, <span class="string">'time'</span>, <span class="string">'spacer'</span>,
+                  <span class="string">'settings'</span>, <span class="string">'clip'</span>, <span class="string">'share'</span>, <span class="string">'fullscreen'</span>],
+    }),
+    <span class="function">airplayPlugin</span>(),
+    <span class="function">chromecastPlugin</span>(),
+    <span class="function">createWatermarkPlugin</span>({
+      <span class="property">imageUrl</span>: <span class="string">'https://example.com/logo.png'</span>,
+      <span class="property">position</span>: <span class="string">'bottom-right'</span>,
+      <span class="property">opacity</span>: <span class="number">0.5</span>,
+      <span class="property">imageHeight</span>: <span class="number">64</span>,
+      <span class="property">padding</span>: <span class="number">10</span>,
+    }),
+    <span class="comment">// Native share sheet on mobile, copy link elsewhere</span>
+    <span class="function">createSharePlugin</span>(),
+    <span class="comment">// Viewer-created clips: this is what a real host running the clips</span>
+    <span class="comment">// server writes - the plugin POSTs the captured range as JSON.</span>
+    <span class="comment">// (Hosts with their own HTTP client pass onCreate instead.)</span>
+    <span class="function">createClipsPlugin</span>({
+      <span class="property">mediaId</span>: <span class="string">'video-42'</span>,
+      <span class="property">endpoint</span>: { <span class="property">url</span>: <span class="string">'/api/clips'</span> },
+    }),
+  ],
+});
+
+<span class="comment">// Initialize and start playback</span>
+<span class="keyword">await</span> player.<span class="function">init</span>();
+
+<span class="comment">// Runtime watermark control</span>
+<span class="keyword">const</span> watermark = player.<span class="function">getPlugin</span>(<span class="string">'watermark'</span>);
+watermark.<span class="function">setPosition</span>(<span class="string">'top-left'</span>);
+watermark.<span class="function">setOpacity</span>(<span class="number">0.3</span>);</pre>
       </div>
     </div>
   </div>
@@ -984,6 +1236,51 @@ playlist.<span class="function">add</span>([
     </div>
   </div>
 
+  <!-- Live / LL-HLS panel. Fed by core state (live, liveEdge, liveLatency,
+       lowLatencyMode) plus the HLS provider's getLiveInfo() for the target
+       latency. Reads "-" on VOD; paste a live .m3u8 into the URL bar above to
+       light it up. -->
+  <div class="info">
+    <div class="live-header">
+      <h2>Live</h2>
+      <span class="live-badge" id="live-ll-badge">LL-HLS off</span>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Stream</div>
+        <div class="stat-value" id="live-kind">Not live</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Latency</div>
+        <div class="stat-value" id="live-latency">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Target</div>
+        <div class="stat-value" id="live-target">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Edge</div>
+        <div class="stat-value" id="live-edge">&mdash;</div>
+      </div>
+    </div>
+    <div class="live-hint">
+      <button id="live-golive" class="live-golive-btn" disabled>Go Live</button>
+      Seeks through <code>player.seekToLive()</code>, which prefers the
+      provider's live sync position over the end of the seekable range.
+    </div>
+  </div>
+
+  <!-- Analytics beacons, captured in the page by the plugin's customBeacon hook -->
+  <div class="info">
+    <div class="analytics-header">
+      <h2>Analytics Log</h2>
+      <button id="analytics-clear" class="analytics-clear-btn">Clear</button>
+    </div>
+    <div class="analytics-log" id="analytics-log">
+      <div class="analytics-empty">Beacons will appear here as you play the video...</div>
+    </div>
+  </div>
+
   <!-- Simulated clips server: onCreate payloads plus the rendering-to-ready sequence -->
   <div class="info">
     <div class="clip-header">
@@ -1041,12 +1338,57 @@ playlist.<span class="function">add</span>([
         formatTime(state.currentTime) + ' / ' + formatTime(state.duration);
 
       const quality = state.currentQuality;
+      const isAudioPlayer = window.activePlayer === 'audio' || window.activePlayer === 'mini';
       document.getElementById('quality').textContent =
-        quality ? quality.label : (state.mediaType === 'audio' ? 'Audio' : 'Auto');
+        quality ? quality.label : (isAudioPlayer ? 'Audio' : 'Auto');
 
       document.getElementById('buffered').textContent =
         Math.round(state.bufferedAmount * 100) + '%';
+
+      updateLivePanel(activePlayer, state);
     }
+
+    // Live panel. Target latency is the one figure core does not hold: it
+    // lives on the provider, so it is read through getLiveInfo() - the same
+    // call seekToLive() uses to pick its target.
+    function updateLivePanel(activePlayer, state) {
+      const badge = document.getElementById('live-ll-badge');
+      const goLive = document.getElementById('live-golive');
+      if (!badge || !goLive) return;
+
+      const isLive = !!state.live;
+      let liveInfo = null;
+      if (isLive && typeof activePlayer.getPlugin === 'function') {
+        const provider = activePlayer.getPlugin('hls-provider');
+        if (provider && typeof provider.getLiveInfo === 'function') {
+          liveInfo = provider.getLiveInfo();
+        }
+      }
+
+      // Effective LL, not requested LL: the manifest has to carry EXT-X-PART
+      // or advertise CAN-BLOCK-RELOAD for this to light up.
+      const lowLatency = !!state.lowLatencyMode;
+      badge.textContent = lowLatency ? 'LL-HLS active' : 'LL-HLS off';
+      badge.classList.toggle('live-badge--on', lowLatency);
+
+      document.getElementById('live-kind').textContent =
+        isLive ? (lowLatency ? 'Live (low latency)' : 'Live') : 'Not live';
+      document.getElementById('live-latency').textContent =
+        isLive ? state.liveLatency.toFixed(2) + 's' : '\u2014';
+      document.getElementById('live-target').textContent =
+        liveInfo ? liveInfo.targetLatency.toFixed(2) + 's' : '\u2014';
+      document.getElementById('live-edge').textContent =
+        isLive ? (state.liveEdge ? 'At edge' : 'Behind') : '\u2014';
+
+      goLive.disabled = !isLive;
+    }
+
+    document.getElementById('live-golive')?.addEventListener('click', () => {
+      const activePlayer = getActivePlayer();
+      if (activePlayer && typeof activePlayer.seekToLive === 'function') {
+        activePlayer.seekToLive();
+      }
+    });
 
     setInterval(updateStats, 250);
 
@@ -1294,6 +1636,49 @@ playlist.<span class="function">add</span>([
     miniUrlInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') loadMiniUrl();
     });
+
+    // Watermark controls
+    const wmPlugin = window.watermarkPlugin;
+
+    document.getElementById('watermark-image-btn').addEventListener('click', () => {
+      const url = document.getElementById('watermark-image-input').value.trim();
+      if (url && wmPlugin) wmPlugin.setImage(url);
+    });
+
+    document.getElementById('watermark-text-btn').addEventListener('click', () => {
+      const text = document.getElementById('watermark-text-input').value.trim();
+      if (text && wmPlugin) wmPlugin.setText(text);
+    });
+
+    document.querySelectorAll('.position-btn[data-pos]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pos = btn.dataset.pos;
+        if (wmPlugin) wmPlugin.setPosition(pos);
+        document.querySelectorAll('.position-btn[data-pos]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    document.getElementById('watermark-opacity').addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      document.getElementById('opacity-value').textContent = val.toFixed(1);
+      if (wmPlugin) wmPlugin.setOpacity(val);
+    });
+
+    document.getElementById('watermark-imageheight').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('imageheight-value').textContent = val;
+      if (wmPlugin) wmPlugin.setImageHeight(val);
+    });
+
+    document.getElementById('watermark-padding').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('padding-value').textContent = val;
+      if (wmPlugin) wmPlugin.setPadding(val);
+    });
+
+    document.getElementById('watermark-show-btn').addEventListener('click', () => wmPlugin?.show());
+    document.getElementById('watermark-hide-btn').addEventListener('click', () => wmPlugin?.hide());
 
     // Code toggle functionality
     document.querySelectorAll('.code-toggle-btn').forEach(btn => {

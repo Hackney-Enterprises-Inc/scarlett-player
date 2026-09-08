@@ -322,15 +322,30 @@ export class ScarlettPlayer {
   }
 
   /**
-   * Wire the two listeners the player owns, exactly once.
+   * Wire the listeners the player owns, exactly once.
    *
    * Guarded by a flag rather than by "init() runs once" because
    * `ensureInitialized()` runs on every `load()`: wiring them twice would
    * load and play each requested source twice.
+   *
+   * No unsubscribe handles are kept: `destroy()` calls `eventBus.destroy()`,
+   * which drops every listener at once, so these cannot fire against a
+   * destroyed player.
    */
   private wireLifecycleListeners(): void {
     if (this.listenersWired) return;
     this.listenersWired = true;
+
+    // A control asked to rejoin the live edge. Routed through seekToLive()
+    // rather than seeked by the control itself, so the sync-position ladder
+    // (provider liveSyncPosition -> seekableRange.end -> duration) is defined
+    // in one place and low latency lands on the last loaded part instead of
+    // past it.
+    this.eventBus.on('live:seektolive', () => {
+      if (this.destroyed) return;
+
+      this.seekToLive();
+    });
 
     // Listen for media:load-request events from plugins (e.g., playlist)
     this.eventBus.on('media:load-request', async ({ src, autoplay }) => {

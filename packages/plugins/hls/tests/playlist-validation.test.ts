@@ -84,6 +84,88 @@ describe('isValidPlaylistDocument()', () => {
     expect(isValidPlaylistDocument(MASTER_PLAYLIST, 'audioTrack')).toBe(false);
     expect(isValidPlaylistDocument(MEDIA_PLAYLIST, 'subtitleTrack')).toBe(true);
   });
+
+  // LL-HLS documents (LL-8). The validator had never seen one, and a false
+  // rejection here becomes a synthetic fatal network error feeding straight
+  // into the reconnect chain - on a healthy stream. LL playlists refresh
+  // several times a second, so a wrong answer would be continuous.
+  describe('low-latency documents', () => {
+    /** A full LL media playlist: server control, parts, and a preload hint. */
+    const LL_PLAYLIST = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:9',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.0,CAN-SKIP-UNTIL=24.0',
+      '#EXT-X-PART-INF:PART-TARGET=1.00000',
+      '#EXT-X-MEDIA-SEQUENCE:100',
+      '#EXTINF:4.00000,',
+      'seg100.m4s',
+      '#EXT-X-PART:DURATION=1.00000,URI="part101.0.m4s"',
+      '#EXT-X-PART:DURATION=1.00000,URI="part101.1.m4s"',
+      '#EXT-X-PART:DURATION=1.00000,URI="part101.2.m4s"',
+      '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part101.3.m4s"',
+    ].join('\n');
+
+    /**
+     * A delta playlist. The response to a `_HLS_skip=YES` request: the older
+     * segments are replaced by EXT-X-SKIP, so it carries no EXTINF at all -
+     * exactly the shape that could have tripped the media-playlist assertion.
+     */
+    const DELTA_PLAYLIST = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:9',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.0,CAN-SKIP-UNTIL=24.0',
+      '#EXT-X-PART-INF:PART-TARGET=1.00000',
+      '#EXT-X-MEDIA-SEQUENCE:100',
+      '#EXT-X-SKIP:SKIPPED-SEGMENTS=6',
+      '#EXT-X-PART:DURATION=1.00000,URI="part107.0.m4s"',
+      '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part107.1.m4s"',
+    ].join('\n');
+
+    /**
+     * A blocking-reload response: the same document shape, returned only once
+     * the requested part exists. Nothing about the body distinguishes it, so
+     * this pins that the validator does not need it to.
+     */
+    const BLOCKING_RELOAD_RESPONSE = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:9',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.0',
+      '#EXT-X-PART-INF:PART-TARGET=1.00000',
+      '#EXT-X-MEDIA-SEQUENCE:101',
+      '#EXTINF:4.00000,',
+      'seg101.m4s',
+      '#EXT-X-PART:DURATION=1.00000,URI="part102.0.m4s"',
+    ].join('\n');
+
+    it('accepts a full LL media playlist on a level refresh', () => {
+      expect(isValidPlaylistDocument(LL_PLAYLIST, 'level')).toBe(true);
+    });
+
+    it('accepts a delta playlist, which carries EXT-X-SKIP instead of EXTINF', () => {
+      expect(DELTA_PLAYLIST).not.toContain('#EXTINF');
+      expect(isValidPlaylistDocument(DELTA_PLAYLIST, 'level')).toBe(true);
+    });
+
+    it('accepts a blocking-reload response', () => {
+      expect(isValidPlaylistDocument(BLOCKING_RELOAD_RESPONSE, 'level')).toBe(true);
+    });
+
+    it('accepts LL documents on audio and subtitle rendition refreshes too', () => {
+      expect(isValidPlaylistDocument(LL_PLAYLIST, 'audioTrack')).toBe(true);
+      expect(isValidPlaylistDocument(DELTA_PLAYLIST, 'subtitleTrack')).toBe(true);
+    });
+
+    it('accepts an LL playlist at the manifest phase', () => {
+      expect(isValidPlaylistDocument(LL_PLAYLIST, 'manifest')).toBe(true);
+    });
+
+    it('still rejects an error page served in place of an LL refresh', () => {
+      expect(isValidPlaylistDocument(ERROR_PAGE, 'level')).toBe(false);
+    });
+  });
 });
 
 describe('createValidatingPlaylistLoader()', () => {

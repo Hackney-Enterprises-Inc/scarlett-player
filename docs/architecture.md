@@ -430,6 +430,50 @@ The UI plugin's `ErrorOverlay` renders viewer-facing copy per `ErrorCode`, shows
 the reconnecting state while the provider self-heals, and emits `error:retry`
 when Try Again is pressed, which core's own listener turns back into a `load()`.
 
+## Live and low latency
+
+Five state keys describe a live stream - `live`, `liveEdge`, `seekableRange`,
+`liveLatency` and `lowLatencyMode` - and four events announce changes to them:
+`live:edgechange`, `live:latency`, `live:seekablerange` and `live:lowlatency`.
+
+**One writer.** `packages/plugins/hls/src/live-metrics.ts` is the only place
+that writes four of those five keys. `computeLiveMetrics(source)` measures, and
+`applyLiveMetrics(api, metrics)` writes and emits, each key only when its value
+actually changed. `hlsLevelLoaded` owns `live` itself and nothing else does.
+
+That rule exists because it was broken. `hlsLevelLoaded` used to compute an edge
+flag from the playlist and the `timeupdate` handler then recomputed it four
+times a second as `latency < 10` off `video.seekable` - the wrong source under
+MSE, where `seekable.start(0)` stays 0 instead of following the sliding window,
+and a threshold that is unconditionally true at a 2-4 second low-latency target.
+"GO LIVE" could not appear however far a viewer drifted. Anything that needs a
+new live reading calls `computeLiveMetrics`; nothing writes those keys directly.
+
+**Latency truth differs by path.** On hls.js (MSE), `hls.latency` is real
+wall-clock latency measured against `EXT-X-PROGRAM-DATE-TIME` drift where the
+manifest carries it, and `hls.targetLatency` derives from `PART-HOLD-BACK` /
+`HOLD-BACK`. On the native path (Safari/iOS) there is no latency API, so the
+distance to `video.seekable.end` stands in - a buffer distance, not a latency -
+and the edge threshold stays deliberately loose (the historical 10s) unless a
+target latency carried over from an hls.js session on the same source.
+
+A viewer is at the edge when `latency <= targetLatency + tolerance`, with
+`tolerance = max(1.5, partTarget ?? targetduration / 2)`. That formula is what
+decides when "GO LIVE" appears.
+
+**`lowLatencyMode` reports effect, not intent.** It is true only when the
+manifest carries `EXT-X-PART` or advertises `CAN-BLOCK-RELOAD=YES` *and* the
+host asked for low latency in the HLS plugin config. A flag set against a plain
+live manifest gets no badge, and neither does an LL manifest played without the
+flag - hls.js will not load its parts.
+
+**Rejoining the edge goes through core.** A control emits `live:seektolive`;
+`ScarlettPlayer` subscribes and calls `seekToLive()`, which prefers the
+provider's `liveSyncPosition` and only then falls back to `seekableRange.end`
+and `duration`. The two are not interchangeable under low latency: the end of
+the seekable range is past the last loaded part, and seeking there stalls. The
+UI's `LiveIndicator` used to seek there itself; it now carries no target at all.
+
 ## Fullscreen
 
 Core owns fullscreen since 1.8.0. `packages/core/src/fullscreen.ts` exports
@@ -545,10 +589,17 @@ caused state to drift from the element.
   through Playwright, covering what jsdom cannot: manifest failures, a
   mid-playback outage and automatic recovery, destroy-mid-append races against a
   locally generated HLS fixture, malformed live playlist refreshes, the shape of
-  the `window.ScarlettPlayer` global the CDN embed publishes, and control-bar
-  reachability at phone widths, which needs a layout engine and a coarse
-  pointer. Thirty-nine checks across seven scenarios; CI runs it on pushes to
-  `main` only, not on pull requests.
+  the `window.ScarlettPlayer` global the CDN embed publishes, control-bar
+  reachability at phone widths (which needs a layout engine and a coarse
+  pointer), and LL-HLS end to end against a rolling low-latency playlist
+  assembled from the fixture's 0.5s part rendition. Fifty-nine checks across
+  eight scenarios; CI runs it on pushes to `main` only, not on pull requests.
+- `scripts/hls-fixture.mjs` generates both renditions the harness plays: 2s
+  segments for everything else, and 0.5s parts for the LL scenario. The parts
+  are real segments on keyframe boundaries rather than byte-range slices of the
+  2s ones, so four of them concatenate to exactly their parent segment. Slicing
+  instead was tried and produces truncated access units that Chromium rejects
+  with `PIPELINE_ERROR_DECODE` a few seconds into part-driven playback.
 
 ## Browser support
 

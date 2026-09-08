@@ -431,6 +431,198 @@ describe('Analytics Plugin', () => {
     });
   });
 
+  // Live latency (LL-11). The only way to know whether low latency is holding
+  // in production, and the reason the sampler aggregates rather than stores:
+  // the provider emits `live:latency` at the timeupdate cadence.
+  describe('Live latency', () => {
+    /** Feed a sequence of latency readings through the event bus. */
+    const feed = (latencies: number[]) => {
+      for (const latency of latencies) {
+        (api as any)._trigger('live:latency', { latency });
+      }
+    };
+
+    it('carries mean, p95, max and the sample count on the heartbeat', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      feed([2, 2, 2, 2, 8]);
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat?.liveLatencySamples).toBe(5);
+      expect(heartbeat?.liveLatencyMean).toBe(3.2);
+      expect(heartbeat?.liveLatencyMax).toBe(8);
+      // The 95th of five readings is the largest one
+      expect(heartbeat?.liveLatencyP95).toBe(8);
+    });
+
+    it('reports the p95 at the bucket edge, never optimistically', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      // 95 readings at 2s and 5 at 9s: the 95th sample is the last 2s one
+      feed([...Array(95).fill(2), ...Array(5).fill(9)]);
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat?.liveLatencySamples).toBe(100);
+      expect(heartbeat?.liveLatencyP95).toBeGreaterThanOrEqual(2);
+      expect(heartbeat?.liveLatencyP95).toBeLessThan(3);
+    });
+
+    it('reports the overflow bucket at the documented clamp', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      // Everything past two minutes lands in the overflow bucket, which has no
+      // upper edge to report: the clamp is the answer, not a bucket width past it
+      feed(Array(10).fill(500));
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat?.liveLatencyP95).toBe(120);
+      expect(heartbeat?.liveLatencyMax).toBe(500);
+    });
+
+    it('carries the summary on the unload beacon as well as on viewEnd', async () => {
+      // A local capture: plugins from earlier tests are still listening on the
+      // window and would push their own (sampler-less) viewEnd into `beacons`
+      const sent: any[] = [];
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        customBeacon: (_url: string, payload: any) => {
+          sent.push(payload);
+        },
+      });
+
+      await plugin.init(api);
+      feed([2, 2, 2, 2, 8]);
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      const viewEnd = sent.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.liveLatencySamples).toBe(5);
+      expect(viewEnd?.liveLatencyMean).toBe(3.2);
+      expect(viewEnd?.liveLatencyMax).toBe(8);
+    });
+
+    it('reports effective low latency, and stays sticky once seen', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      // The manifest announces LL before the first timeupdate reading
+      (api as any)._trigger('live:lowlatency', { enabled: true });
+      feed([2, 2.5]);
+      (api as any)._trigger('live:lowlatency', { enabled: false });
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      expect(beacons.find((b) => b.event === 'heartbeat')?.lowLatency).toBe(true);
+    });
+
+    it('omits the live keys entirely on a VOD session', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat).not.toHaveProperty('liveLatencyMean');
+      expect(heartbeat).not.toHaveProperty('liveLatencyP95');
+      expect(heartbeat).not.toHaveProperty('lowLatency');
+    });
+
+    it('carries the session summary on viewEnd', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 100000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      feed([1, 3]);
+      beacons = [];
+
+      await plugin.destroy();
+
+      const viewEnd = beacons.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.liveLatencyMean).toBe(2);
+      expect(viewEnd?.liveLatencySamples).toBe(2);
+    });
+
+    it('ignores a nonsensical reading rather than skewing the mean', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      feed([2, NaN, -5, Infinity, 4]);
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat?.liveLatencySamples).toBe(2);
+      expect(heartbeat?.liveLatencyMean).toBe(3);
+    });
+
+    it('stops recording after destroy', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 100000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      await plugin.destroy();
+      beacons = [];
+
+      // The unsubscribes ran; nothing should still be listening
+      expect(() => feed([5])).not.toThrow();
+      expect(beacons).toHaveLength(0);
+    });
+  });
+
   describe('QoE Score', () => {
     it('should calculate QoE score', async () => {
       const plugin = createAnalyticsPlugin({
