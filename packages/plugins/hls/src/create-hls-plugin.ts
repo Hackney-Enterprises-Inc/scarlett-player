@@ -373,6 +373,14 @@ export function createHLSPluginWith(
    * 1.1 applies only when low latency was requested, and only when the host
    * did not pick its own value.
    *
+   * The seconds-based keys (`liveSyncDuration`, `liveMaxLatencyDuration`) and
+   * the count-based ones (`liveSyncDurationCount`,
+   * `liveMaxLatencyDurationCount`) are mutually exclusive: hls.js THROWS on a
+   * config carrying both ("don't mix up ..."), which would take the load down
+   * inside `new Hls()` before a frame plays. Either group is forwarded on its
+   * own, including explicit host overrides; a config mixing them forwards one
+   * group and logs which half was dropped.
+   *
    * @returns Live config keys, with no key present holding `undefined`
    */
   const buildLiveHlsConfig = (): Record<string, unknown> => {
@@ -382,13 +390,36 @@ export function createHLSPluginWith(
       if (value !== undefined) live[key] = value;
     };
 
-    set('liveSyncDuration', mergedConfig.liveSyncDuration as number | undefined);
-    set('liveSyncDurationCount', mergedConfig.liveSyncDurationCount as number | undefined);
-    set('liveMaxLatencyDuration', mergedConfig.liveMaxLatencyDuration as number | undefined);
-    set(
-      'liveMaxLatencyDurationCount',
-      mergedConfig.liveMaxLatencyDurationCount as number | undefined
-    );
+    const syncDuration = mergedConfig.liveSyncDuration as number | undefined;
+    const syncCount = mergedConfig.liveSyncDurationCount as number | undefined;
+    const maxDuration = mergedConfig.liveMaxLatencyDuration as number | undefined;
+    const maxCount = mergedConfig.liveMaxLatencyDurationCount as number | undefined;
+
+    // Which group survives a mixed config: the seconds-based one when it can
+    // stand alone, matching hls.js's own precedence (it reads `liveSyncDuration`
+    // before `liveSyncDurationCount`). Without `liveSyncDuration` the seconds
+    // group cannot stand alone - hls.js rejects a `liveMaxLatencyDuration` with
+    // no sync duration beside it - so the count group wins instead.
+    const mixed =
+      (syncDuration !== undefined || maxDuration !== undefined) &&
+      (syncCount !== undefined || maxCount !== undefined);
+    const dropCount = mixed && syncDuration !== undefined;
+    const dropDuration = mixed && !dropCount;
+
+    if (mixed) {
+      api?.logger.warn(
+        `Ignoring ${
+          dropCount
+            ? 'liveSyncDurationCount/liveMaxLatencyDurationCount'
+            : 'liveSyncDuration/liveMaxLatencyDuration'
+        }: hls.js rejects a config mixing seconds-based and count-based live latency options`
+      );
+    }
+
+    set('liveSyncDuration', dropDuration ? undefined : syncDuration);
+    set('liveSyncDurationCount', dropCount ? undefined : syncCount);
+    set('liveMaxLatencyDuration', dropDuration ? undefined : maxDuration);
+    set('liveMaxLatencyDurationCount', dropCount ? undefined : maxCount);
     set('liveDurationInfinity', mergedConfig.liveDurationInfinity as boolean | undefined);
     set(
       'maxLiveSyncPlaybackRate',

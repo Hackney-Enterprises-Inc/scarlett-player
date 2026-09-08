@@ -147,21 +147,28 @@ describe('hls.js live configuration', () => {
     const overrides: Partial<HLSPluginConfig> = {
       lowLatencyMode: true,
       liveSyncDuration: 2,
-      liveSyncDurationCount: 4,
       liveMaxLatencyDuration: 10,
-      liveMaxLatencyDurationCount: 6,
       maxLiveSyncPlaybackRate: 1.05,
       liveDurationInfinity: true,
     };
 
-    it('passes every key through verbatim', async () => {
+    it('passes every seconds-based key through verbatim', async () => {
       const config = await builtConfig(overrides);
 
       expect(config.liveSyncDuration).toBe(2);
-      expect(config.liveSyncDurationCount).toBe(4);
       expect(config.liveMaxLatencyDuration).toBe(10);
-      expect(config.liveMaxLatencyDurationCount).toBe(6);
       expect(config.liveDurationInfinity).toBe(true);
+    });
+
+    it('passes every count-based key through verbatim', async () => {
+      const config = await builtConfig({
+        lowLatencyMode: true,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 6,
+      });
+
+      expect(config.liveSyncDurationCount).toBe(4);
+      expect(config.liveMaxLatencyDurationCount).toBe(6);
     });
 
     it('lets the host override the low-latency catch-up rate', async () => {
@@ -178,6 +185,56 @@ describe('hls.js live configuration', () => {
     });
   });
 
+  /**
+   * hls.js THROWS inside `new Hls()` on a config carrying both groups
+   * ("Illegal hls.js config: don't mix up liveSyncDurationCount/
+   * liveMaxLatencyDurationCount and liveSyncDuration/liveMaxLatencyDuration"),
+   * which would take the load down before a frame plays.
+   */
+  describe('mutually exclusive latency groups', () => {
+    it('drops the count-based keys when liveSyncDuration is set', async () => {
+      const config = await builtConfig({
+        liveSyncDuration: 2,
+        liveMaxLatencyDuration: 10,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 6,
+      });
+
+      expect(config.liveSyncDuration).toBe(2);
+      expect(config.liveMaxLatencyDuration).toBe(10);
+      expect(config).not.toHaveProperty('liveSyncDurationCount');
+      expect(config).not.toHaveProperty('liveMaxLatencyDurationCount');
+    });
+
+    it('keeps the count group when the seconds group cannot stand alone', async () => {
+      // `liveMaxLatencyDuration` with no `liveSyncDuration` beside it is a
+      // second thing hls.js throws on, so dropping the counts here would only
+      // trade one illegal config for another
+      const config = await builtConfig({
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDuration: 10,
+      });
+
+      expect(config.liveSyncDurationCount).toBe(4);
+      expect(config).not.toHaveProperty('liveMaxLatencyDuration');
+    });
+
+    it('says which half it dropped', async () => {
+      await builtConfig({ liveSyncDuration: 2, liveSyncDurationCount: 4 });
+
+      expect(api.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('liveSyncDurationCount')
+      );
+    });
+
+    it('stays quiet when only one group is set', async () => {
+      await builtConfig({ liveSyncDuration: 2, liveMaxLatencyDuration: 10 });
+      await builtConfig({ liveSyncDurationCount: 4, liveMaxLatencyDurationCount: 6 });
+
+      expect(api.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
   it('never emits a key holding undefined, in any configuration', async () => {
     const configs = [
       await builtConfig(),
@@ -185,11 +242,21 @@ describe('hls.js live configuration', () => {
       await builtConfig({
         lowLatencyMode: true,
         liveSyncDuration: 2,
+        liveMaxLatencyDuration: 10,
+        maxLiveSyncPlaybackRate: 1.05,
+        liveDurationInfinity: true,
+      }),
+      await builtConfig({
+        lowLatencyMode: true,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 6,
+      }),
+      // The mixed config one group is dropped from
+      await builtConfig({
+        liveSyncDuration: 2,
         liveSyncDurationCount: 4,
         liveMaxLatencyDuration: 10,
         liveMaxLatencyDurationCount: 6,
-        maxLiveSyncPlaybackRate: 1.05,
-        liveDurationInfinity: true,
       }),
     ];
 

@@ -961,9 +961,19 @@ const state = (page) => page.evaluate(() => {
       // Blocking reload: hold the response until the requested part exists,
       // which is what stops hls.js polling a stale document in a hot loop
       const url = new global.URL(r.request().url());
-      const msn = Number(url.searchParams.get('_HLS_msn'));
-      const partIndex = Number(url.searchParams.get('_HLS_part'));
-      if (Number.isFinite(msn) && Number.isFinite(partIndex)) {
+      // Both params have to be PRESENT: Number(null) is 0, so a plain
+      // (non-blocking) playlist fetch would otherwise be counted as a blocking
+      // reload and made to wait for part 0 of segment 0
+      const msnParam = url.searchParams.get('_HLS_msn');
+      const partParam = url.searchParams.get('_HLS_part');
+      const msn = Number(msnParam);
+      const partIndex = Number(partParam);
+      const isBlocking =
+        msnParam !== null &&
+        partParam !== null &&
+        Number.isFinite(msn) &&
+        Number.isFinite(partIndex);
+      if (isBlocking) {
         counters.blockingReloads++;
         await waitForPart(msn, partIndex);
       }

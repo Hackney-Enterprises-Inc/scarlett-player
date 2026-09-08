@@ -111,6 +111,21 @@ describe('computeLiveMetrics() - hls.js source', () => {
     expect(metrics?.seekableRange).toEqual({ start: 20, end: 160 });
   });
 
+  it('places the window end on the timeline when details carry no edge', () => {
+    // `totalduration` is the LENGTH of the window, not a position: on a
+    // sliding playlist it has to be added to the window start. Used raw it
+    // reported an end (60) behind the viewer (150), i.e. a backwards DVR bar
+    // and a fallback latency pinned at 0.
+    const metrics = computeLiveMetrics({
+      kind: 'hls',
+      hls: fakeHls({ latency: undefined, targetLatency: 3, media: fakeMedia(150, 0, 160) }),
+      details: llDetails({ fragmentStart: 100, edge: undefined, totalduration: 60 }),
+    });
+
+    expect(metrics?.seekableRange).toEqual({ start: 100, end: 160 });
+    expect(metrics?.latency).toBe(10);
+  });
+
   it('falls back to the distance to the edge before hls.js has a latency', () => {
     const metrics = computeLiveMetrics({
       kind: 'hls',
@@ -555,5 +570,53 @@ describe('liveEdge survives a timeupdate tick', () => {
     expect(api.getState('seekableRange')).toEqual({ start: 0, end: 160 });
 
     cleanupVideo();
+  });
+});
+
+/**
+ * A live stream that ends (EXT-X-ENDLIST) or a VOD source loaded after a live
+ * one arrives as `hlsLevelLoaded` with `details.live === false`. Only the
+ * `live` key used to follow: `applyLiveMetrics` ignores a null snapshot by
+ * design and the `timeupdate` path stops measuring once `live` is false, so
+ * the previous stream's latency readout, LL badge and DVR window stayed on
+ * screen over the new one.
+ */
+describe('a playlist that is no longer live clears the live metrics', () => {
+  it('resets the metrics when details.live goes false', () => {
+    const api = createStatefulApi({ live: true });
+    const video = document.createElement('video');
+    const handlers: Record<string, (...args: unknown[]) => void> = {};
+    const hls = {
+      on: (event: string, handler: (...args: unknown[]) => void) => {
+        handlers[event] = handler;
+      },
+      off: vi.fn(),
+      media: video,
+      latency: 6,
+      targetLatency: 3,
+      levels: [],
+      currentLevel: -1,
+      audioTracks: [],
+      audioTrack: -1,
+    } as unknown as HlsInstance;
+
+    setupHlsEventHandlers(hls, api as IPluginAPI, {});
+
+    handlers['hlsLevelLoaded']?.('hlsLevelLoaded', { details: llDetails() });
+
+    expect(api.getState('lowLatencyMode')).toBe(true);
+    expect(api.getState('liveLatency')).toBe(6);
+    expect(api.getState('seekableRange')).toEqual({ start: 100, end: 160 });
+
+    handlers['hlsLevelLoaded']?.('hlsLevelLoaded', {
+      details: { live: false, targetduration: 4, totalduration: 60 },
+    });
+
+    expect(api.getState('live')).toBe(false);
+    expect(api.getState('lowLatencyMode')).toBe(false);
+    expect(api.getState('liveLatency')).toBe(0);
+    expect(api.getState('liveEdge')).toBe(false);
+    expect(api.getState('seekableRange')).toBeNull();
+    expect(api.emit).toHaveBeenCalledWith('live:lowlatency', { enabled: false });
   });
 });

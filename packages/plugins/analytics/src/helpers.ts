@@ -438,7 +438,15 @@ export function createLatencySampler(): {
       for (let i = 0; i < bucketCount; i++) {
         cumulative += buckets[i]!;
         if (cumulative >= target) {
-          p95 = Math.min(max, (i + 1) * LATENCY_BUCKET_SECONDS);
+          // The final bucket is the overflow bucket: everything from
+          // LATENCY_MAX_SECONDS up lands in it, so it has no upper edge to
+          // report. It reports the documented clamp rather than a phantom
+          // edge one bucket past it; `liveLatencyMax` still carries the peak.
+          const edge =
+            i === bucketCount - 1
+              ? LATENCY_MAX_SECONDS
+              : (i + 1) * LATENCY_BUCKET_SECONDS;
+          p95 = Math.min(max, edge);
           break;
         }
       }

@@ -712,6 +712,9 @@ export function createAnalyticsPlugin(
       avgBitrate: session.avgBitrate,
       maxBitrate: session.maxBitrate,
       exitType: session.exitType,
+      // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
+      // view is the one most worth having latency for
+      ...(latencySampler.summary() ?? {}),
     });
   }
 

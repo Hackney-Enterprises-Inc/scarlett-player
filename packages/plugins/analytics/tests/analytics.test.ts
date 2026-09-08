@@ -485,6 +485,50 @@ describe('Analytics Plugin', () => {
       expect(heartbeat?.liveLatencyP95).toBeLessThan(3);
     });
 
+    it('reports the overflow bucket at the documented clamp', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      // Everything past two minutes lands in the overflow bucket, which has no
+      // upper edge to report: the clamp is the answer, not a bucket width past it
+      feed(Array(10).fill(500));
+      beacons = [];
+
+      vi.advanceTimersByTime(1000);
+
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat?.liveLatencyP95).toBe(120);
+      expect(heartbeat?.liveLatencyMax).toBe(500);
+    });
+
+    it('carries the summary on the unload beacon as well as on viewEnd', async () => {
+      // A local capture: plugins from earlier tests are still listening on the
+      // window and would push their own (sampler-less) viewEnd into `beacons`
+      const sent: any[] = [];
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        customBeacon: (_url: string, payload: any) => {
+          sent.push(payload);
+        },
+      });
+
+      await plugin.init(api);
+      feed([2, 2, 2, 2, 8]);
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      const viewEnd = sent.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.liveLatencySamples).toBe(5);
+      expect(viewEnd?.liveLatencyMean).toBe(3.2);
+      expect(viewEnd?.liveLatencyMax).toBe(8);
+    });
+
     it('reports effective low latency, and stays sticky once seen', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,

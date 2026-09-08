@@ -12,6 +12,7 @@ import { sanitizeUrl } from './sanitize-url';
 import {
   applyLiveMetrics,
   computeLiveMetrics,
+  resetLiveMetrics,
   type HlsLevelDetails,
   type LiveMetrics,
 } from './live-metrics';
@@ -303,6 +304,13 @@ export function setupHlsEventHandlers(
             lowLatencyRequested: callbacks.isLowLatencyRequested?.() ?? true,
           })
         );
+      } else {
+        // The playlist went VOD (EXT-X-ENDLIST on a stream that was live, or a
+        // VOD source after a live one). applyLiveMetrics() ignores a null
+        // snapshot by design, and the timeupdate path stops measuring once
+        // `live` is false, so without this the previous stream's latency
+        // readout, LL badge and DVR window would sit on top of the new one.
+        resetLiveMetrics(api);
       }
 
       callbacks.onLiveUpdate?.();

@@ -35,7 +35,10 @@ had been declared since the first release are finally written.
   `liveMaxLatencyDuration`, `liveMaxLatencyDurationCount`,
   `maxLiveSyncPlaybackRate`, `liveDurationInfinity`. Only keys a host actually
   sets are passed to hls.js — it merges config by assignment, so forwarding
-  `undefined` would have overridden its defaults and broken standard live.
+  `undefined` would have overridden its defaults and broken standard live. The
+  seconds-based and count-based options are mutually exclusive (hls.js throws on
+  a config carrying both), so a mixed config forwards one group and logs which
+  half was dropped rather than failing the load.
 - New `live-metrics.ts` is the single writer for `liveLatency`, `liveEdge`,
   `seekableRange` and `lowLatencyMode`. Previously `hlsLevelLoaded` computed an
   edge flag from the playlist and the `timeupdate` handler then recomputed it
@@ -55,6 +58,9 @@ had been declared since the first release are finally written.
   viewer a hard-coded 3 seconds behind the edge on a 2-second-target stream.
 - `live:latency`, `live:edgechange`, `live:seekablerange` and `live:lowlatency`
   are emitted for the first time, each only on change.
+- A playlist that stops being live (`EXT-X-ENDLIST`, or a VOD source after a
+  live one) clears the latency readout, LL badge and DVR window instead of
+  leaving the previous stream's values on screen.
 
 **`@scarlett-player/core`**
 
@@ -72,5 +78,7 @@ had been declared since the first release are finally written.
 - Live sessions report `liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`,
   `liveLatencySamples` and `lowLatency` on heartbeat and viewEnd beacons.
   Accumulated into a fixed histogram rather than stored, so memory does not grow
-  with watch time and the percentile covers the whole session. VOD beacons are
-  unchanged — the keys are absent.
+  with watch time and the percentile covers the whole session. The unload
+  (`pagehide`/`beforeunload`) beacon carries them too, which is where an
+  abandoned live view is recorded. VOD beacons are unchanged — the keys are
+  absent.

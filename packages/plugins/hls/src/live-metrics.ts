@@ -168,7 +168,13 @@ function rangeFromDetails(
   if (!details) return null;
 
   const start = finite(details.fragmentStart) ?? finite(details.fragments?.[0]?.start) ?? 0;
-  const end = finite(details.edge) ?? finite(details.totalduration);
+  // `edge` is an absolute position on the player timeline and is preferred.
+  // `totalduration` is the LENGTH of the window, so on a sliding live playlist
+  // (fragmentStart > 0) it has to be added to the window start to land on the
+  // same timeline: used raw it reports an end behind the viewer's currentTime,
+  // which is both a wrong DVR bar and a fallback latency stuck at 0.
+  const total = finite(details.totalduration);
+  const end = finite(details.edge) ?? (total === null ? null : start + total);
   if (end === null) return null;
 
   return { start, end };

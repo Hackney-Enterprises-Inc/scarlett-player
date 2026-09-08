@@ -17,11 +17,11 @@ export interface HLSPluginConfig {
    *
    * Turning this on does more than set the hls.js flag: it also enables
    * latency catch-up (`maxLiveSyncPlaybackRate`, which hls.js leaves at 1 and
-   * therefore disabled) and widens hls.js's own part-loading retry budget,
-   * because LL-HLS issues requests at roughly 5-10x the segment rate and a
-   * preload-hint 404 at the edge is routine. Without those, LL-HLS parses and
-   * loads parts but latency settles wherever the buffer lands and is never
-   * pulled back.
+   * therefore disabled). Without it, LL-HLS parses and loads parts but latency
+   * settles wherever the buffer lands and is never pulled back. The retry
+   * budgets are deliberately left at their standard-live values; see
+   * `buildBaseHlsConfig()` for why widening them changes nothing a viewer
+   * could see.
    *
    * Opt-in, and it is a REQUEST: the manifest has to carry `EXT-X-PART` or
    * advertise `CAN-BLOCK-RELOAD=YES` for low latency to actually happen. The
@@ -37,8 +37,9 @@ export interface HLSPluginConfig {
   liveSyncDuration?: number;
   /**
    * Target latency expressed as a count of target durations (hls.js default:
-   * 3). Mutually exclusive with `liveSyncDuration`; hls.js warns if both are
-   * set.
+   * 3). Mutually exclusive with `liveSyncDuration`: hls.js THROWS on a config
+   * carrying both, so the plugin forwards one group only and logs which half
+   * it dropped.
    */
   liveSyncDurationCount?: number;
   /**
