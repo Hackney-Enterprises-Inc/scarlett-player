@@ -1622,6 +1622,109 @@ describe('ScarlettPlayer', () => {
     });
   });
 
+  // The UI leg of the same ladder. The LiveIndicator used to seek to
+  // seekableRange.end itself, which under low latency is beyond the last
+  // loaded part - it stalls. It now emits `live:seektolive` and core decides
+  // the target.
+  describe('live:seektolive', () => {
+    /** A provider whose sync position sits 6s inside the seekable end. */
+    const createLiveProvider = () =>
+      createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+        getLiveInfo: vi.fn(() => ({
+          isLive: true,
+          liveSyncPosition: 150,
+          latency: 6,
+          targetLatency: 3,
+          drift: 0,
+          lowLatency: true,
+        })),
+      });
+
+    it('seeks to the provider sync position, not to the seekable end', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createLiveProvider()] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('seekableRange', { start: 100, end: 156 });
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      // What a control's api.emit('live:seektolive') reaches
+      (player as any).eventBus.emit('live:seektolive', undefined);
+
+      expect(seekSpy).toHaveBeenCalledWith({ time: 150 });
+      expect(seekSpy).not.toHaveBeenCalledWith({ time: 156 });
+    });
+
+    it('falls through the same ladder as seekToLive() when there is no sync position', async () => {
+      const provider = createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+      (player as any).stateManager.set('seekableRange', { start: 100, end: 220 });
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      // What a control's api.emit('live:seektolive') reaches
+      (player as any).eventBus.emit('live:seektolive', undefined);
+
+      expect(seekSpy).toHaveBeenCalledWith({ time: 220 });
+    });
+
+    it('is wired exactly once across repeated loads', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createLiveProvider()] });
+      await player.load('live.m3u8');
+      await player.load('live2.m3u8');
+      (player as any).stateManager.set('live', true);
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      // What a control's api.emit('live:seektolive') reaches
+      (player as any).eventBus.emit('live:seektolive', undefined);
+
+      expect(seekSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing on a non-live stream', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createLiveProvider()] });
+      await player.load('vod.m3u8');
+
+      const seekSpy = vi.fn();
+      player.on('playback:seeking', seekSpy);
+
+      // What a control's api.emit('live:seektolive') reaches
+      (player as any).eventBus.emit('live:seektolive', undefined);
+
+      expect(seekSpy).not.toHaveBeenCalled();
+    });
+
+    it('is unsubscribed after destroy', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createLiveProvider()] });
+      await player.load('live.m3u8');
+      (player as any).stateManager.set('live', true);
+
+      const bus = (player as any).eventBus;
+      await player.destroy();
+
+      // The bus is torn down with the player, so the listener cannot fire
+      // against a destroyed instance - emitting must not throw either.
+      expect(() => bus.emit('live:seektolive', undefined)).not.toThrow();
+      expect(bus.listenerCount('live:seektolive')).toBe(0);
+    });
+  });
+
   describe('error state wiring', () => {
     it('should populate the error state key from error events', async () => {
       const player = new ScarlettPlayer({ container });

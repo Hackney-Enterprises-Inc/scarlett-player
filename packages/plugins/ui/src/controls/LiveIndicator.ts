@@ -69,11 +69,16 @@ export class LiveIndicator implements Control {
     }
   };
 
+  /**
+   * Ask core to rejoin the live edge.
+   *
+   * Emits `live:seektolive` rather than seeking to `seekableRange.end`
+   * directly. Core's `seekToLive()` prefers the provider's `liveSyncPosition`,
+   * and under low latency the end of the seekable range is beyond the last
+   * loaded part - seeking there stalls and rebuffers.
+   */
   private seekToLive(): void {
-    const seekableRange = this.api.getState('seekableRange');
-    if (seekableRange) {
-      this.api.emit('playback:seeking', { time: seekableRange.end });
-    }
+    this.api.emit('live:seektolive', undefined);
   }
 
   destroy(): void {

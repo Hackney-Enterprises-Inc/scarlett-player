@@ -174,6 +174,19 @@ export interface PlayerEventMap {
   /** Low-latency mode toggled */
   'live:lowlatency': { enabled: boolean };
 
+  /**
+   * A control asked to rejoin the live edge.
+   *
+   * `ScarlettPlayer` subscribes to this and calls `seekToLive()`, which
+   * prefers the provider's `liveSyncPosition` over `seekableRange.end`. Under
+   * low latency the two are not interchangeable: the end of the seekable
+   * range is beyond the last loaded part, and seeking there stalls and
+   * rebuffers - the one thing a low-latency viewer notices. Controls emit this
+   * rather than a `playback:seeking` of their own so the sync-position ladder
+   * lives in exactly one place.
+   */
+  'live:seektolive': void;
+
   // === Chapter Events (NEW for TSP) ===
   /** Chapter changed (based on playback time) */
   'chapter:change': { chapter: Chapter | null; previous: Chapter | null };

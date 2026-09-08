@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * Build script for the demo
+ * Build script for the demo.
+ *
+ * Bundles demo/demo.ts, stamps demo/index.html with the current version, and
+ * publishes all three files to docs/demo/, which is what scarlettplayer.com
+ * serves. Everything under docs/demo/ is generated: edit demo/index.html and
+ * demo/demo.ts, never the copies.
  */
 
 const esbuild = require('esbuild');
@@ -14,7 +19,8 @@ const corePackage = JSON.parse(
 const VERSION = corePackage.version;
 
 /**
- * Point a demo page's script tag at the current version, as demo.bundle.js?v=<version>.
+ * Point the demo page's script tag at the current version, as
+ * demo.bundle.js?v=<version>.
  *
  * The bundle keeps a stable filename, and nginx serves it with no cache-control
  * header, so browsers fall back to heuristic caching and keep showing an old
@@ -23,6 +29,9 @@ const VERSION = corePackage.version;
  *
  * A no-op when the file is missing or already stamped with this version, so the
  * release workflow's "did anything change" check stays meaningful.
+ *
+ * Only ever called on demo/index.html, the source page. docs/demo/index.html is
+ * copied from it afterwards and inherits the stamp.
  *
  * @param {string} htmlPath Absolute path to the demo index.html to rewrite.
  * @returns {void}
@@ -95,24 +104,32 @@ async function build() {
       },
     });
 
-    // Copy to docs/demo/ (served by Forge at scarlettplayer.com)
+    // Stamp the SOURCE page before copying, so docs/demo/index.html inherits
+    // the version query rather than needing a second stamping pass.
+    stampBundleVersion(path.join(__dirname, 'index.html'));
+
+    // Publish to docs/demo/ (served by Forge at scarlettplayer.com).
+    //
+    // index.html is copied, not hand-maintained. It used to be the one file
+    // here a human had to remember to mirror, and nobody did: by 2026-09-07 the
+    // served page was missing the Analytics Log, Watermark Controls and Live
+    // panels while running the freshly built bundle, because the bundle IS
+    // copied on every build. Treating the page as build output rather than as
+    // a second source file is what stops that recurring - edit demo/index.html
+    // and this rebuild propagates it.
+    //
+    // The outputs stay TRACKED. Forge deploys the committed repo and runs no
+    // build of its own, so anything gitignored here simply is not on the
+    // server: that is the 2026-08-11 outage release.yml now guards against.
     const docsDemo = path.join(__dirname, '../docs/demo');
     if (fs.existsSync(docsDemo)) {
-      fs.copyFileSync(
-        path.join(__dirname, 'demo.bundle.js'),
-        path.join(docsDemo, 'demo.bundle.js')
-      );
-      fs.copyFileSync(
-        path.join(__dirname, 'demo.bundle.js.map'),
-        path.join(docsDemo, 'demo.bundle.js.map')
-      );
-      console.log('✅ Demo built and copied to docs/demo/');
+      for (const file of ['demo.bundle.js', 'demo.bundle.js.map', 'index.html']) {
+        fs.copyFileSync(path.join(__dirname, file), path.join(docsDemo, file));
+      }
+      console.log('✅ Demo built and published to docs/demo/');
     } else {
       console.log('✅ Demo built successfully!');
     }
-
-    stampBundleVersion(path.join(__dirname, 'index.html'));
-    stampBundleVersion(path.join(docsDemo, 'index.html'));
 
     console.log(`📦 Version: ${VERSION}`);
     console.log('📂 Output: demo/demo.bundle.js');

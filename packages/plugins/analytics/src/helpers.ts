@@ -342,6 +342,121 @@ export function calculateQoEScore(params: {
 }
 
 /**
+ * Summary of the live latency observed over a session.
+ */
+export interface LiveLatencySummary {
+  /** Number of latency readings taken */
+  liveLatencySamples: number;
+  /** Mean latency across the session, in seconds (2 decimal places) */
+  liveLatencyMean: number;
+  /** 95th percentile latency, in seconds (2 decimal places) */
+  liveLatencyP95: number;
+  /** Highest latency seen, in seconds (2 decimal places) */
+  liveLatencyMax: number;
+  /** Whether the stream was ever EFFECTIVELY low latency */
+  lowLatency: boolean;
+}
+
+/** Histogram bucket width in seconds. */
+const LATENCY_BUCKET_SECONDS = 0.25;
+
+/** Latency above this is clamped into the final bucket (seconds). */
+const LATENCY_MAX_SECONDS = 120;
+
+/**
+ * Accumulate live latency readings into a session summary.
+ *
+ * A live session emits `live:latency` at the `timeupdate` cadence, roughly
+ * 4Hz, so an hour-long stream produces ~14,000 readings. Keeping them would
+ * make the plugin's memory grow with watch time, and keeping only the last N
+ * would silently turn the "session p95" into a "last two minutes p95" -
+ * precisely the wrong answer for the question live latency telemetry exists
+ * to answer ("did LL hold for this viewer, or only at the end?").
+ *
+ * So readings go into a fixed histogram: 0.25s buckets to two minutes, plus an
+ * overflow bucket. Constant memory, whole-session percentiles, and a
+ * resolution finer than any target latency worth shipping.
+ *
+ * @returns A sampler with `add()` and `summary()`
+ */
+export function createLatencySampler(): {
+  add: (latency: number) => void;
+  markLowLatency: () => void;
+  summary: () => LiveLatencySummary | null;
+} {
+  const bucketCount = Math.ceil(LATENCY_MAX_SECONDS / LATENCY_BUCKET_SECONDS) + 1;
+  const buckets = new Uint32Array(bucketCount);
+  let count = 0;
+  let sum = 0;
+  let max = 0;
+  let sawLowLatency = false;
+
+  return {
+    /**
+     * Record one latency reading.
+     *
+     * @param latency - Latency behind the live edge, in seconds
+     */
+    add(latency: number): void {
+      if (!Number.isFinite(latency) || latency < 0) return;
+
+      count++;
+      sum += latency;
+      if (latency > max) max = latency;
+
+      const index = Math.min(
+        bucketCount - 1,
+        Math.floor(latency / LATENCY_BUCKET_SECONDS)
+      );
+      buckets[index]!++;
+    },
+
+    /**
+     * Mark the session as having been effectively low latency.
+     *
+     * Sticky: a stream that was LL for part of a view is reported as LL,
+     * because "was this an LL session" is the question the flag answers.
+     */
+    markLowLatency(): void {
+      sawLowLatency = true;
+    },
+
+    /**
+     * Summarise the readings so far.
+     *
+     * @returns The summary, or null when no reading was ever taken (VOD)
+     */
+    summary(): LiveLatencySummary | null {
+      if (count === 0) return null;
+
+      // Rank-based p95: the first bucket whose cumulative count reaches the
+      // 95th sample. Reported at the bucket's upper edge, so the figure is
+      // never optimistic.
+      const target = Math.ceil(count * 0.95);
+      let cumulative = 0;
+      let p95 = max;
+      for (let i = 0; i < bucketCount; i++) {
+        cumulative += buckets[i]!;
+        if (cumulative >= target) {
+          p95 = Math.min(max, (i + 1) * LATENCY_BUCKET_SECONDS);
+          break;
+        }
+      }
+
+      const round = (value: number) => Math.round(value * 100) / 100;
+
+      return {
+        liveLatencySamples: count,
+        liveLatencyMean: round(sum / count),
+        liveLatencyP95: round(p95),
+        liveLatencyMax: round(max),
+        lowLatency: sawLowLatency,
+      };
+    },
+  };
+}
+
+/**
  * Check if running in development environment.
  *
  * @returns True if in development

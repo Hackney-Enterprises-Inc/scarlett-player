@@ -9,6 +9,12 @@ import type { AudioTrack } from '@scarlett-player/core';
 import type { HlsAudioTrack, HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
 import { formatLevel } from './quality';
 import { sanitizeUrl } from './sanitize-url';
+import {
+  applyLiveMetrics,
+  computeLiveMetrics,
+  type HlsLevelDetails,
+  type LiveMetrics,
+} from './live-metrics';
 
 /** hls.js event names (avoiding import to keep bundle small) */
 export const HLS_EVENTS = {
@@ -154,6 +160,8 @@ export function setupHlsEventHandlers(
     onBufferUpdate?: () => void;
     onError?: (error: HLSError) => void;
     onLiveUpdate?: () => void;
+    onLevelDetails?: (details: HlsLevelDetails) => void;
+    isLowLatencyRequested?: () => boolean;
     onFragLoaded?: () => void;
     getIsAutoQuality?: () => boolean;
     onAudioTracksUpdated?: (tracks: HlsAudioTrack[]) => void;
@@ -272,28 +280,29 @@ export function setupHlsEventHandlers(
     api.setState('buffering', true);
   });
 
-  // Level loaded - may contain live stream info and DVR window
-  addHandler('hlsLevelLoaded', (_event: string, data: { details: { live?: boolean; totalduration?: number; targetduration?: number; fragmentStart?: number; edge?: number; fragments?: Array<{ start?: number }> } }) => {
+  // Level loaded - may contain live stream info and DVR window.
+  //
+  // This handler owns the `live` key. Every other live key (seekableRange,
+  // liveLatency, liveEdge, lowLatencyMode) is written by live-metrics.ts and
+  // by nothing else, so the `timeupdate` handler below can no longer clobber
+  // the edge flag computed here.
+  addHandler('hlsLevelLoaded', (_event: string, data: { details: HlsLevelDetails }) => {
     if (data.details?.live !== undefined) {
       api.setState('live', data.details.live);
 
-      // For live streams, compute seekable range from the level details
-      // rather than from the media element. Under MSE (hls.js),
-      // video.seekable.start(0) remains 0 instead of reflecting the real
-      // sliding window (details.fragmentStart). Scrubbing to the start
-      // of the bar then triggers hls.js to jump back to live.
       if (data.details.live) {
-        const details = data.details;
-        const start = details.fragmentStart ?? (details.fragments?.[0]?.start ?? 0);
-        const end = details.edge ?? details.totalduration ?? 0;
-        api.setState('seekableRange', { start, end });
-
-        const video = hls.media as HTMLVideoElement | null;
-        if (video) {
-          const latency = Math.max(0, end - video.currentTime);
-          api.setState('liveLatency', latency);
-          api.setState('liveEdge', latency < ((details.targetduration ?? 3) * 3));
-        }
+        // Handed to the plugin so the timeupdate path and getLiveInfo() can
+        // measure against the same playlist this handler just saw
+        callbacks.onLevelDetails?.(data.details);
+        applyLiveMetrics(
+          api,
+          computeLiveMetrics({
+            kind: 'hls',
+            hls,
+            details: data.details,
+            lowLatencyRequested: callbacks.isLowLatencyRequested?.() ?? true,
+          })
+        );
       }
 
       callbacks.onLiveUpdate?.();
@@ -356,10 +365,15 @@ export function setupHlsEventHandlers(
  *
  * @param video - Video element
  * @param api - Plugin API
+ * @param getLiveMetrics - Live measurement for the active pipeline. Supplied on
+ *        the hls.js path, where hls.js is the source of latency truth; omitted
+ *        on the native path, where the element's own `seekable` range is all
+ *        there is and this handler measures from it directly.
  */
 export function setupVideoEventHandlers(
   video: HTMLVideoElement,
-  api: IPluginAPI
+  api: IPluginAPI,
+  getLiveMetrics?: () => LiveMetrics | null
 ): () => void {
   const handlers: Array<{ event: string; handler: EventListener }> = [];
 
@@ -440,20 +454,19 @@ export function setupVideoEventHandlers(
     api.setState('currentTime', video.currentTime);
     api.emit('playback:timeupdate', { currentTime: video.currentTime });
 
-    // Update live stream seekable range and live edge on every timeupdate.
-    // Also detect live from non-finite duration (native HLS on Safari),
-    // since hlsLevelLoaded never runs on the native path.
-    if (video.seekable && video.seekable.length > 0) {
-      if (api.getState('live') || !Number.isFinite(video.duration)) {
-        const start = video.seekable.start(0);
-        const end = video.seekable.end(video.seekable.length - 1);
-        api.setState('seekableRange', { start, end });
-
-        // Live edge: within 10 seconds of seekable end
-        const latency = Math.max(0, end - video.currentTime);
-        api.setState('liveEdge', latency < 10);
-        api.setState('liveLatency', latency);
-      }
+    // Refresh the live measurement on every timeupdate. Also detect live from
+    // non-finite duration (native HLS on Safari), since hlsLevelLoaded never
+    // runs on the native path.
+    //
+    // The measurement comes from `getLiveMetrics` when the caller supplied one:
+    // this handler used to recompute the edge flag here as `latency < 10` off
+    // `video.seekable`, which under MSE is both the wrong source and, at a
+    // low-latency target, permanently true.
+    if (api.getState('live') || !Number.isFinite(video.duration)) {
+      applyLiveMetrics(
+        api,
+        getLiveMetrics ? getLiveMetrics() : computeLiveMetrics({ kind: 'media', media: video })
+      );
     }
   });
 

@@ -356,7 +356,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     poster: 'https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg',
     logLevel: 'debug',
     plugins: [
-      createHLSPlugin(),      // HLS streams (.m3u8)
+      // lowLatencyMode is opt-in for consumers and off by default; the demo
+      // turns it on so the Live panel can show LL-HLS against a low-latency
+      // source. It changes nothing for VOD or for a plain live manifest -
+      // hls.js only takes the LL path when the playlist carries EXT-X-PART.
+      createHLSPlugin({ lowLatencyMode: true }), // HLS streams (.m3u8)
       createNativePlugin(),   // Native formats (MP4, WebM, MOV, MKV)
       uiPlugin({
         hideDelay: 3000,
@@ -457,9 +461,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Analytics Log panel controls
   document.getElementById('analytics-clear')?.addEventListener('click', clearAnalyticsLog);
 
-  // Clip Log panel controls. The lookups are optional-chained because the
-  // served page (docs/demo/index.html) is a manually synced mirror that can
-  // trail demo/index.html - a missing panel must not take the player down.
+  // Clip Log panel controls. The lookups stay optional-chained: a panel this
+  // page does not happen to carry must not take the player down. (Until
+  // 2026-09-08 that was a live risk rather than defensive coding - the served
+  // page, docs/demo/index.html, was hand-mirrored and had fallen three panels
+  // behind. build.cjs now generates it from this page's index.html.)
   document.getElementById('clip-clear')?.addEventListener('click', clearClipLog);
 
   // Clip Controls panel, modelled on Watermark Controls: the four limit

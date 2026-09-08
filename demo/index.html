@@ -171,6 +171,65 @@
     .console-line.warn { color: #ffb74d; }
     .console-line.error { color: #ef5350; }
 
+    /* Live panel (LL-HLS): latency readout, effective-LL badge, GO LIVE */
+    .live-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .live-header h2 {
+      margin-bottom: 0;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 999px;
+      color: #888;
+      padding: 4px 12px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .live-badge--on {
+      border-color: #e50914;
+      color: #fff;
+    }
+
+    .live-golive-btn {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+
+    .live-golive-btn:hover:not(:disabled) {
+      border-color: #e50914;
+    }
+
+    .live-golive-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .live-hint {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+
     .analytics-header {
       display: flex;
       align-items: center;
@@ -1177,6 +1236,40 @@ playlist.<span class="function">add</span>([
     </div>
   </div>
 
+  <!-- Live / LL-HLS panel. Fed by core state (live, liveEdge, liveLatency,
+       lowLatencyMode) plus the HLS provider's getLiveInfo() for the target
+       latency. Reads "-" on VOD; paste a live .m3u8 into the URL bar above to
+       light it up. -->
+  <div class="info">
+    <div class="live-header">
+      <h2>Live</h2>
+      <span class="live-badge" id="live-ll-badge">LL-HLS off</span>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Stream</div>
+        <div class="stat-value" id="live-kind">Not live</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Latency</div>
+        <div class="stat-value" id="live-latency">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Target</div>
+        <div class="stat-value" id="live-target">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Edge</div>
+        <div class="stat-value" id="live-edge">&mdash;</div>
+      </div>
+    </div>
+    <div class="live-hint">
+      <button id="live-golive" class="live-golive-btn" disabled>Go Live</button>
+      Seeks through <code>player.seekToLive()</code>, which prefers the
+      provider's live sync position over the end of the seekable range.
+    </div>
+  </div>
+
   <!-- Analytics beacons, captured in the page by the plugin's customBeacon hook -->
   <div class="info">
     <div class="analytics-header">
@@ -1251,7 +1344,51 @@ playlist.<span class="function">add</span>([
 
       document.getElementById('buffered').textContent =
         Math.round(state.bufferedAmount * 100) + '%';
+
+      updateLivePanel(activePlayer, state);
     }
+
+    // Live panel. Target latency is the one figure core does not hold: it
+    // lives on the provider, so it is read through getLiveInfo() - the same
+    // call seekToLive() uses to pick its target.
+    function updateLivePanel(activePlayer, state) {
+      const badge = document.getElementById('live-ll-badge');
+      const goLive = document.getElementById('live-golive');
+      if (!badge || !goLive) return;
+
+      const isLive = !!state.live;
+      let liveInfo = null;
+      if (isLive && typeof activePlayer.getPlugin === 'function') {
+        const provider = activePlayer.getPlugin('hls-provider');
+        if (provider && typeof provider.getLiveInfo === 'function') {
+          liveInfo = provider.getLiveInfo();
+        }
+      }
+
+      // Effective LL, not requested LL: the manifest has to carry EXT-X-PART
+      // or advertise CAN-BLOCK-RELOAD for this to light up.
+      const lowLatency = !!state.lowLatencyMode;
+      badge.textContent = lowLatency ? 'LL-HLS active' : 'LL-HLS off';
+      badge.classList.toggle('live-badge--on', lowLatency);
+
+      document.getElementById('live-kind').textContent =
+        isLive ? (lowLatency ? 'Live (low latency)' : 'Live') : 'Not live';
+      document.getElementById('live-latency').textContent =
+        isLive ? state.liveLatency.toFixed(2) + 's' : '\u2014';
+      document.getElementById('live-target').textContent =
+        liveInfo ? liveInfo.targetLatency.toFixed(2) + 's' : '\u2014';
+      document.getElementById('live-edge').textContent =
+        isLive ? (state.liveEdge ? 'At edge' : 'Behind') : '\u2014';
+
+      goLive.disabled = !isLive;
+    }
+
+    document.getElementById('live-golive')?.addEventListener('click', () => {
+      const activePlayer = getActivePlayer();
+      if (activePlayer && typeof activePlayer.seekToLive === 'function') {
+        activePlayer.seekToLive();
+      }
+    });
 
     setInterval(updateStats, 250);
 

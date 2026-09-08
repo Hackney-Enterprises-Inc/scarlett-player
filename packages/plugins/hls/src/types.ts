@@ -12,8 +12,60 @@ export interface HLSPluginConfig {
   autoStartLoad?: boolean;
   /** Start position in seconds (-1 for default) */
   startPosition?: number;
-  /** Enable low latency mode for live streams */
+  /**
+   * Enable low-latency HLS for live streams (default: false).
+   *
+   * Turning this on does more than set the hls.js flag: it also enables
+   * latency catch-up (`maxLiveSyncPlaybackRate`, which hls.js leaves at 1 and
+   * therefore disabled) and widens hls.js's own part-loading retry budget,
+   * because LL-HLS issues requests at roughly 5-10x the segment rate and a
+   * preload-hint 404 at the edge is routine. Without those, LL-HLS parses and
+   * loads parts but latency settles wherever the buffer lands and is never
+   * pulled back.
+   *
+   * Opt-in, and it is a REQUEST: the manifest has to carry `EXT-X-PART` or
+   * advertise `CAN-BLOCK-RELOAD=YES` for low latency to actually happen. The
+   * `lowLatencyMode` state key and the `live:lowlatency` event report what the
+   * manifest supports, not what was requested here.
+   */
   lowLatencyMode?: boolean;
+  /**
+   * Target latency for live streams in seconds, overriding the manifest's
+   * `PART-HOLD-BACK` / `HOLD-BACK`. Left unset, hls.js derives the target from
+   * the manifest, which is what a correctly packaged stream wants.
+   */
+  liveSyncDuration?: number;
+  /**
+   * Target latency expressed as a count of target durations (hls.js default:
+   * 3). Mutually exclusive with `liveSyncDuration`; hls.js warns if both are
+   * set.
+   */
+  liveSyncDurationCount?: number;
+  /**
+   * Maximum latency in seconds before the player seeks forward to catch up.
+   * Left unset, hls.js uses `liveMaxLatencyDurationCount`.
+   */
+  liveMaxLatencyDuration?: number;
+  /**
+   * Maximum latency as a count of target durations (hls.js default: Infinity,
+   * i.e. never force a catch-up seek).
+   */
+  liveMaxLatencyDurationCount?: number;
+  /**
+   * Playback rate ceiling used to catch up to the live edge (hls.js default:
+   * 1, which disables catch-up entirely).
+   *
+   * Defaults to 1.1 when `lowLatencyMode` is true and is left at hls.js's
+   * default otherwise, so standard live and VOD are unchanged. 1.1 recovers a
+   * second of drift in ten and the pitch shift is barely audible; 1.05 is
+   * safer and slower.
+   */
+  maxLiveSyncPlaybackRate?: number;
+  /**
+   * Report live streams with an Infinity duration rather than the length of
+   * the current sliding window (hls.js default: false).
+   */
+  liveDurationInfinity?: boolean;
   /** Max buffer length in seconds */
   maxBufferLength?: number;
   /** Max max buffer length in seconds */
@@ -115,6 +167,12 @@ export interface HLSLiveInfo {
   drift: number;
   /** Position to seek to for live sync (seconds from start), when known */
   liveSyncPosition?: number;
+  /**
+   * Whether the stream is EFFECTIVELY low latency - the manifest carries
+   * `EXT-X-PART` or advertises `CAN-BLOCK-RELOAD=YES` - rather than whether
+   * `lowLatencyMode` was requested in the plugin config.
+   */
+  lowLatency: boolean;
 }
 
 /** HLS Plugin interface extending base Plugin */

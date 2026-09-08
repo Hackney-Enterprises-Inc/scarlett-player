@@ -34,6 +34,7 @@ import {
   getPlayerSize,
   getConnectionType,
   calculateQoEScore,
+  createLatencySampler,
   isDevelopment,
   safeStringify,
   isHttpsUrl,
@@ -123,11 +124,17 @@ export function createAnalyticsPlugin(
   let rebufferStartTime: number | null = null;
   let pauseStartTime: number | null = null;
   let cleanupFns: Array<() => void> = [];
+  // Live latency, accumulated at constant memory across the whole session.
+  // Reset alongside the session so a second view does not inherit the first
+  // one's readings.
+  let latencySampler = createLatencySampler();
 
   /**
    * Initialize view session.
    */
   function initSession(): ViewSession {
+    latencySampler = createLatencySampler();
+
     return {
       viewId: generateId(),
       sessionId: getSessionId(),
@@ -352,6 +359,7 @@ export function createAnalyticsPlugin(
       rebufferDuration: session.rebufferDuration,
       avgBitrate: session.avgBitrate,
       qoeScore: getQoEScore(),
+      ...(latencySampler.summary() ?? {}),
     });
 
     lastHeartbeatTime = now;
@@ -414,6 +422,8 @@ export function createAnalyticsPlugin(
       exitType: session.exitType,
       qoeScore: getQoEScore(),
       completionRate,
+      // Absent entirely on VOD: nothing ever emitted a live:latency reading
+      ...(latencySampler.summary() ?? {}),
     });
   }
 
@@ -638,6 +648,33 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * Record a live latency reading.
+   *
+   * Accumulated rather than beaconed: the provider emits this several times a
+   * second, and one beacon per reading would be a denial of service against
+   * the host's own endpoint. The heartbeat and viewEnd payloads carry the
+   * mean, p95 and max instead.
+   *
+   * @param payload - Latency behind the live edge, in seconds
+   */
+  function onLiveLatency(payload: { latency: number }): void {
+    latencySampler.add(payload.latency);
+  }
+
+  /**
+   * Record the stream turning out to be effectively low latency.
+   *
+   * Sticky for the session, and separate from the latency readings because the
+   * event can fire before the first one: `hlsLevelLoaded` announces effective
+   * LL from the manifest, ahead of any `timeupdate`.
+   *
+   * @param payload - Whether low latency is effective
+   */
+  function onLowLatencyChange(payload: { enabled: boolean }): void {
+    if (payload.enabled) latencySampler.markLowLatency();
+  }
+
+  /**
    * Handle page visibility change.
    */
   function onVisibilityChange(): void {
@@ -707,6 +744,11 @@ export function createAnalyticsPlugin(
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
       const unsubQuality = api.on('quality:change', onQualityChange);
+      // Live latency. The HLS provider emits this at the timeupdate cadence
+      // for live content only, so a VOD session records nothing and the live
+      // keys stay out of its beacons entirely.
+      const unsubLatency = api.on('live:latency', onLiveLatency);
+      const unsubLowLatency = api.on('live:lowlatency', onLowLatencyChange);
 
       cleanupFns.push(
         unsubPlay,
@@ -716,7 +758,9 @@ export function createAnalyticsPlugin(
         unsubEnded,
         unsubError,
         unsubCoreError,
-        unsubQuality
+        unsubQuality,
+        unsubLatency,
+        unsubLowLatency
       );
 
       // Page lifecycle events

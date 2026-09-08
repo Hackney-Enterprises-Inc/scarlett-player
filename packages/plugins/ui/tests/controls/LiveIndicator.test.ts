@@ -129,16 +129,25 @@ describe('LiveIndicator', () => {
     expect(el.getAttribute('aria-label')).toBe('Live broadcast - behind live edge, click to seek to live');
   });
 
-  it('should emit playback:seeking on click', () => {
+  it('should emit live:seektolive on click', () => {
     const el = liveIndicator.render();
     el.click();
-    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    expect(api.emit).toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
-  it('should emit playback:seeking on Enter key', () => {
+  it('should emit live:seektolive on Enter key', () => {
     const el = liveIndicator.render();
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    expect(api.emit).toHaveBeenCalledWith('live:seektolive', undefined);
+  });
+
+  // The control must NOT seek on its own. seekableRange.end is beyond the last
+  // loaded part under low latency, and seeking there stalls; core's
+  // seekToLive() prefers the provider's liveSyncPosition.
+  it('should never seek to the seekable range end itself', () => {
+    const el = liveIndicator.render();
+    el.click();
+    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
   });
 
   it('should remove element on destroy', () => {
@@ -151,13 +160,13 @@ describe('LiveIndicator', () => {
 
   // --- Keyboard Interactions ---
 
-  it('should emit playback:seeking on Space key', () => {
+  it('should emit live:seektolive on Space key', () => {
     const el = liveIndicator.render();
     const video = api.container.querySelector('video')!;
     Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
     el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 100 });
+    expect(api.emit).toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
   it('should not seek on unrelated key press', () => {
@@ -169,29 +178,23 @@ describe('LiveIndicator', () => {
     expect(video.currentTime).toBe(50);
   });
 
-  // --- Click when seekable range changes ---
+  // --- The request carries no target ---
 
-  it('should emit playback:seeking with updated seekable range end on click', () => {
+  it('should not read seekableRange when asking to go live', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
-    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
-    // Update seekable range to a new end
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'liveEdge') return false;
-      if (key === 'seekableRange') return { start: 0, end: 200 };
-      return null;
-    });
-
+    (api.getState as any).mockClear();
     el.click();
-    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 200 });
+
+    // The target is core's to decide: reading the range here is what let the
+    // old control seek past the live edge under low latency.
+    const keysRead = (api.getState as any).mock.calls.map((c: unknown[]) => c[0]);
+    expect(keysRead).not.toContain('seekableRange');
+    expect(api.emit).toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
-  it('should not seek if no seekable range is available', () => {
+  it('should still ask to go live when no seekable range is available', () => {
     const el = liveIndicator.render();
-    const video = api.container.querySelector('video')!;
-    Object.defineProperty(video, 'currentTime', { value: 50, writable: true, configurable: true });
 
     (api.getState as any).mockImplementation((key: string) => {
       if (key === 'live') return true;
@@ -200,7 +203,7 @@ describe('LiveIndicator', () => {
     });
 
     el.click();
-    expect(video.currentTime).toBe(50);
+    expect(api.emit).toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
   // --- State Updates ---
@@ -276,7 +279,7 @@ describe('LiveIndicator', () => {
     // Click after destroy should not emit seek event
     vi.mocked(api.emit).mockClear();
     el.click();
-    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+    expect(api.emit).not.toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
   it('should remove keydown event listener on destroy', () => {
@@ -287,7 +290,7 @@ describe('LiveIndicator', () => {
     // Keydown after destroy should not emit seek event
     vi.mocked(api.emit).mockClear();
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+    expect(api.emit).not.toHaveBeenCalledWith('live:seektolive', undefined);
   });
 
   // --- Initial state ---
