@@ -1,7 +1,7 @@
 # Scarlett Player - Architecture
 
-**Version**: 1.8.0 (fixed versioning: every package in the workspace ships this number)
-**Last Updated**: September 6, 2026
+**Version**: 1.11.1 (fixed versioning: every package in the workspace ships this number)
+**Last Updated**: September 7, 2026
 
 This describes the player as it is built, not as it was planned. Every class,
 method and event named here exists in `packages/*/src`. Where a name in an
@@ -53,9 +53,9 @@ ever carried a `plugin-` prefix), the name here is the one the code uses.
 |  Plugins (one npm package each)                               |
 |   provider:  hls, native                                      |
 |   ui:        ui, audio-ui                                     |
-|   feature:   playlist, captions, chapters, gestures,          |
-|              share, watermark, media-session, airplay,        |
-|              chromecast                                       |
+|   feature:   playlist, captions, chapters, clips,             |
+|              gestures, share, watermark, media-session,       |
+|              airplay, chromecast                              |
 |   analytics: analytics                                        |
 +---------------------------------------------------------------+
 ```
@@ -535,11 +535,20 @@ caused state to drift from the element.
   `scripts/check-package-scripts.mjs` fails the build when a workspace package
   declares no `typecheck` or `test` script, which is how the gap that left ten
   packages silently unchecked is kept closed.
+- Three further guards run after the build, each for a defect class that shipped
+  green once: `scripts/check-package-artifacts.mjs` (a manifest advertising a
+  path the build did not leave on disk), `scripts/check-embed-chunks.mjs` (an
+  embed bundle importing a chunk that was never emitted) and
+  `scripts/check-package-types.mjs` (a shipped `.d.ts` that exists but does not
+  compile for a consumer).
 - `scripts/verify-browser.mjs` drives the built demo in a real headless Chrome
   through Playwright, covering what jsdom cannot: manifest failures, a
   mid-playback outage and automatic recovery, destroy-mid-append races against a
-  locally generated HLS fixture, malformed live playlist refreshes, and the shape
-  of the `window.ScarlettPlayer` global the CDN embed publishes.
+  locally generated HLS fixture, malformed live playlist refreshes, the shape of
+  the `window.ScarlettPlayer` global the CDN embed publishes, and control-bar
+  reachability at phone widths, which needs a layout engine and a coarse
+  pointer. Thirty-nine checks across seven scenarios; CI runs it on pushes to
+  `main` only, not on pull requests.
 
 ## Browser support
 

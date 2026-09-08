@@ -1,7 +1,7 @@
 # Changelog
 
 Scarlett Player is versioned with [Changesets](https://github.com/changesets/changesets)
-in fixed mode: all 17 packages share one version number and release together.
+in fixed mode: all 18 packages share one version number and release together.
 
 Changelogs are kept per package and generated from the changesets merged into
 `main`:

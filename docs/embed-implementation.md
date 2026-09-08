@@ -1,69 +1,113 @@
 # Embed Package Implementation Guide
 
-This document contains all implementation details for the `@scarlett-player/embed` package - a standalone, CDN-ready embed for Scarlett Player.
+**Last Updated**: September 7, 2026 (player 1.11.1)
+
+How `@scarlett-player/embed` is built and how a host integrates it. The
+authoritative reference for every supported data attribute is
+[`packages/embed/README.md`](../packages/embed/README.md) - this document links
+to it rather than repeating the table, so the two cannot drift.
 
 ## Quick Start
 
-### Build & Test
+### Build
 
 ```bash
-cd packages/embed
-pnpm install
-pnpm build
-pnpm dev  # Opens demo.html
+pnpm --filter @scarlett-player/embed build   # from the repo root
+pnpm --filter @scarlett-player/embed dev     # Vite dev server over demo.html
 ```
 
-### Simplest Integration
+The build is `rimraf dist && tsc && vite build && BUILD_VIDEO=true vite build &&
+BUILD_AUDIO=true vite build`: `tsc` emits the declarations, then Vite writes
+three bundles into the same `dist`. `emptyOutDir` is pinned to `false` because
+the three builds share that directory and the declarations are already in it.
+
+### Simplest integration
 
 ```html
-<script src="https://cdn.thestreamplatform.com/player/embed.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 <div data-sp src="https://example.com/video.m3u8"></div>
 ```
 
-That's it! The player auto-initializes on page load.
+The player auto-initialises on `DOMContentLoaded`.
 
 ---
 
-## Package Structure
+## Package structure
 
 ```
 packages/embed/
 ├── src/
-│   ├── index.ts      # Main entry, global API, auto-init
-│   ├── embed.ts      # Player creation logic
-│   ├── parser.ts     # Data attribute parsing
-│   └── types.ts      # TypeScript definitions
+│   ├── index.ts           # Full build entry: global API + auto-init
+│   ├── index-video.ts     # Video-only build entry
+│   ├── index-audio.ts     # Audio-only build entry
+│   ├── create-embed.ts    # Player creation, global API, auto-init scan
+│   ├── parser.ts          # Data attribute parsing
+│   ├── types.ts           # EmbedConfig, ScarlettPlayerGlobal, PlayerType
+│   └── version.ts         # __PKG_VERSION__, replaced at build time
 ├── templates/
 │   ├── laravel-embed.blade.php  # Laravel Blade template for /v/{id}
 │   └── EmbedController.php      # Example Laravel controller
-├── demo.html         # Interactive demo page
-├── iframe.html       # iframe embed helper
+├── tests/                 # embed, parser, iframe-error, version
+├── demo.html              # Interactive demo page
+├── iframe.html            # iframe embed helper (published alongside dist)
 ├── package.json
 ├── tsconfig.json
-└── vite.config.ts
+├── tsconfig.typecheck.json
+├── vite.config.ts
+└── vitest.config.ts
 
 dist/ (generated)
-├── embed.js          # ES module
-├── embed.umd.cjs     # UMD bundle (for script tags)
-├── embed.d.ts        # TypeScript definitions
-└── *.map             # Source maps
+├── embed.js / embed.umd.cjs                    # Full build (ESM / UMD)
+├── embed.video.js / embed.video.umd.cjs        # Video-only build
+├── embed.audio.js / embed.audio.umd.cjs        # Audio-only build
+├── hls.<version>.js                            # Shared hls.js chunk (ESM only)
+├── hls.light.<version>.js                      # Shared hls.js/light chunk
+├── *.d.ts                                      # Declarations, emitted by tsc
+└── *.map                                       # Source maps
 ```
+
+### The three builds
+
+| Build | Entry | Plugins |
+|---|---|---|
+| Full (`embed`) | `src/index.ts` | hls, native, ui, audio-ui, analytics, playlist, media-session, watermark, captions, gestures, share |
+| Video (`embed.video`) | `src/index-video.ts` | hls, native, ui, watermark, captions, gestures, share |
+| Audio (`embed.audio`) | `src/index-audio.ts` | hls/light, native, audio-ui, playlist, media-session |
+
+Chapters and clips are not in any embed build; a host that wants them installs
+the packages and builds its own bundle.
+
+All three assign the same `window.ScarlettPlayer` global, so a page loads
+exactly one of them.
+
+### Why the hls.js chunks carry the version
+
+`latest/` is mutable and cached for an hour while `v<version>/` is immutable, so
+an unstamped `latest/hls.js` let a browser pair yesterday's cached chunk with a
+freshly fetched `latest/embed.js`. Stamping the name means a cached bundle keeps
+importing the exact chunk it was built against.
+
+The full and video builds emit a byte-identical `hls.<version>.js`, and
+`guardSharedChunks()` in `vite.config.ts` compares the bytes on every build so a
+divergence fails the build instead of shipping whichever copy was written last.
+`scripts/check-embed-chunks.mjs` then asserts in CI that every chunk a bundle
+imports was actually emitted.
 
 ---
 
-## Three Ways to Embed
+## Three ways to embed
 
-### 1. Drop-in Script (Simplest)
+### 1. Drop-in script (simplest)
 
-**Supported selectors** (all work):
-- `data-sp` - shortest
-- `data-scarlett-player` - full name
-- `data-video-player` - generic
-- `.scarlett-player` - class-based
+Auto-init scans for three selectors (`PLAYER_SELECTORS` in `create-embed.ts`):
 
-**Supported attribute formats** (all work):
-- Short: `src`, `color`, `autoplay`, `muted`, `poster`
-- Full: `data-src`, `data-brand-color`, `data-autoplay`, etc.
+- `[data-scarlett-player]`
+- `[data-sp]`
+- `.scarlett-player`
+
+Attributes are accepted in both a short and a prefixed form - `src` or
+`data-src`, `color` or `data-brand-color`. See
+[`packages/embed/README.md`](../packages/embed/README.md) for the full list.
 
 ```html
 <!-- Simplest possible -->
@@ -75,14 +119,17 @@ dist/ (generated)
 <!-- Full attribute names also work -->
 <div data-scarlett-player data-src="video.m3u8" data-brand-color="#e50914"></div>
 
-<!-- Class-based -->
-<div class="scarlett-player" src="video.m3u8"></div>
+<!-- Audio player -->
+<div data-sp data-type="audio" data-src="track.mp3" data-title="Track" data-artist="Artist"></div>
 ```
 
-### 2. JavaScript API (More Control)
+### 2. JavaScript API (more control)
+
+`create()` is **async** - it resolves once the plugins are initialised and the
+source is loaded. Await it before calling anything on the player.
 
 ```javascript
-const player = ScarlettPlayer.create({
+const player = await ScarlettPlayer.create({
   container: '#player',
   src: 'video.m3u8',
   brandColor: '#e50914',
@@ -90,35 +137,47 @@ const player = ScarlettPlayer.create({
   muted: true,
 });
 
-// Control the player
 player.play();
 player.pause();
 player.setVolume(0.5);
 player.destroy();
 ```
 
-### 3. iframe Embed (Secure/Isolated)
+The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
+
+| Member | Type | Purpose |
+|---|---|---|
+| `create(options)` | `Promise<ScarlettPlayer>` | Build one player programmatically |
+| `initAll()` | `Promise<void>` | Re-scan the DOM for player elements |
+| `version` | `string` | The embed package version |
+| `availableTypes` | `PlayerType[]` | Which of `video` / `audio` this build ships |
+
+### 3. iframe embed (isolated)
+
+`iframe.html` reads its configuration from the query string: `src`, `poster`,
+`autoplay`, `muted`, `loop`, `controls`, `start-time`, `playback-rate`,
+`hide-delay`, `big-play-button`, `brand-color`, `primary-color`,
+`background-color`, `share-url` and `embed-base-url`.
 
 ```html
-<!-- URL parameters -->
 <iframe
-  src="https://embed.thestreamplatform.com/iframe.html?src=VIDEO_URL&brand-color=%23e50914"
-  allow="autoplay; fullscreen"
+  src="https://assets.thestreamplatform.com/scarlett-player/latest/iframe.html?src=VIDEO_URL&brand-color=%23e50914"
+  allow="autoplay; fullscreen; picture-in-picture"
   allowfullscreen
 ></iframe>
-
-<!-- Video ID (requires Laravel backend; replace with an existing video UUID) -->
-<iframe src="https://embed.thestreamplatform.com/v/123e4567-e89b-12d3-a456-426614174000"></iframe>
-
-<!-- Event slug -->
-<iframe src="https://embed.thestreamplatform.com/embed/fight-night-2025"></iframe>
 ```
+
+Host applications can also route their own URLs to a page that renders the
+player - see the Laravel integration below.
 
 ---
 
-## Laravel Integration for `/v/{id}` URLs
+## Laravel integration for `/v/{id}` URLs
 
-### How It Works
+Working examples live in `packages/embed/templates/`
+(`EmbedController.php`, `laravel-embed.blade.php`).
+
+### How it works
 
 ```
 User loads: https://embed.thestreamplatform.com/v/abc123
@@ -141,7 +200,7 @@ Route::get('/embed/{event:slug}', [EmbedController::class, 'event']);
 Route::get('/live/{channel}', [EmbedController::class, 'live']);
 ```
 
-### Controller Example
+### Controller example
 
 ```php
 <?php
@@ -197,7 +256,7 @@ class EmbedController extends Controller
 }
 ```
 
-### Blade Template (resources/views/embed/player.blade.php)
+### Blade template (resources/views/embed/player.blade.php)
 
 ```blade
 <!DOCTYPE html>
@@ -235,30 +294,7 @@ class EmbedController extends Controller
 
 ---
 
-## All Data Attributes
-
-| Attribute | Short Form | Type | Default | Description |
-|-----------|------------|------|---------|-------------|
-| `data-src` | `src` | string | **required** | Video source URL (.m3u8) |
-| `data-autoplay` | `autoplay` | boolean | `false` | Auto-play on load |
-| `data-muted` | `muted` | boolean | `false` | Start muted |
-| `data-poster` | `poster` | string | - | Poster image URL |
-| `data-controls` | `controls` | boolean | `true` | Show/hide UI controls |
-| `data-brand-color` | `color` | string | - | Accent color (`#e50914`) |
-| `data-primary-color` | - | string | - | Primary text color |
-| `data-background-color` | - | string | - | Control bar background |
-| `data-width` | - | string | - | Width (`100%`, `640px`) |
-| `data-height` | - | string | - | Height |
-| `data-aspect-ratio` | - | string | - | Aspect ratio (`16:9`) |
-| `data-loop` | `loop` | boolean | `false` | Loop playback |
-| `data-playback-rate` | - | number | `1.0` | Playback speed |
-| `data-start-time` | - | number | `0` | Start position (seconds) |
-| `data-hide-delay` | - | number | `3000` | Auto-hide delay (ms) |
-| `data-keyboard` | `keyboard` | boolean | `true` | Enable keyboard shortcuts |
-
----
-
-## Multi-Tenant Branding
+## Multi-tenant branding
 
 Each TSP client gets their own branded player:
 
@@ -270,7 +306,7 @@ Each TSP client gets their own branded player:
 <div data-sp src="{{ $clientB->stream }}" color="{{ $clientB->brand_color }}"></div>
 ```
 
-### Embed Code Generator (Laravel)
+### Embed code generator (Laravel)
 
 ```php
 public function generateEmbed(Event $event): string
@@ -297,60 +333,79 @@ public function generateEmbed(Event $event): string
 
 ---
 
-## CDN Deployment
+## CDN deployment
 
-### Files to Upload
+Uploading is automated: `release.yml` hands `packages/embed/dist/` and
+`iframe.html` to a separate `cdn` job as a build artifact, which runs
+`scripts/upload-cdn.sh <version>`. Uploading the artifact rather than rebuilding
+keeps the two jobs publishing byte-identical files and lets a failed upload be
+retried with "Re-run failed jobs". A local publish is the same script:
 
+```bash
+doppler run -- ./scripts/upload-cdn.sh 1.11.1
 ```
-dist/embed.js          # ES module
-dist/embed.umd.cjs     # UMD bundle (for script tags)
-dist/embed.d.ts        # TypeScript support
-dist/*.map             # Source maps (optional)
-iframe.html            # iframe embed helper
-```
 
-### Recommended URL Structure
-
-CDN base: `https://assets.thestreamplatform.com/scarlett-player/{version}/`
+### Layout
 
 ```
 assets.thestreamplatform.com/scarlett-player/
-├── v<version>/
-│   ├── embed.js
-│   ├── embed.umd.cjs
+├── v<version>/          # immutable, max-age=31536000
+│   ├── embed.js, embed.umd.cjs
+│   ├── embed.video.js, embed.video.umd.cjs
+│   ├── embed.audio.js, embed.audio.umd.cjs
+│   ├── hls.<version>.js, hls.light.<version>.js
 │   └── iframe.html
-├── latest/ → v<version>/  # Symlink to current (v${VERSION} release contract)
-└── embed.umd.cjs          # Always latest
+└── latest/              # mutable, max-age=3600
 ```
 
 ### Usage
 
 ```html
-<!-- Pin to version (recommended) -->
-<script src="https://assets.thestreamplatform.com/scarlett-player/v<version>/embed.umd.cjs"></script>
-<!-- or: https://assets.thestreamplatform.com/scarlett-player/{version}/embed.umd.cjs -->
+<!-- Pin a version (recommended) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/v1.11.1/embed.umd.cjs"></script>
 
-<!-- Always latest -->
+<!-- Or track latest -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 ```
 
 ---
 
-## Bundle Size
+## Bundle size
 
-| Component | Minified | Gzipped |
-|-----------|----------|---------|
-| Core | ~20 KB | ~8 KB |
-| HLS Plugin | ~15 KB | ~6 KB |
-| hls.js | ~200 KB | ~65 KB |
-| UI Plugin | ~25 KB | ~10 KB |
-| **Total** | **~260 KB** | **~85 KB** |
+Measured from a `pnpm --filter @scarlett-player/embed build` at 1.11.0. Gzip is
+what a browser actually transfers.
 
-### Optimization Tips
+| Entry | Raw | Gzip | Notes |
+|---|---|---|---|
+| `embed.umd.cjs` | 737 KB | 215 KB | hls.js inlined - UMD cannot code-split |
+| `embed.video.umd.cjs` | 692 KB | 204 KB | hls.js inlined |
+| `embed.audio.umd.cjs` | 432 KB | 130 KB | hls.js/light inlined |
+| `embed.js` | 414 KB | 90 KB | + `hls.<version>.js` on first HLS source |
+| `embed.video.js` | 336 KB | 75 KB | + `hls.<version>.js` on first HLS source |
+| `embed.audio.js` + its chunk | 209 KB | 45 KB | + `hls.light.<version>.js` on first HLS source |
+| `hls.<version>.js` | 1089 KB | 228 KB | lazy, ESM builds only |
+| `hls.light.<version>.js` | 717 KB | 152 KB | lazy, audio build only |
 
-1. **CDN Caching**: `max-age=31536000` (1 year) with versioned URLs
+Two things the table is showing rather than hiding:
+
+- **The ESM builds are not minified.** Vite's library mode skips terser for the
+  `es` format (`if (config.build.lib && outputOptions.format === 'es') return
+  null` in `vite:terser`), regardless of `build.minify`. That is harmless for an
+  npm consumer whose bundler minifies anyway, but these files are also served
+  straight to browsers from the CDN, where the raw column is what leaves the
+  origin. The UMD numbers are minified and are the fair comparison.
+- **hls.js dominates.** A page that never plays an `.m3u8` never fetches the
+  chunk in the ESM builds; a UMD page pays for it up front. Prefer the audio or
+  video build over the full one when the page only needs one of them.
+
+Sizes move with every dependency bump - re-measure rather than trusting this
+table, and watch what Vite prints during `pnpm build`.
+
+### Optimisation tips
+
+1. **CDN caching**: `max-age=31536000` on versioned paths (already set by `upload-cdn.sh`)
 2. **Preload**: `<link rel="preload" href="embed.umd.cjs" as="script">`
-3. **Lazy Load**: Load script only when player scrolls into view
+3. **Lazy load**: load the script only when the player scrolls into view
 
 ---
 
@@ -359,16 +414,20 @@ assets.thestreamplatform.com/scarlett-player/
 ### Player not showing?
 - Check browser console for errors
 - Verify `src` URL is accessible
-- Ensure script loads before DOM elements
+- Ensure the element matches one of the three auto-init selectors
 
 ### Colors not applying?
 - Use valid CSS colors: `#ff0000`, `rgb(255,0,0)`
 - Check attribute names (kebab-case)
 
 ### Video not playing?
-- Verify HLS stream is valid (.m3u8)
-- Check CORS headers on stream
+- Verify the HLS stream is valid (.m3u8)
+- Check CORS headers on the stream
 - Add `muted` for autoplay (mobile requirement)
+
+### Audio player renders as video (or vice versa)?
+- Set `data-type="audio"`; the default is `video`
+- Confirm the build ships that type - `ScarlettPlayer.availableTypes`
 
 ### iframe not loading?
 - Check CORS headers allow embedding
@@ -380,155 +439,40 @@ assets.thestreamplatform.com/scarlett-player/
 ## Development
 
 ```bash
-# Install
 pnpm install
-
-# Dev mode with hot reload
-pnpm dev
-
-# Build for production
-pnpm build
-
-# Type checking
-pnpm typecheck
+pnpm --filter @scarlett-player/embed dev        # Vite dev server
+pnpm --filter @scarlett-player/embed build      # all three builds
+pnpm --filter @scarlett-player/embed test       # vitest
+pnpm --filter @scarlett-player/embed typecheck
 ```
 
-### Adding New Data Attributes
+### Adding a new data attribute
 
-1. Add to `EmbedConfig` in `src/types.ts`
-2. Add parsing in `src/parser.ts`
-3. Use in `src/embed.ts`
-4. Update this doc and demo.html
+1. Add it to `EmbedConfig` in `src/types.ts`
+2. Parse it in `src/parser.ts` (both the short and `data-` prefixed forms)
+3. Consume it in `src/create-embed.ts`
+4. Cover it in `tests/parser.test.ts`
+5. Document it in `packages/embed/README.md` - the authoritative table
+6. Add it to `iframe.html` if it should be settable from the query string
+7. Update `demo.html`
 
 ---
 
-## Deployment Checklist
+## Releasing
 
-- [ ] Build: `pnpm build`
-- [ ] Test demo.html locally
-- [ ] Test iframe.html with sample URL
-- [ ] Verify UMD and ES builds work
-- [ ] Upload to CDN with version path
-- [ ] Update "latest" symlink
-- [ ] Test CDN URLs in production
-- [ ] Update TSP Laravel config with CDN URL
-- [ ] Create embed code generator in admin
+The embed package releases with everything else: it is in the fixed Changesets
+group, so it ships the same version number as the other seventeen packages.
+Merging a changeset to `main` opens a `chore: release packages` PR; merging that
+publishes to npm through trusted publishing (OIDC, no token), tags the release,
+and runs the CDN upload described above. Versions are never bumped by hand and
+`npm publish` is never run manually - see `docs/contributing.md`.
 
----
+Before opening the PR:
 
-## TSP-Web Agent Implementation Prompt
-
-Use this prompt with the `tsp-web` agent to implement the embed in TSP Laravel:
-
-```
-Implement Scarlett Player embed integration in TSP Laravel:
-
-1. **Config** - Add to config/services.php:
-   - 'scarlett' => ['cdn_url' => env('SCARLETT_CDN_URL', 'https://cdn.thestreamplatform.com/player')]
-
-2. **Routes** - Add to routes/web.php:
-   - GET /v/{video:uuid} -> EmbedController@video
-   - GET /embed/{event:slug} -> EmbedController@event
-   - GET /live/{channel} -> EmbedController@live
-
-3. **Controller** - Create app/Http/Controllers/EmbedController.php:
-   - video() method: Look up Video by UUID, check embeddable flag, return embed view with stream_url, brand colors from tenant
-   - event() method: Look up Event by slug, check access, return embed view with live/replay URL
-   - live() method: Look up LiveChannel, return embed view
-
-4. **Blade Template** - Create resources/views/embed/player.blade.php:
-   - Minimal HTML page that loads embed.umd.cjs from CDN
-   - Initializes ScarlettPlayer.create() with passed config
-   - Include OG meta tags for link previews
-
-5. **Embed Code Generator** - Add to EventController or admin:
-   - generateEmbedCode(Event $event) method that returns iframe HTML
-   - Display in admin panel for copy/paste
-
-6. **Environment** - Add SCARLETT_CDN_URL to .env.example
-
-Reference: See packages/embed/templates/ for example controller and blade template.
-```
-
----
-
-## NPM Publishing
-
-### Prerequisites
-
-1. **npm account** - Create at https://www.npmjs.com/signup
-2. **Organization** (optional) - For scoped packages like `@scarlett-player/*`
-3. **2FA enabled** - Required for publishing
-
-### Publishing Steps
-
-```bash
-# 1. Login to npm
-npm login
-
-# 2. Build all packages
-cd /path/to/scarlett-player
-pnpm build
-
-# 3. Publish each package (from package directory)
-cd packages/core && npm publish --access public
-cd packages/plugins/hls && npm publish --access public
-cd packages/plugins/ui && npm publish --access public
-cd packages/vue && npm publish --access public
-cd packages/embed && npm publish --access public
-```
-
-### Before Publishing Checklist
-
-- [ ] Update version in package.json files aligning with the embed manifest's `v${VERSION}` release contract
-- [ ] Set correct `repository` URL in package.json (currently "TBD")
-- [ ] Add `LICENSE` file to root and packages
-- [ ] Verify `files` field in package.json includes correct files
-- [ ] Run `pnpm validate` (lint + typecheck + test + build)
-- [ ] Create CHANGELOG entries
-- [ ] Tag release in git (`v<version>` matching `v${VERSION}`)
-
-### Scoped vs Unscoped
-
-**Scoped (recommended):** `@scarlett-player/core`
-- Requires npm organization or user scope
-- Better namespace protection
-- Use `--access public` for public packages
-
-**Unscoped:** `scarlett-player-core`
-- Simpler but namespace collision risk
-- Anyone can publish similar names
-
-### Automated Publishing (CI/CD)
-
-Add to GitHub Actions:
-
-```yaml
-name: Publish
-on:
-  push:
-    tags: ['v*']
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-      - run: pnpm install
-      - run: pnpm build
-      - run: pnpm publish -r --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-```
-
-### Current Blockers for Publishing
-
-1. **No tests** - Write tests before publishing
-2. ~~**Repository URL is "TBD"**~~ - ✅ Set to https://github.com/Hackney-Enterprises-Inc/scarlett-player
-3. **Empty stub packages** - Remove or implement react/, 19 stub plugins
-4. **Version <version>** - Align with embed manifest's v${VERSION} release contract
-5. ~~**No LICENSE file**~~ - ✅ MIT license added
+- [ ] `pnpm validate` (package-script guard, lint, build, package-type guard, typecheck, test)
+- [ ] `node scripts/check-package-artifacts.mjs` and `node scripts/check-embed-chunks.mjs`
+      after a build, if you touched the manifest or the embed build
+- [ ] Test `demo.html` and `iframe.html` locally
+- [ ] Verify the UMD global still exposes `create`, `initAll`, `version` and
+      `availableTypes` (`scripts/verify-browser.mjs` scenario 6 pins this)
+- [ ] A changeset

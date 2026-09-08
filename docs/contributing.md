@@ -1,6 +1,6 @@
 # Scarlett Player - Development Guidelines
 
-**Last Updated**: September 6, 2026
+**Last Updated**: September 7, 2026
 
 Companion documents: `docs/architecture.md` (how the player is put together)
 and `docs/plugin-authoring.md` (writing a plugin package).
@@ -395,7 +395,8 @@ test(core): add PluginManager integration tests
 4. Add a changeset (`pnpm changeset`) for anything that reaches a published
    package. Versions are never hand-edited: the group is fixed, so every package
    publishes at one version
-5. Run `pnpm validate` (package-script guard, lint, typecheck, test, build)
+5. Run `pnpm validate` (package-script guard, lint, build, package-type guard,
+   typecheck, test)
 6. Open a PR against `main`
 7. Address review comments
 8. Merge when approved
@@ -410,10 +411,18 @@ test(core): add PluginManager integration tests
    advertises (`main`, `module`, `types`, `exports`) exists in `dist/`
 4. `node scripts/check-embed-chunks.mjs`: every chunk an embed bundle imports
    was actually emitted
-5. `node scripts/check-package-scripts.mjs`: every package declares
+5. `node scripts/check-package-types.mjs`: every shipped `.d.ts` actually
+   compiles for a consumer, not merely exists
+6. `node scripts/check-package-scripts.mjs`: every package declares
    `typecheck` and `test`
-6. `pnpm run typecheck`
-7. `pnpm run test`
+7. `pnpm run typecheck`
+8. `pnpm run test`
+
+On a push to `main` — not on pull requests — CI then installs Chromium and
+ffmpeg, generates the HLS fixture with `node scripts/hls-fixture.mjs`, and runs
+`node scripts/verify-browser.mjs` against a freshly built demo bundle, which it
+discards afterwards. It is gated to `main` because the harness takes minutes and
+several scenarios assert against fixed waits tuned on a developer machine.
 
 `pnpm validate` covers everything except the two post-build guards (3 and 4);
 run those by hand after `pnpm build` when you touch a package manifest or the
@@ -429,7 +438,7 @@ upgraded to 3.x.
 
 Merging a changeset to `main` makes `release.yml` open (or update) a
 `chore: release packages` PR on the `changeset-release/main` branch. Merging
-that PR versions all seventeen packages together, publishes each to npm through
+that PR versions all eighteen packages together, publishes each to npm through
 trusted publishing (OIDC, no token), tags `v<version>`, creates the GitHub
 release, and uploads the embed bundles to the CDN through
 `scripts/upload-cdn.sh`. Versions are never bumped by hand.
@@ -596,7 +605,7 @@ liveRegion.textContent = 'Video playing';
 ## Version Guidelines
 
 **Semantic Versioning** (SemVer), applied through Changesets in fixed mode: all
-seventeen packages share one version number, so a release publishes them
+eighteen packages share one version number, so a release publishes them
 together even where a package did not change.
 
 - MAJOR: Breaking changes
