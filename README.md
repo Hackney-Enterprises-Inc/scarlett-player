@@ -29,7 +29,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **1,800+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **2,300+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -184,7 +184,7 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
      media session, captions, gestures, watermark, share -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Or pin a version: .../scarlett-player/v1.8.0/embed.umd.cjs -->
+<!-- Or pin a version: .../scarlett-player/v1.11.1/embed.umd.cjs -->
 
 <!-- Video player via data attributes -->
 <div data-scarlett-player
@@ -327,11 +327,11 @@ has already passed. It goes away once vitest moves to 3.x.
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all tests (1,800+)
+pnpm test             # Run all tests (2,300+)
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
-pnpm validate         # package-script check + lint + typecheck + test + build
+pnpm validate         # package-script check + lint + build + package-type check + typecheck + test
 node demo/build.cjs   # Rebuild demo site
 ```
 
@@ -390,7 +390,7 @@ packages/
   embed/            # CDN embed (video, audio, and full builds)
 demo/               # Interactive demo (video + audio players)
 docs/               # Landing page + architecture docs
-scripts/            # Browser verification harness + HLS fixture generator
+scripts/            # CI guards, browser verification harness, HLS fixture, CDN upload
 ```
 
 ## Browser Support
@@ -426,6 +426,7 @@ configs), so no transpilation below that is applied.
 - [x] Self-healing error recovery (auto-reconnect, load watchdog, playlist validation, PiP readiness gate)
 - [x] Chapter markers (progress bar dividers, chapter list, seek to chapter)
 - [x] Mobile gesture controls (double-tap seek)
+- [x] Viewer-created clips (range selection, loop preview, host submission)
 - [ ] Mobile gesture controls (swipe for volume and brightness) - Sprint 2
 - [ ] DRM support - Sprint 2
 - [ ] Low-latency HLS (LL-HLS) - Sprint 2
