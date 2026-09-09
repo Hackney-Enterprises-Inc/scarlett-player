@@ -315,6 +315,38 @@ describe('show/hide on playback events', () => {
     const el = mockApi.container.querySelector('.sp-watermark');
     expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
   });
+
+  it('cancels showDelay timer on ended', () => {
+    // playback:ended hid the watermark but left the pending show delay armed,
+    // so a clip shorter than the delay ended hidden and then went visible -
+    // and, with dynamic on, started repositioning itself over a finished
+    // player. The pause handler already cleared it; ended did not.
+    const plugin = createWatermarkPlugin({
+      text: 'test',
+      showDelay: 5000,
+      dynamic: true,
+      dynamicInterval: 1000,
+    });
+    plugin.init(mockApi);
+
+    playCallback?.();
+    vi.advanceTimersByTime(2000); // media runs out before the delay expires
+    endedCallback?.();
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+
+    vi.advanceTimersByTime(5000);
+
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.style.visibility).toBe('hidden');
+
+    // The delayed callback also starts dynamic repositioning; neither may run.
+    const positionBefore = { left: el?.style.left, top: el?.style.top };
+    vi.advanceTimersByTime(5000);
+    expect({ left: el?.style.left, top: el?.style.top }).toEqual(positionBefore);
+  });
 });
 
 describe('dynamic repositioning', () => {

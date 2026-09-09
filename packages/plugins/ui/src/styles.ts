@@ -220,13 +220,6 @@ export const styles = `
   bottom: calc(92px + var(--sp-inset-bottom, 0px));
 }
 
-/* While an extension owns the pointer the bar must not also look like it is
-   scrubbing: the tooltip is suppressed inline by the control, and the handle
-   stops responding to hover growth. */
-.sp-progress-wrapper--ext-dragging .sp-progress__handle {
-  transform: translate(-50%, -50%);
-}
-
 .sp-progress__track {
   position: absolute;
   top: 0;
@@ -295,6 +288,19 @@ export const styles = `
 
 .sp-progress--dragging .sp-progress__handle {
   transform: translate(-50%, -50%) scale(1);
+}
+
+/* While an extension owns the pointer the bar must not also look like it is
+   scrubbing: the tooltip is suppressed inline by the control, and the handle
+   stops responding to hover growth.
+
+   This has to come after the :hover and --dragging rules AND match their
+   specificity, which is why the hover case is spelled out rather than left to
+   the bare class: an extension drag is a pointer drag, so the pointer is over
+   the wrapper the whole time and the hover rule is always the competing one. */
+.sp-progress-wrapper--ext-dragging .sp-progress__handle,
+.sp-progress-wrapper--ext-dragging:hover .sp-progress__handle {
+  transform: translate(-50%, -50%);
 }
 
 /* Thumbnail Preview */

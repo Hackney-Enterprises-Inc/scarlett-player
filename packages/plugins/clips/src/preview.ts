@@ -10,6 +10,12 @@
  * viewer let run to the end and walked away from is not a preview, it is a
  * player that will not stop.
  *
+ * "Actually running" is tracked as playback happens (`playback:play`,
+ * `playback:pause` and progress ticks), never read from `paused` state inside
+ * the `ended` handler: a media element that reaches its end sets `paused` and
+ * fires `pause` *before* `ended`, so state says "paused" for every natural end
+ * and the duration out point would never loop at all.
+ *
  * The controller is pure logic over `IPluginAPI` events; the only media access
  * is `seekClamped()` from ./media. It owns its own subscriptions (created on
  * `start()`, released on `stop()`) so `stop()` fully unsubscribes even if the
@@ -107,14 +113,45 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
   let selection: ClipSelection | null = null;
   let suspended = false;
   let disposers: Array<() => void> = [];
+  /**
+   * Whether playback was running as of the last thing that reported on it.
+   *
+   * Read by `onEnded`, and the reason it cannot ask state instead: reaching the
+   * end of a media resource sets `paused` to true and fires `pause` *before*
+   * `ended`, so by the time `playback:ended` is emitted the provider has
+   * already published `paused: true` for every natural end. Asking state there
+   * answered "the viewer had stopped" for a viewer who had not, and the
+   * duration out point never looped.
+   */
+  let wasPlaying = false;
 
   const rewind = (): void => {
     if (selection) seekClamped(api, selection.start);
   };
 
   const onTimeUpdate = (payload: { currentTime: number }): void => {
+    // Progress while unpaused is the loop's own evidence that playback is
+    // running. It only ever latches this on: a `timeupdate` queued behind the
+    // end-of-playback pause must not read as "the viewer stopped".
+    if (api.getState('paused') !== true) wasPlaying = true;
     if (!selection || suspended) return;
     if (payload.currentTime >= selection.end) rewind();
+  };
+
+  /** An explicit request to play: intent to keep playing. */
+  const onPlay = (): void => {
+    wasPlaying = true;
+  };
+
+  /**
+   * An explicit request to pause: intent to stop.
+   *
+   * This is the command event a viewer's pause raises, not the element's own
+   * `pause`, which a natural end fires too - which is exactly why the two can
+   * be told apart here and could not be told apart from `paused` state.
+   */
+  const onPause = (): void => {
+    wasPlaying = false;
   };
 
   /**
@@ -125,15 +162,27 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
    * be the loop taking the player over rather than previewing a selection.
    */
   const onEnded = (): void => {
+    const playing = wasPlaying;
+    // The media is stopped now whatever happens next; a further rewind needs
+    // its own play.
+    wasPlaying = false;
     if (!selection || suspended) return;
-    if (api.getState('paused') === true) return;
+    if (!playing) return;
     rewind();
   };
 
   /** Subscribe once; both entry points share the subscription. */
   const ensureSubscribed = (): void => {
     if (disposers.length > 0) return;
-    disposers = [api.on('playback:timeupdate', onTimeUpdate), api.on('playback:ended', onEnded)];
+    // Seed from state: a session that opens over a video already playing gets
+    // no `playback:play` of its own.
+    wasPlaying = api.getState('paused') !== true;
+    disposers = [
+      api.on('playback:timeupdate', onTimeUpdate),
+      api.on('playback:ended', onEnded),
+      api.on('playback:play', onPlay),
+      api.on('playback:pause', onPause),
+    ];
   };
 
   return {
@@ -155,6 +204,7 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
       disposers = [];
       selection = null;
       suspended = false;
+      wasPlaying = false;
     },
 
     suspend(): void {

@@ -262,12 +262,20 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
    * so sampling it once during `init()` left the tap surface installed over an
    * audio player whose type arrived a moment later. `GestureOverlay` has no
    * show/hide, so the surface is constructed and destroyed rather than toggled.
+   *
+   * Only `'video'` gets a surface. `'unknown'` means "not established yet", not
+   * "video": an audio-only source the classifier cannot prove (native HLS on a
+   * browser that ships no track lists) stays `'unknown'` for its whole life, and
+   * reading that as video put a full-bleed tap surface over the audio UI. The
+   * cost of waiting is nothing, because this runs again on every `mediaType`
+   * change - the surface appears the moment the source is confirmed as video.
    */
   const syncSurface = (): void => {
     if (!active || !api) return;
 
-    // Audio has its own compact surface with no picture to tap.
-    const wantsSurface = api.getState('mediaType') !== 'audio';
+    // Audio has its own compact surface with no picture to tap, and an
+    // unclassified source has no picture anyone can vouch for yet.
+    const wantsSurface = api.getState('mediaType') === 'video';
 
     if (wantsSurface && !overlay) {
       overlay = new GestureOverlay(api.container, { onPointer, feedback });

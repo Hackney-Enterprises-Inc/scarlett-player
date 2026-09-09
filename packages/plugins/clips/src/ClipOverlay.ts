@@ -1188,7 +1188,7 @@ export class ClipOverlay {
       // Not stopPropagation: the document handler above turns Escape into
       // "back" or "cancel", and reverting the field first means the viewer
       // never leaves with a half-typed value applied.
-      this.renderTimeFields();
+      this.renderTimeFields(which);
     }
   }
 
@@ -1205,11 +1205,11 @@ export class ClipOverlay {
     const parsed = parseTimestamp(input.value);
     if (parsed === null) {
       this.showNotice('Enter a time as seconds or m:ss', { type: 'error', autoHideMs: 4000 });
-      this.renderTimeFields();
+      this.renderTimeFields(which);
       return;
     }
     this.selector.applyEndpoint(which, parsed, 'field');
-    this.renderTimeFields();
+    this.renderTimeFields(which);
   }
 
   /** @internal Re-render everything stateful. */
@@ -1222,13 +1222,22 @@ export class ClipOverlay {
     this.renderValidity();
   }
 
-  /** @internal The exact-time fields, unless the viewer is editing one. */
-  private renderTimeFields(): void {
+  /**
+   * @internal The exact-time fields, unless the viewer is editing one.
+   *
+   * @param force - One field to rewrite even while it holds focus. Enter and
+   *   Escape are both handled with the input still focused, so without this the
+   *   field the viewer just acted on was the one field the re-render skipped:
+   *   Escape left the half-typed text in place, a refused value stayed on
+   *   screen next to the notice rejecting it, and a committed value never
+   *   showed the snapped, clamped time the selector actually landed on.
+   */
+  private renderTimeFields(force?: ClipHandle): void {
     const step = (this.config.step as number | undefined) ?? 1;
     for (const which of ['start', 'end'] as const) {
       const input = this.timeInputs[which];
       // Never overwrite what someone is typing; blur and Enter are the commits.
-      if (document.activeElement === input) continue;
+      if (which !== force && document.activeElement === input) continue;
       input.value = formatTimestamp(this.selection[which], step);
     }
   }

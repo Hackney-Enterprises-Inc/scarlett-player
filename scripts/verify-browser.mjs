@@ -1074,6 +1074,10 @@ const state = (page) => page.evaluate(() => {
       // A long server-style error, which is what used to push the footer out.
       window.clipsPlugin.setTitle('x'.repeat(60));
       const body = document.querySelector('.sp-clip-details__body');
+      // `scrollHeight >= clientHeight` is true of every element there is, so it
+      // asserted nothing. Scrollable means both halves: an overflow mode that
+      // scrolls, and content that actually exceeds the box.
+      const bodyOverflowY = getComputedStyle(body).overflowY;
 
       return {
         stage: editor.dataset.stage,
@@ -1082,7 +1086,11 @@ const state = (page) => page.evaluate(() => {
         cancelInside: inside(document.querySelector('.sp-clip-btn--cancel')),
         backInside: inside(document.querySelector('.sp-clip-back')),
         // The body scrolls; the panel does not grow past the player.
-        bodyScrolls: body.scrollHeight >= body.clientHeight,
+        bodyOverflowY,
+        bodyOverflow: body.scrollHeight - body.clientHeight,
+        bodyScrolls:
+          (bodyOverflowY === 'auto' || bodyOverflowY === 'scroll') &&
+          body.scrollHeight > body.clientHeight,
         panelInside: inside(document.querySelector('.sp-clip-details')),
         controlsHidden:
           getComputedStyle(document.querySelector('.sp-controls')).display === 'none',

@@ -219,6 +219,8 @@ export class RangeSelector {
   private drag: DragState | null = null;
   private clampTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  /** False while frozen by {@link RangeSelector.setInteractive}. */
+  private interactive = true;
 
   /**
    * Builds the selector DOM (detached - the caller mounts `element`).
@@ -353,6 +355,12 @@ export class RangeSelector {
    * being submitted must not move under the request) and while the details
    * stage covers the player, where the timeline behind it is out of reach.
    *
+   * The freeze is enforced in the handlers, not only in CSS and the tab order:
+   * `tabindex="-1"` removes a handle from tabbing but leaves a handle that was
+   * already focused when the freeze landed focused and taking arrow keys, so
+   * the range could still be moved out from under a submission with the
+   * keyboard.
+   *
    * Any drag in progress is cancelled, so the endpoint stays where it was
    * rather than following a finger the editor is no longer listening to.
    *
@@ -360,6 +368,7 @@ export class RangeSelector {
    */
   setInteractive(interactive: boolean): void {
     if (this.destroyed) return;
+    this.interactive = interactive;
     if (!interactive) this.endDrag(true);
     this.track.classList.toggle('sp-clip-track--frozen', !interactive);
     for (const which of ['start', 'end'] as const) {
@@ -470,7 +479,7 @@ export class RangeSelector {
    * the handle to the finger.
    */
   private onPointerDown = (event: PointerEvent): void => {
-    if (this.destroyed || this.drag) return;
+    if (this.destroyed || !this.interactive || this.drag) return;
     // Primary button (or touch/pen, which report 0) only. A right-click or a
     // stylus barrel press must never grab a handle.
     if (event.button !== undefined && event.button !== 0) return;
@@ -697,7 +706,7 @@ export class RangeSelector {
    * handled here calls `preventDefault()` so the UI plugin's shortcuts skip it.
    */
   private onKeyDown(which: ClipHandle, event: KeyboardEvent): void {
-    if (this.destroyed) return;
+    if (this.destroyed || !this.interactive) return;
     const step = this.stepValue();
     const delta = event.shiftKey ? step * KEYBOARD_COARSE_FACTOR : step;
     const current = this.selection[which];

@@ -344,6 +344,13 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
       });
 
       const unsubEnded = api.on('playback:ended', () => {
+        // Before hide(), or a showDelay still pending from playback:play fires
+        // afterwards and puts the watermark back - visible, and repositioning
+        // itself - over a player that has finished.
+        if (showDelayTimer) {
+          clearTimeout(showDelayTimer);
+          showDelayTimer = null;
+        }
         hide();
         stopDynamic();
       });

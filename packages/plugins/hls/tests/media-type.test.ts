@@ -216,7 +216,7 @@ describe('createMediaTypeClassifier', () => {
       classifier.beginSource('a.m3u8');
       classifier.attach(video);
       setVideoWidth(video, 1280);
-      classifier.evaluate();
+      video.dispatchEvent(new Event('loadeddata'));
 
       classifier.noteManifestParsed({ audio: true, video: false });
 
@@ -307,13 +307,51 @@ describe('createMediaTypeClassifier', () => {
       classifier.beginSource('a.m3u8');
       classifier.attach(video);
       setVideoWidth(video, 1280);
-      classifier.evaluate();
+      video.dispatchEvent(new Event('loadeddata'));
       expect(classifier.current()).toBe('video');
 
       classifier.beginSource('b.m3u8');
 
       expect(classifier.current()).toBe('unknown');
       expect(stateWrites(api, 'mediaType')).toEqual(['unknown', 'video', 'unknown']);
+    });
+
+    it('ignores the previous source\'s dimensions on a reused element', () => {
+      // The plugin attaches to the same <video> before hls.js has been pointed
+      // at the new manifest, so an audio-only source that follows a video one
+      // arrives with videoWidth still reporting the old frame. Believing it
+      // was permanent: video evidence is sticky and outranks the manifest.
+      const classifier = createMediaTypeClassifier(api);
+      classifier.beginSource('video.m3u8');
+      classifier.attach(video);
+      setVideoWidth(video, 1920);
+      video.dispatchEvent(new Event('loadeddata'));
+      expect(classifier.current()).toBe('video');
+
+      // Same element, same preserved videoWidth, new audio-only source.
+      classifier.beginSource('audio.m3u8');
+      classifier.attach(video);
+      expect(classifier.current()).toBe('unknown');
+
+      classifier.noteManifestParsed({ audio: true, video: false });
+
+      expect(classifier.current()).toBe('audio');
+      expect(lastState(api, 'mediaType')).toBe('audio');
+    });
+
+    it('reads dimensions again once the new source reports them', () => {
+      const classifier = createMediaTypeClassifier(api);
+      classifier.beginSource('a.m3u8');
+      classifier.attach(video);
+      setVideoWidth(video, 1920);
+
+      // Stale until the element says something about this source...
+      classifier.evaluate();
+      expect(classifier.current()).toBe('unknown');
+
+      // ...and evidence the moment it does.
+      video.dispatchEvent(new Event('playing'));
+      expect(classifier.current()).toBe('video');
     });
 
     it('retains confirmed classification across a same-source pipeline handoff', () => {

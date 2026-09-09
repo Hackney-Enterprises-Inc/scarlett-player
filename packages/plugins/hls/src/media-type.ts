@@ -18,6 +18,11 @@
  *    video.** That evidence is *sticky* for the source: a later zero-width
  *    event, a track list that empties during a pipeline handoff, or a
  *    `resize` to 0x0 never downgrades a source already known to carry video.
+ *    Dimensions only count once the element has reported on *this* source,
+ *    because the element outlives the source: it is attached before
+ *    `attachMedia()`/`loadSource()` (or a native `src` swap) has replaced
+ *    anything, and until then `videoWidth` still measures the frame of the
+ *    source before it.
  * 2. **hls.js `MANIFEST_PARSED` establishes it before a frame decodes.** Its
  *    payload carries `audio` / `video` booleans. `video === true` is video.
  *    `video === false && audio === true` is audio - but only when both fields
@@ -179,6 +184,15 @@ export function createMediaTypeClassifier(api: IPluginAPI): MediaTypeClassifier 
   let videoConfirmed = false;
   /** Something established that this source is audio only. */
   let audioConfirmed = false;
+  /**
+   * Whether the attached element has reported on the *current* source yet.
+   *
+   * Gates the intrinsic-dimension read. Cleared by a new source and by every
+   * `attach()`; set by the element's own metadata / data / resize / playing
+   * events, which are the first thing that can only be about the source now
+   * loaded.
+   */
+  let elementReported = false;
 
   let element: ElementWithTrackLists | null = null;
   /** Detach functions for everything attached to the current element. */
@@ -213,7 +227,13 @@ export function createMediaTypeClassifier(api: IPluginAPI): MediaTypeClassifier 
     const video = element;
     if (!video) return;
 
-    if (video.videoWidth > 0) {
+    // Dimensions, but only once this source has been heard from. The plugin
+    // attaches the classifier to a *reused* element before hls.js has been
+    // pointed at the new manifest, so an audio-only source loaded after a video
+    // one arrives here with the previous frame's `videoWidth` still standing.
+    // Believing it there was permanent: video evidence is sticky, so the
+    // manifest's `video: false` could no longer correct it.
+    if (elementReported && video.videoWidth > 0) {
       videoConfirmed = true;
       return;
     }
@@ -259,6 +279,7 @@ export function createMediaTypeClassifier(api: IPluginAPI): MediaTypeClassifier 
       source = src;
       videoConfirmed = false;
       audioConfirmed = false;
+      elementReported = false;
       // Publish immediately: the next thing that happens is this source's
       // metadata, and it must not be read against the previous source's
       // classification.
@@ -270,9 +291,14 @@ export function createMediaTypeClassifier(api: IPluginAPI): MediaTypeClassifier 
       if (destroyed) return;
       detachElement();
       element = video as ElementWithTrackLists;
+      // Nothing this element says is about the new source until it says it.
+      elementReported = false;
 
       for (const event of ELEMENT_EVENTS) {
-        const handler = (): void => evaluate();
+        const handler = (): void => {
+          elementReported = true;
+          evaluate();
+        };
         video.addEventListener(event, handler);
         elementDisposers.push(() => video.removeEventListener(event, handler));
       }

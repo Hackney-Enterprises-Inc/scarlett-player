@@ -583,6 +583,49 @@ describe('setInteractive()', () => {
     expect(lastDragEnd(h).info.cancelled).toBe(true);
     expect(h.selector.isDragging()).toBe(false);
   });
+
+  it('refuses arrow keys from a handle that was already focused when it froze', () => {
+    // tabindex="-1" keeps a frozen handle out of tabbing, but it does not blur
+    // a handle that already had focus, and a focused element still gets
+    // keydown - so the range could be walked out from under a submission that
+    // is already carrying it.
+    const h = setup();
+    h.end.focus();
+    h.selector.setInteractive(false);
+
+    const event = key(h.end, 'ArrowRight');
+
+    expect(h.end.getAttribute('aria-valuenow')).toBe('130');
+    expect(h.onChange).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false); // not ours to swallow while frozen
+  });
+
+  it('refuses a pointer grab while frozen, with no stylesheet to rely on', () => {
+    // .sp-clip-track--frozen sets pointer-events: none, but the stylesheet is
+    // the host page's to override and jsdom applies none of it; the freeze has
+    // to hold in the handler too.
+    const h = setup();
+    h.selector.setInteractive(false);
+
+    pointer(h.end, 'pointerdown', 130);
+    pointer(h.track, 'pointermove', 200);
+
+    expect(h.selector.isDragging()).toBe(false);
+    expect(h.onDragStart).not.toHaveBeenCalled();
+    expect(h.end.getAttribute('aria-valuenow')).toBe('130');
+  });
+
+  it('takes keyboard and pointer moves again once thawed', () => {
+    const h = setup();
+    h.selector.setInteractive(false);
+    h.selector.setInteractive(true);
+
+    key(h.end, 'ArrowRight');
+    expect(h.end.getAttribute('aria-valuenow')).toBe('131');
+
+    dragHandle(h, 'end', 131, 200);
+    expect(h.end.getAttribute('aria-valuenow')).toBe('200');
+  });
 });
 
 describe('update()', () => {

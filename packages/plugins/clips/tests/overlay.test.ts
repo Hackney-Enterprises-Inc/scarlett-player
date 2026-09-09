@@ -551,6 +551,55 @@ describe('exact time fields', () => {
     expect(h.readout.textContent).toBe('1:40 – 2:10 · 30s');
   });
 
+  it('reverts the FOCUSED field on Escape', () => {
+    // The regression: renderTimeFields() skipped any focused input, and Enter
+    // and Escape are both handled with the input still focused - so the one
+    // field the viewer had just acted on was the one field never re-rendered.
+    // Typing requires focus, so this is the only state that happens for real.
+    const h = setup();
+    h.timeOut.focus();
+    h.timeOut.value = '9:99';
+
+    keydown(h.timeOut, 'Escape');
+
+    expect(h.timeOut.value).toBe('2:10');
+    expect(h.readout.textContent).toBe('1:40 – 2:10 · 30s');
+  });
+
+  it('clears a refused value out of the FOCUSED field it was typed into', () => {
+    const h = setup();
+    h.timeOut.focus();
+
+    typeTime(h.timeOut, 'abc');
+
+    expect(h.notice.textContent).toBe('Enter a time as seconds or m:ss');
+    expect(h.timeOut.value).toBe('2:10');
+  });
+
+  it('shows the landed time in the FOCUSED field after a clamped commit', () => {
+    // 9:00 is past the 60s maxDuration from IN, so the selector clamps it. The
+    // field has to show where the endpoint actually went, not what was typed.
+    const h = setup();
+    h.timeOut.focus();
+
+    typeTime(h.timeOut, '9:00');
+
+    expect(h.timeOut.value).toBe('2:40');
+    expect(h.readout.textContent).toBe('1:40 – 2:40 · 60s');
+  });
+
+  it('still leaves the OTHER field alone while it is being typed into', () => {
+    const h = setup();
+    h.timeIn.focus();
+    h.timeIn.value = '1:4';
+
+    // Committing OUT re-renders, and must not reach into IN mid-edit.
+    h.timeOut.value = '2:20';
+    h.timeOut.dispatchEvent(new FocusEvent('blur'));
+
+    expect(h.timeIn.value).toBe('1:4');
+  });
+
   it('does not overwrite a field while it is being typed into', () => {
     const h = setup();
     h.timeOut.focus();

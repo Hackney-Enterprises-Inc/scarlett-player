@@ -371,7 +371,7 @@ export const styles = `
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  min-height: 36px;
+  min-height: 44px; /* thumb target; matches .sp-clip-btn and .sp-control's floor */
   padding: 0 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -427,7 +427,7 @@ export const styles = `
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  min-height: 36px;
+  min-height: 44px; /* thumb target; matches .sp-clip-btn and .sp-control's floor */
   padding: 0 10px;
   cursor: pointer;
 }

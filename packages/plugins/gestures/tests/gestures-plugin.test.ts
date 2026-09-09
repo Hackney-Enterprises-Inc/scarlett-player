@@ -203,10 +203,9 @@ describe('createGesturesPlugin', () => {
   });
 
   it('tears the surface down when the source turns out to be audio', () => {
-    // mediaType defaults to 'unknown' and is written when the source loads, so
-    // a plugin that sampled it once during init() left the tap surface over an
-    // audio player.
-    const api = createMockApi({ mediaType: 'unknown' });
+    // mediaType is written when the source loads, so a plugin that sampled it
+    // once during init() left the tap surface over an audio player.
+    const api = createMockApi({ mediaType: 'video' });
     const plugin = createGesturesPlugin();
     plugin.init(api as never);
 
@@ -217,6 +216,25 @@ describe('createGesturesPlugin', () => {
 
     expect(api.container.querySelector('.sp-gestures')).toBeNull();
     expect(plugin.ownsTapInteraction()).toBe(false);
+  });
+
+  it('waits for video rather than reading unknown as a picture', () => {
+    // 'unknown' is "not established yet", not "video". An audio-only source
+    // the classifier cannot prove (native HLS where the browser ships no track
+    // lists) stays unknown for its whole life, and covering the audio UI with a
+    // full-bleed tap surface is not a cost worth paying for an earlier install.
+    const api = createMockApi({ mediaType: 'unknown' });
+    const plugin = createGesturesPlugin();
+    plugin.init(api as never);
+
+    expect(api.container.querySelector('.sp-gestures')).toBeNull();
+    expect(plugin.ownsTapInteraction()).toBe(false);
+
+    // Nothing is lost by waiting: this runs again on every mediaType change.
+    api.setStateAndNotify('mediaType', 'video');
+
+    expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+    expect(plugin.ownsTapInteraction()).toBe(true);
   });
 
   it('rebuilds the surface when the source turns back into video', () => {
@@ -233,7 +251,7 @@ describe('createGesturesPlugin', () => {
   });
 
   it('destroys cleanly after the surface was torn down for audio', () => {
-    const api = createMockApi();
+    const api = createMockApi({ mediaType: 'video' });
     const plugin = createGesturesPlugin();
     plugin.init(api as never);
 
