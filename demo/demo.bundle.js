@@ -36223,13 +36223,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   bottom: calc(92px + var(--sp-inset-bottom, 0px));
 }
 
-/* While an extension owns the pointer the bar must not also look like it is
-   scrubbing: the tooltip is suppressed inline by the control, and the handle
-   stops responding to hover growth. */
-.sp-progress-wrapper--ext-dragging .sp-progress__handle {
-  transform: translate(-50%, -50%);
-}
-
 .sp-progress__track {
   position: absolute;
   top: 0;
@@ -36298,6 +36291,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
 .sp-progress--dragging .sp-progress__handle {
   transform: translate(-50%, -50%) scale(1);
+}
+
+/* While an extension owns the pointer the bar must not also look like it is
+   scrubbing: the tooltip is suppressed inline by the control, and the handle
+   stops responding to hover growth.
+
+   This has to come after the :hover and --dragging rules AND match their
+   specificity, which is why the hover case is spelled out rather than left to
+   the bare class: an extension drag is a pointer drag, so the pointer is over
+   the wrapper the whole time and the hover rule is always the competing one. */
+.sp-progress-wrapper--ext-dragging .sp-progress__handle,
+.sp-progress-wrapper--ext-dragging:hover .sp-progress__handle {
+  transform: translate(-50%, -50%);
 }
 
 /* Thumbnail Preview */
@@ -41048,6 +41054,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let source = null;
     let videoConfirmed = false;
     let audioConfirmed = false;
+    let elementReported = false;
     let element = null;
     let elementDisposers = [];
     let published = null;
@@ -41066,7 +41073,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const readElement = () => {
       const video = element;
       if (!video) return;
-      if (video.videoWidth > 0) {
+      if (elementReported && video.videoWidth > 0) {
         videoConfirmed = true;
         return;
       }
@@ -41099,6 +41106,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         source = src;
         videoConfirmed = false;
         audioConfirmed = false;
+        elementReported = false;
         published = null;
         publish();
       },
@@ -41106,8 +41114,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (destroyed) return;
         detachElement();
         element = video;
+        elementReported = false;
         for (const event of ELEMENT_EVENTS) {
-          const handler = () => evaluate();
+          const handler = () => {
+            elementReported = true;
+            evaluate();
+          };
           video.addEventListener(event, handler);
           elementDisposers.push(() => video.removeEventListener(event, handler));
         }
@@ -45266,6 +45278,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         });
         const unsubEnded = api.on("playback:ended", () => {
+          if (showDelayTimer) {
+            clearTimeout(showDelayTimer);
+            showDelayTimer = null;
+          }
           hide();
           stopDynamic();
         });
@@ -46665,7 +46681,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const syncSurface = () => {
       if (!active || !api) return;
-      const wantsSurface = api.getState("mediaType") !== "audio";
+      const wantsSurface = api.getState("mediaType") === "video";
       if (wantsSurface && !overlay) {
         overlay = new GestureOverlay(api.container, { onPointer, feedback });
         overlay.setZoneWidths(leftZone, rightZone);
@@ -47581,21 +47597,37 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let selection = null;
     let suspended = false;
     let disposers = [];
+    let wasPlaying = false;
     const rewind = () => {
       if (selection) seekClamped(api, selection.start);
     };
     const onTimeUpdate = (payload) => {
+      if (api.getState("paused") !== true) wasPlaying = true;
       if (!selection || suspended) return;
       if (payload.currentTime >= selection.end) rewind();
     };
+    const onPlay = () => {
+      wasPlaying = true;
+    };
+    const onPause = () => {
+      wasPlaying = false;
+    };
     const onEnded = () => {
+      const playing = wasPlaying;
+      wasPlaying = false;
       if (!selection || suspended) return;
-      if (api.getState("paused") === true) return;
+      if (!playing) return;
       rewind();
     };
     const ensureSubscribed = () => {
       if (disposers.length > 0) return;
-      disposers = [api.on("playback:timeupdate", onTimeUpdate), api.on("playback:ended", onEnded)];
+      wasPlaying = api.getState("paused") !== true;
+      disposers = [
+        api.on("playback:timeupdate", onTimeUpdate),
+        api.on("playback:ended", onEnded),
+        api.on("playback:play", onPlay),
+        api.on("playback:pause", onPause)
+      ];
     };
     return {
       start(next) {
@@ -47614,6 +47646,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         disposers = [];
         selection = null;
         suspended = false;
+        wasPlaying = false;
       },
       suspend() {
         suspended = true;
@@ -47748,6 +47781,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.drag = null;
       this.clampTimer = null;
       this.destroyed = false;
+      /** False while frozen by {@link RangeSelector.setInteractive}. */
+      this.interactive = true;
       // --------------------------------------------------------------------------
       // Pointer interaction
       // --------------------------------------------------------------------------
@@ -47758,7 +47793,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
        * the handle to the finger.
        */
       this.onPointerDown = (event) => {
-        if (this.destroyed || this.drag) return;
+        if (this.destroyed || !this.interactive || this.drag) return;
         if (event.button !== void 0 && event.button !== 0) return;
         const which = this.resolveTarget(event);
         if (which === null) return;
@@ -47948,6 +47983,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * being submitted must not move under the request) and while the details
      * stage covers the player, where the timeline behind it is out of reach.
      *
+     * The freeze is enforced in the handlers, not only in CSS and the tab order:
+     * `tabindex="-1"` removes a handle from tabbing but leaves a handle that was
+     * already focused when the freeze landed focused and taking arrow keys, so
+     * the range could still be moved out from under a submission with the
+     * keyboard.
+     *
      * Any drag in progress is cancelled, so the endpoint stays where it was
      * rather than following a finger the editor is no longer listening to.
      *
@@ -47955,6 +47996,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     setInteractive(interactive) {
       if (this.destroyed) return;
+      this.interactive = interactive;
       if (!interactive) this.endDrag(true);
       this.track.classList.toggle("sp-clip-track--frozen", !interactive);
       for (const which of ["start", "end"]) {
@@ -48139,7 +48181,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * handled here calls `preventDefault()` so the UI plugin's shortcuts skip it.
      */
     onKeyDown(which, event) {
-      if (this.destroyed) return;
+      if (this.destroyed || !this.interactive) return;
       const step = this.stepValue();
       const delta = event.shiftKey ? step * KEYBOARD_COARSE_FACTOR : step;
       const current = this.selection[which];
@@ -49096,7 +49138,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       if (event.key === "Escape") {
-        this.renderTimeFields();
+        this.renderTimeFields(which);
       }
     }
     /**
@@ -49112,11 +49154,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const parsed = parseTimestamp(input.value);
       if (parsed === null) {
         this.showNotice("Enter a time as seconds or m:ss", { type: "error", autoHideMs: 4e3 });
-        this.renderTimeFields();
+        this.renderTimeFields(which);
         return;
       }
       this.selector.applyEndpoint(which, parsed, "field");
-      this.renderTimeFields();
+      this.renderTimeFields(which);
     }
     /** @internal Re-render everything stateful. */
     renderAll() {
@@ -49127,12 +49169,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.renderPlayButton();
       this.renderValidity();
     }
-    /** @internal The exact-time fields, unless the viewer is editing one. */
-    renderTimeFields() {
+    /**
+     * @internal The exact-time fields, unless the viewer is editing one.
+     *
+     * @param force - One field to rewrite even while it holds focus. Enter and
+     *   Escape are both handled with the input still focused, so without this the
+     *   field the viewer just acted on was the one field the re-render skipped:
+     *   Escape left the half-typed text in place, a refused value stayed on
+     *   screen next to the notice rejecting it, and a committed value never
+     *   showed the snapped, clamped time the selector actually landed on.
+     */
+    renderTimeFields(force) {
       const step = this.config.step ?? 1;
       for (const which of ["start", "end"]) {
         const input = this.timeInputs[which];
-        if (document.activeElement === input) continue;
+        if (which !== force && document.activeElement === input) continue;
         input.value = formatTimestamp(this.selection[which], step);
       }
     }
@@ -49629,7 +49680,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  min-height: 36px;
+  min-height: 44px; /* thumb target; matches .sp-clip-btn and .sp-control's floor */
   padding: 0 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -49685,7 +49736,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  min-height: 36px;
+  min-height: 44px; /* thumb target; matches .sp-clip-btn and .sp-control's floor */
   padding: 0 10px;
   cursor: pointer;
 }
@@ -51410,7 +51461,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.12.0" : "dev";
+  var VERSION = true ? "1.13.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
