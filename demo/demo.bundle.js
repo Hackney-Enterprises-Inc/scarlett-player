@@ -1969,15 +1969,23 @@
           }
         }
         /**
-         * Wire the two listeners the player owns, exactly once.
+         * Wire the listeners the player owns, exactly once.
          *
          * Guarded by a flag rather than by "init() runs once" because
          * `ensureInitialized()` runs on every `load()`: wiring them twice would
          * load and play each requested source twice.
+         *
+         * No unsubscribe handles are kept: `destroy()` calls `eventBus.destroy()`,
+         * which drops every listener at once, so these cannot fire against a
+         * destroyed player.
          */
         wireLifecycleListeners() {
           if (this.listenersWired) return;
           this.listenersWired = true;
+          this.eventBus.on("live:seektolive", () => {
+            if (this.destroyed) return;
+            this.seekToLive();
+          });
           this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
             if (this.stateManager.getValue("chromecastActive")) return;
             await this.load(src);
@@ -38071,11 +38079,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.el.setAttribute("aria-label", "Live broadcast - behind live edge, click to seek to live");
           }
         }
+        /**
+         * Ask core to rejoin the live edge.
+         *
+         * Emits `live:seektolive` rather than seeking to `seekableRange.end`
+         * directly. Core's `seekToLive()` prefers the provider's `liveSyncPosition`,
+         * and under low latency the end of the seekable range is beyond the last
+         * loaded part - seeking there stalls and rebuffers.
+         */
         seekToLive() {
-          const seekableRange = this.api.getState("seekableRange");
-          if (seekableRange) {
-            this.api.emit("playback:seeking", { time: seekableRange.end });
-          }
+          this.api.emit("live:seektolive", void 0);
         }
         destroy() {
           this.el.removeEventListener("click", this.handleClick);
@@ -40376,6 +40389,107 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/hls/src/sanitize-url.ts
   init_src();
 
+  // packages/plugins/hls/src/live-metrics.ts
+  var DEFAULT_TARGET_LATENCY = 3;
+  var MIN_EDGE_TOLERANCE = 1.5;
+  var NATIVE_EDGE_TOLERANCE = 7;
+  var EPSILON = 0.05;
+  function finite(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  function rangeFromDetails(details) {
+    if (!details) return null;
+    const start = finite(details.fragmentStart) ?? finite(details.fragments?.[0]?.start) ?? 0;
+    const total = finite(details.totalduration);
+    const end = finite(details.edge) ?? (total === null ? null : start + total);
+    if (end === null) return null;
+    return { start, end };
+  }
+  function rangeFromMedia(media) {
+    const seekable = media?.seekable;
+    if (!seekable || seekable.length === 0) return null;
+    const start = seekable.start(0);
+    const end = seekable.end(seekable.length - 1);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    return { start, end };
+  }
+  function targetFromDetails(details) {
+    if (!details) return null;
+    const targetduration = finite(details.targetduration);
+    return finite(details.partHoldBack) ?? finite(details.holdBack) ?? (targetduration !== null ? targetduration * 3 : null);
+  }
+  function edgeTolerance(details, targetLatency) {
+    const targetduration = finite(details?.targetduration);
+    const half = targetduration !== null ? targetduration / 2 : targetLatency / 2;
+    return Math.max(MIN_EDGE_TOLERANCE, finite(details?.partTarget) ?? half);
+  }
+  function computeLiveMetrics(source) {
+    if (source.kind === "hls") {
+      const { hls, details } = source;
+      const media2 = hls.media;
+      const seekableRange2 = rangeFromDetails(details) ?? rangeFromMedia(media2);
+      const targetLatency2 = finite(hls.targetLatency) ?? targetFromDetails(details) ?? DEFAULT_TARGET_LATENCY;
+      const latency2 = finite(hls.latency) ?? (seekableRange2 && media2 ? Math.max(0, seekableRange2.end - media2.currentTime) : null);
+      if (latency2 === null && seekableRange2 === null) return null;
+      const resolvedLatency = latency2 ?? 0;
+      return {
+        latency: resolvedLatency,
+        targetLatency: targetLatency2,
+        atEdge: resolvedLatency <= targetLatency2 + edgeTolerance(details, targetLatency2),
+        seekableRange: seekableRange2,
+        // Effective LL, not requested LL: the manifest has to carry parts or
+        // advertise blocking reloads, AND the host has to have asked for it.
+        lowLatency: source.lowLatencyRequested !== false && (!!details?.partList?.length || details?.canBlockReload === true)
+      };
+    }
+    const { media } = source;
+    const seekableRange = rangeFromMedia(media);
+    if (!seekableRange) return null;
+    const targetLatency = source.targetLatency ?? DEFAULT_TARGET_LATENCY;
+    const tolerance = source.targetLatency === void 0 ? NATIVE_EDGE_TOLERANCE : Math.max(MIN_EDGE_TOLERANCE, source.targetLatency / 2);
+    const latency = Math.max(0, seekableRange.end - media.currentTime);
+    return {
+      latency,
+      targetLatency,
+      atEdge: latency <= targetLatency + tolerance,
+      seekableRange,
+      lowLatency: source.lowLatency === true
+    };
+  }
+  function applyLiveMetrics(api, metrics) {
+    if (!metrics) return;
+    const previousLatency = api.getState("liveLatency");
+    if (Math.abs(previousLatency - metrics.latency) > EPSILON) {
+      api.setState("liveLatency", metrics.latency);
+      api.emit("live:latency", { latency: metrics.latency });
+    }
+    if (api.getState("liveEdge") !== metrics.atEdge) {
+      api.setState("liveEdge", metrics.atEdge);
+      api.emit("live:edgechange", { atEdge: metrics.atEdge });
+    }
+    const range = metrics.seekableRange;
+    if (range) {
+      const previous = api.getState("seekableRange");
+      if (!previous || Math.abs(previous.start - range.start) > EPSILON || Math.abs(previous.end - range.end) > EPSILON) {
+        api.setState("seekableRange", { start: range.start, end: range.end });
+        api.emit("live:seekablerange", { start: range.start, end: range.end });
+      }
+    }
+    if (api.getState("lowLatencyMode") !== metrics.lowLatency) {
+      api.setState("lowLatencyMode", metrics.lowLatency);
+      api.emit("live:lowlatency", { enabled: metrics.lowLatency });
+    }
+  }
+  function resetLiveMetrics(api) {
+    if (api.getState("lowLatencyMode")) {
+      api.setState("lowLatencyMode", false);
+      api.emit("live:lowlatency", { enabled: false });
+    }
+    api.setState("liveLatency", 0);
+    api.setState("liveEdge", false);
+    api.setState("seekableRange", null);
+  }
+
   // packages/plugins/hls/src/event-map.ts
   var HLS_ERROR_TYPES = {
     NETWORK_ERROR: "networkError",
@@ -40513,16 +40627,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (data.details?.live !== void 0) {
         api.setState("live", data.details.live);
         if (data.details.live) {
-          const details = data.details;
-          const start = details.fragmentStart ?? (details.fragments?.[0]?.start ?? 0);
-          const end = details.edge ?? details.totalduration ?? 0;
-          api.setState("seekableRange", { start, end });
-          const video = hls.media;
-          if (video) {
-            const latency = Math.max(0, end - video.currentTime);
-            api.setState("liveLatency", latency);
-            api.setState("liveEdge", latency < (details.targetduration ?? 3) * 3);
-          }
+          callbacks.onLevelDetails?.(data.details);
+          applyLiveMetrics(
+            api,
+            computeLiveMetrics({
+              kind: "hls",
+              hls,
+              details: data.details,
+              lowLatencyRequested: callbacks.isLowLatencyRequested?.() ?? true
+            })
+          );
+        } else {
+          resetLiveMetrics(api);
         }
         callbacks.onLiveUpdate?.();
       }
@@ -40562,7 +40678,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("currentAudioTrack", null);
     };
   }
-  function setupVideoEventHandlers(video, api) {
+  function setupVideoEventHandlers(video, api, getLiveMetrics) {
     const handlers = [];
     const addHandler = (event, handler) => {
       video.addEventListener(event, handler);
@@ -40599,15 +40715,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("timeupdate", () => {
       api.setState("currentTime", video.currentTime);
       api.emit("playback:timeupdate", { currentTime: video.currentTime });
-      if (video.seekable && video.seekable.length > 0) {
-        if (api.getState("live") || !Number.isFinite(video.duration)) {
-          const start = video.seekable.start(0);
-          const end = video.seekable.end(video.seekable.length - 1);
-          api.setState("seekableRange", { start, end });
-          const latency = Math.max(0, end - video.currentTime);
-          api.setState("liveEdge", latency < 10);
-          api.setState("liveLatency", latency);
-        }
+      if (api.getState("live") || !Number.isFinite(video.duration)) {
+        applyLiveMetrics(
+          api,
+          getLiveMetrics ? getLiveMetrics() : computeLiveMetrics({ kind: "media", media: video })
+        );
       }
     });
     addHandler("durationchange", () => {
@@ -40783,6 +40895,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     // Never index a malformed live playlist refresh blindly
     validatePlaylists: true
   };
+  var LL_CATCH_UP_PLAYBACK_RATE = 1.1;
   var MANIFEST_PHASE_ERRORS = [
     "manifestLoadError",
     "manifestLoadTimeOut",
@@ -40798,6 +40911,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupHlsEvents = null;
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
+    let lastLevelDetails = null;
+    let lastLiveMetrics = null;
+    let lastKnownTargetLatency = null;
     let loadSession = 0;
     let abortPendingLoad2 = null;
     let networkRetryCount = 0;
@@ -40820,6 +40936,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let stallWatchdogTimer = null;
     let lastStallCheckTime = 0;
     let lastStallCheckPosition = 0;
+    const readLiveMetrics = () => {
+      const metrics = hls && !isNative ? computeLiveMetrics({
+        kind: "hls",
+        hls,
+        details: lastLevelDetails,
+        lowLatencyRequested: mergedConfig.lowLatencyMode === true
+      }) : video ? computeLiveMetrics({
+        kind: "media",
+        media: video,
+        targetLatency: lastKnownTargetLatency ?? void 0,
+        lowLatency: lastLiveMetrics?.lowLatency
+      }) : null;
+      if (metrics) {
+        lastLiveMetrics = metrics;
+        if (hls && !isNative) lastKnownTargetLatency = metrics.targetLatency;
+      }
+      return metrics;
+    };
     const applyPoster = () => {
       if (!video) return;
       video.poster = api?.getState("poster") || "";
@@ -40869,6 +41003,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       mediaRetryCount = 0;
       errorCount = 0;
       errorWindowStart = 0;
+      lastLevelDetails = null;
+      lastLiveMetrics = null;
+      lastKnownTargetLatency = null;
+      if (api) resetLiveMetrics(api);
     };
     const buildHlsConfig = () => {
       const config2 = buildBaseHlsConfig();
@@ -40880,27 +41018,58 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return config2;
     };
-    const buildBaseHlsConfig = () => ({
-      debug: mergedConfig.debug,
-      autoStartLoad: mergedConfig.autoStartLoad,
-      startPosition: mergedConfig.startPosition,
-      startLevel: -1,
-      // Auto quality selection (ABR)
-      abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate),
-      lowLatencyMode: mergedConfig.lowLatencyMode,
-      maxBufferLength: mergedConfig.maxBufferLength,
-      maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
-      backBufferLength: mergedConfig.backBufferLength,
-      enableWorker: mergedConfig.enableWorker,
-      capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
-      // Minimize hls.js internal retries - we handle retries ourselves
-      fragLoadingMaxRetry: 1,
-      manifestLoadingMaxRetry: 1,
-      levelLoadingMaxRetry: 1,
-      fragLoadingRetryDelay: 500,
-      manifestLoadingRetryDelay: 500,
-      levelLoadingRetryDelay: 500
-    });
+    const buildLiveHlsConfig = () => {
+      const live = {};
+      const set = (key, value) => {
+        if (value !== void 0) live[key] = value;
+      };
+      const syncDuration = mergedConfig.liveSyncDuration;
+      const syncCount = mergedConfig.liveSyncDurationCount;
+      const maxDuration = mergedConfig.liveMaxLatencyDuration;
+      const maxCount = mergedConfig.liveMaxLatencyDurationCount;
+      const mixed = (syncDuration !== void 0 || maxDuration !== void 0) && (syncCount !== void 0 || maxCount !== void 0);
+      const dropCount = mixed && syncDuration !== void 0;
+      const dropDuration = mixed && !dropCount;
+      if (mixed) {
+        api?.logger.warn(
+          `Ignoring ${dropCount ? "liveSyncDurationCount/liveMaxLatencyDurationCount" : "liveSyncDuration/liveMaxLatencyDuration"}: hls.js rejects a config mixing seconds-based and count-based live latency options`
+        );
+      }
+      set("liveSyncDuration", dropDuration ? void 0 : syncDuration);
+      set("liveSyncDurationCount", dropCount ? void 0 : syncCount);
+      set("liveMaxLatencyDuration", dropDuration ? void 0 : maxDuration);
+      set("liveMaxLatencyDurationCount", dropCount ? void 0 : maxCount);
+      set("liveDurationInfinity", mergedConfig.liveDurationInfinity);
+      set(
+        "maxLiveSyncPlaybackRate",
+        mergedConfig.maxLiveSyncPlaybackRate ?? (mergedConfig.lowLatencyMode === true ? LL_CATCH_UP_PLAYBACK_RATE : void 0)
+      );
+      return live;
+    };
+    const buildBaseHlsConfig = () => {
+      return {
+        debug: mergedConfig.debug,
+        autoStartLoad: mergedConfig.autoStartLoad,
+        startPosition: mergedConfig.startPosition,
+        startLevel: -1,
+        // Auto quality selection (ABR)
+        abrEwmaDefaultEstimate: getInitialBandwidthEstimate(mergedConfig.initialBandwidthEstimate),
+        lowLatencyMode: mergedConfig.lowLatencyMode,
+        maxBufferLength: mergedConfig.maxBufferLength,
+        maxMaxBufferLength: mergedConfig.maxMaxBufferLength,
+        backBufferLength: mergedConfig.backBufferLength,
+        enableWorker: mergedConfig.enableWorker,
+        capLevelToPlayerSize: mergedConfig.capLevelToPlayerSize,
+        // Minimize hls.js internal retries - we handle retries ourselves
+        fragLoadingMaxRetry: 1,
+        manifestLoadingMaxRetry: 1,
+        levelLoadingMaxRetry: 1,
+        fragLoadingRetryDelay: 500,
+        manifestLoadingRetryDelay: 500,
+        levelLoadingRetryDelay: 500,
+        ...buildLiveHlsConfig()
+      };
+    };
     const getRetryDelay2 = (retryCount) => {
       const baseDelay = mergedConfig.retryDelayMs ?? 1e3;
       const backoffFactor = mergedConfig.retryBackoffFactor ?? 2;
@@ -41097,7 +41266,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const videoEl = getOrCreateVideo();
       isNative = true;
       if (api) {
-        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api);
+        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
       }
       return new Promise((resolve2, reject) => {
         let watchdog = null;
@@ -41190,7 +41359,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       isNative = false;
       hls = loader.createHlsInstance(buildHlsConfig());
       if (api) {
-        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api);
+        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
       }
       return new Promise((resolve2, reject) => {
         if (!hls || !api) {
@@ -41232,6 +41401,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           },
           onLevelSwitched: () => {
           },
+          onLevelDetails: (details) => {
+            if (session !== loadSession) return;
+            lastLevelDetails = details;
+            readLiveMetrics();
+          },
+          isLowLatencyRequested: () => mergedConfig.lowLatencyMode === true,
           onError: (error) => {
             if (session !== loadSession) return;
             const terminal = handleHlsError(error);
@@ -41669,25 +41844,45 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       isNativeHLS() {
         return isNative;
       },
+      /**
+       * Report the live state of the stream.
+       *
+       * `latency` and `targetLatency` come from hls.js on the MSE path, where
+       * they are measured against `EXT-X-PROGRAM-DATE-TIME` drift when the
+       * manifest carries it. On the native path there is no latency API, so both
+       * are approximations: latency is the distance to `seekable.end`, and the
+       * target is whatever an earlier hls.js session on this source measured
+       * (an AirPlay handoff) before it falls back to 3 seconds. Parking a viewer
+       * of a 2-second-target stream 3 seconds back was the previous behaviour,
+       * and it is a full target latency of drift.
+       *
+       * @returns Live info, or null for VOD and before a pipeline exists
+       */
       getLiveInfo() {
         const live = api?.getState("live") || false;
         if (!live) return null;
+        const metrics = readLiveMetrics();
         if (isNative) {
+          const targetLatency2 = metrics?.targetLatency ?? DEFAULT_TARGET_LATENCY;
+          const seekableEnd = video?.seekable?.length ? video.seekable.end(video.seekable.length - 1) : void 0;
           return {
             isLive: true,
-            latency: 0,
-            targetLatency: 3,
+            latency: metrics?.latency ?? 0,
+            targetLatency: targetLatency2,
             drift: 0,
-            liveSyncPosition: video?.seekable?.length ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3) : void 0
+            liveSyncPosition: seekableEnd !== void 0 ? Math.max(0, seekableEnd - targetLatency2) : void 0,
+            lowLatency: metrics?.lowLatency ?? false
           };
         }
         if (!hls) return null;
+        const targetLatency = hls.targetLatency || metrics?.targetLatency || DEFAULT_TARGET_LATENCY;
         return {
           isLive: true,
           latency: hls.latency || 0,
-          targetLatency: hls.targetLatency || 3,
+          targetLatency,
           drift: hls.drift || 0,
-          liveSyncPosition: hls.liveSyncPosition ?? (video?.seekable?.length ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 3) : void 0)
+          liveSyncPosition: hls.liveSyncPosition ?? (video?.seekable?.length ? Math.max(0, video.seekable.end(video.seekable.length - 1) - targetLatency) : void 0),
+          lowLatency: metrics?.lowLatency ?? false
         };
       },
       /**
@@ -41712,10 +41907,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const wasPlaying = api?.getState("playing") || false;
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
+        const savedTargetLatency = lastKnownTargetLatency;
         const session = ++loadSession;
         cancelReconnect();
         cleanup(new Error("HLS load cancelled: switching to native HLS"));
         currentSrc = savedSrc;
+        lastKnownTargetLatency = savedTargetLatency;
         await loadNative(savedSrc);
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
@@ -41751,10 +41948,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const wasPlaying = api?.getState("playing") || false;
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
+        const savedTargetLatency = lastKnownTargetLatency;
         const session = ++loadSession;
         cancelReconnect();
         cleanup(new Error("HLS load cancelled: switching to hls.js"));
         currentSrc = savedSrc;
+        lastKnownTargetLatency = savedTargetLatency;
         await loadWithHlsJs(savedSrc);
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
@@ -46925,7 +47124,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var DEFAULT_DEFAULT_DURATION = 30;
   var DEFAULT_STEP = 1;
   var DEFAULT_TITLE_MAX_LENGTH = 80;
-  var EPSILON = 1e-9;
+  var EPSILON2 = 1e-9;
   function clamp(value, lo, hi) {
     return Math.min(Math.max(value, lo), hi);
   }
@@ -46964,7 +47163,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let end = Math.min(snap(clamp(currentTime, b.min, b.max), limits.step), b.max);
     let start = snap(end - limits.defaultDuration, limits.step);
     if (start < b.min) start = b.min;
-    if (end - start < limits.minDuration - EPSILON) {
+    if (end - start < limits.minDuration - EPSILON2) {
       end = Math.min(snap(start + limits.minDuration, limits.step), b.max);
     }
     return { start, end };
@@ -46985,11 +47184,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const limits = rawLimits(cfg);
     const { start, end } = selection;
     if (!Number.isFinite(start) || !Number.isFinite(end)) return "out-of-bounds";
-    if (start < b.min - EPSILON || end > b.max + EPSILON) return "out-of-bounds";
+    if (start < b.min - EPSILON2 || end > b.max + EPSILON2) return "out-of-bounds";
     if (end < start) return "inverted";
     const duration = end - start;
-    if (duration > limits.maxDuration + EPSILON) return "too-long";
-    if (duration < limits.minDuration - EPSILON) return "too-short";
+    if (duration > limits.maxDuration + EPSILON2) return "too-long";
+    if (duration < limits.minDuration - EPSILON2) return "too-short";
     return null;
   }
   function validateTitle(title, cfg) {
@@ -48868,6 +49067,70 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const qoeScore = successScore * 0.3 + startupScore * 0.25 + smoothnessScore * 0.3 + qualityScore * 0.15;
     return Math.round(qoeScore);
   }
+  var LATENCY_BUCKET_SECONDS = 0.25;
+  var LATENCY_MAX_SECONDS = 120;
+  function createLatencySampler() {
+    const bucketCount = Math.ceil(LATENCY_MAX_SECONDS / LATENCY_BUCKET_SECONDS) + 1;
+    const buckets = new Uint32Array(bucketCount);
+    let count = 0;
+    let sum = 0;
+    let max = 0;
+    let sawLowLatency = false;
+    return {
+      /**
+       * Record one latency reading.
+       *
+       * @param latency - Latency behind the live edge, in seconds
+       */
+      add(latency) {
+        if (!Number.isFinite(latency) || latency < 0) return;
+        count++;
+        sum += latency;
+        if (latency > max) max = latency;
+        const index = Math.min(
+          bucketCount - 1,
+          Math.floor(latency / LATENCY_BUCKET_SECONDS)
+        );
+        buckets[index]++;
+      },
+      /**
+       * Mark the session as having been effectively low latency.
+       *
+       * Sticky: a stream that was LL for part of a view is reported as LL,
+       * because "was this an LL session" is the question the flag answers.
+       */
+      markLowLatency() {
+        sawLowLatency = true;
+      },
+      /**
+       * Summarise the readings so far.
+       *
+       * @returns The summary, or null when no reading was ever taken (VOD)
+       */
+      summary() {
+        if (count === 0) return null;
+        const target = Math.ceil(count * 0.95);
+        let cumulative = 0;
+        let p95 = max;
+        for (let i = 0; i < bucketCount; i++) {
+          cumulative += buckets[i];
+          if (cumulative >= target) {
+            const edge = i === bucketCount - 1 ? LATENCY_MAX_SECONDS : (i + 1) * LATENCY_BUCKET_SECONDS;
+            p95 = Math.min(max, edge);
+            break;
+          }
+        }
+        const round = (value) => Math.round(value * 100) / 100;
+        return {
+          liveLatencySamples: count,
+          liveLatencyMean: round(sum / count),
+          liveLatencyP95: round(p95),
+          liveLatencyMax: round(max),
+          lowLatency: sawLowLatency
+        };
+      }
+    };
+  }
   function isDevelopment() {
     return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.includes(".local");
   }
@@ -48918,7 +49181,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let rebufferStartTime = null;
     let pauseStartTime = null;
     let cleanupFns = [];
+    let latencySampler = createLatencySampler();
     function initSession() {
+      latencySampler = createLatencySampler();
       return {
         viewId: generateId2(),
         sessionId: getSessionId(),
@@ -49084,7 +49349,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         rebufferCount: session.rebufferCount,
         rebufferDuration: session.rebufferDuration,
         avgBitrate: session.avgBitrate,
-        qoeScore: getQoEScore()
+        qoeScore: getQoEScore(),
+        ...latencySampler.summary() ?? {}
       });
       lastHeartbeatTime = now2;
     }
@@ -49126,7 +49392,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         errorCount: session.errorCount,
         exitType: session.exitType,
         qoeScore: getQoEScore(),
-        completionRate
+        completionRate,
+        // Absent entirely on VOD: nothing ever emitted a live:latency reading
+        ...latencySampler.summary() ?? {}
       });
     }
     function onPlayRequest() {
@@ -49272,6 +49540,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       }
     }
+    function onLiveLatency(payload) {
+      latencySampler.add(payload.latency);
+    }
+    function onLowLatencyChange(payload) {
+      if (payload.enabled) latencySampler.markLowLatency();
+    }
     function onVisibilityChange() {
       if (document.hidden) {
         session.exitType = "background";
@@ -49294,7 +49568,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         rebufferDuration: session.rebufferDuration,
         avgBitrate: session.avgBitrate,
         maxBitrate: session.maxBitrate,
-        exitType: session.exitType
+        exitType: session.exitType,
+        // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
+        // view is the one most worth having latency for
+        ...latencySampler.summary() ?? {}
       });
     }
     return {
@@ -49319,6 +49596,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
         const unsubQuality = api.on("quality:change", onQualityChange);
+        const unsubLatency = api.on("live:latency", onLiveLatency);
+        const unsubLowLatency = api.on("live:lowlatency", onLowLatencyChange);
         cleanupFns.push(
           unsubPlay,
           unsubPause,
@@ -49327,7 +49606,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubEnded,
           unsubError,
           unsubCoreError,
-          unsubQuality
+          unsubQuality,
+          unsubLatency,
+          unsubLowLatency
         );
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("beforeunload", onBeforeUnload);
@@ -49380,7 +49661,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.11.0" : "dev";
+  var VERSION = true ? "1.12.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
@@ -49583,7 +49864,11 @@ Cada trampa se prueba una sola vez.
       poster: "https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg",
       logLevel: "debug",
       plugins: [
-        createHLSPlugin(),
+        // lowLatencyMode is opt-in for consumers and off by default; the demo
+        // turns it on so the Live panel can show LL-HLS against a low-latency
+        // source. It changes nothing for VOD or for a plain live manifest -
+        // hls.js only takes the LL path when the playlist carries EXT-X-PART.
+        createHLSPlugin({ lowLatencyMode: true }),
         // HLS streams (.m3u8)
         createNativePlugin(),
         // Native formats (MP4, WebM, MOV, MKV)
