@@ -66,6 +66,24 @@ controls (playlist, chapters, share, clips) declare `@scarlett-player/ui` as an
 OPTIONAL peer and register their controls through a dynamic import, so they keep
 working when no UI package is installed.
 
+`@scarlett-player/ui` exposes two extension seams, both through module-level
+registries rather than through `IPluginAPI`, and both feature-detected by their
+callers:
+
+- **The control registry** (`registerControl`) contributes a *button* to a slot
+  in the bar, which the host's layout has to name for it to appear.
+- **The timeline registry** (`registerTimelineExtension`) contributes an editing
+  *layer* over the playback rail: a positioned element with the rail's exact
+  horizontal geometry, plus leases for holding the bar visible and for
+  suppressing ordinary seeking while the extension owns a pointer. One
+  extension per player, keyed by container. `@scarlett-player/clips` mounts its
+  in/out handles there and falls back to a self-contained rail when the seam is
+  absent, so an older UI peer degrades rather than failing.
+
+Both registries are keyed by the player container where per-player state is
+involved, which is what keeps two players on one page from driving each other's
+controls.
+
 ## Packages
 
 Eighteen packages, all published at one version by a fixed Changesets group.

@@ -126,6 +126,40 @@ Any id a plugin registers through the control registry (`share`, `chapters`,
 `playlist-previous`, `playlist-next`, ...) can be placed in the same list. A
 control whose plugin is not loaded is skipped.
 
+## Timeline extensions
+
+The control registry lets a plugin contribute a *button*. `registerTimelineExtension` lets one contribute an editing layer over the **playback timeline** - the clip plugin's in/out handles are the first, and the reason it exists: an editor with its own miniature track cannot express a 30-second selection on a two-hour source, and makes the viewer pick points on a rail that is not the one they were just scrubbing.
+
+```typescript
+import { registerTimelineExtension } from '@scarlett-player/ui';
+
+const release = registerTimelineExtension(api.container, (surface) => {
+  surface.element.appendChild(myHandles);
+
+  return {
+    update: () => reposition(surface.getRailRect()),
+    onSeekStart: () => suspendMyPreview(),
+    onSeekEnd: () => {},
+    destroy: () => myHandles.remove(),
+  };
+});
+```
+
+`surface` gives an extension four things and nothing else:
+
+| Member | What it is |
+|---|---|
+| `element` | The layer to paint into: a sibling of the `role="slider"` seek element (never a child of it), positioned with exactly the rail's horizontal geometry and centred on it. `pointer-events: none`, so plain presses on the rail keep seeking; give your own hit targets `pointer-events: auto` |
+| `getRailRect()` | The rail's box, in client coordinates - the same box the slider maps a press against, so a `clientX`-to-time mapping agrees with the player's own seeking to the pixel |
+| `setEditing(active)` | Holds the control bar and progress bar visible and reserves the vertical room an editor needs around the rail. Independent of any control's `isMenuOpen()`, so an extension opened from a host's own button still holds the bar |
+| `setDragging(active)` | Suppresses ordinary seeking while the extension owns the pointer, and gets the hover tooltip out of the way |
+
+The extension gives back `update()` (called with the progress bar's own update, so it never has to observe the rail itself), `onSeekStart()` / `onSeekEnd()` for ordinary seeks it does **not** own - mouse, touch, keyboard and cancellation alike - and `destroy()`.
+
+There is one active extension per player, keyed by container. Registering again replaces and destroys the previous one; the returned disposer only ever removes the registration it made, so a late cleanup cannot unmount its successor. Registration works before or after the UI plugin initialises. `unregisterTimelineExtension(container)` drops a player's registration wholesale, and `hasTimelineExtension(container)` reports whether one is present.
+
+The UI package reads no plugin-specific state and gains no `IPluginAPI` surface for this: it offers a positioned layer and four lifecycle calls, and an extension paints into it.
+
 ## Keyboard Shortcuts
 
 | Key | Action |

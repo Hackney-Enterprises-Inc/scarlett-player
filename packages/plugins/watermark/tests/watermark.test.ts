@@ -57,6 +57,21 @@ function createMockApi(): MockPluginApi {
   };
 }
 
+/**
+ * Yield long enough for a queued `MutationObserver` callback to run.
+ *
+ * The observer delivers on the microtask queue, so a plain `await` is not
+ * enough on its own to be sure it has been given a turn; a macrotask is.
+ * Every assertion about what the observer did or did not do has to sit
+ * behind one of these — the anti-tamper bug it guards against was invisible
+ * to the synchronous assertions this file used to make.
+ *
+ * @returns A promise resolved after the pending observer callbacks have run
+ */
+function flushObserver(): Promise<void> {
+  return new Promise<void>(resolve => setTimeout(resolve, 0));
+}
+
 describe('createWatermarkPlugin', () => {
   it('creates a plugin with correct metadata', () => {
     const plugin = createWatermarkPlugin();
@@ -140,9 +155,12 @@ describe('init and DOM', () => {
     const plugin = createWatermarkPlugin({ text: 'test' });
     plugin.init(mockApi);
 
-    const el = mockApi.container.querySelector('.sp-watermark');
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
     expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
     expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+    // The classes have no stylesheet behind them, so the inline visibility is
+    // what actually keeps the mark off the poster.
+    expect(el?.style.visibility).toBe('hidden');
   });
 
   it('applies position via data attribute', () => {
@@ -239,8 +257,9 @@ describe('show/hide on playback events', () => {
 
     playCallback?.();
 
-    const el = mockApi.container.querySelector('.sp-watermark');
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
     expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+    expect(el?.style.visibility).toBe('visible');
   });
 
   it('keeps watermark visible on playback:pause', () => {
@@ -250,9 +269,10 @@ describe('show/hide on playback events', () => {
     playCallback?.();
     pauseCallback?.();
 
-    const el = mockApi.container.querySelector('.sp-watermark');
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
     expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
     expect(el?.classList.contains('sp-watermark--hidden')).toBe(false);
+    expect(el?.style.visibility).toBe('visible');
   });
 
   it('hides watermark on playback:ended', () => {
@@ -262,8 +282,9 @@ describe('show/hide on playback events', () => {
     playCallback?.();
     endedCallback?.();
 
-    const el = mockApi.container.querySelector('.sp-watermark');
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
     expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.style.visibility).toBe('hidden');
   });
 
   it('respects showDelay before showing', () => {
@@ -480,15 +501,31 @@ describe('runtime API', () => {
   });
 
   it('show and hide toggle visibility', () => {
-    const el = mockApi.container.querySelector('.sp-watermark');
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
 
     plugin.show();
     expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
     expect(el?.classList.contains('sp-watermark--hidden')).toBe(false);
+    expect(el?.style.visibility).toBe('visible');
 
     plugin.hide();
     expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
     expect(el?.classList.contains('sp-watermark--visible')).toBe(false);
+    expect(el?.style.visibility).toBe('hidden');
+  });
+
+  it('setPosition preserves visibility state', () => {
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+
+    plugin.show();
+    plugin.setPosition('top-left');
+    expect(el?.classList.contains('sp-watermark--visible')).toBe(true);
+    expect(el?.style.visibility).toBe('visible');
+
+    plugin.hide();
+    plugin.setPosition('center');
+    expect(el?.classList.contains('sp-watermark--hidden')).toBe(true);
+    expect(el?.style.visibility).toBe('hidden');
   });
 
   it('getConfig returns current configuration', () => {
@@ -539,6 +576,123 @@ describe('runtime API', () => {
     const cfg = plugin.getConfig();
     expect(cfg.imageHeight).toBe(80);
     expect(cfg.padding).toBe(20);
+  });
+});
+
+describe('anti-tamper observer', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let plugin: IWatermarkPlugin;
+  let el: HTMLElement;
+
+  beforeEach(() => {
+    mockApi = createMockApi();
+    plugin = createWatermarkPlugin({ text: 'initial', position: 'bottom-right', opacity: 0.5 });
+    plugin.init(mockApi);
+    el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+  });
+
+  afterEach(() => {
+    plugin.destroy();
+  });
+
+  it('leaves setOpacity in place once the observer has run', async () => {
+    plugin.setOpacity(0.1);
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.1');
+    expect(plugin.getConfig().opacity).toBe(0.1);
+  });
+
+  it('does not reset opacity when setPosition writes styles', async () => {
+    plugin.setOpacity(0.2);
+    plugin.setPosition('top-left');
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.2');
+  });
+
+  it('does not reset opacity when setPadding writes styles', async () => {
+    plugin.setOpacity(0.2);
+    plugin.setPadding(25);
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.2');
+    expect(el.style.top).toBe('');
+    expect(el.style.right).toBe('25px');
+  });
+
+  it('does not reset opacity when setImageHeight writes styles', async () => {
+    plugin.setImage('https://example.com/logo.png');
+    plugin.setOpacity(0.2);
+    plugin.setImageHeight(100);
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.2');
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(img.style.maxHeight).toBe('100px');
+  });
+
+  it('ignores style writes on other elements inside the container', async () => {
+    // The control bar, progress bar and clip selector all live under the same
+    // container and restyle themselves constantly; `subtree: true` reports
+    // every one of those, and none of them is tampering.
+    const sibling = document.createElement('div');
+    mockApi.container.appendChild(sibling);
+    plugin.setOpacity(0.2);
+    plugin.hide();
+    await flushObserver();
+
+    sibling.style.opacity = '0.9';
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.2');
+    expect(el.style.visibility).toBe('hidden');
+    expect(sibling.style.opacity).toBe('0.9');
+  });
+
+  it('restores tampered opacity to the runtime value, not the config value', async () => {
+    plugin.setOpacity(0.2);
+    await flushObserver();
+
+    el.style.opacity = '0';
+    await flushObserver();
+
+    expect(el.style.opacity).toBe('0.2');
+  });
+
+  it('restores tampered pointer-events, position and z-index', async () => {
+    el.style.pointerEvents = 'auto';
+    el.style.position = 'static';
+    el.style.zIndex = '-1';
+    await flushObserver();
+
+    expect(el.style.pointerEvents).toBe('none');
+    expect(el.style.position).toBe('absolute');
+    expect(el.style.zIndex).toBe('10');
+  });
+
+  it('restores tampered visibility to the state hide() asked for', async () => {
+    plugin.hide();
+    await flushObserver();
+
+    el.style.visibility = 'visible';
+    await flushObserver();
+
+    expect(el.style.visibility).toBe('hidden');
+  });
+
+  it('leaves show() in place once the observer has run', async () => {
+    plugin.show();
+    await flushObserver();
+
+    expect(el.style.visibility).toBe('visible');
+  });
+
+  it('re-attaches the element when it is removed from the container', async () => {
+    el.remove();
+    await flushObserver();
+
+    expect(mockApi.container.querySelector('.sp-watermark')).toBe(el);
   });
 });
 

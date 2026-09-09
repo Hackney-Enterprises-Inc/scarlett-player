@@ -45069,6 +45069,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/watermark/src/index.ts
   var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
+  function clampOpacity(value) {
+    return Math.max(0, Math.min(1, value));
+  }
   function getPositionStyles(padding, bottomPadding) {
     return {
       "top-left": `top:${padding}px;left:${padding}px;`,
@@ -45084,7 +45087,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let dynamicTimer = null;
     let showDelayTimer = null;
     let currentPosition = config.position || "bottom-right";
-    const opacity = config.opacity ?? 0.5;
+    let currentOpacity = clampOpacity(config.opacity ?? 0.5);
+    let currentVisible = false;
     const fontSize = config.fontSize ?? 14;
     let currentImageHeight = config.imageHeight ?? 40;
     let currentPadding = config.padding ?? 10;
@@ -45099,7 +45103,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const createElement2 = () => {
       const el = document.createElement("div");
       el.className = "sp-watermark sp-watermark--hidden";
-      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
+      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;visibility:${currentVisible ? "visible" : "hidden"};opacity:${currentOpacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
       el.setAttribute("data-position", currentPosition);
       updateContent(el);
       return el;
@@ -45145,8 +45149,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       });
       element.setAttribute("data-position", position);
-      const isVisible = element.classList.contains("sp-watermark--visible");
-      const visClass = isVisible ? " sp-watermark--visible" : " sp-watermark--hidden";
+      const visClass = currentVisible ? " sp-watermark--visible" : " sp-watermark--hidden";
       element.className = `sp-watermark sp-watermark--${position}${visClass}${dynamic ? " sp-watermark--dynamic" : ""}`;
     };
     const randomizePosition = () => {
@@ -45155,12 +45158,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       setPosition(next);
     };
     const show = () => {
+      currentVisible = true;
       if (!element) return;
+      element.style.visibility = "visible";
       element.classList.remove("sp-watermark--hidden");
       element.classList.add("sp-watermark--visible");
     };
     const hide = () => {
+      currentVisible = false;
       if (!element) return;
+      element.style.visibility = "hidden";
       element.classList.remove("sp-watermark--visible");
       element.classList.add("sp-watermark--hidden");
     };
@@ -45214,11 +45221,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                 }
               }
             } else if (mutation.type === "attributes" && mutation.attributeName === "style") {
-              if (element) {
-                element.style.opacity = String(opacity);
-                element.style.pointerEvents = "none";
-                element.style.position = "absolute";
-                element.style.zIndex = "10";
+              if (mutation.target !== element) continue;
+              const restore = [
+                ["opacity", String(currentOpacity)],
+                ["visibility", currentVisible ? "visible" : "hidden"],
+                ["pointer-events", "none"],
+                ["position", "absolute"],
+                ["z-index", "10"]
+              ];
+              for (const [prop, value] of restore) {
+                if (element.style.getPropertyValue(prop) !== value) {
+                  element.style.setProperty(prop, value);
+                }
               }
             }
           }
@@ -45282,7 +45296,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       setPosition,
       setOpacity(value) {
-        if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
+        currentOpacity = clampOpacity(value);
+        if (element) element.style.opacity = String(currentOpacity);
       },
       setImageHeight(height) {
         currentImageHeight = Math.max(1, height);
@@ -45300,7 +45315,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       show,
       hide,
       getConfig() {
-        return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity, imageHeight: currentImageHeight, padding: currentPadding };
+        return { ...config, position: currentPosition, opacity: currentOpacity, imageHeight: currentImageHeight, padding: currentPadding };
       }
     };
   }
@@ -48413,38 +48428,44 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "sp-clip-tool--play",
         "Play",
         "\u25B6",
+        "\u25B6",
         () => this.callbacks.onTogglePlay?.()
       );
       this.setInBtn = this.buildTool(
         "sp-clip-tool--set-in",
         "Set in point here",
         "IN here",
+        "IN",
         () => this.callbacks.onSetAtPlayhead?.("start")
       );
       this.setOutBtn = this.buildTool(
         "sp-clip-tool--set-out",
         "Set out point here",
         "OUT here",
+        "OUT",
         () => this.callbacks.onSetAtPlayhead?.("end")
       );
       this.previewBtn = this.buildTool(
         "sp-clip-tool--preview",
         "Preview clip",
         "Preview",
+        "\u21BB",
         () => this.callbacks.onPreview?.()
       );
       this.tuneBtn = this.buildTool(
         "sp-clip-tool--tune",
         "Fine tune exact times",
         "Fine tune",
+        "\u22EF",
         () => this.goToDetails("start")
       );
-      this.toolbarCancelBtn = this.buildTool("sp-clip-tool--cancel", "Cancel clip", "Cancel", () => {
+      this.toolbarCancelBtn = this.buildTool("sp-clip-tool--cancel", "Cancel clip", "Cancel", "\u2715", () => {
         if (!this.submitting) this.callbacks.onCancel();
       });
       this.nextBtn = this.buildTool(
         "sp-clip-tool--next",
         "Next: name and create",
+        "Next",
         "Next",
         () => this.goToDetails()
       );
@@ -48926,12 +48947,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const regular = this.layout === "regular";
       const givesUpControls = this.layout === "minimal" || this.layout === "tiny";
       this.nextBtn.hidden = regular;
-      this.tuneBtn.hidden = regular;
       this.toolbarCancelBtn.hidden = regular;
       this.backBtn.hidden = regular;
       this.playBtn.hidden = !givesUpControls;
+      this.tuneBtn.hidden = regular || givesUpControls;
       this.renderPlayButton();
-      this.root.classList.toggle("sp-clip-editor--icons", this.layout !== "regular");
+      const short = this.layout !== "regular";
+      this.root.classList.toggle("sp-clip-editor--icons", short);
+      for (const button of [
+        this.setInBtn,
+        this.setOutBtn,
+        this.previewBtn,
+        this.tuneBtn,
+        this.toolbarCancelBtn,
+        this.nextBtn
+      ]) {
+        const label = short ? button.dataset.shortLabel : button.dataset.longLabel;
+        if (label !== void 0 && button.textContent !== label) button.textContent = label;
+      }
     }
     /**
      * @internal Anchor the editor above the timeline's measured top edge.
@@ -48982,12 +49015,30 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     // --------------------------------------------------------------------------
     // Rendering
     // --------------------------------------------------------------------------
-    /** @internal Build one toolbar button with a full accessible name. */
-    buildTool(modifier, ariaLabel, text, onClick2) {
+    /**
+     * @internal Build one toolbar button with a full accessible name.
+     *
+     * Two visible labels, one accessible name. At 320px the toolbar's own row is
+     * 296px wide and seven word-labelled buttons need well over 400, so the
+     * primary action scrolled off the right-hand edge - which is the exact
+     * failure this whole piece of work exists to stop. The short label is what
+     * the viewer sees there; `aria-label` never shortens, so a screen-reader user
+     * always hears "Set in point here", not "IN".
+     *
+     * @param modifier - The button's class modifier
+     * @param ariaLabel - The unabridged accessible name
+     * @param text - Visible label on a player with room
+     * @param shortText - Visible label on a narrow player
+     * @param onClick - What the press does
+     * @returns The button
+     */
+    buildTool(modifier, ariaLabel, text, shortText, onClick2) {
       const el = document.createElement("button");
       el.type = "button";
       el.className = `sp-clip-tool ${modifier}`;
       el.setAttribute("aria-label", ariaLabel);
+      el.dataset.longLabel = text;
+      el.dataset.shortLabel = shortText;
       el.textContent = text;
       el.addEventListener("click", () => {
         if (this.submitting) return;
@@ -49517,9 +49568,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 .sp-clip-rail[hidden] { display: none; }
 
 /* Silent clamp flash. Deliberately not a live region: a drag pinned against a
-   limit re-flashes on every pointermove, and announcing that is noise. */
+   limit re-flashes on every pointermove, and announcing that is noise.
+
+   Floated above the editor rather than laid out inside it: it is transient, and
+   on a 320x180 player the ~24px it would otherwise reserve is the difference
+   between the toolbar being inside the picture and being one pixel above it. */
 .sp-clip-flash {
-  align-self: center;
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 6px;
+  transform: translateX(-50%);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -49819,8 +49878,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   display: none;
 }
 
-/* Icons/short labels at narrow widths; the accessible name is unchanged. */
+/* Short labels at narrow widths; the accessible name is unchanged. */
 .sp-clip-editor--icons .sp-clip-tool { font-size: 11px; padding: 0 8px; }
+
+/* The two exits stay put while the middle scrolls. The row is allowed to
+   overflow horizontally on a very narrow player, and "no control required for
+   clipping is outside the player" has to survive that: Cancel and Next are
+   pinned to the ends so the viewer can always leave or continue. */
+.sp-clip-editor--icons .sp-clip-tool--cancel {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.sp-clip-editor--icons .sp-clip-tool--primary {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
 
 /* Tiny: there is no picture worth protecting left, so reachability wins and
    the editor becomes a bounded scrollable sheet over the whole player. */
@@ -51327,7 +51401,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.11.0" : "dev";
+  var VERSION = true ? "1.13.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
@@ -51526,6 +51600,12 @@ Cada trampa se prueba una sola vez.
       mediaId: "demo-bbb",
       onCreate: fakeClipCreation
     });
+    const watermarkPlugin = createWatermarkPlugin({
+      imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
+      position: "bottom-right",
+      opacity: 0.5,
+      imageHeight: 64
+    });
     const player = await createPlayer({
       container,
       src: VIDEO_URL,
@@ -51572,12 +51652,7 @@ Cada trampa se prueba una sola vez.
         }),
         airplayPlugin(),
         chromecastPlugin(),
-        createWatermarkPlugin({
-          imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
-          position: "bottom-right",
-          opacity: 0.5,
-          imageHeight: 64
-        }),
+        watermarkPlugin,
         // Shares the demo page itself, with the playback position appended. On a
         // phone this opens the OS share sheet directly.
         //
@@ -51674,6 +51749,48 @@ Cada trampa se prueba una sola vez.
       input?.addEventListener("input", applyClipLimits);
     }
     document.getElementById("clip-open-btn")?.addEventListener("click", () => clipsPlugin.open());
+    const watermarkImageInput = document.getElementById("watermark-image-input");
+    document.getElementById("watermark-image-btn")?.addEventListener("click", () => {
+      const url = watermarkImageInput?.value.trim();
+      if (url) watermarkPlugin.setImage(url);
+    });
+    const watermarkTextInput = document.getElementById("watermark-text-input");
+    document.getElementById("watermark-text-btn")?.addEventListener("click", () => {
+      const text = watermarkTextInput?.value.trim();
+      if (text) watermarkPlugin.setText(text);
+    });
+    const positionButtons = document.querySelectorAll(".position-btn[data-pos]");
+    positionButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pos = btn.dataset.pos;
+        if (pos) watermarkPlugin.setPosition(pos);
+        positionButtons.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
+    });
+    const opacityInput = document.getElementById("watermark-opacity");
+    opacityInput?.addEventListener("input", () => {
+      const value = parseFloat(opacityInput.value);
+      const label = document.getElementById("opacity-value");
+      if (label) label.textContent = value.toFixed(1);
+      watermarkPlugin.setOpacity(value);
+    });
+    const imageHeightInput = document.getElementById("watermark-imageheight");
+    imageHeightInput?.addEventListener("input", () => {
+      const value = parseInt(imageHeightInput.value, 10);
+      const label = document.getElementById("imageheight-value");
+      if (label) label.textContent = String(value);
+      watermarkPlugin.setImageHeight(value);
+    });
+    const paddingInput = document.getElementById("watermark-padding");
+    paddingInput?.addEventListener("input", () => {
+      const value = parseInt(paddingInput.value, 10);
+      const label = document.getElementById("padding-value");
+      if (label) label.textContent = String(value);
+      watermarkPlugin.setPadding(value);
+    });
+    document.getElementById("watermark-show-btn")?.addEventListener("click", () => watermarkPlugin.show());
+    document.getElementById("watermark-hide-btn")?.addEventListener("click", () => watermarkPlugin.hide());
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
@@ -51688,7 +51805,7 @@ Cada trampa se prueba una sola vez.
     player.on("clip:cancelled", (e) => console.log(`\u{1F6AB} Clip cancelled (${e.reason})`));
     player.on("clip:error", (e) => console.error("\u274C Clip error:", e.error?.message ?? e.error));
     window.player = player;
-    window.watermarkPlugin = player.getPlugin("watermark");
+    window.watermarkPlugin = watermarkPlugin;
     window.clipsPlugin = clipsPlugin;
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");

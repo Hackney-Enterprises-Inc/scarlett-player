@@ -17,6 +17,16 @@ export type { IWatermarkPlugin, WatermarkConfig, WatermarkPosition } from './typ
 
 const POSITIONS: WatermarkPosition[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'];
 
+/**
+ * Clamp an opacity to the 0-1 range CSS accepts.
+ *
+ * @param value - Requested opacity
+ * @returns The value clamped to 0-1
+ */
+function clampOpacity(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
 function getPositionStyles(padding: number, bottomPadding: number): Record<WatermarkPosition, string> {
   return {
     'top-left': `top:${padding}px;left:${padding}px;`,
@@ -60,7 +70,11 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   let showDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let currentPosition: WatermarkPosition = config.position || 'bottom-right';
 
-  const opacity = config.opacity ?? 0.5;
+  // Opacity is runtime state, not a constant: setOpacity() has to survive the
+  // anti-tamper observer below, which restores whatever value the plugin last
+  // asked for. Reading the config there instead would undo every setOpacity().
+  let currentOpacity = clampOpacity(config.opacity ?? 0.5);
+  let currentVisible = false;
   const fontSize = config.fontSize ?? 14;
   let currentImageHeight = config.imageHeight ?? 40;
   let currentPadding = config.padding ?? 10;
@@ -80,7 +94,9 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   const createElement = (): HTMLDivElement => {
     const el = document.createElement('div');
     el.className = 'sp-watermark sp-watermark--hidden';
-    el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
+    // `visibility` rather than `display` so the 0.5s transition and the
+    // element's box survive a hide(); the two classes stay as consumer hooks.
+    el.style.cssText = `position:absolute;z-index:10;pointer-events:none;visibility:${currentVisible ? 'visible' : 'hidden'};opacity:${currentOpacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
     el.setAttribute('data-position', currentPosition);
 
     updateContent(el);
@@ -143,8 +159,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
       }
     });
     element.setAttribute('data-position', position);
-    const isVisible = element.classList.contains('sp-watermark--visible');
-    const visClass = isVisible ? ' sp-watermark--visible' : ' sp-watermark--hidden';
+    const visClass = currentVisible ? ' sp-watermark--visible' : ' sp-watermark--hidden';
     element.className = `sp-watermark sp-watermark--${position}${visClass}${dynamic ? ' sp-watermark--dynamic' : ''}`;
   };
 
@@ -161,7 +176,9 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
    * Show the watermark.
    */
   const show = (): void => {
+    currentVisible = true;
     if (!element) return;
+    element.style.visibility = 'visible';
     element.classList.remove('sp-watermark--hidden');
     element.classList.add('sp-watermark--visible');
   };
@@ -170,7 +187,9 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
    * Hide the watermark.
    */
   const hide = (): void => {
+    currentVisible = false;
     if (!element) return;
+    element.style.visibility = 'hidden';
     element.classList.remove('sp-watermark--visible');
     element.classList.add('sp-watermark--hidden');
   };
@@ -243,12 +262,26 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
               }
             }
           } else if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-            // Inline style was altered — restore opacity and pointer-events
-            if (element) {
-              element.style.opacity = String(opacity);
-              element.style.pointerEvents = 'none';
-              element.style.position = 'absolute';
-              element.style.zIndex = '10';
+            // Only the watermark's own style is ours to restore. `subtree: true`
+            // is needed for the childList branch, so every style write anywhere
+            // in the container (control bar, progress bar, clip selector)
+            // arrives here too — those are not tampering.
+            if (mutation.target !== element) continue;
+            // Restore the values the plugin last asked for, not the ones it was
+            // configured with, and only when they actually differ: an
+            // unconditional write queues another record for this same element
+            // on every callback.
+            const restore: Array<[string, string]> = [
+              ['opacity', String(currentOpacity)],
+              ['visibility', currentVisible ? 'visible' : 'hidden'],
+              ['pointer-events', 'none'],
+              ['position', 'absolute'],
+              ['z-index', '10'],
+            ];
+            for (const [prop, value] of restore) {
+              if (element.style.getPropertyValue(prop) !== value) {
+                element.style.setProperty(prop, value);
+              }
             }
           }
         }
@@ -328,7 +361,8 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     setPosition: setPosition,
 
     setOpacity(value: number): void {
-      if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
+      currentOpacity = clampOpacity(value);
+      if (element) element.style.opacity = String(currentOpacity);
     },
 
     setImageHeight(height: number): void {
@@ -353,7 +387,7 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     hide,
 
     getConfig(): WatermarkConfig {
-      return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity, imageHeight: currentImageHeight, padding: currentPadding };
+      return { ...config, position: currentPosition, opacity: currentOpacity, imageHeight: currentImageHeight, padding: currentPadding };
     },
   };
 }

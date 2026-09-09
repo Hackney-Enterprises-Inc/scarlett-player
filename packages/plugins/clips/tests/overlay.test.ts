@@ -42,6 +42,7 @@ interface Harness {
   confirm: HTMLButtonElement;
   next: HTMLButtonElement;
   back: HTMLButtonElement;
+  toolbarCancelBtn: HTMLButtonElement;
   setIn: HTMLButtonElement;
   setOut: HTMLButtonElement;
   preview: HTMLButtonElement;
@@ -128,6 +129,7 @@ function setup(
     confirm: pick<HTMLButtonElement>('.sp-clip-btn--confirm'),
     next: pick<HTMLButtonElement>('.sp-clip-tool--next'),
     back: pick<HTMLButtonElement>('.sp-clip-back'),
+    toolbarCancelBtn: pick<HTMLButtonElement>('.sp-clip-tool--cancel'),
     setIn: pick<HTMLButtonElement>('.sp-clip-tool--set-in'),
     setOut: pick<HTMLButtonElement>('.sp-clip-tool--set-out'),
     preview: pick<HTMLButtonElement>('.sp-clip-tool--preview'),
@@ -383,10 +385,35 @@ describe('layout and stages', () => {
   });
 
   it('Fine tune opens the details stage focused on the chosen endpoint', () => {
-    const h = setup({}, { width: 375, height: 211 });
+    const h = setup({}, { width: 500, height: 400 });
+    expect(h.overlay.getLayout()).toBe('compact');
+    expect(h.tune.hidden).toBe(false);
+
     h.tune.click();
+
     expect(h.overlay.getStage()).toBe('details');
     expect(document.activeElement).toBe(h.timeIn);
+  });
+
+  it('drops Fine tune on a player that has already given up its control bar', () => {
+    // Next goes to the same stage, and at 320px keeping a second route there
+    // is what pushed the primary action off the right-hand edge.
+    const h = setup({}, { width: 320, height: 180 });
+    expect(h.tune.hidden).toBe(true);
+    expect(h.next.hidden).toBe(false);
+    expect(h.toolbarCancelBtn.hidden).toBe(false);
+  });
+
+  it('shortens the visible labels on a narrow player but never the accessible names', () => {
+    const compact = setup({}, { width: 375, height: 211 });
+    expect(compact.setIn.textContent).toBe('IN');
+    expect(compact.setOut.textContent).toBe('OUT');
+    expect(compact.setIn.getAttribute('aria-label')).toBe('Set in point here');
+    expect(compact.setOut.getAttribute('aria-label')).toBe('Set out point here');
+
+    const regular = setup();
+    expect(regular.setIn.textContent).toBe('IN here');
+    expect(regular.setOut.textContent).toBe('OUT here');
   });
 
   it('freezes the timeline while the details stage covers the player', () => {

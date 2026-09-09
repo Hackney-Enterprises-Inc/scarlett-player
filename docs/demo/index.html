@@ -976,7 +976,7 @@
           <input type="range" id="watermark-opacity" min="0" max="1" step="0.1" value="0.5">
         </div>
         <div class="watermark-row">
-          <label>Size: <span id="imageheight-value">64</span>px</label>
+          <label>Image size: <span id="imageheight-value">64</span>px</label>
           <input type="range" id="watermark-imageheight" min="20" max="200" step="5" value="64">
         </div>
         <div class="watermark-row">
@@ -1011,7 +1011,7 @@
         </div>
         <div class="clip-control-row">
           <button id="clip-open-btn" class="clip-btn">Open selector</button>
-          <span class="clip-hint">opens pre-rolled behind the playhead, VOD only - the sliders re-run plugin.configure()</span>
+          <span class="clip-hint">opens pre-rolled behind the playhead, VOD only - the IN/OUT handles land on the playback timeline itself, and the sliders re-run plugin.configure()</span>
         </div>
       </div>
     </div>
@@ -1067,6 +1067,8 @@
     <span class="comment">// Viewer-created clips: this is what a real host running the clips</span>
     <span class="comment">// server writes - the plugin POSTs the captured range as JSON.</span>
     <span class="comment">// (Hosts with their own HTTP client pass onCreate instead.)</span>
+    <span class="comment">// With the UI plugin present the IN/OUT handles mount onto the</span>
+    <span class="comment">// playback timeline; without it they render on their own rail.</span>
     <span class="function">createClipsPlugin</span>({
       <span class="property">mediaId</span>: <span class="string">'video-42'</span>,
       <span class="property">endpoint</span>: { <span class="property">url</span>: <span class="string">'/api/clips'</span> },
@@ -1296,7 +1298,7 @@ playlist.<span class="function">add</span>([
     <div class="console-line">Console output will appear here...</div>
   </div>
 
-  <script src="demo.bundle.js?v=1.11.0"></script>
+  <script src="demo.bundle.js?v=1.13.0"></script>
   <script>
     // Display version from bundle
     if (window.SCARLETT_VERSION) {
@@ -1637,48 +1639,10 @@ playlist.<span class="function">add</span>([
       if (e.key === 'Enter') loadMiniUrl();
     });
 
-    // Watermark controls
-    const wmPlugin = window.watermarkPlugin;
-
-    document.getElementById('watermark-image-btn').addEventListener('click', () => {
-      const url = document.getElementById('watermark-image-input').value.trim();
-      if (url && wmPlugin) wmPlugin.setImage(url);
-    });
-
-    document.getElementById('watermark-text-btn').addEventListener('click', () => {
-      const text = document.getElementById('watermark-text-input').value.trim();
-      if (text && wmPlugin) wmPlugin.setText(text);
-    });
-
-    document.querySelectorAll('.position-btn[data-pos]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const pos = btn.dataset.pos;
-        if (wmPlugin) wmPlugin.setPosition(pos);
-        document.querySelectorAll('.position-btn[data-pos]').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-      });
-    });
-
-    document.getElementById('watermark-opacity').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      document.getElementById('opacity-value').textContent = val.toFixed(1);
-      if (wmPlugin) wmPlugin.setOpacity(val);
-    });
-
-    document.getElementById('watermark-imageheight').addEventListener('input', (e) => {
-      const val = parseInt(e.target.value, 10);
-      document.getElementById('imageheight-value').textContent = val;
-      if (wmPlugin) wmPlugin.setImageHeight(val);
-    });
-
-    document.getElementById('watermark-padding').addEventListener('input', (e) => {
-      const val = parseInt(e.target.value, 10);
-      document.getElementById('padding-value').textContent = val;
-      if (wmPlugin) wmPlugin.setPadding(val);
-    });
-
-    document.getElementById('watermark-show-btn').addEventListener('click', () => wmPlugin?.show());
-    document.getElementById('watermark-hide-btn').addEventListener('click', () => wmPlugin?.hide());
+    // The Watermark Controls panel is wired in demo.ts, next to the Clip
+    // Controls panel, because it needs the live plugin instance: this script
+    // runs while the page is still parsing, long before createPlayer() has
+    // resolved and set window.watermarkPlugin.
 
     // Code toggle functionality
     document.querySelectorAll('.code-toggle-btn').forEach(btn => {

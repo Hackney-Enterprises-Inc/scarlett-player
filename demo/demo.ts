@@ -21,6 +21,7 @@ import { createAnalyticsPlugin } from '../packages/plugins/analytics/src/index';
 import type { Chapter } from '../packages/core/src/index';
 import type { BeaconPayload } from '../packages/plugins/analytics/src/index';
 import type { ClipRange } from '../packages/plugins/clips/src/index';
+import type { WatermarkPosition } from '../packages/plugins/watermark/src/index';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -356,6 +357,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     onCreate: fakeClipCreation,
   });
 
+  // Held in scope for the same reason, for the Watermark Controls panel. A
+  // consumer would reach for `player.getPlugin<IWatermarkPlugin>('watermark')`
+  // as the README shows; this file compiles core from src while the plugins
+  // resolve its types from dist, so that generic does not line up here - the
+  // same mismatch the clip:* event casts below work around.
+  const watermarkPlugin = createWatermarkPlugin({
+    imageUrl: 'https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png',
+    position: 'bottom-right',
+    opacity: 0.5,
+    imageHeight: 64,
+  });
+
   // Provider plugins (HLS and Native) are tried in order - first one that can play the source wins
   const player = await createPlayer({
     container,
@@ -401,12 +414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }),
       airplayPlugin(),
       chromecastPlugin(),
-      createWatermarkPlugin({
-        imageUrl: 'https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png',
-        position: 'bottom-right',
-        opacity: 0.5,
-        imageHeight: 64,
-      }),
+      watermarkPlugin,
       // Shares the demo page itself, with the playback position appended. On a
       // phone this opens the OS share sheet directly.
       //
@@ -475,11 +483,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // behind. build.cjs now generates it from this page's index.html.)
   document.getElementById('clip-clear')?.addEventListener('click', clearClipLog);
 
-  // Clip Controls panel, modelled on Watermark Controls: the four limit
-  // sliders feed plugin.configure() as one patch, and "Open selector" calls
-  // plugin.open(). Wired here rather than in the page's inline script so the
-  // handlers see the live instance - unlike the watermark capture below,
-  // which reads window.watermarkPlugin before the async init has set it.
+  // Clip Controls panel: the four limit sliders feed plugin.configure() as one
+  // patch, and "Open selector" calls plugin.open(). Wired here rather than in
+  // the page's inline script so the handlers see the live instance, which is
+  // what the Watermark Controls panel below now does too.
   const clipLimitInputs = {
     minDuration: document.getElementById('clip-min') as HTMLInputElement | null,
     maxDuration: document.getElementById('clip-max') as HTMLInputElement | null,
@@ -525,6 +532,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   document.getElementById('clip-open-btn')?.addEventListener('click', () => clipsPlugin.open());
 
+  // Watermark Controls panel. Also wired here rather than in the page's inline
+  // script: that script runs while the page is still parsing, so the
+  // `window.watermarkPlugin` it used to read was always undefined and every
+  // control on the panel silently did nothing (the buttons still took their
+  // `active` class, so it looked broken rather than dead).
+  const watermarkImageInput = document.getElementById('watermark-image-input') as HTMLInputElement | null;
+  document.getElementById('watermark-image-btn')?.addEventListener('click', () => {
+    const url = watermarkImageInput?.value.trim();
+    if (url) watermarkPlugin.setImage(url);
+  });
+
+  const watermarkTextInput = document.getElementById('watermark-text-input') as HTMLInputElement | null;
+  document.getElementById('watermark-text-btn')?.addEventListener('click', () => {
+    const text = watermarkTextInput?.value.trim();
+    if (text) watermarkPlugin.setText(text);
+  });
+
+  const positionButtons = document.querySelectorAll<HTMLElement>('.position-btn[data-pos]');
+  positionButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pos = btn.dataset.pos as WatermarkPosition | undefined;
+      if (pos) watermarkPlugin.setPosition(pos);
+      positionButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  const opacityInput = document.getElementById('watermark-opacity') as HTMLInputElement | null;
+  opacityInput?.addEventListener('input', () => {
+    const value = parseFloat(opacityInput.value);
+    const label = document.getElementById('opacity-value');
+    if (label) label.textContent = value.toFixed(1);
+    watermarkPlugin.setOpacity(value);
+  });
+
+  const imageHeightInput = document.getElementById('watermark-imageheight') as HTMLInputElement | null;
+  imageHeightInput?.addEventListener('input', () => {
+    const value = parseInt(imageHeightInput.value, 10);
+    const label = document.getElementById('imageheight-value');
+    if (label) label.textContent = String(value);
+    watermarkPlugin.setImageHeight(value);
+  });
+
+  const paddingInput = document.getElementById('watermark-padding') as HTMLInputElement | null;
+  paddingInput?.addEventListener('input', () => {
+    const value = parseInt(paddingInput.value, 10);
+    const label = document.getElementById('padding-value');
+    if (label) label.textContent = String(value);
+    watermarkPlugin.setPadding(value);
+  });
+
+  document.getElementById('watermark-show-btn')?.addEventListener('click', () => watermarkPlugin.show());
+  document.getElementById('watermark-hide-btn')?.addEventListener('click', () => watermarkPlugin.hide());
+
   // Log events for debugging
   player.on('playback:play', () => console.log('▶️ Playing'));
   player.on('playback:pause', () => console.log('⏸️ Paused'));
@@ -547,7 +608,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Expose player globally for debugging
   (window as any).player = player;
-  (window as any).watermarkPlugin = player.getPlugin('watermark');
+  (window as any).watermarkPlugin = watermarkPlugin;
   (window as any).clipsPlugin = clipsPlugin;
 
   console.log(`🎬 Scarlett Player v${VERSION} Demo Ready`);

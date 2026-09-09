@@ -319,9 +319,17 @@ export const styles = `
 .sp-clip-rail[hidden] { display: none; }
 
 /* Silent clamp flash. Deliberately not a live region: a drag pinned against a
-   limit re-flashes on every pointermove, and announcing that is noise. */
+   limit re-flashes on every pointermove, and announcing that is noise.
+
+   Floated above the editor rather than laid out inside it: it is transient, and
+   on a 320x180 player the ~24px it would otherwise reserve is the difference
+   between the toolbar being inside the picture and being one pixel above it. */
 .sp-clip-flash {
-  align-self: center;
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 6px;
+  transform: translateX(-50%);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -621,8 +629,23 @@ export const styles = `
   display: none;
 }
 
-/* Icons/short labels at narrow widths; the accessible name is unchanged. */
+/* Short labels at narrow widths; the accessible name is unchanged. */
 .sp-clip-editor--icons .sp-clip-tool { font-size: 11px; padding: 0 8px; }
+
+/* The two exits stay put while the middle scrolls. The row is allowed to
+   overflow horizontally on a very narrow player, and "no control required for
+   clipping is outside the player" has to survive that: Cancel and Next are
+   pinned to the ends so the viewer can always leave or continue. */
+.sp-clip-editor--icons .sp-clip-tool--cancel {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.sp-clip-editor--icons .sp-clip-tool--primary {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
 
 /* Tiny: there is no picture worth protecting left, so reachability wins and
    the editor becomes a bounded scrollable sheet over the whole player. */

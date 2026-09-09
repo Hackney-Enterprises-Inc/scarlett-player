@@ -318,25 +318,25 @@ export class ClipOverlay {
     this.toolbar.setAttribute('role', 'group');
     this.toolbar.setAttribute('aria-label', 'Clip range');
 
-    this.playBtn = this.buildTool('sp-clip-tool--play', 'Play', '▶', () =>
+    this.playBtn = this.buildTool('sp-clip-tool--play', 'Play', '▶', '▶', () =>
       this.callbacks.onTogglePlay?.()
     );
-    this.setInBtn = this.buildTool('sp-clip-tool--set-in', 'Set in point here', 'IN here', () =>
+    this.setInBtn = this.buildTool('sp-clip-tool--set-in', 'Set in point here', 'IN here', 'IN', () =>
       this.callbacks.onSetAtPlayhead?.('start')
     );
-    this.setOutBtn = this.buildTool('sp-clip-tool--set-out', 'Set out point here', 'OUT here', () =>
+    this.setOutBtn = this.buildTool('sp-clip-tool--set-out', 'Set out point here', 'OUT here', 'OUT', () =>
       this.callbacks.onSetAtPlayhead?.('end')
     );
-    this.previewBtn = this.buildTool('sp-clip-tool--preview', 'Preview clip', 'Preview', () =>
+    this.previewBtn = this.buildTool('sp-clip-tool--preview', 'Preview clip', 'Preview', '↻', () =>
       this.callbacks.onPreview?.()
     );
-    this.tuneBtn = this.buildTool('sp-clip-tool--tune', 'Fine tune exact times', 'Fine tune', () =>
+    this.tuneBtn = this.buildTool('sp-clip-tool--tune', 'Fine tune exact times', 'Fine tune', '⋯', () =>
       this.goToDetails('start')
     );
-    this.toolbarCancelBtn = this.buildTool('sp-clip-tool--cancel', 'Cancel clip', 'Cancel', () => {
+    this.toolbarCancelBtn = this.buildTool('sp-clip-tool--cancel', 'Cancel clip', 'Cancel', '✕', () => {
       if (!this.submitting) this.callbacks.onCancel();
     });
-    this.nextBtn = this.buildTool('sp-clip-tool--next', 'Next: name and create', 'Next', () =>
+    this.nextBtn = this.buildTool('sp-clip-tool--next', 'Next: name and create', 'Next', 'Next', () =>
       this.goToDetails()
     );
     this.nextBtn.classList.add('sp-clip-tool--primary');
@@ -910,15 +910,30 @@ export class ClipOverlay {
     // buttons have nothing to switch between and the panel's own footer
     // carries Cancel.
     this.nextBtn.hidden = regular;
-    this.tuneBtn.hidden = regular;
     this.toolbarCancelBtn.hidden = regular;
     this.backBtn.hidden = regular;
     this.playBtn.hidden = !givesUpControls;
+    // Fine tune is a shortcut to the details stage focused on one endpoint.
+    // On a player short enough to have given up its control bar there is no
+    // room for a shortcut to a place Next already goes, and keeping it is what
+    // pushed the primary action off the right-hand edge at 320px.
+    this.tuneBtn.hidden = regular || givesUpControls;
     this.renderPlayButton();
 
-    // At 320px the words do not fit beside four other targets; the accessible
-    // name stays full either way.
-    this.root.classList.toggle('sp-clip-editor--icons', this.layout !== 'regular');
+    // Short visible labels below `regular`; the accessible names are untouched.
+    const short = this.layout !== 'regular';
+    this.root.classList.toggle('sp-clip-editor--icons', short);
+    for (const button of [
+      this.setInBtn,
+      this.setOutBtn,
+      this.previewBtn,
+      this.tuneBtn,
+      this.toolbarCancelBtn,
+      this.nextBtn,
+    ]) {
+      const label = short ? button.dataset.shortLabel : button.dataset.longLabel;
+      if (label !== undefined && button.textContent !== label) button.textContent = label;
+    }
   }
 
   /**
@@ -1081,19 +1096,36 @@ export class ClipOverlay {
   // Rendering
   // --------------------------------------------------------------------------
 
-  /** @internal Build one toolbar button with a full accessible name. */
+  /**
+   * @internal Build one toolbar button with a full accessible name.
+   *
+   * Two visible labels, one accessible name. At 320px the toolbar's own row is
+   * 296px wide and seven word-labelled buttons need well over 400, so the
+   * primary action scrolled off the right-hand edge - which is the exact
+   * failure this whole piece of work exists to stop. The short label is what
+   * the viewer sees there; `aria-label` never shortens, so a screen-reader user
+   * always hears "Set in point here", not "IN".
+   *
+   * @param modifier - The button's class modifier
+   * @param ariaLabel - The unabridged accessible name
+   * @param text - Visible label on a player with room
+   * @param shortText - Visible label on a narrow player
+   * @param onClick - What the press does
+   * @returns The button
+   */
   private buildTool(
     modifier: string,
     ariaLabel: string,
     text: string,
+    shortText: string,
     onClick: () => void
   ): HTMLButtonElement {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = `sp-clip-tool ${modifier}`;
-    // The visible text shortens on a narrow player; the accessible name never
-    // does, so a screen-reader user always hears the whole thing.
     el.setAttribute('aria-label', ariaLabel);
+    el.dataset.longLabel = text;
+    el.dataset.shortLabel = shortText;
     el.textContent = text;
     el.addEventListener('click', () => {
       if (this.submitting) return;
