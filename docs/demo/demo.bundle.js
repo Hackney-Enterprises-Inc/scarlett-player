@@ -7071,15 +7071,15 @@ ${newDetails.m3u8}`);
     }
     return null;
   }
-  function toTimescaleFromBase(baseTime, destScale, srcBase = 1, round = false) {
+  function toTimescaleFromBase(baseTime, destScale, srcBase = 1, round2 = false) {
     const result = baseTime * destScale * srcBase;
-    return round ? Math.round(result) : result;
+    return round2 ? Math.round(result) : result;
   }
-  function toTimescaleFromScale(baseTime, destScale, srcScale = 1, round = false) {
-    return toTimescaleFromBase(baseTime, destScale, 1 / srcScale, round);
+  function toTimescaleFromScale(baseTime, destScale, srcScale = 1, round2 = false) {
+    return toTimescaleFromBase(baseTime, destScale, 1 / srcScale, round2);
   }
-  function toMsFromMpegTsClock(baseTime, round = false) {
-    return toTimescaleFromBase(baseTime, 1e3, 1 / MPEG_TS_CLOCK_FREQ_HZ, round);
+  function toMsFromMpegTsClock(baseTime, round2 = false) {
+    return toTimescaleFromBase(baseTime, 1e3, 1 / MPEG_TS_CLOCK_FREQ_HZ, round2);
   }
   function toMpegTsClockFromTimescale(baseTime, srcScale = 1) {
     return toTimescaleFromBase(baseTime, MPEG_TS_CLOCK_FREQ_HZ, 1 / srcScale);
@@ -36192,6 +36192,44 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   height: 5px;
 }
 
+/* ============================================
+   Timeline extension layer (timeline-registry.ts)
+
+   A zero-height line lying exactly on the rail's centre, spanning exactly the
+   rail's width, so an extension can position by percentage and land on the
+   same pixels the seek slider maps a press to. The 10px offset is the rail
+   centre in BOTH wrapper modes: the fine-pointer wrapper is 20px tall with the
+   3px rail centred (8.5..11.5 from the bottom), and the coarse-pointer wrapper
+   is 44px tall with 8.5px of bottom padding and align-items: flex-end, which
+   puts the rail in the same place.
+
+   Inert by default: only the explicit hit targets an extension puts inside it
+   take pointer input, so an ordinary press on the rail still seeks.
+   ============================================ */
+.sp-progress__extension {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  height: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Editing reserves a lane below the rail for an extension's second handle, by
+   lifting the whole wrapper clear of the control bar. The lane above needs no
+   reservation - it is over the picture. */
+.sp-progress-wrapper--editing {
+  bottom: calc(92px + var(--sp-inset-bottom, 0px));
+}
+
+/* While an extension owns the pointer the bar must not also look like it is
+   scrubbing: the tooltip is suppressed inline by the control, and the handle
+   stops responding to hover growth. */
+.sp-progress-wrapper--ext-dragging .sp-progress__handle {
+  transform: translate(-50%, -50%);
+}
+
 .sp-progress__track {
   position: absolute;
   top: 0;
@@ -37466,15 +37504,59 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/timeline-registry.ts
+  function registerTimelineExtension(owner, factory) {
+    const token = {};
+    registrations.set(owner, { factory, token });
+    hosts.get(owner)?.setFactory(factory);
+    return () => {
+      const current = registrations.get(owner);
+      if (!current || current.token !== token) return;
+      registrations.delete(owner);
+      hosts.get(owner)?.setFactory(null);
+    };
+  }
+  function unregisterTimelineExtension(owner) {
+    if (!registrations.has(owner)) return false;
+    registrations.delete(owner);
+    hosts.get(owner)?.setFactory(null);
+    return true;
+  }
+  function hasTimelineExtension(owner) {
+    return registrations.has(owner);
+  }
+  function attachTimelineHost(owner, host) {
+    hosts.set(owner, host);
+    const registration = registrations.get(owner);
+    if (registration) host.setFactory(registration.factory);
+    return () => {
+      if (hosts.get(owner) === host) hosts.delete(owner);
+    };
+  }
+  var registrations, hosts;
+  var init_timeline_registry = __esm({
+    "packages/plugins/ui/src/timeline-registry.ts"() {
+      "use strict";
+      registrations = /* @__PURE__ */ new WeakMap();
+      hosts = /* @__PURE__ */ new WeakMap();
+    }
+  });
+
   // packages/plugins/ui/src/controls/ProgressBar.ts
-  var ProgressBar;
+  var SEEK_KEYS, ProgressBar;
   var init_ProgressBar = __esm({
     "packages/plugins/ui/src/controls/ProgressBar.ts"() {
       "use strict";
       init_utils();
       init_ThumbnailPreview();
+      init_timeline_registry();
+      SEEK_KEYS = /* @__PURE__ */ new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
       ProgressBar = class {
-        constructor(api) {
+        /**
+         * @param api - The per-player plugin API
+         * @param options - Optional hooks; see {@link ProgressBarOptions}
+         */
+        constructor(api, options = {}) {
           this.isDragging = false;
           this.lastSeekTime = 0;
           this.seekThrottleMs = 100;
@@ -37484,8 +37566,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.renderedChapters = null;
           /** Duration the marker layer was last built against, since positions are a percentage of it. */
           this.renderedDuration = 0;
+          /** The mounted extension, or null when none is registered. */
+          this.extension = null;
+          /** Detaches this bar from the registry on destroy. */
+          this.detachTimelineHost = null;
+          /** True while the extension holds the pointer: ordinary seeking is suppressed. */
+          this.extensionDragging = false;
+          /** True while the extension is editing: the bar is held open and geometry reserved. */
+          this.extensionEditing = false;
           this.onMouseDown = (e) => {
+            if (this.isExtensionInput(e)) return;
             e.preventDefault();
+            this.extension?.onSeekStart();
             const video = getVideo(this.api.container);
             this.wasPlayingBeforeDrag = video ? !video.paused : false;
             this.isDragging = true;
@@ -37504,6 +37596,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.seek(e.clientX, true);
               this.isDragging = false;
               this.el.classList.remove("sp-progress--dragging");
+              this.extension?.onSeekEnd();
               if (this.wasPlayingBeforeDrag) {
                 const video = getVideo(this.api.container);
                 if (video && video.paused) {
@@ -37518,7 +37611,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.onTouchStart = (e) => {
+            if (this.isExtensionInput(e)) return;
             e.preventDefault();
+            this.extension?.onSeekStart();
             const video = getVideo(this.api.container);
             this.wasPlayingBeforeDrag = video ? !video.paused : false;
             this.isDragging = true;
@@ -37541,6 +37636,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               }
               this.isDragging = false;
               this.el.classList.remove("sp-progress--dragging");
+              this.extension?.onSeekEnd();
               if (this.wasPlayingBeforeDrag) {
                 const video = getVideo(this.api.container);
                 if (video && video.paused) {
@@ -37557,6 +37653,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
           this.onMouseMove = (e) => {
+            if (this.isExtensionInput(e)) return;
             this.updateTooltip(e.clientX);
           };
           this.onMouseLeave = () => {
@@ -37568,51 +37665,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.onKeyDown = (e) => {
             const video = getVideo(this.api.container);
             if (!video) return;
-            const step = 5;
-            const live = this.api.getState("live");
-            const seekableRange = this.api.getState("seekableRange");
-            if (live && seekableRange) {
-              switch (e.key) {
-                case "ArrowLeft":
-                  e.preventDefault();
-                  video.currentTime = Math.max(seekableRange.start, video.currentTime - step);
-                  break;
-                case "ArrowRight":
-                  e.preventDefault();
-                  video.currentTime = Math.min(seekableRange.end, video.currentTime + step);
-                  break;
-                case "Home":
-                  e.preventDefault();
-                  video.currentTime = seekableRange.start;
-                  break;
-                case "End":
-                  e.preventDefault();
-                  video.currentTime = seekableRange.end;
-                  break;
-              }
-            } else {
-              const duration = this.api.getState("duration") || 0;
-              switch (e.key) {
-                case "ArrowLeft":
-                  e.preventDefault();
-                  video.currentTime = Math.max(0, video.currentTime - step);
-                  break;
-                case "ArrowRight":
-                  e.preventDefault();
-                  video.currentTime = Math.min(duration, video.currentTime + step);
-                  break;
-                case "Home":
-                  e.preventDefault();
-                  video.currentTime = 0;
-                  break;
-                case "End":
-                  e.preventDefault();
-                  video.currentTime = duration;
-                  break;
-              }
+            if (!SEEK_KEYS.has(e.key)) return;
+            this.extension?.onSeekStart();
+            try {
+              this.applyKeyboardSeek(e, video);
+            } finally {
+              this.extension?.onSeekEnd();
             }
           };
           this.api = api;
+          this.options = options;
           this.wrapper = createElement("div", { className: "sp-progress-wrapper" });
           this.el = createElement("div", { className: "sp-progress" });
           const track = createElement("div", { className: "sp-progress__track" });
@@ -37631,6 +37693,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.el.appendChild(this.thumbnailPreview.getElement());
           this.el.appendChild(this.tooltip);
           this.wrapper.appendChild(this.el);
+          this.extensionLayer = createElement("div", { className: "sp-progress__extension" });
+          this.wrapper.appendChild(this.extensionLayer);
           this.el.setAttribute("role", "slider");
           this.el.setAttribute("aria-label", "Seek");
           this.el.setAttribute("aria-valuemin", "0");
@@ -37648,6 +37712,90 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           document.addEventListener("touchmove", this.onDocTouchMove, { passive: false });
           document.addEventListener("touchend", this.onTouchEnd);
           document.addEventListener("touchcancel", this.onTouchEnd);
+          this.detachTimelineHost = attachTimelineHost(this.api.container, {
+            setFactory: (factory) => this.mountExtension(factory)
+          });
+        }
+        // --------------------------------------------------------------------------
+        // Timeline extension seam
+        // --------------------------------------------------------------------------
+        /**
+         * Mount a registered extension factory, replacing any predecessor.
+         *
+         * The previous extension is destroyed and every lease it held is released
+         * first, so a replacement never inherits a stale editing or dragging state.
+         *
+         * @param factory - The factory to mount, or null to unmount
+         */
+        mountExtension(factory) {
+          if (this.extension) {
+            this.extension.destroy();
+            this.extension = null;
+            this.setExtensionDragging(false);
+            this.setExtensionEditing(false);
+            this.extensionLayer.replaceChildren();
+          }
+          if (!factory) return;
+          const surface = {
+            element: this.extensionLayer,
+            getRailRect: () => this.el.getBoundingClientRect(),
+            setEditing: (active) => this.setExtensionEditing(active),
+            setDragging: (active) => this.setExtensionDragging(active)
+          };
+          this.extension = factory(surface);
+          this.extension.update();
+        }
+        /** Whether a registered extension is currently editing. */
+        isTimelineEditing() {
+          return this.extensionEditing;
+        }
+        /**
+         * Apply the editing lease: reserve the handle lanes and hold the bar open.
+         *
+         * @param active - Whether the extension is editing
+         */
+        setExtensionEditing(active) {
+          if (this.extensionEditing === active) return;
+          this.extensionEditing = active;
+          this.wrapper.classList.toggle("sp-progress-wrapper--editing", active);
+          if (active) this.show();
+          this.options.onEditingChange?.(active);
+        }
+        /**
+         * Apply the pointer lease: suppress ordinary seeking while the extension
+         * owns the gesture, and get the hover tooltip out of the way.
+         *
+         * @param active - Whether the extension owns the pointer
+         */
+        setExtensionDragging(active) {
+          if (this.extensionDragging === active) return;
+          this.extensionDragging = active;
+          this.wrapper.classList.toggle("sp-progress-wrapper--ext-dragging", active);
+          if (active) {
+            this.isDragging = false;
+            this.el.classList.remove("sp-progress--dragging");
+            this.tooltip.style.opacity = "0";
+            this.thumbnailPreview.hide();
+          } else {
+            this.tooltip.style.opacity = "";
+          }
+        }
+        /**
+         * Whether an input event belongs to the extension rather than to seeking.
+         *
+         * Two independent reasons, and both are needed: the extension holds the
+         * pointer lease (its drag has moved off its handle and onto the rail), or
+         * the event started inside the extension layer at all. Touch and mouse
+         * compatibility events replay a handle press as a wrapper press, and only
+         * the target check catches those.
+         *
+         * @param event - The incoming pointer, mouse or touch event
+         * @returns True when the timeline must not act on it
+         */
+        isExtensionInput(event) {
+          if (this.extensionDragging) return true;
+          const target = event.target;
+          return target instanceof Node && this.extensionLayer.contains(target);
         }
         render() {
           return this.wrapper;
@@ -37707,6 +37855,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.el.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
             this.el.setAttribute("aria-valuetext", formatTime(currentTime));
           }
+          this.extension?.update();
         }
         /**
          * Label of the chapter containing a point on the timeline.
@@ -37815,6 +37964,57 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.filled.style.width = `${percent * 100}%`;
           this.handle.style.left = `${percent * 100}%`;
         }
+        /**
+         * Apply one keyboard seek to the element.
+         *
+         * @param e - The key event (already known to be a seek key)
+         * @param video - The player's media element
+         */
+        applyKeyboardSeek(e, video) {
+          const step = 5;
+          const live = this.api.getState("live");
+          const seekableRange = this.api.getState("seekableRange");
+          if (live && seekableRange) {
+            switch (e.key) {
+              case "ArrowLeft":
+                e.preventDefault();
+                video.currentTime = Math.max(seekableRange.start, video.currentTime - step);
+                break;
+              case "ArrowRight":
+                e.preventDefault();
+                video.currentTime = Math.min(seekableRange.end, video.currentTime + step);
+                break;
+              case "Home":
+                e.preventDefault();
+                video.currentTime = seekableRange.start;
+                break;
+              case "End":
+                e.preventDefault();
+                video.currentTime = seekableRange.end;
+                break;
+            }
+          } else {
+            const duration = this.api.getState("duration") || 0;
+            switch (e.key) {
+              case "ArrowLeft":
+                e.preventDefault();
+                video.currentTime = Math.max(0, video.currentTime - step);
+                break;
+              case "ArrowRight":
+                e.preventDefault();
+                video.currentTime = Math.min(duration, video.currentTime + step);
+                break;
+              case "Home":
+                e.preventDefault();
+                video.currentTime = 0;
+                break;
+              case "End":
+                e.preventDefault();
+                video.currentTime = duration;
+                break;
+            }
+          }
+        }
         seek(clientX, force = false) {
           const video = getVideo(this.api.container);
           if (!video) return;
@@ -37829,6 +38029,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         destroy() {
+          this.detachTimelineHost?.();
+          this.detachTimelineHost = null;
+          this.extension?.destroy();
+          this.extension = null;
           this.wrapper.removeEventListener("mousedown", this.onMouseDown);
           this.wrapper.removeEventListener("mousemove", this.onMouseMove);
           this.wrapper.removeEventListener("mouseleave", this.onMouseLeave);
@@ -39540,15 +39744,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     formatLiveTime: () => formatLiveTime,
     formatTime: () => formatTime,
     getControlFactory: () => getControlFactory,
+    hasTimelineExtension: () => hasTimelineExtension,
     icons: () => icons,
     planFit: () => planFit,
     registerControl: () => registerControl,
+    registerTimelineExtension: () => registerTimelineExtension,
     resetControlRegistry: () => resetControlRegistry,
     resolveFitItems: () => resolveFitItems,
     styles: () => styles,
     uiPlugin: () => uiPlugin,
     unregisterControl: () => unregisterControl,
-    unregisterControlsFor: () => unregisterControlsFor
+    unregisterControlsFor: () => unregisterControlsFor,
+    unregisterTimelineExtension: () => unregisterTimelineExtension
   });
   function uiPlugin(config = {}) {
     let api;
@@ -39850,10 +40057,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         updateControls();
       });
     };
-    const hasOpenMenu = () => controls.some((control) => {
-      const menu = control;
-      return typeof menu.isMenuOpen === "function" && menu.isMenuOpen();
-    });
+    const hasOpenMenu = () => {
+      if (progressBar?.isTimelineEditing()) return true;
+      return controls.some((control) => {
+        const menu = control;
+        return typeof menu.isMenuOpen === "function" && menu.isMenuOpen();
+      });
+    };
     const showControls = () => {
       if (controlsVisible) {
         resetHideTimer();
@@ -40035,7 +40245,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           bigPlayButton = new BigPlayButton(api, () => errorOverlay?.isVisible() ?? false);
           container.appendChild(bigPlayButton.render());
         }
-        progressBar = new ProgressBar(api);
+        progressBar = new ProgressBar(api, {
+          // A timeline editor is on screen for as long as the viewer needs it,
+          // which is longer than any hide delay. Holding visibility here rather
+          // than through a control's isMenuOpen() is deliberate: an extension
+          // can be opened from a host's own button, in a layout that lists no
+          // matching control at all.
+          onEditingChange: (active) => {
+            if (active) showControls();
+            else resetHideTimer();
+          }
+        });
         container.appendChild(progressBar.render());
         if (!isPlaying) {
           progressBar.show();
@@ -40209,6 +40429,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_control_registry();
       init_version2();
       init_control_registry();
+      init_timeline_registry();
       init_icons();
       init_styles();
       init_utils();
@@ -40566,7 +40787,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.emit("quality:levels", {
         levels: levels.map((l) => ({ id: l.id, label: l.label }))
       });
-      callbacks.onManifestParsed?.(data.levels);
+      callbacks.onManifestParsed?.(data.levels, data);
     });
     addHandler("hlsLevelSwitched", (_event, data) => {
       const level = hls.levels[data.level];
@@ -40775,12 +40996,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     });
     addHandler("loadedmetadata", () => {
       api.setState("duration", video.duration);
-      api.setState("mediaType", video.videoWidth > 0 ? "video" : "audio");
-    });
-    addHandler("loadeddata", () => {
-      if (video.videoWidth > 0) {
-        api.setState("mediaType", "video");
-      }
     });
     addHandler("error", () => {
       const error = video.error;
@@ -40819,6 +41034,113 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         video.removeEventListener(event, handler);
       }
       handlers.length = 0;
+    };
+  }
+
+  // packages/plugins/hls/src/media-type.ts
+  var ELEMENT_EVENTS = ["loadedmetadata", "loadeddata", "resize", "playing"];
+  var TRACK_LIST_EVENTS = ["addtrack", "removetrack", "change"];
+  var HAVE_METADATA = 1;
+  function isTrackList(list) {
+    return typeof list === "object" && list !== null && typeof list.length === "number";
+  }
+  function createMediaTypeClassifier(api) {
+    let source = null;
+    let videoConfirmed = false;
+    let audioConfirmed = false;
+    let element = null;
+    let elementDisposers = [];
+    let published = null;
+    let destroyed = false;
+    const decide = () => {
+      if (videoConfirmed) return "video";
+      if (audioConfirmed) return "audio";
+      return "unknown";
+    };
+    const publish = () => {
+      const next = decide();
+      if (next === published) return;
+      published = next;
+      api.setState("mediaType", next);
+    };
+    const readElement = () => {
+      const video = element;
+      if (!video) return;
+      if (video.videoWidth > 0) {
+        videoConfirmed = true;
+        return;
+      }
+      if (video.readyState < HAVE_METADATA) return;
+      const videoTracks = video.videoTracks;
+      const audioTracks = video.audioTracks;
+      if (!isTrackList(videoTracks)) return;
+      if (videoTracks.length > 0) {
+        videoConfirmed = true;
+        return;
+      }
+      if (isTrackList(audioTracks) && audioTracks.length > 0) {
+        audioConfirmed = true;
+      }
+    };
+    const evaluate = () => {
+      if (destroyed) return;
+      readElement();
+      publish();
+    };
+    const detachElement = () => {
+      for (const off of elementDisposers) off();
+      elementDisposers = [];
+      element = null;
+    };
+    return {
+      beginSource(src) {
+        if (destroyed) return;
+        if (source === src) return;
+        source = src;
+        videoConfirmed = false;
+        audioConfirmed = false;
+        published = null;
+        publish();
+      },
+      attach(video) {
+        if (destroyed) return;
+        detachElement();
+        element = video;
+        for (const event of ELEMENT_EVENTS) {
+          const handler = () => evaluate();
+          video.addEventListener(event, handler);
+          elementDisposers.push(() => video.removeEventListener(event, handler));
+        }
+        for (const list of [element.videoTracks, element.audioTracks]) {
+          if (!isTrackList(list) || typeof list.addEventListener !== "function") continue;
+          for (const event of TRACK_LIST_EVENTS) {
+            const handler = () => evaluate();
+            list.addEventListener(event, handler);
+            elementDisposers.push(() => list.removeEventListener?.(event, handler));
+          }
+        }
+        evaluate();
+      },
+      noteManifestParsed(data) {
+        if (destroyed || !data) return;
+        const hasVideo = typeof data.video === "boolean" ? data.video : null;
+        const hasAudio = typeof data.audio === "boolean" ? data.audio : null;
+        if (hasVideo === true) {
+          videoConfirmed = true;
+        } else if (hasVideo === false && hasAudio === true) {
+          audioConfirmed = true;
+        }
+        publish();
+      },
+      evaluate,
+      current() {
+        return decide();
+      },
+      destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        detachElement();
+      }
     };
   }
 
@@ -40911,6 +41233,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupHlsEvents = null;
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
+    let mediaTypeClassifier = null;
     let lastLevelDetails = null;
     let lastLiveMetrics = null;
     let lastKnownTargetLatency = null;
@@ -41268,6 +41591,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (api) {
         cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
       }
+      mediaTypeClassifier?.beginSource(src);
+      mediaTypeClassifier?.attach(videoEl);
       return new Promise((resolve2, reject) => {
         let watchdog = null;
         let settled = false;
@@ -41361,6 +41686,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (api) {
         cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
       }
+      mediaTypeClassifier?.beginSource(src);
+      mediaTypeClassifier?.attach(videoEl);
       return new Promise((resolve2, reject) => {
         if (!hls || !api) {
           reject(new Error("HLS not initialized"));
@@ -41387,8 +41714,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         };
         cleanupHlsEvents = setupHlsEventHandlers(hls, api, {
-          onManifestParsed: () => {
+          onManifestParsed: (_levels, manifestData) => {
             if (session !== loadSession) return;
+            mediaTypeClassifier?.noteManifestParsed(manifestData);
             if (!resolved) {
               resolved = true;
               releaseAbort();
@@ -41647,6 +41975,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       async init(pluginApi) {
         api = pluginApi;
         api.logger.info(`HLS plugin${variant.logSuffix} initialized`);
+        mediaTypeClassifier = createMediaTypeClassifier(api);
         const unsubPlay = api.on("playback:play", async () => {
           if (!video) return;
           try {
@@ -41782,6 +42111,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           onlineListener = null;
         }
         cleanup(new Error("HLS load cancelled: player destroyed"));
+        mediaTypeClassifier?.destroy();
+        mediaTypeClassifier = null;
         if (video?.parentNode) {
           video.parentNode.removeChild(video);
         }
@@ -44738,6 +45069,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
   // packages/plugins/watermark/src/index.ts
   var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
+  function clampOpacity(value, fallback = 0.5) {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(0, Math.min(1, value));
+  }
+  function clampPx(value, floor, fallback) {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(floor, value);
+  }
   function getPositionStyles(padding, bottomPadding) {
     return {
       "top-left": `top:${padding}px;left:${padding}px;`,
@@ -44753,11 +45092,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let dynamicTimer = null;
     let showDelayTimer = null;
     let currentPosition = config.position || "bottom-right";
-    const opacity = config.opacity ?? 0.5;
+    let currentOpacity = clampOpacity(config.opacity ?? 0.5);
+    let currentVisible = false;
     const fontSize = config.fontSize ?? 14;
-    let currentImageHeight = config.imageHeight ?? 40;
-    let currentPadding = config.padding ?? 10;
-    let currentBottomPadding = config.padding ?? 40;
+    let currentImageHeight = clampPx(config.imageHeight ?? 40, 1, 40);
+    let currentPadding = clampPx(config.padding ?? 10, 0, 10);
+    let currentBottomPadding = clampPx(config.padding ?? 40, 0, 40);
     const dynamic = config.dynamic ?? false;
     const dynamicInterval = config.dynamicInterval ?? 1e4;
     const showDelay = config.showDelay ?? 0;
@@ -44768,7 +45108,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const createElement2 = () => {
       const el = document.createElement("div");
       el.className = "sp-watermark sp-watermark--hidden";
-      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;opacity:${opacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
+      el.style.cssText = `position:absolute;z-index:10;pointer-events:none;visibility:${currentVisible ? "visible" : "hidden"};opacity:${currentOpacity};font-size:${fontSize}px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);font-family:sans-serif;transition:all 0.5s ease;${positionStyles[currentPosition]}`;
       el.setAttribute("data-position", currentPosition);
       updateContent(el);
       return el;
@@ -44814,8 +45154,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       });
       element.setAttribute("data-position", position);
-      const isVisible = element.classList.contains("sp-watermark--visible");
-      const visClass = isVisible ? " sp-watermark--visible" : " sp-watermark--hidden";
+      const visClass = currentVisible ? " sp-watermark--visible" : " sp-watermark--hidden";
       element.className = `sp-watermark sp-watermark--${position}${visClass}${dynamic ? " sp-watermark--dynamic" : ""}`;
     };
     const randomizePosition = () => {
@@ -44824,12 +45163,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       setPosition(next);
     };
     const show = () => {
+      currentVisible = true;
       if (!element) return;
+      element.style.visibility = "visible";
       element.classList.remove("sp-watermark--hidden");
       element.classList.add("sp-watermark--visible");
     };
     const hide = () => {
+      currentVisible = false;
       if (!element) return;
+      element.style.visibility = "hidden";
       element.classList.remove("sp-watermark--visible");
       element.classList.add("sp-watermark--hidden");
     };
@@ -44883,11 +45226,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                 }
               }
             } else if (mutation.type === "attributes" && mutation.attributeName === "style") {
-              if (element) {
-                element.style.opacity = String(opacity);
-                element.style.pointerEvents = "none";
-                element.style.position = "absolute";
-                element.style.zIndex = "10";
+              if (mutation.target !== element) continue;
+              const restore = [
+                ["opacity", String(currentOpacity)],
+                ["visibility", currentVisible ? "visible" : "hidden"],
+                ["pointer-events", "none"],
+                ["position", "absolute"],
+                ["z-index", "10"]
+              ];
+              for (const [prop, value] of restore) {
+                if (element.style.getPropertyValue(prop) !== value) {
+                  element.style.setProperty(prop, value);
+                }
               }
             }
           }
@@ -44951,25 +45301,30 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       setPosition,
       setOpacity(value) {
-        if (element) element.style.opacity = String(Math.max(0, Math.min(1, value)));
+        currentOpacity = clampOpacity(value, currentOpacity);
+        if (element) element.style.opacity = String(currentOpacity);
       },
       setImageHeight(height) {
-        currentImageHeight = Math.max(1, height);
+        currentImageHeight = clampPx(height, 1, currentImageHeight);
         if (element) {
           const img = element.querySelector("img");
           if (img) img.style.maxHeight = `${currentImageHeight}px`;
         }
       },
       setPadding(value) {
-        currentPadding = Math.max(0, value);
-        currentBottomPadding = Math.max(value, config.padding ?? 40);
+        currentPadding = clampPx(value, 0, currentPadding);
+        currentBottomPadding = clampPx(
+          Math.max(value, config.padding ?? 40),
+          0,
+          currentBottomPadding
+        );
         positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
         setPosition(currentPosition);
       },
       show,
       hide,
       getConfig() {
-        return { ...config, position: currentPosition, opacity: element ? parseFloat(element.style.opacity) || opacity : opacity, imageHeight: currentImageHeight, padding: currentPadding };
+        return { ...config, position: currentPosition, opacity: currentOpacity, imageHeight: currentImageHeight, padding: currentPadding };
       }
     };
   }
@@ -47235,15 +47590,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const onEnded = () => {
       if (!selection || suspended) return;
+      if (api.getState("paused") === true) return;
       rewind();
+    };
+    const ensureSubscribed = () => {
+      if (disposers.length > 0) return;
+      disposers = [api.on("playback:timeupdate", onTimeUpdate), api.on("playback:ended", onEnded)];
     };
     return {
       start(next) {
         if (!enabled) return;
         selection = { start: next.start, end: next.end };
         suspended = false;
-        if (disposers.length > 0) return;
-        disposers = [api.on("playback:timeupdate", onTimeUpdate), api.on("playback:ended", onEnded)];
+        ensureSubscribed();
+      },
+      retarget(next) {
+        if (!enabled) return;
+        selection = { start: next.start, end: next.end };
+        ensureSubscribed();
       },
       stop() {
         for (const off of disposers) off();
@@ -47256,6 +47620,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       resume() {
         suspended = false;
+      },
+      isSuspended() {
+        return suspended;
+      },
+      isArmed() {
+        return enabled && selection !== null;
       }
     };
   }
@@ -47314,21 +47684,67 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   }
 
-  // packages/plugins/clips/src/ClipOverlay.ts
-  init_src();
+  // packages/plugins/clips/src/time-format.ts
+  var CLOCK = /^(?:(\d+):)?([0-5]?\d):([0-5]?\d)(\.\d+)?$/;
+  var SECONDS = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
+  function parseTimestamp(raw) {
+    const text = raw.trim();
+    if (text === "") return null;
+    if (SECONDS.test(text)) {
+      const value2 = Number(text);
+      return Number.isFinite(value2) && value2 >= 0 ? value2 : null;
+    }
+    const match = CLOCK.exec(text);
+    if (!match) return null;
+    const [, hours, minutes, seconds, fraction] = match;
+    const value = Number(hours ?? 0) * 3600 + Number(minutes) * 60 + Number(seconds) + Number(fraction ?? 0);
+    return Number.isFinite(value) ? value : null;
+  }
+  function formatTimestamp(time, step = 1) {
+    if (!Number.isFinite(time) || time < 0) return formatTimestamp(0, step);
+    const decimals = fractionDigits(step);
+    const total = Number(time.toFixed(decimals));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total % 3600 / 60);
+    const seconds = total % 60;
+    const wholeSeconds = Math.floor(seconds);
+    const fraction = decimals > 0 ? (seconds - wholeSeconds).toFixed(decimals).slice(1).replace(/0+$/, "").replace(/\.$/, "") : "";
+    const body = `${pad2(minutes, hours > 0)}:${pad2(wholeSeconds, true)}${fraction}`;
+    return hours > 0 ? `${hours}:${body}` : body;
+  }
+  function formatLength(seconds, step = 1) {
+    const decimals = fractionDigits(step);
+    const value = Math.max(0, seconds);
+    if (decimals === 0) return String(Math.round(value));
+    return Number(value.toFixed(decimals)).toString();
+  }
+  function fractionDigits(step) {
+    if (!Number.isFinite(step) || step <= 0 || step >= 1) return 0;
+    for (let digits = 1; digits < 3; digits += 1) {
+      if (Number.isInteger(Number((step * 10 ** digits).toFixed(6)))) return digits;
+    }
+    return 3;
+  }
+  function pad2(value, always) {
+    return always && value < 10 ? `0${value}` : String(value);
+  }
 
   // packages/plugins/clips/src/RangeSelector.ts
-  init_src();
   var CLAMP_FLASH_MS = 1e3;
   var KEYBOARD_COARSE_FACTOR = 5;
+  var HANDLE_LABEL = { start: "IN", end: "OUT" };
+  var HANDLE_ARIA = {
+    start: "Clip in point",
+    end: "Clip out point"
+  };
   var RangeSelector = class {
     /**
      * Builds the selector DOM (detached - the caller mounts `element`).
      *
-     * @param options - Initial selection, bounds, host config and callbacks
+     * @param options - Initial selection, bounds, host config, presentation and
+     * callbacks
      */
     constructor(options) {
-      /** The drag in progress - the only state this component owns. */
       this.drag = null;
       this.clampTimer = null;
       this.destroyed = false;
@@ -47337,64 +47753,116 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       // --------------------------------------------------------------------------
       /**
        * @internal
-       * pointerdown picks the nearer handle - ties (pointer exactly at the
-       * selection midpoint) resolve to the start handle - captures the pointer on
-       * the track and announces the drag. It does NOT move anything yet: pressing
-       * beside a handle must not jump it.
+       * pointerdown starts a drag on a handle. It does NOT move anything: the grab
+       * offset is recorded so the first move applies a delta rather than jumping
+       * the handle to the finger.
        */
       this.onPointerDown = (event) => {
         if (this.destroyed || this.drag) return;
-        if (event.button !== 0) return;
+        if (event.button !== void 0 && event.button !== 0) return;
+        const which = this.resolveTarget(event);
+        if (which === null) return;
         const raw = this.timeFromClientX(event.clientX);
         if (raw === null) return;
-        const which = this.pickHandle(snap(raw, this.stepValue()));
-        this.drag = { handle: which, pointerId: event.pointerId };
-        this.track.setPointerCapture?.(event.pointerId);
+        const handleEl = this.handleEl(which);
+        let captured = false;
+        try {
+          handleEl.setPointerCapture?.(event.pointerId);
+          captured = typeof handleEl.setPointerCapture === "function";
+        } catch {
+          captured = false;
+        }
+        this.drag = {
+          handle: which,
+          pointerId: event.pointerId,
+          grabOffset: raw - this.selection[which],
+          captured,
+          released: false
+        };
+        if (!captured) this.attachDocumentFallback();
         this.track.classList.add("sp-clip-track--dragging");
-        this.handleEl(which).classList.add("sp-clip-handle--dragging");
-        this.handleEl(which).focus?.({ preventScroll: true });
+        handleEl.classList.add("sp-clip-handle--dragging");
+        handleEl.focus?.({ preventScroll: true });
         this.callbacks.onDragStart?.(which);
       };
-      /** @internal Convert clientX to a time on the track, or null if unusable. */
+      /** @internal Move the dragged handle by the delta from where it was grabbed. */
       this.onPointerMove = (event) => {
-        if (!this.drag) return;
+        if (!this.drag || this.drag.released) return;
         if (event.pointerId !== this.drag.pointerId) return;
         const raw = this.timeFromClientX(event.clientX);
         if (raw === null) return;
-        const landed = this.applyMove(this.drag.handle, raw, "pointer");
+        const landed = this.applyMove(this.drag.handle, raw - this.drag.grabOffset, "pointer");
         this.callbacks.onDragMove?.(this.drag.handle, landed);
       };
-      /** @internal Release the drag; pointerup and pointercancel share the path. */
+      /**
+       * @internal A clean release: apply the release coordinates once, then end.
+       *
+       * The final position matters - a fast drag can outrun `pointermove` by
+       * several pixels, and the endpoint the viewer let go on is the one they
+       * meant. Applying it here rather than trusting the last move is what makes
+       * the release land where the finger did.
+       */
       this.onPointerUp = (event) => {
-        if (!this.drag) return;
+        if (!this.drag || this.drag.released) return;
         if (event.pointerId !== this.drag.pointerId) return;
-        const { handle, pointerId } = this.drag;
-        this.drag = null;
-        this.track.releasePointerCapture?.(pointerId);
-        this.track.classList.remove("sp-clip-track--dragging");
-        this.handleEl(handle).classList.remove("sp-clip-handle--dragging");
-        this.callbacks.onDragEnd?.({ ...this.selection });
+        const raw = this.timeFromClientX(event.clientX);
+        if (raw !== null) this.applyMove(this.drag.handle, raw - this.drag.grabOffset, "pointer");
+        this.endDrag(false);
+      };
+      /** @internal The gesture was taken away: keep the range, restore nothing. */
+      this.onPointerCancel = (event) => {
+        if (!this.drag || this.drag.released) return;
+        if (event.pointerId !== this.drag.pointerId) return;
+        this.endDrag(true);
+      };
+      /**
+       * @internal Capture was lost (a scroll took over, the element was removed).
+       *
+       * Same treatment as a cancel. Fires after a normal `pointerup` too, which the
+       * `released` guard on the drag state absorbs.
+       */
+      this.onLostCapture = (event) => {
+        if (!this.drag || this.drag.released) return;
+        if (event.pointerId !== this.drag.pointerId) return;
+        this.endDrag(true);
+      };
+      this.onDocPointerMove = (event) => {
+        if (this.alreadyHandled(event)) return;
+        this.onPointerMove(event);
+      };
+      this.onDocPointerUp = (event) => {
+        if (this.alreadyHandled(event)) return;
+        this.onPointerUp(event);
+      };
+      this.onDocPointerCancel = (event) => {
+        if (this.alreadyHandled(event)) return;
+        this.onPointerCancel(event);
       };
       this.selection = { start: options.selection.start, end: options.selection.end };
       this.bounds = { min: options.bounds.min, max: options.bounds.max };
       this.config = options.config;
+      this.presentation = options.presentation ?? "standalone";
       this.callbacks = options.callbacks ?? {};
       this.track = document.createElement("div");
-      this.track.className = "sp-clip-track";
       this.rangeEl = document.createElement("div");
       this.rangeEl.className = "sp-clip-track__range";
       this.track.appendChild(this.rangeEl);
-      this.startHandle = this.buildHandle("start", "Clip start");
-      this.endHandle = this.buildHandle("end", "Clip end");
+      const start = this.buildHandle("start");
+      const end = this.buildHandle("end");
+      this.startHandle = start.el;
+      this.endHandle = end.el;
+      this.labels = { start: start.label, end: end.label };
       this.track.appendChild(this.startHandle);
       this.track.appendChild(this.endHandle);
       this.track.addEventListener("pointerdown", this.onPointerDown);
       this.track.addEventListener("pointermove", this.onPointerMove);
       this.track.addEventListener("pointerup", this.onPointerUp);
-      this.track.addEventListener("pointercancel", this.onPointerUp);
+      this.track.addEventListener("pointercancel", this.onPointerCancel);
+      this.track.addEventListener("lostpointercapture", this.onLostCapture);
+      this.applyPresentationClass();
       this.render();
     }
-    /** The track element; the overlay mounts this and owns placement. */
+    /** The track element; the caller mounts this and owns placement. */
     get element() {
       return this.track;
     }
@@ -47412,10 +47880,88 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * @param config - Optional replacement config (limits changed at runtime)
      */
     update(selection, bounds2, config) {
+      if (this.destroyed) return;
       this.selection = { start: selection.start, end: selection.end };
       this.bounds = { min: bounds2.min, max: bounds2.max };
       if (config) this.config = config;
       this.render();
+    }
+    /**
+     * Move the handles between the timeline lanes and the standalone rail.
+     *
+     * The caller re-parents `element`; this only changes how it draws. An active
+     * drag is cancelled first - the geometry it was measuring against is about to
+     * stop existing, and continuing would apply a delta from a rail that moved.
+     *
+     * @param presentation - Where the handles are now mounted
+     */
+    setPresentation(presentation) {
+      if (this.destroyed || this.presentation === presentation) return;
+      this.endDrag(true);
+      this.presentation = presentation;
+      this.applyPresentationClass();
+      this.render();
+    }
+    /**
+     * The presentation currently in force.
+     *
+     * @returns `'timeline'` or `'standalone'`
+     */
+    getPresentation() {
+      return this.presentation;
+    }
+    /**
+     * Move focus to one handle.
+     *
+     * @param which - The handle to focus
+     */
+    focusHandle(which) {
+      if (this.destroyed) return;
+      this.handleEl(which).focus?.({ preventScroll: true });
+    }
+    /**
+     * Whether a pointer drag is in progress.
+     *
+     * @returns True while a handle is held
+     */
+    isDragging() {
+      return this.drag !== null;
+    }
+    /**
+     * Abandon any drag in progress, keeping the range it had reached.
+     *
+     * Reported as a cancellation, so the plugin keeps the last committed
+     * endpoints and leaves playback alone. The device rotating is the case this
+     * exists for: the rail the drag was measuring against has moved, and
+     * continuing to apply a delta against the old geometry would throw the
+     * endpoint somewhere the viewer never dragged it.
+     */
+    cancelDrag() {
+      if (this.destroyed) return;
+      this.endDrag(true);
+    }
+    /**
+     * Freeze or thaw the handles.
+     *
+     * Frozen handles take no pointer input, leave the tab order and announce
+     * themselves as disabled. Used while a submission is in flight (the range
+     * being submitted must not move under the request) and while the details
+     * stage covers the player, where the timeline behind it is out of reach.
+     *
+     * Any drag in progress is cancelled, so the endpoint stays where it was
+     * rather than following a finger the editor is no longer listening to.
+     *
+     * @param interactive - False to freeze
+     */
+    setInteractive(interactive) {
+      if (this.destroyed) return;
+      if (!interactive) this.endDrag(true);
+      this.track.classList.toggle("sp-clip-track--frozen", !interactive);
+      for (const which of ["start", "end"]) {
+        const el = this.handleEl(which);
+        el.setAttribute("aria-disabled", String(!interactive));
+        el.setAttribute("tabindex", interactive ? "0" : "-1");
+      }
     }
     /**
      * Detach all listeners, clear timers and remove the DOM. Idempotent; the
@@ -47423,31 +47969,45 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     destroy() {
       if (this.destroyed) return;
+      this.endDrag(true);
       this.destroyed = true;
       this.track.removeEventListener("pointerdown", this.onPointerDown);
       this.track.removeEventListener("pointermove", this.onPointerMove);
       this.track.removeEventListener("pointerup", this.onPointerUp);
-      this.track.removeEventListener("pointercancel", this.onPointerUp);
+      this.track.removeEventListener("pointercancel", this.onPointerCancel);
+      this.track.removeEventListener("lostpointercapture", this.onLostCapture);
+      this.detachDocumentFallback();
       if (this.clampTimer !== null) {
         clearTimeout(this.clampTimer);
         this.clampTimer = null;
       }
-      this.drag = null;
       this.track.remove();
     }
     // --------------------------------------------------------------------------
     // DOM construction / rendering
     // --------------------------------------------------------------------------
-    /** @internal Build one slider handle with its ARIA wiring and key handler. */
-    buildHandle(which, label) {
+    /** @internal Build one slider handle with its stem, label, ARIA and keys. */
+    buildHandle(which) {
       const el = document.createElement("div");
       el.className = `sp-clip-handle sp-clip-handle--${which}`;
       el.setAttribute("role", "slider");
       el.setAttribute("tabindex", "0");
-      el.setAttribute("aria-label", label);
+      el.setAttribute("aria-label", HANDLE_ARIA[which]);
       el.dataset.clipHandle = which;
+      const stem = document.createElement("span");
+      stem.className = "sp-clip-handle__stem";
+      stem.setAttribute("aria-hidden", "true");
+      el.appendChild(stem);
+      const label = document.createElement("span");
+      label.className = "sp-clip-handle__label";
+      label.setAttribute("aria-hidden", "true");
+      el.appendChild(label);
       el.addEventListener("keydown", (event) => this.onKeyDown(which, event));
-      return el;
+      return { el, label };
+    }
+    /** @internal Apply the presentation modifier to the track's class list. */
+    applyPresentationClass() {
+      this.track.className = `sp-clip-track sp-clip-track--${this.presentation}`;
     }
     /** @internal Position both handles and the range fill from current state. */
     render() {
@@ -47460,20 +48020,66 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.rangeEl.style.width = `${Math.max(endPct - startPct, 0)}%`;
       this.startHandle.style.left = `${startPct}%`;
       this.endHandle.style.left = `${endPct}%`;
-      for (const [el, time] of [
-        [this.startHandle, this.selection.start],
-        [this.endHandle, this.selection.end]
-      ]) {
-        el.setAttribute("aria-valuemin", String(min));
-        el.setAttribute("aria-valuemax", String(max));
-        el.setAttribute("aria-valuenow", String(time));
-        el.setAttribute("aria-valuetext", formatTime(time));
+      const step = this.stepValue();
+      for (const which of ["start", "end"]) {
+        const el = this.handleEl(which);
+        const time = this.selection[which];
+        const limits = this.endpointLimits(which);
+        el.setAttribute("aria-valuemin", String(round(limits.lo)));
+        el.setAttribute("aria-valuemax", String(round(limits.hi)));
+        el.setAttribute("aria-valuenow", String(round(time)));
+        el.setAttribute("aria-valuetext", `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
+        this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
       }
     }
     /**
-     * @internal Which handle a pointer position targets: the nearer one; an
-     * exact-midpoint tie goes to start (the pointer sits on the start side of
-     * the selection as it crosses the middle).
+     * @internal End the current drag exactly once, whatever route got here.
+     *
+     * @param cancelled - True when the drag was interrupted rather than released
+     */
+    endDrag(cancelled) {
+      const drag = this.drag;
+      if (!drag || drag.released) return;
+      drag.released = true;
+      this.drag = null;
+      if (drag.captured) {
+        try {
+          this.handleEl(drag.handle).releasePointerCapture?.(drag.pointerId);
+        } catch {
+        }
+      }
+      this.detachDocumentFallback();
+      this.track.classList.remove("sp-clip-track--dragging");
+      this.handleEl(drag.handle).classList.remove("sp-clip-handle--dragging");
+      this.callbacks.onDragEnd?.({ ...this.selection }, { cancelled });
+    }
+    /**
+     * @internal Which handle a press targets.
+     *
+     * An explicit hit on a handle always wins - with the lanes overlapping on a
+     * short selection, nearest-by-time would pick the wrong one constantly.
+     * Falling back to the nearer handle is the standalone rail's behaviour only;
+     * on the timeline a press that missed both handles belongs to the playhead
+     * underneath, and this returns null so it falls through and seeks.
+     *
+     * @param event - The press
+     * @returns The handle to drag, or null to ignore the press
+     */
+    resolveTarget(event) {
+      const target = event.target;
+      if (target instanceof Element) {
+        const hit = target.closest("[data-clip-handle]");
+        const which = hit?.dataset.clipHandle;
+        if (which === "start" || which === "end") return which;
+      }
+      if (this.presentation !== "standalone") return null;
+      const raw = this.timeFromClientX(event.clientX);
+      if (raw === null) return null;
+      return this.pickHandle(snap(raw, this.stepValue()));
+    }
+    /**
+     * @internal Which handle a background position is nearer to; an exact-midpoint
+     * tie goes to start (the pointer sits on the start side as it crosses).
      */
     pickHandle(time) {
       const { start, end } = this.selection;
@@ -47487,33 +48093,72 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const ratio = (clientX - rect.left) / rect.width;
       return min + Math.min(Math.max(ratio, 0), 1) * (max - min);
     }
+    // --- document fallback, for when pointer capture is unavailable -----------
+    /**
+     * @internal Whether a document-level event has already been handled on the way up.
+     *
+     * The fallback listens on the document, and an event that started inside the
+     * track reaches the track's own handler first and then bubbles here. Without
+     * this the whole drag is processed twice per move - two model applications,
+     * two `onChange`, two scrub seeks.
+     *
+     * @param event - The event as the document sees it
+     * @returns True when the track's own listener already handled it
+     */
+    alreadyHandled(event) {
+      const target = event.target;
+      return target instanceof Node && this.track.contains(target);
+    }
+    /**
+     * @internal Track a drag through the document when capture failed.
+     *
+     * Without capture, moving off the handle stops delivering events to it, and
+     * the drag would freeze mid-gesture with the handle still latched. These are
+     * guarded by the same pointer id, skip anything the track already handled,
+     * and are removed on every exit.
+     */
+    attachDocumentFallback() {
+      document.addEventListener("pointermove", this.onDocPointerMove);
+      document.addEventListener("pointerup", this.onDocPointerUp);
+      document.addEventListener("pointercancel", this.onDocPointerCancel);
+    }
+    /** @internal Remove the document fallback. Safe to call when never attached. */
+    detachDocumentFallback() {
+      document.removeEventListener("pointermove", this.onDocPointerMove);
+      document.removeEventListener("pointerup", this.onDocPointerUp);
+      document.removeEventListener("pointercancel", this.onDocPointerCancel);
+    }
     // --------------------------------------------------------------------------
     // Keyboard interaction
     // --------------------------------------------------------------------------
     /**
      * @internal
      * ArrowLeft/Right step by one `step`, Shift+Arrow by five, Home/End jump to
-     * the track bounds. Every key handled here calls `preventDefault()` so the
-     * UI plugin's document-level shortcuts skip the event.
+     * the endpoint's own effective limits (not the media's - the other handle and
+     * the duration limits are what this handle can actually reach). Every key
+     * handled here calls `preventDefault()` so the UI plugin's shortcuts skip it.
      */
     onKeyDown(which, event) {
       if (this.destroyed) return;
       const step = this.stepValue();
       const delta = event.shiftKey ? step * KEYBOARD_COARSE_FACTOR : step;
       const current = this.selection[which];
+      const limits = this.endpointLimits(which);
       let target = null;
       switch (event.key) {
         case "ArrowLeft":
+        case "ArrowDown":
           target = current - delta;
           break;
         case "ArrowRight":
+        case "ArrowUp":
           target = current + delta;
           break;
         case "Home":
-          target = this.bounds.min;
+          target = limits.lo;
           break;
         case "End":
-          target = this.bounds.max;
+          target = limits.hi;
           break;
         default:
           return;
@@ -47525,10 +48170,44 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     // Model application
     // --------------------------------------------------------------------------
     /**
-     * @internal The single commit path: snap the requested time, run the
-     * clamping model (`moveStart`/`moveEnd` - the other handle never moves),
-     * re-render, flash + report if clamped, and fire `onChange` when anything
-     * meaningful happened.
+     * Commit a time for one endpoint through the same clamping path a drag uses.
+     *
+     * The exact-timestamp fields and the "set at playhead" buttons come through
+     * here, so every route to a new endpoint snaps, clamps and reports
+     * identically - there is one mutation path, not four.
+     *
+     * @param which - The endpoint to move
+     * @param time - Requested time in media seconds
+     * @param source - How the move was made, for the change metadata
+     * @returns The landed time after snapping and clamping
+     */
+    applyEndpoint(which, time, source) {
+      if (this.destroyed) return this.selection[which];
+      return this.applyMove(which, time, source);
+    }
+    /**
+     * The limits one endpoint can actually reach right now.
+     *
+     * The other endpoint, the min/max duration and the media bounds together;
+     * this is what ARIA announces and what Home/End jump to.
+     *
+     * @param which - The endpoint
+     * @returns Its inclusive `[lo, hi]` in media seconds
+     */
+    endpointLimits(which) {
+      const { minDuration, maxDuration } = resolveLimits(this.config);
+      const { start, end } = this.selection;
+      const { min, max } = this.bounds;
+      if (which === "start") {
+        return { lo: Math.max(min, end - maxDuration), hi: end - minDuration };
+      }
+      return { lo: start + minDuration, hi: Math.min(max, start + maxDuration) };
+    }
+    /**
+     * @internal The single commit path: snap the requested time, run the clamping
+     * model (`moveStart`/`moveEnd` - the other handle never moves), re-render,
+     * flash + report if clamped, and fire `onChange` when anything meaningful
+     * happened.
      *
      * @returns The handle's landed time
      */
@@ -47589,6 +48268,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return Number.isFinite(step) && step > 0 ? step : 1;
     }
   };
+  function round(value) {
+    return Number.isFinite(value) ? Number(value.toFixed(3)) : 0;
+  }
 
   // packages/plugins/clips/src/ClipOverlay.ts
   var CLAMP_FLASH_MS2 = 1e3;
@@ -47596,10 +48278,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var DEFAULT_TITLE_PLACEHOLDER = "Name this clip";
   var DEFAULT_TITLE_LABEL = "Clip title";
   var DEFAULT_CONFIRM_LABEL = "Create clip";
-  var titleFieldSeq = 0;
+  var fieldSeq = 0;
+  var COMPACT_WIDTH = 600;
+  var COMPACT_HEIGHT = 360;
+  var MINIMAL_HEIGHT = 220;
+  var TINY_HEIGHT = 160;
+  var HANDLE_LANE = 44;
+  var LANE_GAP = 8;
+  var FALLBACK_ANCHOR = 64;
   var ClipOverlay = class {
     /**
-     * Builds the panel DOM (detached - {@link ClipOverlay.open} mounts it) and
+     * Builds the editor DOM (detached - {@link ClipOverlay.open} mounts it) and
      * the {@link RangeSelector} inside it.
      *
      * @param options - Container, initial selection/bounds/config/title and the
@@ -47607,14 +48296,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     constructor(options) {
       this.submitting = false;
+      /** True while the platform has taken the picture away (native full screen). */
+      this.suspended = false;
       this.destroyed = false;
+      this.stage = "range";
+      this.layout = "regular";
+      this.paused = true;
+      /** A reason submission is impossible right now (audio, live, bad duration). */
+      this.blockedReason = null;
       this.noticeTimer = null;
+      this.flashTimer = null;
+      // --- timeline attachment ---
+      /** The UI extension layer the selector is mounted into, or null. */
+      this.timelineHost = null;
+      /** Measures the rail the handles sit on; null when standalone. */
+      this.getRailRect = null;
+      // --- responsive plumbing ---
+      this.resizeObserver = null;
+      this.onWindowResize = null;
+      this.onOrientationChange = null;
       // --------------------------------------------------------------------------
       // Event handlers
       // --------------------------------------------------------------------------
       /** @internal Selector committed a move: re-render and route it to the plugin. */
       this.handleSelectorChange = (selection, meta) => {
         this.selection = { start: selection.start, end: selection.end };
+        this.renderTimeFields();
         this.renderReadout();
         this.renderValidity();
         if (meta.clamped && meta.clampReason) this.showClampNotice(meta.clampReason);
@@ -47637,6 +48344,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         event.preventDefault();
         if (!this.submitting && this.isCommittable()) this.callbacks.onConfirm();
       };
+      /**
+       * @internal An on-screen keyboard has just taken half the viewport. Bring the
+       * field back into view rather than leaving the viewer typing off screen.
+       */
+      this.handleFieldFocus = (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        requestAnimationFrame(() => {
+          if (this.destroyed) return;
+          target.scrollIntoView?.({ block: "nearest" });
+        });
+      };
       /** @internal Cancel button: route to the plugin (close with reason 'user'). */
       this.handleCancelClick = () => {
         if (this.submitting) return;
@@ -47649,30 +48368,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       };
       /**
        * @internal
-       * Document-level trap, active while the panel is mounted (the SettingsMenu
-       * pattern): Escape cancels with `preventDefault()`, Tab/Shift+Tab cycle the
-       * panel's own focusables.
+       * Escape closes, scoped to focus inside **this** player - a document-wide
+       * handler let a keypress in one player close another's editor. Tab is
+       * trapped only inside the details dialog, and only in a compact layout where
+       * that dialog genuinely covers the player; the range stage is nonmodal and
+       * lets Tab through to the rest of the page.
        */
       this.onDocumentKeyDown = (event) => {
         if (this.destroyed) return;
+        if (!this.ownsFocus()) return;
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
-          this.callbacks.onCancel();
+          if (this.layout !== "regular" && this.stage === "details") this.goToRange();
+          else if (!this.submitting) this.callbacks.onCancel();
           return;
         }
         if (event.key !== "Tab") return;
-        const items = this.focusables();
+        if (this.layout === "regular" || this.stage !== "details") return;
+        if (!this.details.contains(document.activeElement)) return;
+        const items = this.dialogFocusables();
         if (items.length === 0) return;
         event.preventDefault();
         const current = items.indexOf(document.activeElement);
         const last = items.length - 1;
-        let next;
-        if (event.shiftKey) {
-          next = current <= 0 ? last : current - 1;
-        } else {
-          next = current === -1 || current === last ? 0 : current + 1;
-        }
+        const next = event.shiftKey ? current <= 0 ? last : current - 1 : current === -1 || current === last ? 0 : current + 1;
         items[next].focus();
       };
       this.container = options.container;
@@ -47682,34 +48402,137 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.bounds = { min: options.bounds.min, max: options.bounds.max };
       this.config = options.config;
       this.confirmLabel = this.config.buttonLabel ?? DEFAULT_CONFIRM_LABEL;
-      this.panel = document.createElement("div");
-      this.panel.className = "sp-clip-panel";
-      this.panel.setAttribute("role", "dialog");
-      this.panel.setAttribute("aria-label", this.confirmLabel);
+      const seq = fieldSeq += 1;
+      const headingId = `sp-clip-heading-${seq}`;
+      this.root = document.createElement("div");
+      this.root.className = "sp-clip-editor";
+      this.root.setAttribute("role", "region");
+      this.root.setAttribute("aria-label", this.confirmLabel);
+      this.root.dataset.stage = "range";
       this.selector = new RangeSelector({
         selection: this.selection,
         bounds: this.bounds,
         config: this.config,
+        presentation: "standalone",
         callbacks: {
           onChange: this.handleSelectorChange,
           onDragStart: (handle) => this.callbacks.onDragStart?.(handle),
           onDragMove: (handle, time) => this.callbacks.onDragMove?.(handle, time),
-          onDragEnd: (selection) => this.callbacks.onDragEnd?.(selection)
+          onDragEnd: (selection, info) => this.callbacks.onDragEnd?.(selection, info)
         }
       });
-      this.panel.appendChild(this.selector.element);
+      this.flash = document.createElement("div");
+      this.flash.className = "sp-clip-flash";
+      this.flash.setAttribute("aria-hidden", "true");
+      this.root.appendChild(this.flash);
+      this.railHost = document.createElement("div");
+      this.railHost.className = "sp-clip-rail";
+      this.railHost.appendChild(this.selector.element);
+      this.root.appendChild(this.railHost);
+      this.toolbar = document.createElement("div");
+      this.toolbar.className = "sp-clip-toolbar";
+      this.toolbar.setAttribute("role", "group");
+      this.toolbar.setAttribute("aria-label", "Clip range");
+      this.playBtn = this.buildTool(
+        "sp-clip-tool--play",
+        "Play",
+        "\u25B6",
+        "\u25B6",
+        () => this.callbacks.onTogglePlay?.()
+      );
+      this.setInBtn = this.buildTool(
+        "sp-clip-tool--set-in",
+        "Set in point here",
+        "IN here",
+        "IN",
+        () => this.callbacks.onSetAtPlayhead?.("start")
+      );
+      this.setOutBtn = this.buildTool(
+        "sp-clip-tool--set-out",
+        "Set out point here",
+        "OUT here",
+        "OUT",
+        () => this.callbacks.onSetAtPlayhead?.("end")
+      );
+      this.previewBtn = this.buildTool(
+        "sp-clip-tool--preview",
+        "Preview clip",
+        "Preview",
+        "\u21BB",
+        () => this.callbacks.onPreview?.()
+      );
+      this.tuneBtn = this.buildTool(
+        "sp-clip-tool--tune",
+        "Fine tune exact times",
+        "Fine tune",
+        "\u22EF",
+        () => this.goToDetails("start")
+      );
+      this.toolbarCancelBtn = this.buildTool("sp-clip-tool--cancel", "Cancel clip", "Cancel", "\u2715", () => {
+        if (!this.submitting) this.callbacks.onCancel();
+      });
+      this.nextBtn = this.buildTool(
+        "sp-clip-tool--next",
+        "Next: name and create",
+        "Next",
+        "Next",
+        () => this.goToDetails()
+      );
+      this.nextBtn.classList.add("sp-clip-tool--primary");
+      for (const el of [
+        this.playBtn,
+        this.setInBtn,
+        this.setOutBtn,
+        this.previewBtn,
+        this.tuneBtn,
+        this.toolbarCancelBtn,
+        this.nextBtn
+      ]) {
+        this.toolbar.appendChild(el);
+      }
+      this.root.appendChild(this.toolbar);
+      this.details = document.createElement("div");
+      this.details.className = "sp-clip-details";
+      this.details.setAttribute("role", "dialog");
+      this.details.setAttribute("aria-modal", "false");
+      this.details.setAttribute("aria-labelledby", headingId);
+      const head = document.createElement("div");
+      head.className = "sp-clip-details__head";
+      this.backBtn = document.createElement("button");
+      this.backBtn.type = "button";
+      this.backBtn.className = "sp-clip-back";
+      this.backBtn.setAttribute("aria-label", "Back to range");
+      this.backBtn.textContent = "Back";
+      this.backBtn.addEventListener("click", () => this.goToRange());
+      head.appendChild(this.backBtn);
+      this.headingEl = document.createElement("h2");
+      this.headingEl.className = "sp-clip-details__title";
+      this.headingEl.id = headingId;
+      this.headingEl.tabIndex = -1;
+      this.headingEl.textContent = this.confirmLabel;
+      head.appendChild(this.headingEl);
+      this.details.appendChild(head);
+      this.detailsBody = document.createElement("div");
+      this.detailsBody.className = "sp-clip-details__body";
+      const fields = document.createElement("div");
+      fields.className = "sp-clip-fields";
+      this.timeInputs = {
+        start: this.buildTimeField("start", "In point", `sp-clip-in-${seq}`, fields),
+        end: this.buildTimeField("end", "Out point", `sp-clip-out-${seq}`, fields)
+      };
+      this.detailsBody.appendChild(fields);
       this.readout = document.createElement("div");
       this.readout.className = "sp-clip-readout";
-      this.panel.appendChild(this.readout);
+      this.detailsBody.appendChild(this.readout);
       const titleCfg = options.config.title === false ? null : options.config.title ?? {};
       this.titleMaxLength = titleCfg?.maxLength ?? DEFAULT_TITLE_MAX_LENGTH2;
       if (titleCfg) {
-        const fieldId = `sp-clip-title-${titleFieldSeq += 1}`;
+        const fieldId = `sp-clip-title-${seq}`;
         const label = document.createElement("label");
         label.className = "sp-clip-title-label";
         label.htmlFor = fieldId;
         label.textContent = titleCfg.label ?? DEFAULT_TITLE_LABEL;
-        this.panel.appendChild(label);
+        this.detailsBody.appendChild(label);
         this.titleInput = document.createElement("input");
         this.titleInput.className = "sp-clip-title";
         this.titleInput.type = "text";
@@ -47720,11 +48543,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (titleCfg.required) this.titleInput.setAttribute("aria-required", "true");
         this.titleInput.addEventListener("input", this.handleTitleInput);
         this.titleInput.addEventListener("keydown", this.handleTitleKeydown);
-        this.panel.appendChild(this.titleInput);
+        this.titleInput.addEventListener("focus", this.handleFieldFocus);
+        this.detailsBody.appendChild(this.titleInput);
         this.titleCounter = document.createElement("span");
         this.titleCounter.className = "sp-clip-title-counter";
         this.titleCounter.setAttribute("aria-hidden", "true");
-        this.panel.appendChild(this.titleCounter);
+        this.detailsBody.appendChild(this.titleCounter);
       } else {
         this.titleInput = null;
         this.titleCounter = null;
@@ -47734,7 +48558,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.notice.setAttribute("aria-live", "polite");
       this.noticeText = document.createElement("span");
       this.notice.appendChild(this.noticeText);
-      this.panel.appendChild(this.notice);
+      this.detailsBody.appendChild(this.notice);
+      this.details.appendChild(this.detailsBody);
       const actions = document.createElement("div");
       actions.className = "sp-clip-actions";
       this.cancelBtn = document.createElement("button");
@@ -47748,33 +48573,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.confirmBtn.className = "sp-clip-btn sp-clip-btn--confirm";
       this.confirmBtn.addEventListener("click", this.handleConfirmClick);
       actions.appendChild(this.confirmBtn);
-      this.panel.appendChild(actions);
+      this.details.appendChild(actions);
+      this.root.appendChild(this.details);
       document.addEventListener("keydown", this.onDocumentKeyDown);
       this.renderAll();
     }
-    /** The panel element; mounted on the container by {@link ClipOverlay.open}. */
+    /** The editor element; mounted on the container by {@link ClipOverlay.open}. */
     get element() {
-      return this.panel;
+      return this.root;
     }
     /**
-     * Mount the panel on the container and take focus: the `--open` class and
-     * the initial focus are deferred one frame (the SettingsMenu pattern) so
-     * the enter transition runs and the DOM is settled.
+     * Mount the editor on the container, start observing its size and take
+     * focus. The `--open` class and the initial focus are deferred one frame
+     * (the SettingsMenu pattern) so the enter transition runs and the DOM has
+     * settled.
      */
     open() {
       if (this.destroyed) return;
-      if (!this.panel.isConnected) this.container.appendChild(this.panel);
+      if (!this.root.isConnected) this.container.appendChild(this.root);
+      this.startObservingSize();
+      this.measureLayout();
       requestAnimationFrame(() => {
         if (this.destroyed) return;
-        this.panel.classList.add("sp-clip-panel--open");
-        this.focusables()[0]?.focus();
+        this.root.classList.add("sp-clip-editor--open");
+        this.measureLayout();
+        this.focusStageEntry();
       });
     }
     /**
-     * Re-render from state after an external change (`setRange`, a
-     * `configure()` re-clamp, new limits or bounds). Render-only: the title
-     * field keeps whatever the viewer is typing; host-driven title writes go
-     * through {@link ClipOverlay.setTitle}.
+     * Re-render from state after an external change (`setRange`, a `configure()`
+     * re-clamp, new limits or bounds). Render-only: the title field keeps
+     * whatever the viewer is typing; host-driven title writes go through
+     * {@link ClipOverlay.setTitle}.
      *
      * @param selection - The selection to render
      * @param bounds - The bounds the track spans
@@ -47786,9 +48616,56 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.bounds = { min: bounds2.min, max: bounds2.max };
       if (config) this.config = config;
       this.selector.update(selection, bounds2, config);
+      this.renderTimeFields();
       this.renderReadout();
       this.renderValidity();
     }
+    // --------------------------------------------------------------------------
+    // Timeline attachment
+    // --------------------------------------------------------------------------
+    /**
+     * Move the handles onto the playback timeline, or back off it.
+     *
+     * The **same** selector instance is re-parented, so an open session survives
+     * the UI package appearing, disappearing or rebuilding its control bar
+     * without losing the selection, the title or the request id.
+     *
+     * @param host - The UI extension layer to mount into, or null for standalone
+     * @param getRailRect - Measures the rail the handles sit on; required with a host
+     */
+    attachTimeline(host, getRailRect) {
+      if (this.destroyed) return;
+      const presentation = host ? "timeline" : "standalone";
+      this.timelineHost = host;
+      this.getRailRect = host && getRailRect ? getRailRect : null;
+      (host ?? this.railHost).appendChild(this.selector.element);
+      this.selector.setPresentation(presentation);
+      this.root.classList.toggle("sp-clip-editor--timeline", presentation === "timeline");
+      this.railHost.hidden = presentation === "timeline";
+      this.measureLayout();
+    }
+    /**
+     * Whether the handles are currently on the playback timeline.
+     *
+     * @returns True while mounted into the UI extension layer
+     */
+    isOnTimeline() {
+      return this.timelineHost !== null;
+    }
+    /**
+     * Recompute geometry against the timeline.
+     *
+     * Called from the timeline extension's `update()`, which the UI package runs
+     * with its own progress-bar update, so the panel follows the rail without
+     * observing it separately.
+     */
+    syncTimelineGeometry() {
+      if (this.destroyed) return;
+      this.applyAnchor();
+    }
+    // --------------------------------------------------------------------------
+    // External state
+    // --------------------------------------------------------------------------
     /**
      * Write the title field from outside (a host calling `setTitle()` while the
      * panel is open). The overlay's own keystrokes do not echo back here - the
@@ -47803,20 +48680,81 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.renderValidity();
     }
     /**
-     * Enter or leave the submitting state: both buttons disabled, the `--submitting`
-     * modifier and a spinner replacing the Confirm label while a commit is in
-     * flight (plan "Submission").
+     * Enter or leave the submitting state.
+     *
+     * Everything freezes, the handles included: the range being submitted must
+     * not move under the request that carries it.
      *
      * @param submitting - True while the submission is pending
      */
     setSubmitting(submitting) {
       if (this.destroyed || this.submitting === submitting) return;
       this.submitting = submitting;
+      this.root.classList.toggle("sp-clip-editor--submitting", submitting);
+      this.applySelectorInteractivity();
       this.renderConfirmContent();
       this.renderValidity();
     }
     /**
-     * Show a notice in the `aria-live` slot: clamp reasons, validation hints,
+     * Suspend or resume editing because the platform took the picture away.
+     *
+     * On iPhone, native video full screen replaces the page with the OS player,
+     * where no custom DOM control exists at all. The draft is kept exactly as it
+     * is and every control is frozen, so a stray touch on the way in or out
+     * cannot move an endpoint; leaving full screen thaws it unchanged.
+     *
+     * @param suspended - True while the media is in the platform's own player
+     */
+    setSuspended(suspended) {
+      if (this.destroyed || this.suspended === suspended) return;
+      this.suspended = suspended;
+      this.root.classList.toggle("sp-clip-editor--suspended", suspended);
+      this.applySelectorInteractivity();
+      this.renderValidity();
+    }
+    /**
+     * Reflect play state on the toolbar's Play/Pause, which only exists when the
+     * ordinary control bar has been hidden for room.
+     *
+     * @param paused - Whether playback is paused
+     */
+    setPaused(paused) {
+      if (this.destroyed || this.paused === paused) return;
+      this.paused = paused;
+      this.renderPlayButton();
+    }
+    /**
+     * Block (or unblock) submission with a precise reason.
+     *
+     * The plugin calls this when the media stops being something this selection
+     * can be committed against - it turned out to be audio, it went live, its
+     * duration stopped being usable. The selection is kept and shown; only the
+     * commit is refused, and the viewer is told why rather than being left with
+     * a Create button that silently does nothing.
+     *
+     * @param reason - Human-readable reason, or null to unblock
+     */
+    setBlocked(reason) {
+      if (this.destroyed || this.blockedReason === reason) return;
+      this.blockedReason = reason;
+      if (reason) this.showNotice(reason, { type: "error" });
+      else this.hideNotice();
+      this.renderValidity();
+    }
+    /**
+     * Place one endpoint at an exact time, through the selector's own commit
+     * path (so it snaps, clamps, re-renders and reports identically to a drag).
+     *
+     * @param handle - Which endpoint
+     * @param time - The requested time in media seconds
+     * @returns The landed time after snapping and clamping
+     */
+    setEndpoint(handle, time) {
+      if (this.destroyed) return this.selection[handle];
+      return this.selector.applyEndpoint(handle, time, "playhead");
+    }
+    /**
+     * Show a notice in the `aria-live` slot: validation hints, block reasons,
      * server error text. Written with `textContent` only - a server-supplied
      * `body.message` containing markup renders as literal text, never HTML.
      *
@@ -47837,18 +48775,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     /**
-     * Flash why a move was refused by a limit, for {@link CLAMP_FLASH_MS} -
-     * the same beat as the handle's `--clamped` flash.
+     * Flash why a move was refused by a limit, for {@link CLAMP_FLASH_MS}.
+     *
+     * Goes to the toolbar's silent flash, not to the live region - see the
+     * module docblock.
      *
      * @param reason - Which limit bit stopped the move
      */
     showClampNotice(reason) {
+      if (this.destroyed) return;
       const limits = resolveLimits(this.config);
       let text;
       if (reason === "max-duration") text = `Max ${limits.maxDuration}s`;
       else if (reason === "min-duration") text = `Min ${limits.minDuration}s`;
       else text = "Media edge";
-      this.showNotice(text, { autoHideMs: CLAMP_FLASH_MS2 });
+      this.flash.textContent = text;
+      this.flash.classList.add("sp-clip-flash--visible");
+      if (this.flashTimer !== null) clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(() => {
+        this.flashTimer = null;
+        this.flash.classList.remove("sp-clip-flash--visible");
+      }, CLAMP_FLASH_MS2);
     }
     /** Clear the notice and any pending auto-hide. Idempotent. */
     hideNotice() {
@@ -47858,39 +48805,342 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.noticeText.textContent = "";
     }
     /**
-     * Detach listeners, destroy the selector, unmount the panel and return
-     * focus to the control-bar button when focus had been inside the panel.
-     * Idempotent; the instance must not be reused afterwards.
+     * The stage the compact editor is showing.
+     *
+     * @returns `'range'` or `'details'`
+     */
+    getStage() {
+      return this.stage;
+    }
+    /**
+     * How much room the editor decided it has.
+     *
+     * @returns The layout mode currently applied
+     */
+    getLayout() {
+      return this.layout;
+    }
+    /**
+     * Detach listeners, destroy the selector, unmount and return focus to the
+     * opener when focus had been inside the editor. Idempotent; the instance
+     * must not be reused afterwards.
      */
     destroy() {
       if (this.destroyed) return;
       this.destroyed = true;
-      const hadFocus = this.panel.contains(document.activeElement);
+      const hadFocus = this.ownsFocus();
       document.removeEventListener("keydown", this.onDocumentKeyDown);
+      this.stopObservingSize();
       this.clearNoticeTimer();
+      if (this.flashTimer !== null) {
+        clearTimeout(this.flashTimer);
+        this.flashTimer = null;
+      }
+      this.container.classList.remove("sp-clip-editing", "sp-clip-editing--minimal");
       this.selector.destroy();
-      this.panel.remove();
+      this.root.remove();
       if (hadFocus) {
         const target = this.getReturnFocus?.() ?? null;
-        if (target && target.isConnected) target.focus();
+        if (target && target.isConnected) {
+          target.focus();
+        } else if (this.container.isConnected) {
+          this.container.focus?.({ preventScroll: true });
+        }
       }
+    }
+    // --------------------------------------------------------------------------
+    // Stages
+    // --------------------------------------------------------------------------
+    /**
+     * Show the details stage.
+     *
+     * @param focusEndpoint - Focus this endpoint's exact-time field on arrival
+     */
+    goToDetails(focusEndpoint) {
+      if (this.destroyed || this.stage === "details") {
+        if (focusEndpoint) this.timeInputs[focusEndpoint].focus();
+        return;
+      }
+      this.stage = "details";
+      this.root.dataset.stage = "details";
+      this.applySelectorInteractivity();
+      this.measureLayout();
+      if (focusEndpoint) this.timeInputs[focusEndpoint].focus();
+      else this.focusStageEntry();
+    }
+    /** Show the range stage, keeping the selection and the typed title. */
+    goToRange() {
+      if (this.destroyed || this.stage === "range") return;
+      this.stage = "range";
+      this.root.dataset.stage = "range";
+      this.applySelectorInteractivity();
+      this.measureLayout();
+      this.focusStageEntry();
+    }
+    /** @internal Focus the first thing that makes sense for the current stage. */
+    focusStageEntry() {
+      if (this.layout === "regular" || this.stage === "range") {
+        const first = this.visibleToolbarButtons()[0];
+        first?.focus();
+        return;
+      }
+      this.headingEl.focus();
+    }
+    // --------------------------------------------------------------------------
+    // Responsive layout
+    // --------------------------------------------------------------------------
+    /**
+     * @internal Watch the **player**, not the window.
+     *
+     * Device sniffing would get a 320px player in a wide article wrong in both
+     * directions. A window-resize fallback covers jsdom and the handful of
+     * browsers without `ResizeObserver`; `visualViewport` covers the on-screen
+     * keyboard, which changes the usable height without resizing anything else.
+     */
+    startObservingSize() {
+      if (typeof ResizeObserver === "function") {
+        this.resizeObserver = new ResizeObserver(() => this.measureLayout());
+        this.resizeObserver.observe(this.container);
+      }
+      if (typeof window !== "undefined") {
+        this.onWindowResize = () => this.measureLayout();
+        window.addEventListener("resize", this.onWindowResize);
+        window.visualViewport?.addEventListener("resize", this.onWindowResize);
+        this.onOrientationChange = () => {
+          this.selector.cancelDrag();
+          this.measureLayout();
+        };
+        window.addEventListener("orientationchange", this.onOrientationChange);
+      }
+    }
+    /** @internal Stop watching the player's size. */
+    stopObservingSize() {
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+      if (typeof window !== "undefined") {
+        if (this.onWindowResize) {
+          window.removeEventListener("resize", this.onWindowResize);
+          window.visualViewport?.removeEventListener("resize", this.onWindowResize);
+        }
+        if (this.onOrientationChange) {
+          window.removeEventListener("orientationchange", this.onOrientationChange);
+        }
+      }
+      this.onWindowResize = null;
+      this.onOrientationChange = null;
+    }
+    /** @internal Re-decide the layout mode and re-apply everything that depends on it. */
+    measureLayout() {
+      if (this.destroyed) return;
+      const rect = this.container.getBoundingClientRect();
+      const width = rect.width || this.container.clientWidth;
+      const height = rect.height || this.container.clientHeight;
+      const next = height > 0 && height < TINY_HEIGHT ? "tiny" : height > 0 && height < MINIMAL_HEIGHT ? "minimal" : width > 0 && width < COMPACT_WIDTH || height > 0 && height < COMPACT_HEIGHT ? "compact" : "regular";
+      if (next !== this.layout) {
+        this.layout = next;
+        if (next === "regular") this.stage = "range";
+        this.root.dataset.stage = this.stage;
+      }
+      this.root.dataset.layout = this.layout;
+      this.container.classList.add("sp-clip-editing");
+      this.container.classList.toggle(
+        "sp-clip-editing--minimal",
+        this.layout === "minimal" || this.layout === "tiny"
+      );
+      this.applyToolbarVisibility();
+      this.applyAnchor();
+      this.applySelectorInteractivity();
+    }
+    /** @internal Which toolbar buttons make sense in the current layout and stage. */
+    applyToolbarVisibility() {
+      const regular = this.layout === "regular";
+      const givesUpControls = this.layout === "minimal" || this.layout === "tiny";
+      this.nextBtn.hidden = regular;
+      this.toolbarCancelBtn.hidden = regular;
+      this.backBtn.hidden = regular;
+      this.playBtn.hidden = !givesUpControls;
+      this.tuneBtn.hidden = regular || givesUpControls;
+      this.renderPlayButton();
+      const short = this.layout !== "regular";
+      this.root.classList.toggle("sp-clip-editor--icons", short);
+      for (const button of [
+        this.setInBtn,
+        this.setOutBtn,
+        this.previewBtn,
+        this.tuneBtn,
+        this.toolbarCancelBtn,
+        this.nextBtn
+      ]) {
+        const label = short ? button.dataset.shortLabel : button.dataset.longLabel;
+        if (label !== void 0 && button.textContent !== label) button.textContent = label;
+      }
+    }
+    /**
+     * @internal Anchor the editor above the timeline's measured top edge.
+     *
+     * The old fixed `bottom: 64px` assumed a control bar of a particular height
+     * and no handle lanes at all. With the handles on the rail there are two
+     * lanes to clear, and the only honest source for where they are is the rail's
+     * own box.
+     */
+    applyAnchor() {
+      const box = this.container.getBoundingClientRect();
+      const height = box.height || this.container.clientHeight;
+      let anchor = FALLBACK_ANCHOR;
+      const rail = this.getRailRect?.();
+      if (rail && height > 0) {
+        anchor = Math.max(0, box.bottom - rail.top) + HANDLE_LANE + LANE_GAP;
+      }
+      this.root.style.bottom = `${Math.round(anchor)}px`;
+      if (height > 0) {
+        const available = Math.max(0, height - anchor - LANE_GAP);
+        this.details.style.maxHeight = this.layout === "tiny" ? `${height}px` : `${available}px`;
+      } else {
+        this.details.style.maxHeight = "";
+      }
+    }
+    /**
+     * @internal Freeze the handles whenever they are out of reach or must not
+     * move: while a submission is in flight, and while the details stage covers
+     * the player on a compact layout.
+     */
+    applySelectorInteractivity() {
+      const detailsCovers = this.layout !== "regular" && this.stage === "details";
+      this.selector.setInteractive(!this.submitting && !this.suspended && !detailsCovers);
+    }
+    /**
+     * @internal Whether focus is inside this player's editor or controls.
+     *
+     * The selector may be mounted into the UI package's timeline layer, which is
+     * outside this editor's DOM but inside the same player, so the container is
+     * the right boundary - and it is exactly the boundary that keeps two players
+     * on one page from stealing each other's keys.
+     */
+    ownsFocus() {
+      const active = document.activeElement;
+      if (!(active instanceof Node)) return false;
+      return this.root.contains(active) || this.container.contains(active);
     }
     // --------------------------------------------------------------------------
     // Rendering
     // --------------------------------------------------------------------------
+    /**
+     * @internal Build one toolbar button with a full accessible name.
+     *
+     * Two visible labels, one accessible name. At 320px the toolbar's own row is
+     * 296px wide and seven word-labelled buttons need well over 400, so the
+     * primary action scrolled off the right-hand edge - which is the exact
+     * failure this whole piece of work exists to stop. The short label is what
+     * the viewer sees there; `aria-label` never shortens, so a screen-reader user
+     * always hears "Set in point here", not "IN".
+     *
+     * @param modifier - The button's class modifier
+     * @param ariaLabel - The unabridged accessible name
+     * @param text - Visible label on a player with room
+     * @param shortText - Visible label on a narrow player
+     * @param onClick - What the press does
+     * @returns The button
+     */
+    buildTool(modifier, ariaLabel, text, shortText, onClick2) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = `sp-clip-tool ${modifier}`;
+      el.setAttribute("aria-label", ariaLabel);
+      el.dataset.longLabel = text;
+      el.dataset.shortLabel = shortText;
+      el.textContent = text;
+      el.addEventListener("click", () => {
+        if (this.submitting) return;
+        onClick2();
+      });
+      return el;
+    }
+    /** @internal Build one labelled exact-time field and append it to a row. */
+    buildTimeField(which, labelText, id, parent) {
+      const wrap = document.createElement("div");
+      wrap.className = "sp-clip-field";
+      const label = document.createElement("label");
+      label.className = "sp-clip-field__label";
+      label.htmlFor = id;
+      label.textContent = labelText;
+      wrap.appendChild(label);
+      const input = document.createElement("input");
+      input.className = "sp-clip-time";
+      input.type = "text";
+      input.id = id;
+      input.inputMode = "decimal";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.dataset.clipEndpoint = which;
+      input.setAttribute("aria-describedby", `${id}-hint`);
+      input.addEventListener("keydown", (event) => this.handleTimeKeydown(which, event));
+      input.addEventListener("blur", () => this.commitTimeField(which));
+      input.addEventListener("focus", this.handleFieldFocus);
+      wrap.appendChild(input);
+      const hint = document.createElement("span");
+      hint.className = "sp-clip-field__hint";
+      hint.id = `${id}-hint`;
+      hint.textContent = "Seconds or m:ss";
+      wrap.appendChild(hint);
+      parent.appendChild(wrap);
+      return input;
+    }
+    /**
+     * @internal Enter commits an exact time; Escape reverts the field to the
+     * selection it is showing. Both stop the key reaching the player shortcuts.
+     */
+    handleTimeKeydown(which, event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.commitTimeField(which);
+        return;
+      }
+      if (event.key === "Escape") {
+        this.renderTimeFields();
+      }
+    }
+    /**
+     * @internal Commit one exact-time field through the selector's model path.
+     *
+     * A malformed, negative or non-finite value changes nothing and says so; the
+     * field is then re-rendered from the selection, so the viewer is never left
+     * looking at text the player did not accept.
+     */
+    commitTimeField(which) {
+      if (this.destroyed || this.submitting) return;
+      const input = this.timeInputs[which];
+      const parsed = parseTimestamp(input.value);
+      if (parsed === null) {
+        this.showNotice("Enter a time as seconds or m:ss", { type: "error", autoHideMs: 4e3 });
+        this.renderTimeFields();
+        return;
+      }
+      this.selector.applyEndpoint(which, parsed, "field");
+      this.renderTimeFields();
+    }
     /** @internal Re-render everything stateful. */
     renderAll() {
+      this.renderTimeFields();
       this.renderReadout();
       this.renderCounter();
       this.renderConfirmContent();
+      this.renderPlayButton();
       this.renderValidity();
     }
-    /** @internal `0:12 – 0:47 · 35s`, at the deliberately coarse whole-second granularity. */
+    /** @internal The exact-time fields, unless the viewer is editing one. */
+    renderTimeFields() {
+      const step = this.config.step ?? 1;
+      for (const which of ["start", "end"]) {
+        const input = this.timeInputs[which];
+        if (document.activeElement === input) continue;
+        input.value = formatTimestamp(this.selection[which], step);
+      }
+    }
+    /** @internal `0:12 - 0:47 · 35s`, at the configured granularity. */
     renderReadout() {
+      const step = this.config.step ?? 1;
       const { start, end } = this.selection;
-      const secs = Math.max(0, end - start);
-      const shown = Number.isInteger(secs) ? String(secs) : secs.toFixed(1);
-      this.readout.textContent = `${formatTime(start)} \u2013 ${formatTime(end)} \xB7 ${shown}s`;
+      this.readout.textContent = `${formatTimestamp(start, step)} \u2013 ${formatTimestamp(end, step)} \xB7 ${formatLength(end - start, step)}s`;
     }
     /** @internal Live `12/80` counter under the title field. */
     renderCounter() {
@@ -47910,25 +49160,57 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         this.confirmBtn.textContent = this.confirmLabel;
       }
     }
+    /** @internal The toolbar transport glyph and its accessible name. */
+    renderPlayButton() {
+      this.playBtn.textContent = this.paused ? "\u25B6" : "\u23F8";
+      this.playBtn.setAttribute("aria-label", this.paused ? "Play" : "Pause");
+    }
     /** @internal Whether the selection and title pass the pure-model validation. */
     isCommittable() {
-      return validate(this.selection, this.config, this.bounds) === null && validateTitle(this.titleInput?.value ?? "", this.config) === null;
-    }
-    /** @internal Disabled states: submitting wins over validity; Cancel is free otherwise. */
-    renderValidity() {
-      this.cancelBtn.disabled = this.submitting;
-      this.confirmBtn.disabled = this.submitting || !this.isCommittable();
+      return this.blockedReason === null && !this.suspended && validate(this.selection, this.config, this.bounds) === null && validateTitle(this.titleInput?.value ?? "", this.config) === null;
     }
     /**
-     * @internal The panel's focusables, in DOM order: the two slider handles,
-     * the title field, then the enabled action buttons. Selected through the
-     * pinned class vocabulary rather than a generic selector so the disabled
+     * @internal Disabled states. Submitting wins over everything: while a request
+     * is in flight nothing that could change the range or the title is live.
+     */
+    renderValidity() {
+      const frozen = this.submitting || this.suspended;
+      this.cancelBtn.disabled = frozen;
+      this.toolbarCancelBtn.disabled = frozen;
+      this.confirmBtn.disabled = frozen || !this.isCommittable();
+      this.nextBtn.disabled = frozen;
+      this.tuneBtn.disabled = frozen;
+      this.setInBtn.disabled = frozen;
+      this.setOutBtn.disabled = frozen;
+      this.previewBtn.disabled = frozen;
+      this.backBtn.disabled = frozen;
+      this.playBtn.disabled = frozen;
+      for (const which of ["start", "end"]) {
+        this.timeInputs[which].disabled = frozen;
+      }
+      if (this.titleInput) this.titleInput.disabled = frozen;
+    }
+    /** @internal The toolbar buttons currently on screen and usable. */
+    visibleToolbarButtons() {
+      return [
+        this.playBtn,
+        this.setInBtn,
+        this.setOutBtn,
+        this.previewBtn,
+        this.tuneBtn,
+        this.toolbarCancelBtn,
+        this.nextBtn
+      ].filter((el) => !el.hidden && !el.disabled);
+    }
+    /**
+     * @internal The details dialog's focusables, in DOM order. Selected through
+     * the pinned class vocabulary rather than a generic selector, so a disabled
      * Confirm drops out of the cycle.
      */
-    focusables() {
+    dialogFocusables() {
       return Array.from(
-        this.panel.querySelectorAll(
-          ".sp-clip-handle, .sp-clip-title, .sp-clip-btn:not([disabled])"
+        this.details.querySelectorAll(
+          ".sp-clip-back:not([disabled]), .sp-clip-time:not([disabled]), .sp-clip-title:not([disabled]), .sp-clip-btn:not([disabled])"
         )
       );
     }
@@ -48063,26 +49345,141 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/clips/src/styles.ts
   var styles6 = `
 /* ==========================================================================
-   Range selector (RangeSelector.ts)
+   Range selector - shared
    ========================================================================== */
 
-/*
- * The track is a 44px-tall touch band (WCAG 2.5.5 floor); the visible rail is
- * a 6px line centered by ::before so the hit area extends far past the art.
- * touch-action: none keeps a scroll gesture from stealing handle drags.
- * left/width/top offsets are set inline by JS from the selection state.
- */
 .sp-clip-track {
   position: relative;
-  height: 44px;
-  margin: 0 10px; /* keeps edge handles over the picture, not off it */
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* The shaded selection; never intercepts pointer input in either presentation. */
+.sp-clip-track__range {
+  position: absolute;
+  background: var(--sp-accent, #e50914);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.sp-clip-handle {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+}
+
+/* Frozen: a submission is in flight, or the details stage covers the player.
+   Handles must not move under a request that is already carrying the range. */
+.sp-clip-track--frozen { pointer-events: none; }
+.sp-clip-track--frozen .sp-clip-handle { opacity: 0.5; cursor: default; }
+
+/* ==========================================================================
+   Range selector - timeline presentation
+
+   Mounted inside .sp-progress__extension, a zero-height line on the playback
+   rail's centre. Everything below is positioned from that line.
+   ========================================================================== */
+
+.sp-clip-track--timeline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  /* Presses that miss a handle belong to the playhead underneath. */
+  pointer-events: none;
+}
+
+.sp-clip-track--timeline .sp-clip-track__range {
+  top: -3px;
+  height: 6px;
+}
+
+.sp-clip-track--timeline .sp-clip-handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 44px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+/* IN sits in the lane above the rail, OUT in the lane below: distinct vertical
+   targets are what keeps both reachable when the selection is a pixel wide. */
+.sp-clip-track--timeline .sp-clip-handle--start {
+  bottom: 2px;
+  justify-content: flex-start;
+}
+.sp-clip-track--timeline .sp-clip-handle--end {
+  top: 2px;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+}
+
+.sp-clip-track--timeline .sp-clip-handle__label {
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(28, 28, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* The stem is the precision: the label is a readable block, the 2px line under
+   it is what actually points at the timestamp. */
+.sp-clip-track--timeline .sp-clip-handle__stem {
+  display: block;
+  width: 2px;
+  flex: 1 1 auto;
+  min-height: 8px;
+  background: #fff;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+}
+
+.sp-clip-track--timeline .sp-clip-handle--dragging .sp-clip-handle__label,
+.sp-clip-track--timeline .sp-clip-handle:focus-visible .sp-clip-handle__label {
+  background: var(--sp-accent, #e50914);
+  border-color: #fff;
+}
+.sp-clip-track--timeline .sp-clip-handle:focus-visible {
+  outline: none;
+}
+.sp-clip-track--timeline .sp-clip-handle:focus-visible .sp-clip-handle__label {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+.sp-clip-track--timeline .sp-clip-handle--clamped .sp-clip-handle__label {
+  background: #ffd23f;
+  color: #1c1c1e;
+}
+
+/* ==========================================================================
+   Range selector - standalone presentation
+
+   The self-contained 44px band used when there is no timeline to mount into:
+   no UI package, one too old to expose the extension seam, or one torn down
+   under a live session.
+   ========================================================================== */
+
+.sp-clip-track--standalone {
+  height: 44px;
+  margin: 0 10px; /* keeps edge handles over the picture, not off it */
   cursor: pointer;
 }
-.sp-clip-track::before {
+.sp-clip-track--standalone::before {
   content: '';
   position: absolute;
   left: 0;
@@ -48093,132 +49490,261 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   background: rgba(255, 255, 255, 0.25);
   border-radius: 3px;
 }
-
-/* The shaded selection between the handles; never intercepts pointer input. */
-.sp-clip-track__range {
-  position: absolute;
+.sp-clip-track--standalone .sp-clip-track__range {
   top: 50%;
   height: 6px;
   transform: translateY(-50%);
-  background: var(--sp-accent, #e50914);
-  border-radius: 3px;
-  pointer-events: none;
 }
-
-/*
- * Handles: transparent 44x44 hit areas (the "visually smaller via padding"
- * rule - the 6x20px knob is drawn by ::before, inset to center it).
- * translate(-50%, -50%) lets JS position the center with left: <pct>%.
- */
-.sp-clip-handle {
-  position: absolute;
+.sp-clip-track--standalone .sp-clip-handle {
   top: 50%;
   width: 44px;
   height: 44px;
   transform: translate(-50%, -50%);
-  padding: 0;
-  border: 0;
-  background: transparent;
   border-radius: 8px;
-  cursor: grab;
-  touch-action: none;
-  z-index: 2; /* above the range fill so edge handles stay grabbable */
 }
-.sp-clip-handle::before {
-  content: '';
+/* The knob: a 6x20px bar drawn inside the 44px hit area. */
+.sp-clip-track--standalone .sp-clip-handle__stem {
   position: absolute;
-  inset: 12px 19px; /* 6px wide x 20px tall knob inside the 44px band */
+  inset: 12px 19px;
   background: #fff;
   border-radius: 3px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   transition: inset 120ms ease, background-color 120ms ease;
 }
-/* Two grip lines, the "I drag" affordance. */
-.sp-clip-handle::after {
-  content: '';
+/* The label has no room on the standalone rail; the panel's readout carries it. */
+.sp-clip-track--standalone .sp-clip-handle__label {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 2px;
-  height: 10px;
-  transform: translate(-50%, -50%);
-  background:
-    linear-gradient(#555, #555) -2px 0 / 1px 100% no-repeat,
-    linear-gradient(#555, #555) 2px 0 / 1px 100% no-repeat;
-  pointer-events: none;
-  opacity: 0.9;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-.sp-clip-handle--start,
-.sp-clip-handle--end {
-  /* Semantic hooks only: both handles render identically by design. JS and
-     tests select on these; visuals differ (yet) only through the state
-     modifiers below. */
-}
-
 @media (hover: hover) {
-  .sp-clip-handle:hover::before { inset: 10px 16px; }
+  .sp-clip-track--standalone .sp-clip-handle:hover .sp-clip-handle__stem { inset: 10px 16px; }
 }
-
-/* Visible keyboard focus, per the house focus convention. */
-.sp-clip-handle:focus-visible {
+.sp-clip-track--standalone .sp-clip-handle:focus-visible {
   outline: 2px solid #fff;
   outline-offset: -6px;
 }
-.sp-clip-handle:focus-visible::before { inset: 10px 16px; }
-
-/* The handle currently under the pointer during a drag. */
-.sp-clip-handle--dragging {
-  cursor: grabbing;
-}
-.sp-clip-handle--dragging::before { inset: 10px 16px; }
-/* Grow the sibling knob too, matching .sp-progress--dragging behavior. */
-.sp-clip-track--dragging .sp-clip-handle::before { inset: 10px 16px; }
-
-/*
- * Clamp flash: a move was refused by min/max duration or the bounds. JS adds
- * this for ~1s (same beat as the overlay's notice flash) and colors the knob
- * so the stop reads as deliberate, not as a dead track.
- */
-.sp-clip-handle--clamped::before {
-  background: #ffd23f;
-}
+.sp-clip-track--standalone .sp-clip-handle:focus-visible .sp-clip-handle__stem { inset: 10px 16px; }
+.sp-clip-track--standalone .sp-clip-handle--dragging { cursor: grabbing; }
+.sp-clip-track--standalone .sp-clip-handle--dragging .sp-clip-handle__stem { inset: 10px 16px; }
+.sp-clip-track--standalone.sp-clip-track--dragging .sp-clip-handle__stem { inset: 10px 16px; }
+.sp-clip-track--standalone .sp-clip-handle--clamped .sp-clip-handle__stem { background: #ffd23f; }
 
 /* ==========================================================================
-   Overlay panel (ClipOverlay.ts, task 3.3)
+   Editor
    ========================================================================== */
 
 /*
- * Bottom panel anchored above the 64px control strip on the menus' layer
- * (z-index 20: below the error overlay's 25, above big-play's 12 and the
- * gestures surface's 6). No backdrop anywhere in this file - the picture
- * stays undimmed so the loop preview is visible.
+ * Anchored above the timeline's measured top edge (JS writes \`bottom\`), on the
+ * menus' layer. No backdrop anywhere in this file - the picture stays undimmed
+ * so the loop preview is visible while the viewer picks in/out points.
  */
-.sp-clip-panel {
+.sp-clip-editor {
   position: absolute;
   left: 12px;
   right: 12px;
   bottom: 64px;
   z-index: 20;
-  background: rgba(28, 28, 30, 0.95); /* share sheet's #1c1c1e, lifted off the backdrop */
-  color: #fff;
-  border-radius: 12px;
-  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 13px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 560px;
+  max-width: 720px;
   margin: 0 auto;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 140ms ease, transform 140ms ease;
 }
-.sp-clip-panel--open {
+.sp-clip-editor--open {
   opacity: 1;
   transform: translateY(0);
 }
+.sp-clip-editor * { box-sizing: border-box; min-width: 0; }
+
+/* The standalone rail's host; hidden the moment the real timeline is available,
+   so one selection never shows two tracks. */
+.sp-clip-rail {
+  background: rgba(28, 28, 30, 0.95);
+  border-radius: 12px;
+  padding: 0 2px;
+}
+.sp-clip-rail[hidden] { display: none; }
+
+/* Silent clamp flash. Deliberately not a live region: a drag pinned against a
+   limit re-flashes on every pointermove, and announcing that is noise.
+
+   Floated above the editor rather than laid out inside it: it is transient, and
+   on a 320x180 player the ~24px it would otherwise reserve is the difference
+   between the toolbar being inside the picture and being one pixel above it. */
+.sp-clip-flash {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 6px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #1c1c1e;
+  background: #ffd23f;
+  border-radius: 10px;
+  padding: 3px 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+.sp-clip-flash--visible { opacity: 1; }
+
+/* ==========================================================================
+   Range stage toolbar
+   ========================================================================== */
+
+.sp-clip-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  background: rgba(28, 28, 30, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sp-clip-toolbar::-webkit-scrollbar { display: none; }
+
+.sp-clip-tool {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 0 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+.sp-clip-tool[hidden] { display: none; }
+.sp-clip-tool:disabled { opacity: 0.4; cursor: not-allowed; }
+.sp-clip-tool:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@media (hover: hover) {
+  .sp-clip-tool:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+}
+.sp-clip-tool--primary {
+  background: var(--sp-accent, #e50914);
+  color: #fff;
+  margin-left: auto;
+}
+.sp-clip-tool--play { font-size: 14px; min-width: 40px; }
+
+/* ==========================================================================
+   Details stage
+   ========================================================================== */
+
+.sp-clip-details {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(28, 28, 30, 0.97);
+  border-radius: 12px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5);
+}
+
+.sp-clip-details__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+.sp-clip-details__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.sp-clip-details__title:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+.sp-clip-back {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.sp-clip-back[hidden] { display: none; }
+.sp-clip-back:disabled { opacity: 0.4; cursor: not-allowed; }
+.sp-clip-back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* The body scrolls; the footer does not. An error notice must never push the
+   Create button out of the player. */
+.sp-clip-details__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-clip-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sp-clip-field {
+  flex: 1 1 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sp-clip-field__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+.sp-clip-field__hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.sp-clip-time {
+  width: 100%;
+  /* 16px keeps iOS Safari from zooming the viewport on focus. */
+  font-size: 16px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.sp-clip-time:focus-visible {
+  outline: 2px solid var(--sp-accent, #e50914);
+  outline-offset: -1px;
+}
+.sp-clip-time:disabled { opacity: 0.5; }
 
 /* "0:12 \u2013 0:47 \xB7 35s" - tabular numerals so the line does not jitter. */
 .sp-clip-readout {
@@ -48227,28 +49753,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.9);
-  padding: 0 10px; /* aligns with the track's edge inset */
 }
 
-/*
- * Notice slot: clamp reasons, then validation hints, then server messages.
- * The element carries aria-live="polite" (set in JS); text is written with
- * textContent only - server-supplied markup must render as text. Hidden
- * (height-collapsed but live-region stable) until JS adds --visible.
- */
-.sp-clip-notice {
-  min-height: 18px;
-  font-size: 12px;
-  line-height: 18px;
-  color: #ffd23f; /* matches the handle clamp flash */
-  padding: 0 10px;
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
-.sp-clip-notice--visible { opacity: 1; }
-.sp-clip-notice--error { color: #ff6b6b; }
-
-/* Title field (hidden entirely when config.title === false). */
+/* Title field (absent entirely when config.title === false). */
 .sp-clip-title-label {
   display: block;
   font-size: 11px;
@@ -48256,14 +49763,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.55);
-  padding: 0 10px 2px;
 }
 .sp-clip-title {
   display: block;
-  box-sizing: border-box;
-  width: calc(100% - 20px);
-  margin: 0 10px;
-  /* 16px keeps iOS Safari from zooming the viewport on focus. */
+  width: 100%;
   font-size: 16px;
   font-family: inherit;
   color: #fff;
@@ -48276,22 +49779,39 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   outline: 2px solid var(--sp-accent, #e50914);
   outline-offset: -1px;
 }
-/* Live "12/80" counter; tabular so the digits do not shift as they roll. */
 .sp-clip-title-counter {
   display: block;
   text-align: right;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, 0.55);
-  padding: 2px 12px 0 0;
 }
 
-/* Button row. */
+/*
+ * Notice slot: validation hints, block reasons, then server messages. The
+ * element carries aria-live="polite" (set in JS); text is written with
+ * textContent only - server-supplied markup must render as text. Wraps rather
+ * than pushing the footer anywhere.
+ */
+.sp-clip-notice {
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  color: #ffd23f;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.sp-clip-notice--visible { opacity: 1; }
+.sp-clip-notice--error { color: #ff6b6b; }
+
+/* Sticky footer: safe-area padding counted here, inside the bounded panel. */
 .sp-clip-actions {
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 2px 10px 0;
+  padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px));
 }
 .sp-clip-btn {
   appearance: none;
@@ -48312,15 +49832,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transition: background-color 120ms ease, transform 120ms ease, opacity 120ms ease;
 }
 .sp-clip-btn:active { transform: scale(0.96); }
-.sp-clip-btn:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-.sp-clip-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none;
-}
+.sp-clip-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sp-clip-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
 .sp-clip-btn--cancel {
   background: rgba(255, 255, 255, 0.12);
@@ -48338,9 +49851,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 @media (hover: hover) {
   .sp-clip-btn--confirm:hover:not(:disabled) { filter: brightness(1.12); }
 }
-
-/* Submitting state: JS sets disabled, adds --submitting, and appends the
-   spinner; the label text is swapped out by the overlay. */
 .sp-clip-btn--submitting { cursor: progress; }
 
 .sp-clip-spinner {
@@ -48356,7 +49866,87 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ==========================================================================
-   Success toast (index.ts wiring, task 3.3)
+   Stages and layouts
+
+   \`data-layout\` is measured from the PLAYER, never the device: a 320px player
+   embedded in a 1600px article needs the compact editor just as much as a
+   phone does. \`data-stage\` only means anything below \`regular\`.
+   ========================================================================== */
+
+/* Regular: toolbar and details on screen together, so the stage buttons are
+   meaningless and the panel's own footer carries Cancel. */
+.sp-clip-editor[data-layout='regular'] .sp-clip-details { display: flex; }
+
+/* Compact and below: exactly one stage at a time. */
+.sp-clip-editor:not([data-layout='regular'])[data-stage='range'] .sp-clip-details {
+  display: none;
+}
+.sp-clip-editor:not([data-layout='regular'])[data-stage='details'] .sp-clip-toolbar,
+.sp-clip-editor:not([data-layout='regular'])[data-stage='details'] .sp-clip-rail,
+.sp-clip-editor:not([data-layout='regular'])[data-stage='details'] .sp-clip-flash {
+  display: none;
+}
+
+/* Short labels at narrow widths; the accessible name is unchanged. */
+.sp-clip-editor--icons .sp-clip-tool { font-size: 11px; padding: 0 8px; }
+
+/* The two exits stay put while the middle scrolls. The row is allowed to
+   overflow horizontally on a very narrow player, and "no control required for
+   clipping is outside the player" has to survive that: Cancel and Next are
+   pinned to the ends so the viewer can always leave or continue. */
+.sp-clip-editor--icons .sp-clip-tool--cancel {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.sp-clip-editor--icons .sp-clip-tool--primary {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+/* Tiny: there is no picture worth protecting left, so reachability wins and
+   the editor becomes a bounded scrollable sheet over the whole player. */
+.sp-clip-editor[data-layout='tiny'] {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0 !important;
+  margin: 0;
+  max-width: none;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.82);
+  overflow-y: auto;
+}
+
+/* The details stage covers the picture on a compact player, so it gets the
+   room; on a regular one it is bounded above the timeline by JS. */
+.sp-clip-editor:not([data-layout='regular'])[data-stage='details'] {
+  bottom: 8px !important;
+  top: 8px;
+}
+
+/* ==========================================================================
+   Container-level effects
+
+   The clips package styling the UI package's control bar is deliberate and
+   narrow: it is the only way to reclaim that band for the duration of an edit
+   without adding a "hide your controls" call to the UI plugin's public API for
+   one caller. Scoped to the container the editor is open on, so a second
+   player on the page is untouched, and removed on close.
+   ========================================================================== */
+
+.sp-clip-editing--minimal .sp-controls {
+  display: none !important;
+}
+/* With the bar gone the timeline can come back down; the OUT lane then needs
+   only its own 44px of clearance. */
+.sp-clip-editing--minimal .sp-progress-wrapper--editing {
+  bottom: calc(44px + var(--sp-inset-bottom, 0px));
+}
+
+/* ==========================================================================
+   Success toast (index.ts)
    ========================================================================== */
 
 /*
@@ -48370,7 +49960,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   left: 50%;
   bottom: 12px;
   transform: translate(-50%, 8px);
-  z-index: 22; /* above the panel (20), below the error overlay (25) */
+  z-index: 22; /* above the editor (20), below the error overlay (25) */
   background: rgba(28, 28, 30, 0.95);
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -48388,12 +49978,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   transform: translate(-50%, 0);
 }
 
-
 @media (prefers-reduced-motion: reduce) {
-  .sp-clip-panel,
+  .sp-clip-editor,
   .sp-clip-notice,
+  .sp-clip-flash,
   .sp-clip-btn,
-  .sp-clip-handle::before {
+  .sp-clip-tool,
+  .sp-clip-track--standalone .sp-clip-handle__stem {
     transition: none;
   }
   .sp-clip-spinner {
@@ -48413,6 +50004,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var TOAST_VISIBLE_MS = 2e3;
   var GENERIC_FAILURE_MESSAGE = "Couldn't create the clip. Please try again.";
   var SEEK_THROTTLE_MS = 100;
+  var GATE_MESSAGES = {
+    "live-unsupported": "Live streams cannot be clipped.",
+    "media-type-unsupported": "Audio cannot be clipped; clips need video.",
+    "media-type-unknown": "Video information is not available yet. Press Play and try again.",
+    "duration-unknown": "The video length is not known yet. Press Play and try again.",
+    "native-fullscreen-active": "Exit full screen to create a clip - this device plays full screen in its own player."
+  };
   function clipError(code, message) {
     const error = new Error(message);
     error.code = code;
@@ -48468,9 +50066,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let releaseStyles = null;
     let releaseControls = null;
     let clipControl = null;
-    let dragging = false;
+    let releaseTimeline = null;
+    let timelineSurface = null;
     let wasPlayingBeforeDrag = false;
     let lastScrubSeek = 0;
+    let previewSuspendedBeforeDrag = false;
+    let nativeFullscreen = false;
+    let detachFullscreenWatch = null;
     let toastEl = null;
     let toastTimer = null;
     const currentBounds = () => bounds({ duration: sessionDuration });
@@ -48516,8 +50118,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.setState("clipOpen", false);
       overlay?.destroy();
       overlay = null;
-      dragging = false;
+      timelineSurface?.setDragging(false);
+      timelineSurface?.setEditing(false);
       wasPlayingBeforeDrag = false;
+      previewSuspendedBeforeDrag = false;
     }
     function closeSession(reason) {
       if (!sessionOpen) return;
@@ -48534,6 +50138,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       clearToast();
       releaseControls?.();
       releaseControls = null;
+      releaseTimeline?.();
+      releaseTimeline = null;
+      timelineSurface = null;
+      detachFullscreenWatch?.();
+      detachFullscreenWatch = null;
+      nativeFullscreen = false;
       releaseStyles?.();
       releaseStyles = null;
       clipControl = null;
@@ -48548,10 +50158,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       next = moveStart(next, next.start, cfg, b);
       return next;
     }
-    function commitSelection(sel, reason, retargetLoop = true) {
+    function commitSelection(sel, reason) {
       selection = sel;
       api?.setState("clipSelection", { start: sel.start, end: sel.end });
-      if (retargetLoop) preview?.start(sel);
+      preview?.retarget(sel);
       api?.emit("clip:changed", { start: sel.start, end: sel.end, reason });
       overlay?.update(sel, currentBounds(), cfg);
     }
@@ -48559,7 +50169,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!api || !sessionOpen) return;
       const step = cfg.step ?? 1;
       const snapped = { start: snap(sel.start, step), end: snap(sel.end, step) };
-      commitSelection(clampSelection(snapped), "user", !dragging);
+      commitSelection(clampSelection(snapped), "user");
     }
     function applyTitle(raw) {
       if (!api) return;
@@ -48568,25 +50178,76 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       titleText = raw.trim().slice(0, Math.max(0, maxLength));
       api.setState("clipTitle", titleText);
     }
+    function mediaGate() {
+      if (!api) return null;
+      if (nativeFullscreen) {
+        return {
+          code: "native-fullscreen-active",
+          message: GATE_MESSAGES["native-fullscreen-active"]
+        };
+      }
+      if (api.getState("live")) {
+        return { code: "live-unsupported", message: GATE_MESSAGES["live-unsupported"] };
+      }
+      const mediaType = api.getState("mediaType");
+      if (mediaType === "unknown" || mediaType === void 0) {
+        return { code: "media-type-unknown", message: GATE_MESSAGES["media-type-unknown"] };
+      }
+      if (mediaType !== "video") {
+        return { code: "media-type-unsupported", message: GATE_MESSAGES["media-type-unsupported"] };
+      }
+      const duration = api.getState("duration");
+      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
+        return { code: "duration-unknown", message: GATE_MESSAGES["duration-unknown"] };
+      }
+      return null;
+    }
     function mediaClippable() {
       if (!api) return false;
-      if (api.getState("live")) return false;
-      if (api.getState("mediaType") !== "video") return false;
-      const duration = api.getState("duration");
-      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) return false;
+      if (mediaGate() !== null) return false;
       try {
         return resolveMediaId() !== null;
       } catch {
         return false;
       }
     }
+    function refreshGate() {
+      if (!sessionOpen || !overlay) return;
+      const gate = mediaGate();
+      overlay.setBlocked(gate ? gate.message : null);
+    }
+    function watchNativeFullscreen() {
+      detachFullscreenWatch?.();
+      detachFullscreenWatch = null;
+      const video = api ? getVideo2(api.container) : null;
+      if (!video) return;
+      const onBegin = () => {
+        nativeFullscreen = true;
+        preview?.suspend();
+        overlay?.setSuspended(true);
+        refreshGate();
+      };
+      const onEnd = () => {
+        nativeFullscreen = false;
+        overlay?.setSuspended(false);
+        refreshGate();
+      };
+      video.addEventListener("webkitbeginfullscreen", onBegin);
+      video.addEventListener("webkitendfullscreen", onEnd);
+      detachFullscreenWatch = () => {
+        video.removeEventListener("webkitbeginfullscreen", onBegin);
+        video.removeEventListener("webkitendfullscreen", onEnd);
+      };
+      nativeFullscreen = video.webkitDisplayingFullscreen === true;
+    }
     function handleDragStart() {
-      dragging = true;
       lastScrubSeek = 0;
       const video = api ? getVideo2(api.container) : null;
       wasPlayingBeforeDrag = video ? !video.paused : false;
       video?.pause();
+      previewSuspendedBeforeDrag = preview?.isSuspended() ?? true;
       preview?.suspend();
+      timelineSurface?.setDragging(true);
     }
     function handleDragMove(_handle, time) {
       const now2 = Date.now();
@@ -48594,10 +50255,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastScrubSeek = now2;
       seekClamped(api, time);
     }
-    function handleDragEnd(finalSelection) {
-      dragging = false;
+    function handleDragEnd(finalSelection, info) {
+      timelineSurface?.setDragging(false);
+      if (!sessionOpen) {
+        wasPlayingBeforeDrag = false;
+        return;
+      }
+      preview?.retarget(finalSelection);
+      if (info.cancelled) {
+        wasPlayingBeforeDrag = false;
+        return;
+      }
       seekClamped(api, finalSelection.start);
-      preview?.start(finalSelection);
+      if (!previewSuspendedBeforeDrag) preview?.resume();
       restorePlayStateAfterDrag();
     }
     function restorePlayStateAfterDrag() {
@@ -48612,6 +50282,43 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
         };
         video.addEventListener("seeked", resumePlayback);
+      }
+    }
+    function handleSetAtPlayhead(handle) {
+      if (!api || !sessionOpen || !overlay) return;
+      const video = getVideo2(api.container);
+      const time = video && Number.isFinite(video.currentTime) ? video.currentTime : api.getState("currentTime") ?? 0;
+      overlay.setEndpoint(handle, time);
+    }
+    function handlePreviewRequest() {
+      if (!api || !sessionOpen || !selection) return;
+      seekClamped(api, selection.start);
+      preview?.start(selection);
+      const video = getVideo2(api.container);
+      if (!video) return;
+      void video.play().catch(() => {
+        overlay?.showNotice("Press Play to preview", { autoHideMs: 4e3 });
+      });
+    }
+    function handleTogglePlay() {
+      const video = api ? getVideo2(api.container) : null;
+      if (!video) return;
+      if (video.paused) void video.play().catch(() => {
+      });
+      else video.pause();
+    }
+    function handleTimelineSeekStart() {
+      if (!sessionOpen) return;
+      preview?.suspend();
+    }
+    function syncTimelineAttachment() {
+      if (!overlay) return;
+      if (timelineSurface) {
+        const surface = timelineSurface;
+        overlay.attachTimeline(surface.element, () => surface.getRailRect());
+        surface.setEditing(true);
+      } else {
+        overlay.attachTimeline(null);
       }
     }
     function showToast() {
@@ -48662,29 +50369,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           onSelectionChange: (sel) => applySelectionFromSelector(sel),
           onDragStart: handleDragStart,
           onDragMove: handleDragMove,
-          onDragEnd: handleDragEnd
+          onDragEnd: handleDragEnd,
+          onSetAtPlayhead: handleSetAtPlayhead,
+          onPreview: handlePreviewRequest,
+          onTogglePlay: handleTogglePlay
         }
       });
+      syncTimelineAttachment();
       overlay.open();
+      overlay.setPaused(getVideo2(api.container)?.paused ?? true);
+      refreshGate();
     }
     function doOpen() {
       if (!api || sessionOpen) return;
-      if (api.getState("live")) {
-        reportError(clipError("live-unsupported", "clips: live media cannot be clipped in v1"));
-        return;
-      }
-      const mediaType = api.getState("mediaType");
-      if (mediaType !== "video") {
-        reportError(
-          clipError("media-type-unsupported", `clips: only video is clippable; media type is ${String(mediaType)}`)
-        );
+      const gate = mediaGate();
+      if (gate) {
+        reportError(clipError(gate.code, gate.message));
         return;
       }
       const duration = api.getState("duration");
-      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
-        reportError(clipError("duration-unknown", "clips: media duration is unknown; cannot open"));
-        return;
-      }
       let mediaId = null;
       try {
         mediaId = resolveMediaId();
@@ -48727,6 +50430,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (mediaId === null) {
         reportError(clipError("media-id-unresolved", "clips: mediaId could not be resolved at commit time"));
         return;
+      }
+      const gate = mediaGate();
+      if (gate) {
+        reportError(clipError(gate.code, gate.message));
+        overlay?.setBlocked(gate.message);
+        return;
+      }
+      const currentDuration = api.getState("duration");
+      if (currentDuration !== sessionDuration) {
+        sessionDuration = currentDuration;
+        overlay?.update(selection, currentBounds(), cfg);
       }
       const rangeCode = validate(selection, cfg, currentBounds());
       if (rangeCode !== null) {
@@ -48789,13 +50503,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.on("media:load-request", closeOnSourceChange),
           api.on("playlist:change", closeOnSourceChange)
         );
+        watchNativeFullscreen();
+        disposers.push(api.on("media:loaded", watchNativeFullscreen));
+        disposers.push(
+          api.subscribeToState((event) => {
+            if (event.key === "paused") {
+              overlay?.setPaused(event.value === true);
+              return;
+            }
+            if (event.key !== "mediaType" && event.key !== "live" && event.key !== "duration") return;
+            refreshGate();
+            clipControl?.update();
+          })
+        );
         if (cfg.ui !== "none") {
           releaseStyles = injectSharedStyles(STYLE_ID6, styles6);
         }
         if (cfg.ui !== "none") {
           const generation = lifecycle;
           const owner = api.container;
-          void Promise.resolve().then(() => (init_src2(), src_exports)).then(({ registerControl: registerControl2, unregisterControl: unregisterControl2 }) => {
+          void Promise.resolve().then(() => (init_src2(), src_exports)).then((module) => {
+            const { registerControl: registerControl2, unregisterControl: unregisterControl2 } = module;
             if (generation !== lifecycle) return;
             registerControl2(
               CONTROL_ID,
@@ -48821,6 +50549,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               unregisterControl2(CONTROL_ID, { owner });
               clipControl = null;
             };
+            const registerTimelineExtension2 = module.registerTimelineExtension;
+            if (typeof registerTimelineExtension2 !== "function") {
+              api?.logger.debug("clips: installed UI has no timeline seam; using the standalone rail");
+              return;
+            }
+            releaseTimeline = registerTimelineExtension2(owner, (surface) => {
+              timelineSurface = surface;
+              if (sessionOpen) syncTimelineAttachment();
+              return {
+                update: () => overlay?.syncTimelineGeometry(),
+                onSeekStart: handleTimelineSeekStart,
+                // Deliberately empty: the loop stays suspended after an
+                // ordinary seek. See handleTimelineSeekStart.
+                onSeekEnd: () => {
+                },
+                destroy: () => {
+                  timelineSurface = null;
+                  if (sessionOpen) syncTimelineAttachment();
+                }
+              };
+            });
           }).catch(() => {
             api?.logger.debug("@scarlett-player/ui not present, clip control not registered");
           });
@@ -48840,7 +50589,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (!api || !sessionOpen) return;
         const step = cfg.step ?? 1;
         const snapped = { start: snap(start, step), end: snap(end, step) };
-        commitSelection(clampSelection(snapped), "user", !dragging);
+        commitSelection(clampSelection(snapped), "user");
       },
       setTitle(title) {
         if (!api) return;
@@ -49120,12 +50869,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             break;
           }
         }
-        const round = (value) => Math.round(value * 100) / 100;
+        const round2 = (value) => Math.round(value * 100) / 100;
         return {
           liveLatencySamples: count,
-          liveLatencyMean: round(sum / count),
-          liveLatencyP95: round(p95),
-          liveLatencyMax: round(max),
+          liveLatencyMean: round2(sum / count),
+          liveLatencyP95: round2(p95),
+          liveLatencyMax: round2(max),
           lowLatency: sawLowLatency
         };
       }
@@ -49843,6 +51592,8 @@ Cada trampa se prueba una sola vez.
   function fakeClipCreation(range) {
     const uuid2 = crypto.randomUUID();
     const clipUrl = `https://example.com/clips/${uuid2}`;
+    const captures = window.__clipCaptures ?? (window.__clipCaptures = []);
+    captures.push(range);
     appendClipRow("clip:requested", `POST /api/clips (simulated)`, range);
     window.setTimeout(() => appendClipRow("status", "rendering"), 2e3);
     window.setTimeout(() => appendClipRow("status", `ready  url=${clipUrl}`), 4e3);
@@ -49857,6 +51608,12 @@ Cada trampa se prueba una sola vez.
     const clipsPlugin = createClipsPlugin({
       mediaId: "demo-bbb",
       onCreate: fakeClipCreation
+    });
+    const watermarkPlugin = createWatermarkPlugin({
+      imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
+      position: "bottom-right",
+      opacity: 0.5,
+      imageHeight: 64
     });
     const player = await createPlayer({
       container,
@@ -49904,12 +51661,7 @@ Cada trampa se prueba una sola vez.
         }),
         airplayPlugin(),
         chromecastPlugin(),
-        createWatermarkPlugin({
-          imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
-          position: "bottom-right",
-          opacity: 0.5,
-          imageHeight: 64
-        }),
+        watermarkPlugin,
         // Shares the demo page itself, with the playback position appended. On a
         // phone this opens the OS share sheet directly.
         //
@@ -50006,6 +51758,48 @@ Cada trampa se prueba una sola vez.
       input?.addEventListener("input", applyClipLimits);
     }
     document.getElementById("clip-open-btn")?.addEventListener("click", () => clipsPlugin.open());
+    const watermarkImageInput = document.getElementById("watermark-image-input");
+    document.getElementById("watermark-image-btn")?.addEventListener("click", () => {
+      const url = watermarkImageInput?.value.trim();
+      if (url) watermarkPlugin.setImage(url);
+    });
+    const watermarkTextInput = document.getElementById("watermark-text-input");
+    document.getElementById("watermark-text-btn")?.addEventListener("click", () => {
+      const text = watermarkTextInput?.value.trim();
+      if (text) watermarkPlugin.setText(text);
+    });
+    const positionButtons = document.querySelectorAll(".position-btn[data-pos]");
+    positionButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pos = btn.dataset.pos;
+        if (pos) watermarkPlugin.setPosition(pos);
+        positionButtons.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
+    });
+    const opacityInput = document.getElementById("watermark-opacity");
+    opacityInput?.addEventListener("input", () => {
+      const value = parseFloat(opacityInput.value);
+      const label = document.getElementById("opacity-value");
+      if (label) label.textContent = value.toFixed(1);
+      watermarkPlugin.setOpacity(value);
+    });
+    const imageHeightInput = document.getElementById("watermark-imageheight");
+    imageHeightInput?.addEventListener("input", () => {
+      const value = parseInt(imageHeightInput.value, 10);
+      const label = document.getElementById("imageheight-value");
+      if (label) label.textContent = String(value);
+      watermarkPlugin.setImageHeight(value);
+    });
+    const paddingInput = document.getElementById("watermark-padding");
+    paddingInput?.addEventListener("input", () => {
+      const value = parseInt(paddingInput.value, 10);
+      const label = document.getElementById("padding-value");
+      if (label) label.textContent = String(value);
+      watermarkPlugin.setPadding(value);
+    });
+    document.getElementById("watermark-show-btn")?.addEventListener("click", () => watermarkPlugin.show());
+    document.getElementById("watermark-hide-btn")?.addEventListener("click", () => watermarkPlugin.hide());
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
@@ -50020,7 +51814,7 @@ Cada trampa se prueba una sola vez.
     player.on("clip:cancelled", (e) => console.log(`\u{1F6AB} Clip cancelled (${e.reason})`));
     player.on("clip:error", (e) => console.error("\u274C Clip error:", e.error?.message ?? e.error));
     window.player = player;
-    window.watermarkPlugin = player.getPlugin("watermark");
+    window.watermarkPlugin = watermarkPlugin;
     window.clipsPlugin = clipsPlugin;
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");

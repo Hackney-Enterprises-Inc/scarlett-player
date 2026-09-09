@@ -128,12 +128,18 @@ export function formatLength(seconds: number, step = 1): string {
  */
 export function fractionDigits(step: number): number {
   if (!Number.isFinite(step) || step <= 0 || step >= 1) return 0;
-  // 0.5 -> 1, 0.25 -> 2, 0.1 -> 1, 0.001 -> 3. Anything finer than a
-  // millisecond is beyond what a media element seeks to anyway.
-  const text = String(step);
-  const dot = text.indexOf('.');
-  if (dot === -1) return 0;
-  return Math.min(3, text.length - dot - 1);
+
+  // 0.5 -> 1, 0.25 -> 2, 0.001 -> 3. Derived by asking which power of ten
+  // makes the step whole rather than by counting characters in String(step):
+  // a small enough step formats exponentially ('1e-7'), which has no decimal
+  // point at all and so counted as zero decimals - the one input where the
+  // character count gave a confidently wrong answer instead of a capped one.
+  for (let digits = 1; digits < 3; digits += 1) {
+    if (Number.isInteger(Number((step * 10 ** digits).toFixed(6)))) return digits;
+  }
+
+  // Anything finer than a millisecond is beyond what a media element seeks to.
+  return 3;
 }
 
 /**

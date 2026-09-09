@@ -106,8 +106,16 @@ describe('fractionDigits', () => {
 
   it('reports what a fractional step needs, capped at milliseconds', () => {
     expect(fractionDigits(0.5)).toBe(1);
+    expect(fractionDigits(0.1)).toBe(1);
     expect(fractionDigits(0.25)).toBe(2);
     expect(fractionDigits(0.001)).toBe(3);
     expect(fractionDigits(0.00001)).toBe(3);
+  });
+
+  it('caps rather than misreads a step small enough to format exponentially', () => {
+    // String(1e-7) is '1e-7', which has no decimal point: counting characters
+    // answered 0 decimals for the finest step there is.
+    expect(fractionDigits(1e-7)).toBe(3);
+    expect(String(1e-7)).not.toContain('.');
   });
 });

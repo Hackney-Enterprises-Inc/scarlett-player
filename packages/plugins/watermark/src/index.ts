@@ -20,11 +20,37 @@ const POSITIONS: WatermarkPosition[] = ['top-left', 'top-right', 'bottom-left', 
 /**
  * Clamp an opacity to the 0-1 range CSS accepts.
  *
+ * Non-finite input falls back rather than propagating: `Math.max`/`Math.min`
+ * pass `NaN` straight through, so an unguarded clamp wrote
+ * `style.opacity = 'NaN'` (which CSS ignores, leaving the watermark at
+ * whatever it was) and, worse, handed `NaN` back out through `getConfig()`,
+ * where a host reading it round-trips the poison into its own state.
+ *
  * @param value - Requested opacity
- * @returns The value clamped to 0-1
+ * @param fallback - Used when the value is not a finite number
+ * @returns The value clamped to 0-1, or the fallback
  */
-function clampOpacity(value: number): number {
+function clampOpacity(value: number, fallback = 0.5): number {
+  if (!Number.isFinite(value)) return fallback;
+
   return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Clamp a pixel measurement to a floor, rejecting nonsense.
+ *
+ * Same reasoning as {@link clampOpacity}: `Math.max(1, NaN)` is `NaN`, and
+ * `${NaN}px` is an invalid declaration the browser drops silently.
+ *
+ * @param value - Requested measurement in px
+ * @param floor - Smallest value that makes sense
+ * @param fallback - Used when the value is not a finite number
+ * @returns The clamped measurement, or the fallback
+ */
+function clampPx(value: number, floor: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+
+  return Math.max(floor, value);
 }
 
 function getPositionStyles(padding: number, bottomPadding: number): Record<WatermarkPosition, string> {
@@ -76,9 +102,10 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
   let currentOpacity = clampOpacity(config.opacity ?? 0.5);
   let currentVisible = false;
   const fontSize = config.fontSize ?? 14;
-  let currentImageHeight = config.imageHeight ?? 40;
-  let currentPadding = config.padding ?? 10;
-  let currentBottomPadding = config.padding ?? 40; // Higher default for bottom to clear player controls
+  let currentImageHeight = clampPx(config.imageHeight ?? 40, 1, 40);
+  let currentPadding = clampPx(config.padding ?? 10, 0, 10);
+  // Higher default for bottom to clear player controls
+  let currentBottomPadding = clampPx(config.padding ?? 40, 0, 40);
   const dynamic = config.dynamic ?? false;
   const dynamicInterval = config.dynamicInterval ?? 10000;
   const showDelay = config.showDelay ?? 0;
@@ -361,12 +388,12 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     setPosition: setPosition,
 
     setOpacity(value: number): void {
-      currentOpacity = clampOpacity(value);
+      currentOpacity = clampOpacity(value, currentOpacity);
       if (element) element.style.opacity = String(currentOpacity);
     },
 
     setImageHeight(height: number): void {
-      currentImageHeight = Math.max(1, height);
+      currentImageHeight = clampPx(height, 1, currentImageHeight);
       if (element) {
         const img = element.querySelector('img');
         if (img) img.style.maxHeight = `${currentImageHeight}px`;
@@ -374,9 +401,13 @@ export function createWatermarkPlugin(config: WatermarkConfig = {}): IWatermarkP
     },
 
     setPadding(value: number): void {
-      currentPadding = Math.max(0, value);
+      currentPadding = clampPx(value, 0, currentPadding);
       // Preserve the 40px minimum bottom clearance for player controls
-      currentBottomPadding = Math.max(value, config.padding ?? 40);
+      currentBottomPadding = clampPx(
+        Math.max(value, config.padding ?? 40),
+        0,
+        currentBottomPadding
+      );
       positionStyles = getPositionStyles(currentPadding, currentBottomPadding);
       // Re-apply current position with new padding
       setPosition(currentPosition);

@@ -544,6 +544,32 @@ describe('runtime API', () => {
     expect(cfg.opacity).toBe(0.8);
   });
 
+  it('ignores non-finite measurements instead of writing NaN into styles and config', () => {
+    // Math.max/Math.min pass NaN straight through, so an unguarded clamp wrote
+    // `opacity: NaN` and `max-height: NaNpx` - both silently dropped by CSS -
+    // and then handed NaN back out through getConfig() for the host to keep.
+    plugin.setImage('https://example.com/logo.png');
+    plugin.setOpacity(0.8);
+    plugin.setImageHeight(100);
+    plugin.setPadding(20);
+
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      plugin.setOpacity(bad);
+      plugin.setImageHeight(bad);
+      plugin.setPadding(bad);
+    }
+
+    const cfg = plugin.getConfig();
+    expect(cfg.opacity).toBe(0.8);
+    expect(cfg.imageHeight).toBe(100);
+    expect(cfg.padding).toBe(20);
+
+    const el = mockApi.container.querySelector('.sp-watermark') as HTMLElement;
+    const img = mockApi.container.querySelector('.sp-watermark img') as HTMLElement;
+    expect(el.style.opacity).toBe('0.8');
+    expect(img.style.maxHeight).toBe('100px');
+  });
+
   it('setImageHeight updates image max-height', () => {
     plugin.setImage('https://example.com/logo.png');
     plugin.setImageHeight(100);
