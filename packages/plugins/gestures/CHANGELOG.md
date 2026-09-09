@@ -1,5 +1,153 @@
 # @scarlett-player/gestures
 
+## 1.13.0
+
+### Patch Changes
+
+- [#95](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/95) [`9cef6a8`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9cef6a8f698b2cbc607839deb35223852da77ffa) Thanks [@alexhackney](https://github.com/alexhackney)! - Fixes from review of the clip-editing pass: guards that were written but never
+  took effect, and two classifications that believed stale evidence.
+
+  **`@scarlett-player/clips`**
+  - The exact-time field the viewer is editing is now re-rendered on Enter and
+    Escape. `renderTimeFields()` skipped any focused input so as not to overwrite
+    typing, but Enter and Escape are both handled with the input still focused -
+    so the one field the viewer had just acted on was the one field never updated.
+    Escape left the half-typed value on screen, a refused value stayed next to the
+    notice rejecting it, and a committed value never showed the snapped, clamped
+    time the endpoint actually landed on. Other fields are still left alone.
+  - The preview loop rewinds again when the out point is pinned at the media's
+    duration. It asked `paused` state inside its `playback:ended` handler, and a
+    media element that reaches its end sets `paused` and fires `pause` _before_
+    `ended` - so state said "the viewer stopped" for every natural end and the
+    rewind never ran. Playback intent is now tracked as playback happens, which
+    still declines to restart a video the viewer paused and walked away from.
+  - `setInteractive(false)` now holds against the keyboard and the pointer.
+    `tabindex="-1"` keeps a frozen handle out of tabbing but does not blur one
+    that already had focus, and a focused element still receives keydown, so the
+    range could be walked out from under a submission already carrying it. The
+    freeze is enforced in the handlers rather than only in CSS and the tab order.
+  - The range toolbar buttons and the details Back button are 44px tall, matching
+    the touch-target floor the other clip controls already used.
+
+  **`@scarlett-player/hls`**
+  - `mediaType` no longer inherits the previous source's frame size. The
+    classifier attaches to a _reused_ `<video>` before `attachMedia()`/
+    `loadSource()` has replaced anything, so an audio-only source loaded after a
+    video one arrived with `videoWidth` still measuring the old frame. Believing
+    it was permanent: video evidence is sticky, so the manifest's `video: false`
+    could no longer correct it, and an audio-only source stayed labelled `video`.
+    Intrinsic dimensions now count only once the element has reported on the
+    source now loading.
+
+  **`@scarlett-player/gestures`**
+  - The tap surface is built for `mediaType: 'video'`, not for anything that is
+    not `'audio'`. `'unknown'` means "not established yet": an audio-only source
+    the classifier cannot prove (native HLS where the browser ships no track
+    lists) stays unknown for its whole life, and was getting a full-bleed tap
+    surface over the audio UI. Nothing is lost by waiting - the surface is built
+    the moment the source is confirmed as video.
+
+  **`@scarlett-player/ui`**
+  - The progress handle stops growing on hover while a timeline extension owns the
+    pointer. The `--ext-dragging` rule sat above the `:hover` rule it was meant to
+    beat and at lower specificity, and an extension drag is a pointer drag, so the
+    hover rule always won and the override never applied.
+
+  **`@scarlett-player/watermark`**
+  - `playback:ended` cancels a pending `showDelay`. The handler hid the watermark
+    but left the timer armed, so media shorter than the delay ended hidden and
+    then went visible - and, with `dynamic` on, started repositioning itself over
+    a finished player.
+
+- [#95](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/95) [`9cef6a8`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9cef6a8f698b2cbc607839deb35223852da77ffa) Thanks [@alexhackney](https://github.com/alexhackney)! - Clips on the playback timeline, and an end to video being mislabelled as audio.
+
+  **Video is no longer classified as audio because nobody measured it yet.**
+  `@scarlett-player/hls` derived `mediaType` from one expression in its
+  `loadedmetadata` handler - `video.videoWidth > 0 ? 'video' : 'audio'` - which
+  reads a _missing_ measurement as positive evidence of audio. Intrinsic
+  dimensions are simply not available at that point on several mobile browsers, so
+  an ordinary phone playing an ordinary video was labelled `audio`, and everything
+  gated on that quietly refused to work. Classification now needs evidence:
+  positive dimensions or a present native video track establish video and stay
+  sticky for the source; hls.js's `MANIFEST_PARSED` flags establish it before a
+  frame decodes; native track lists (feature-detected, consulted only from
+  `HAVE_METADATA`) establish audio. Anything else stays `unknown`, which is a
+  third answer and not a synonym for audio. Evidence survives retries, native
+  error-recovery reloads and AirPlay handoffs, and resets on a new source.
+
+  **The clip IN/OUT handles now live on the playback timeline.**
+  `@scarlett-player/ui` gains `registerTimelineExtension(owner, factory)`, a
+  second extension seam beside the control registry: it offers a positioned layer
+  over the rail, the rail's measured geometry, and leases for holding the control
+  bar visible and suppressing ordinary seeking while an extension owns a pointer.
+  One extension per player, keyed by container, registerable before or after the
+  UI plugin initialises. The UI package reads no plugin-specific state and gains
+  no `IPluginAPI` surface for it.
+
+  `@scarlett-player/clips` mounts its handles there in two 44px lanes, IN above
+  the rail and OUT below, each labelled with its own timestamp. Two lanes because
+  a 30-second selection on a two-hour source is about a pixel wide, and two
+  targets on one line cannot both be hit. Presses that miss a handle fall through
+  and seek as usual. Without the seam - no UI package, or one too old to have it -
+  the same selector instance renders on its own rail, and it moves between the two
+  without losing the selection, the title or the request id.
+
+  **Editing and preview stopped fighting the viewer.** Drags preserve the grab
+  offset, lock one pointer, survive a failed pointer capture, apply the release
+  position once, and treat a cancelled gesture as a cancellation (range kept,
+  playback not resumed). Endpoints can also be placed at the playhead, stepped
+  with the keyboard against their own reachable limits, or typed exactly
+  (`93`, `1:33.5`, `0:01:33.250`). An ordinary seek takes the preview loop's
+  ownership of the playhead and keeps it, so scrubbing past the out point no
+  longer snaps back; "Preview clip" is how it is asked for again.
+
+  **The editor fits on a phone.** Layout is measured on the player, never the
+  device. Below 600x360 range editing and naming become two steps so neither is
+  cut off; below 220px tall the control bar is given up for the duration of the
+  edit with Play/Pause moved into the toolbar; below 160px the editor becomes a
+  bounded scrollable sheet. Range editing is a nonmodal labelled region (no
+  document-wide focus trap), the details step is a labelled `aria-modal="false"`
+  dialog, and Escape is scoped to focus inside its own player so two players never
+  answer each other.
+
+  New clip error codes: `media-type-unknown` ("Video information is not available
+  yet. Press Play and try again.") and `native-fullscreen-active`, for the iPhone's
+  own fullscreen player where no custom DOM control can exist. The gate is
+  re-checked at commit, so a selection is never submitted against a source that
+  has changed under it.
+
+- [#95](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/95) [`9cef6a8`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9cef6a8f698b2cbc607839deb35223852da77ffa) Thanks [@alexhackney](https://github.com/alexhackney)! - Fix the watermark runtime API, which the plugin's own anti-tamper observer had
+  been undoing.
+
+  **`@scarlett-player/watermark`**
+  - `setOpacity()` now sticks. The `MutationObserver` installed by `init()` wrote
+    `element.style.opacity = String(opacity)` from the original config on every
+    style mutation, so a runtime opacity was reverted on the next microtask.
+    Opacity is runtime state now, and the observer restores the value the plugin
+    last applied. The existing tests passed only because they asserted
+    synchronously, before the observer callback ran; the new ones await it.
+  - `setPosition()`, `setPadding()` and `setImageHeight()` no longer reset
+    opacity as a side effect — each of them writes inline styles, and every write
+    triggered that same revert.
+  - The observer's style branch is scoped to the watermark element. It observes
+    the player container with `subtree: true` (needed to catch the mark being
+    removed), so a style write anywhere else under the container — the control
+    bar animating, the progress bar, the clip range selector — was treated as
+    tampering and re-asserted the config opacity. It also only writes a property
+    when it differs, instead of queueing another mutation record for itself on
+    every callback.
+  - `show()` / `hide()` do something. They only swapped `sp-watermark--visible` /
+    `sp-watermark--hidden`, and no stylesheet in the repo defines either class,
+    so the calls were inert and the mark was visible from `init()`. Visibility is
+    now an inline `visibility` (the classes stay as consumer hooks), and the
+    observer restores the tracked state rather than forcing the mark visible.
+  - **Behaviour change:** the documented lifecycle now actually happens — the
+    mark is hidden until the first `playback:play` (after `showDelay`), stays
+    visible while paused, and hides on `playback:ended`. A consumer who was
+    seeing it over the poster will no longer see it there.
+  - README: the overlay stays visible while paused, which is what the code has
+    always done; "hidden on pause" was wrong.
+
 ## 1.12.0
 
 ### Minor Changes
