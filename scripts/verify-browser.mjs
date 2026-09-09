@@ -32,7 +32,15 @@
  *      still seeks the video, the progress bar is a 44px touch target, and the
  *      settings speed panel fits inside its bound and scrolls inside a 375x211
  *      player rather than overflowing it. Repeated at 375 and 414.
- *   8. LL-HLS: a rolling low-latency playlist assembled from the same fixture
+ *   8. Clip editing on the playback timeline (local fixture): the IN and OUT
+ *      handles are mounted into the UI package's timeline extension layer and
+ *      not into a second track of their own, `elementFromPoint` reaches both
+ *      of them at 320x180 where a single lane would overlap, a real touch drag
+ *      moves one endpoint without also seeking, an ordinary press on the rail
+ *      still seeks, the compact range/details stages both keep Create inside
+ *      the player, and the submitted payload matches the range the plugin
+ *      reports. onCreate is the demo's local stand-in, so no origin is needed.
+ *   9. LL-HLS: a rolling low-latency playlist assembled from the same fixture
  *      segments, sliced into 0.5s parts and served the way an LL origin serves
  *      them (blocking part delivery, blocking playlist reloads). Parts load,
  *      effective LL is reported, the edge threshold flips to GO LIVE when the
@@ -835,6 +843,360 @@ const state = (page) => page.evaluate(() => {
 }
 
 // ============================================================ SCENARIO 8
+// Clip editing on the playback timeline.
+//
+// Everything here needs layout and real input, which is why none of it can be
+// a unit test: whether both endpoint targets are actually hit-testable at
+// 320x180, whether a touch drag on a handle also scrubs the video underneath
+// it, and whether the Create button ends up inside the player once an error
+// notice has wrapped onto three lines are all questions only a browser can
+// answer. The two-lane layout exists because the single-lane one failed the
+// first of those on a two-hour source.
+{
+  console.log('\n--- Scenario 8: clip editing on the timeline (local fixture) ---');
+
+  /**
+   * Open the demo on a phone-sized touch viewport with the fixture loaded and
+   * the clip editor open on the timeline.
+   *
+   * @param {number} width - Viewport width
+   * @param {number} height - Viewport height
+   * @param {{player?: {width: number, height: number}}} [opts] - Force a
+   *   player box, for the embedded-narrow-player case
+   * @returns {Promise<import('playwright').Page>} The prepared page
+   */
+  const openClipEditor = async (width, height, opts = {}) => {
+    const p = await browser.newPage({
+      viewport: { width, height },
+      hasTouch: true,
+      isMobile: true,
+    });
+    await blockExternalOrigins(p);
+    await p.goto(URL, { waitUntil: 'domcontentloaded' });
+    await p.waitForSelector('.sp-controls', { timeout: 15000 });
+    await loadFixture(p);
+    await p.waitForFunction(
+      () => (document.querySelector('video')?.duration ?? 0) > 0,
+      null,
+      { timeout: 30000 }
+    );
+
+    if (opts.player) {
+      await p.evaluate(({ w, h }) => {
+        const el = document.getElementById('player');
+        el.style.aspectRatio = 'auto';
+        el.style.width = `${w}px`;
+        el.style.height = `${h}px`;
+      }, { w: opts.player.width, h: opts.player.height });
+    }
+
+    // Past the pre-roll, so the opening selection has room behind the playhead
+    // and the handles are not both pinned to zero.
+    await p.evaluate(async () => {
+      const video = document.querySelector('video');
+      video.currentTime = 40;
+      await new Promise((r) => setTimeout(r, 400));
+      window.clipsPlugin.open();
+      // The editor measures on a frame and the overlay opens on the next one.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    await p.waitForSelector('.sp-clip-editor', { timeout: 10000 });
+
+    return p;
+  };
+
+  {
+    const page = await openClipEditor(320, 568, { player: { width: 320, height: 180 } });
+
+    const mount = await page.evaluate(() => {
+      const track = document.querySelector('.sp-clip-track');
+      const layer = document.querySelector('.sp-progress__extension');
+
+      return {
+        tracks: document.querySelectorAll('.sp-clip-track').length,
+        onTimeline: track?.parentElement === layer,
+        timelineClass: track?.classList.contains('sp-clip-track--timeline') ?? false,
+        // The panel's own rail must be gone the moment the real one is in use,
+        // or one selection shows two tracks.
+        railHidden: document.querySelector('.sp-clip-rail')?.hidden ?? null,
+        // The layer must not be inside the seek slider: an editor's handles are
+        // controls in their own right, and nesting them in role="slider" hides
+        // them behind the slider's semantics.
+        insideSlider: !!layer?.closest('[role="slider"]'),
+        layout: document.querySelector('.sp-clip-editor')?.dataset.layout,
+      };
+    });
+    record(
+      'the clip handles mount into the timeline layer, and only there',
+      mount.tracks === 1 && mount.onTimeline === true && mount.timelineClass === true &&
+        mount.railHidden === true && mount.insideSlider === false,
+      JSON.stringify(mount)
+    );
+    record(
+      'a 320x180 player uses the minimal layout',
+      mount.layout === 'minimal',
+      String(mount.layout)
+    );
+
+    // The two-lane geometry, asked the only way that means anything: what does
+    // the browser say is under each handle's own centre point? On one lane the
+    // out handle sat on top of the in handle for any selection shorter than a
+    // handle's width, and the viewer could only ever grab one of them.
+    const hits = await page.evaluate(() => {
+      const at = (which) => {
+        const el = document.querySelector(`[data-clip-handle="${which}"]`);
+        if (!el) return { found: false };
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+
+        return {
+          found: true,
+          box: { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) },
+          reaches: hit?.closest('[data-clip-handle]')?.dataset.clipHandle ?? null,
+        };
+      };
+      const player = document.getElementById('player').getBoundingClientRect();
+      const start = at('start');
+      const end = at('end');
+
+      return {
+        start,
+        end,
+        // Distinct lanes: IN above the rail, OUT below it, never overlapping.
+        disjoint: start.found && end.found && start.box.bottom <= end.box.top + 1,
+        insidePlayer:
+          start.box.top >= player.top - 1 && end.box.bottom <= player.bottom + 1,
+      };
+    });
+    record(
+      'elementFromPoint reaches BOTH endpoint handles at 320x180',
+      hits.start.reaches === 'start' && hits.end.reaches === 'end',
+      JSON.stringify(hits)
+    );
+    record(
+      'the two handle lanes are disjoint and inside the player',
+      hits.disjoint === true && hits.insidePlayer === true,
+      JSON.stringify({ start: hits.start.box, end: hits.end.box })
+    );
+
+    // A real touch drag through CDP, not a synthetic event: the whole point is
+    // that the browser's own hit-testing and the wrapper's touch handlers agree
+    // about who owns the gesture.
+    const before = await page.evaluate(() => ({
+      range: window.clipsPlugin.getRange(),
+      t: +document.querySelector('video').currentTime.toFixed(2),
+    }));
+
+    const endBox = await page.evaluate(() => {
+      const r = document.querySelector('[data-clip-handle="end"]').getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.touchscreen.tap(endBox.x, endBox.y);
+    const client = await page.context().newCDPSession(page);
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: endBox.x, y: endBox.y }],
+    });
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: endBox.x + 40, y: endBox.y }],
+    });
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await page.waitForTimeout(400);
+
+    const after = await page.evaluate(() => ({
+      range: window.clipsPlugin.getRange(),
+      t: +document.querySelector('video').currentTime.toFixed(2),
+    }));
+    record(
+      'a touch drag on the OUT handle moves that endpoint',
+      after.range.endTime > before.range.endTime &&
+        after.range.startTime === before.range.startTime,
+      JSON.stringify({ before: before.range && { s: before.range.startTime, e: before.range.endTime },
+                       after: after.range && { s: after.range.startTime, e: after.range.endTime } })
+    );
+
+    // The rail underneath must still be an ordinary seek target: an editor that
+    // ate every press on the timeline would take scrubbing away for the whole
+    // session.
+    const seek = await page.evaluate(async () => {
+      const rail = document.querySelector('.sp-progress');
+      const r = rail.getBoundingClientRect();
+      const video = document.querySelector('video');
+      const from = video.currentTime;
+      // Well clear of both handles, on the rail's own line.
+      rail.dispatchEvent(new MouseEvent('mousedown', {
+        clientX: r.left + r.width * 0.85,
+        clientY: r.top + r.height / 2,
+        bubbles: true,
+      }));
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: r.left + r.width * 0.85,
+        clientY: r.top + r.height / 2,
+        bubbles: true,
+      }));
+      await new Promise((res) => setTimeout(res, 300));
+
+      return { from: +from.toFixed(2), to: +video.currentTime.toFixed(2) };
+    });
+    record(
+      'a press on the rail away from the handles still seeks',
+      seek.to !== seek.from,
+      JSON.stringify(seek)
+    );
+
+    // Everything the viewer must be able to reach, at the size that used to
+    // put Create off the bottom of the player.
+    const stages = await page.evaluate(async () => {
+      const player = () => document.getElementById('player').getBoundingClientRect();
+      const inside = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const p = player();
+
+        return r.width > 0 && r.height > 0 &&
+          r.top >= p.top - 1 && r.bottom <= p.bottom + 1 &&
+          r.left >= p.left - 1 && r.right <= p.right + 1;
+      };
+
+      const editor = document.querySelector('.sp-clip-editor');
+      const toolbarReachable =
+        inside(document.querySelector('.sp-clip-tool--set-in')) &&
+        inside(document.querySelector('.sp-clip-tool--set-out')) &&
+        inside(document.querySelector('.sp-clip-tool--next'));
+
+      document.querySelector('.sp-clip-tool--next').click();
+      await new Promise((r) => setTimeout(r, 300));
+
+      // A long server-style error, which is what used to push the footer out.
+      window.clipsPlugin.setTitle('x'.repeat(60));
+      const body = document.querySelector('.sp-clip-details__body');
+
+      return {
+        stage: editor.dataset.stage,
+        toolbarReachable,
+        confirmInside: inside(document.querySelector('.sp-clip-btn--confirm')),
+        cancelInside: inside(document.querySelector('.sp-clip-btn--cancel')),
+        backInside: inside(document.querySelector('.sp-clip-back')),
+        // The body scrolls; the panel does not grow past the player.
+        bodyScrolls: body.scrollHeight >= body.clientHeight,
+        panelInside: inside(document.querySelector('.sp-clip-details')),
+        controlsHidden:
+          getComputedStyle(document.querySelector('.sp-controls')).display === 'none',
+      };
+    });
+    record(
+      'the range toolbar is fully inside a 320x180 player',
+      stages.toolbarReachable === true && stages.controlsHidden === true,
+      JSON.stringify(stages)
+    );
+    record(
+      'the details stage keeps Back, Cancel and Create inside the player',
+      stages.stage === 'details' && stages.confirmInside && stages.cancelInside &&
+        stages.backInside && stages.panelInside && stages.bodyScrolls,
+      JSON.stringify(stages)
+    );
+
+    // Submit, and compare what the host received against what the plugin says
+    // it captured. onCreate is the demo's own local stand-in - no origin.
+    const submitted = await page.evaluate(async () => {
+      const expected = window.clipsPlugin.getRange();
+      document.querySelector('.sp-clip-btn--confirm').click();
+      await new Promise((r) => setTimeout(r, 600));
+      const captures = window.__clipCaptures ?? [];
+
+      return { expected, captured: captures[captures.length - 1] ?? null, count: captures.length };
+    });
+    record(
+      'the submitted payload is the range the plugin reported',
+      submitted.count === 1 &&
+        submitted.captured?.startTime === submitted.expected?.startTime &&
+        submitted.captured?.endTime === submitted.expected?.endTime &&
+        submitted.captured?.clientRequestId === submitted.expected?.clientRequestId,
+      JSON.stringify(submitted)
+    );
+
+    const cleanup = await page.evaluate(() => ({
+      editor: !!document.querySelector('.sp-clip-editor'),
+      track: !!document.querySelector('.sp-clip-track'),
+      open: window.clipsPlugin.isOpen(),
+      controlsBack: getComputedStyle(document.querySelector('.sp-controls')).display !== 'none',
+      editingClass: document.getElementById('player').classList.contains('sp-clip-editing'),
+    }));
+    record(
+      'closing the editor leaves no handles, no reservation and the bar back',
+      cleanup.editor === false && cleanup.track === false && cleanup.open === false &&
+        cleanup.controlsBack === true && cleanup.editingClass === false,
+      JSON.stringify(cleanup)
+    );
+
+    await page.close();
+  }
+
+  // A 320px player on a wide desktop page must behave like a phone, because
+  // the breakpoints are measured on the player and never on the device.
+  {
+    const page = await openClipEditor(1440, 900, { player: { width: 320, height: 180 } });
+    const embedded = await page.evaluate(() => ({
+      layout: document.querySelector('.sp-clip-editor')?.dataset.layout,
+      nextShown: document.querySelector('.sp-clip-tool--next')?.hidden === false,
+    }));
+    record(
+      'a 320px player on a 1440px page still gets the compact editor',
+      embedded.layout === 'minimal' && embedded.nextShown === true,
+      JSON.stringify(embedded)
+    );
+    await page.close();
+  }
+
+  // Keyboard and exact times on a desktop-sized player, where both stages are
+  // on screen together.
+  {
+    const page = await openClipEditor(1280, 900);
+    const desktop = await page.evaluate(async () => {
+      const editor = document.querySelector('.sp-clip-editor');
+      const startHandle = document.querySelector('[data-clip-handle="start"]');
+      const before = window.clipsPlugin.getRange().startTime;
+
+      startHandle.focus();
+      startHandle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      const afterKey = window.clipsPlugin.getRange().startTime;
+
+      const field = document.querySelector('[data-clip-endpoint="end"]');
+      const target = Math.round(window.clipsPlugin.getRange().startTime) + 20;
+      field.value = String(target);
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 200));
+
+      return {
+        layout: editor.dataset.layout,
+        before,
+        afterKey,
+        target,
+        endTime: window.clipsPlugin.getRange().endTime,
+        // Both stages at once on a player with room: no Next, no Back.
+        nextHidden: document.querySelector('.sp-clip-tool--next').hidden,
+        detailsShown: getComputedStyle(document.querySelector('.sp-clip-details')).display !== 'none',
+      };
+    });
+    record(
+      'a desktop player shows the toolbar and the details panel together',
+      desktop.layout === 'regular' && desktop.nextHidden === true && desktop.detailsShown === true,
+      JSON.stringify(desktop)
+    );
+    record(
+      'an arrow key steps the focused handle, and an exact time lands on it',
+      desktop.afterKey > desktop.before && desktop.endTime === desktop.target,
+      JSON.stringify(desktop)
+    );
+    await page.close();
+  }
+}
+
+// ============================================================ SCENARIO 9
 // LL-HLS against a rolling low-latency playlist. The fixture segments are
 // sliced into 0.5s parts on the fly and served the way a real LL origin
 // serves them - the playlist advances with wall clock, a part request blocks
@@ -846,7 +1208,7 @@ const state = (page) => page.evaluate(() => {
 // never advances, so a fixed document would report latency climbing forever
 // and nothing about the edge threshold could be asserted.
 {
-  console.log('\n--- Scenario 8: LL-HLS parts, latency and GO LIVE (local fixture) ---');
+  console.log('\n--- Scenario 9: LL-HLS parts, latency and GO LIVE (local fixture) ---');
 
   const LL_PART_DURATION = LL_FIXTURE.partDuration; // 0.5s
   const LL_PARTS_PER_SEG = 4;

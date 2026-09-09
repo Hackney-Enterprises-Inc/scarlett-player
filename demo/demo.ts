@@ -320,6 +320,13 @@ function fakeClipCreation(range: ClipRange): Promise<{ uuid: string; status_url:
   const uuid = crypto.randomUUID();
   const clipUrl = `https://example.com/clips/${uuid}`;
 
+  // Also kept in memory for the browser harness (scripts/verify-browser.mjs),
+  // which needs the exact payload rather than the rendered log row - and
+  // needs it locally, because no scenario in that harness may depend on an
+  // external origin.
+  const captures = ((window as unknown as { __clipCaptures?: ClipRange[] }).__clipCaptures ??= []);
+  captures.push(range);
+
   appendClipRow('clip:requested', `POST /api/clips (simulated)`, range);
   window.setTimeout(() => appendClipRow('status', 'rendering'), 2000);
   window.setTimeout(() => appendClipRow('status', `ready  url=${clipUrl}`), 4000);

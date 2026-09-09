@@ -9,6 +9,7 @@ import type { AudioTrack } from '@scarlett-player/core';
 import type { HlsAudioTrack, HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
 import { formatLevel } from './quality';
 import { sanitizeUrl } from './sanitize-url';
+import type { ManifestMediaFlags } from './media-type';
 import {
   applyLiveMetrics,
   computeLiveMetrics,
@@ -156,7 +157,7 @@ export function setupHlsEventHandlers(
   hls: HlsInstance,
   api: IPluginAPI,
   callbacks: {
-    onManifestParsed?: (levels: HlsLevel[]) => void;
+    onManifestParsed?: (levels: HlsLevel[], data: ManifestMediaFlags) => void;
     onLevelSwitched?: (level: number) => void;
     onBufferUpdate?: () => void;
     onError?: (error: HLSError) => void;
@@ -177,7 +178,7 @@ export function setupHlsEventHandlers(
   };
 
   // Manifest parsed - quality levels available
-  addHandler('hlsManifestParsed', (_event: string, data: { levels: HlsLevel[] }) => {
+  addHandler('hlsManifestParsed', (_event: string, data: { levels: HlsLevel[] } & ManifestMediaFlags) => {
     api.logger.debug('HLS manifest parsed', { levels: data.levels.length });
 
     // Update qualities in state
@@ -197,7 +198,10 @@ export function setupHlsEventHandlers(
       levels: levels.map((l) => ({ id: l.id, label: l.label })),
     });
 
-    callbacks.onManifestParsed?.(data.levels);
+    // `data` also carries hls.js's own `audio` / `video` booleans, which
+    // establish the media type before a frame is decoded. Passed through
+    // verbatim so ./media-type.ts can decide what (if anything) they prove.
+    callbacks.onManifestParsed?.(data.levels, data);
   });
 
   // Level switched
@@ -547,16 +551,14 @@ export function setupVideoEventHandlers(
   // Metadata loaded
   addHandler('loadedmetadata', () => {
     api.setState('duration', video.duration);
-    // videoWidth may be 0 on mobile at loadedmetadata time; updated again on loadeddata
-    api.setState('mediaType', video.videoWidth > 0 ? 'video' : 'audio');
   });
 
-  // Loaded data - re-check mediaType since videoWidth may not be available at loadedmetadata on mobile
-  addHandler('loadeddata', () => {
-    if (video.videoWidth > 0) {
-      api.setState('mediaType', 'video');
-    }
-  });
+  // `mediaType` is deliberately NOT written here. Zero intrinsic dimensions at
+  // loadedmetadata are a missing measurement, not evidence of audio, and this
+  // handler used to publish `audio` for every mobile browser that had not
+  // measured the frame yet. Classification lives in ./media-type.ts, which the
+  // factory attaches to the same element; it listens to loadedmetadata,
+  // loadeddata, resize and playing itself.
 
   // Errors
   addHandler('error', () => {

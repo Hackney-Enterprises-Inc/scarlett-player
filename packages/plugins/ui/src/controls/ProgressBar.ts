@@ -8,6 +8,26 @@ import type { Chapter, IPluginAPI, ThumbnailConfig } from '@scarlett-player/core
 import type { Control } from './Control';
 import { createElement, getVideo, formatTime, formatLiveTime } from '../utils';
 import { ThumbnailPreview } from './ThumbnailPreview';
+import { attachTimelineHost } from '../timeline-registry';
+import type {
+  TimelineExtension,
+  TimelineExtensionFactory,
+  TimelineSurface,
+} from '../timeline-registry';
+
+/** Keys the progress bar acts on; anything else is left to the page. */
+const SEEK_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+
+/** Options the UI plugin passes when it builds the bar's progress control. */
+export interface ProgressBarOptions {
+  /**
+   * Called when a registered timeline extension enters or leaves editing mode.
+   *
+   * The plugin uses it to hold the control bar visible while an editor is on
+   * screen, and to restart the ordinary hide delay when it closes.
+   */
+  onEditingChange?: (active: boolean) => void;
+}
 
 export class ProgressBar implements Control {
   private wrapper: HTMLDivElement;
@@ -28,8 +48,26 @@ export class ProgressBar implements Control {
   /** Duration the marker layer was last built against, since positions are a percentage of it. */
   private renderedDuration = 0;
 
-  constructor(api: IPluginAPI) {
+  // --- timeline extension seam (see ../timeline-registry.ts) ---
+  /** The layer a registered extension paints into; empty and inert without one. */
+  private extensionLayer: HTMLDivElement;
+  /** The mounted extension, or null when none is registered. */
+  private extension: TimelineExtension | null = null;
+  /** Detaches this bar from the registry on destroy. */
+  private detachTimelineHost: (() => void) | null = null;
+  /** True while the extension holds the pointer: ordinary seeking is suppressed. */
+  private extensionDragging = false;
+  /** True while the extension is editing: the bar is held open and geometry reserved. */
+  private extensionEditing = false;
+  private readonly options: ProgressBarOptions;
+
+  /**
+   * @param api - The per-player plugin API
+   * @param options - Optional hooks; see {@link ProgressBarOptions}
+   */
+  constructor(api: IPluginAPI, options: ProgressBarOptions = {}) {
     this.api = api;
+    this.options = options;
 
     // Create wrapper (positioned above controls)
     this.wrapper = createElement('div', { className: 'sp-progress-wrapper' });
@@ -58,6 +96,13 @@ export class ProgressBar implements Control {
     this.el.appendChild(this.tooltip);
     this.wrapper.appendChild(this.el);
 
+    // Sibling of the slider, never a child of it: an editor's own handles are
+    // interactive controls in their own right, and nesting them inside
+    // role="slider" would hide them from assistive technology behind the
+    // slider's semantics. Positioned by CSS onto the rail's own centre line.
+    this.extensionLayer = createElement('div', { className: 'sp-progress__extension' });
+    this.wrapper.appendChild(this.extensionLayer);
+
     // Accessibility
     this.el.setAttribute('role', 'slider');
     this.el.setAttribute('aria-label', 'Seek');
@@ -78,6 +123,105 @@ export class ProgressBar implements Control {
     document.addEventListener('touchmove', this.onDocTouchMove, { passive: false });
     document.addEventListener('touchend', this.onTouchEnd);
     document.addEventListener('touchcancel', this.onTouchEnd);
+
+    // Last: a factory registered before the UI plugin initialised mounts here,
+    // and it must not run against a half-built bar.
+    this.detachTimelineHost = attachTimelineHost(this.api.container, {
+      setFactory: (factory) => this.mountExtension(factory),
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Timeline extension seam
+  // --------------------------------------------------------------------------
+
+  /**
+   * Mount a registered extension factory, replacing any predecessor.
+   *
+   * The previous extension is destroyed and every lease it held is released
+   * first, so a replacement never inherits a stale editing or dragging state.
+   *
+   * @param factory - The factory to mount, or null to unmount
+   */
+  private mountExtension(factory: TimelineExtensionFactory | null): void {
+    if (this.extension) {
+      this.extension.destroy();
+      this.extension = null;
+      this.setExtensionDragging(false);
+      this.setExtensionEditing(false);
+      this.extensionLayer.replaceChildren();
+    }
+
+    if (!factory) return;
+
+    const surface: TimelineSurface = {
+      element: this.extensionLayer,
+      getRailRect: () => this.el.getBoundingClientRect(),
+      setEditing: (active) => this.setExtensionEditing(active),
+      setDragging: (active) => this.setExtensionDragging(active),
+    };
+    this.extension = factory(surface);
+    this.extension.update();
+  }
+
+  /** Whether a registered extension is currently editing. */
+  isTimelineEditing(): boolean {
+    return this.extensionEditing;
+  }
+
+  /**
+   * Apply the editing lease: reserve the handle lanes and hold the bar open.
+   *
+   * @param active - Whether the extension is editing
+   */
+  private setExtensionEditing(active: boolean): void {
+    if (this.extensionEditing === active) return;
+    this.extensionEditing = active;
+    this.wrapper.classList.toggle('sp-progress-wrapper--editing', active);
+    if (active) this.show();
+    this.options.onEditingChange?.(active);
+  }
+
+  /**
+   * Apply the pointer lease: suppress ordinary seeking while the extension
+   * owns the gesture, and get the hover tooltip out of the way.
+   *
+   * @param active - Whether the extension owns the pointer
+   */
+  private setExtensionDragging(active: boolean): void {
+    if (this.extensionDragging === active) return;
+    this.extensionDragging = active;
+    this.wrapper.classList.toggle('sp-progress-wrapper--ext-dragging', active);
+    if (active) {
+      // A drag that started on a handle is not a scrub: end any seek this bar
+      // thought it owned rather than leaving it latched.
+      this.isDragging = false;
+      this.el.classList.remove('sp-progress--dragging');
+      this.tooltip.style.opacity = '0';
+      this.thumbnailPreview.hide();
+    } else {
+      // Cleared, not zeroed - an inline '0' outranks the stylesheet's hover
+      // rule and would hide the tooltip for the rest of the session.
+      this.tooltip.style.opacity = '';
+    }
+  }
+
+  /**
+   * Whether an input event belongs to the extension rather than to seeking.
+   *
+   * Two independent reasons, and both are needed: the extension holds the
+   * pointer lease (its drag has moved off its handle and onto the rail), or
+   * the event started inside the extension layer at all. Touch and mouse
+   * compatibility events replay a handle press as a wrapper press, and only
+   * the target check catches those.
+   *
+   * @param event - The incoming pointer, mouse or touch event
+   * @returns True when the timeline must not act on it
+   */
+  private isExtensionInput(event: Event): boolean {
+    if (this.extensionDragging) return true;
+    const target = event.target;
+    return target instanceof Node && this.extensionLayer.contains(target);
   }
 
   render(): HTMLElement {
@@ -157,6 +301,9 @@ export class ProgressBar implements Control {
       this.el.setAttribute('aria-valuenow', String(Math.floor(currentTime)));
       this.el.setAttribute('aria-valuetext', formatTime(currentTime));
     }
+
+    // Last, so an extension repaints against the geometry this update settled.
+    this.extension?.update();
   }
 
   /**
@@ -303,7 +450,11 @@ export class ProgressBar implements Control {
   }
 
   private onMouseDown = (e: MouseEvent): void => {
+    // A press on an extension handle, or anywhere while it owns the pointer,
+    // is not a seek. Left unguarded, grabbing a clip handle also scrubbed.
+    if (this.isExtensionInput(e)) return;
     e.preventDefault();
+    this.extension?.onSeekStart();
     const video = getVideo(this.api.container);
     this.wasPlayingBeforeDrag = video ? !video.paused : false;
     this.isDragging = true;
@@ -325,6 +476,7 @@ export class ProgressBar implements Control {
       this.seek(e.clientX, true); // Force final seek
       this.isDragging = false;
       this.el.classList.remove('sp-progress--dragging');
+      this.extension?.onSeekEnd();
 
       // Resume playback if video was playing before drag
       // Wait for seeked event to avoid stutter
@@ -349,7 +501,9 @@ export class ProgressBar implements Control {
   }
 
   private onTouchStart = (e: TouchEvent): void => {
+    if (this.isExtensionInput(e)) return;
     e.preventDefault();
+    this.extension?.onSeekStart();
     const video = getVideo(this.api.container);
     this.wasPlayingBeforeDrag = video ? !video.paused : false;
     this.isDragging = true;
@@ -374,6 +528,9 @@ export class ProgressBar implements Control {
       }
       this.isDragging = false;
       this.el.classList.remove('sp-progress--dragging');
+      // Also reached by touchcancel, which is the gesture being taken away:
+      // the extension hears the same "seek is over" either way.
+      this.extension?.onSeekEnd();
 
       // Resume playback if was playing before drag
       if (this.wasPlayingBeforeDrag) {
@@ -396,6 +553,9 @@ export class ProgressBar implements Control {
   };
 
   private onMouseMove = (e: MouseEvent): void => {
+    // No hover tooltip over an extension's own controls, and none at all while
+    // it is dragging: it would track a pointer that is editing, not scrubbing.
+    if (this.isExtensionInput(e)) return;
     this.updateTooltip(e.clientX);
   };
 
@@ -411,7 +571,25 @@ export class ProgressBar implements Control {
   private onKeyDown = (e: KeyboardEvent): void => {
     const video = getVideo(this.api.container);
     if (!video) return;
+    if (!SEEK_KEYS.has(e.key)) return;
 
+    // Keyboard seeking is a complete gesture in one event, so the extension
+    // hears both ends of it - the same contract mouse and touch get.
+    this.extension?.onSeekStart();
+    try {
+      this.applyKeyboardSeek(e, video);
+    } finally {
+      this.extension?.onSeekEnd();
+    }
+  };
+
+  /**
+   * Apply one keyboard seek to the element.
+   *
+   * @param e - The key event (already known to be a seek key)
+   * @param video - The player's media element
+   */
+  private applyKeyboardSeek(e: KeyboardEvent, video: HTMLVideoElement): void {
     const step = 5; // seconds
     const live = this.api.getState('live');
     const seekableRange = this.api.getState('seekableRange');
@@ -457,7 +635,7 @@ export class ProgressBar implements Control {
           break;
       }
     }
-  };
+  }
 
   private seek(clientX: number, force = false): void {
     const video = getVideo(this.api.container);
@@ -477,6 +655,12 @@ export class ProgressBar implements Control {
   }
 
   destroy(): void {
+    // Registry first: a rebuilt bar has already attached its replacement, and
+    // attachTimelineHost's disposer checks identity before detaching.
+    this.detachTimelineHost?.();
+    this.detachTimelineHost = null;
+    this.extension?.destroy();
+    this.extension = null;
     this.wrapper.removeEventListener('mousedown', this.onMouseDown);
     this.wrapper.removeEventListener('mousemove', this.onMouseMove);
     this.wrapper.removeEventListener('mouseleave', this.onMouseLeave);

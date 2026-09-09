@@ -65,6 +65,16 @@ export {
   resetControlRegistry,
   type RegisterControlOptions,
 } from './control-registry';
+export {
+  registerTimelineExtension,
+  unregisterTimelineExtension,
+  hasTimelineExtension,
+} from './timeline-registry';
+export type {
+  TimelineSurface,
+  TimelineExtension,
+  TimelineExtensionFactory,
+} from './timeline-registry';
 export { icons } from './icons';
 export { styles } from './styles';
 export { formatTime, formatLiveTime } from './utils';
@@ -812,12 +822,18 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
    * Duck-typed rather than instance-checked so a host-registered control can
    * take part simply by exposing `isMenuOpen()`.
    */
-  const hasOpenMenu = (): boolean =>
-    controls.some((control) => {
+  const hasOpenMenu = (): boolean => {
+    // A registered timeline extension in editing mode holds the bar exactly as
+    // an open menu does, and independently of any control: see the
+    // onEditingChange note where the progress bar is built.
+    if (progressBar?.isTimelineEditing()) return true;
+
+    return controls.some((control) => {
       const menu = control as Control & { isMenuOpen?: () => boolean };
 
       return typeof menu.isMenuOpen === 'function' && menu.isMenuOpen();
     });
+  };
 
   /**
    * Show the control bar.
@@ -1151,7 +1167,17 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       }
 
       // Create progress bar (positioned above controls)
-      progressBar = new ProgressBar(api);
+      progressBar = new ProgressBar(api, {
+        // A timeline editor is on screen for as long as the viewer needs it,
+        // which is longer than any hide delay. Holding visibility here rather
+        // than through a control's isMenuOpen() is deliberate: an extension
+        // can be opened from a host's own button, in a layout that lists no
+        // matching control at all.
+        onEditingChange: (active) => {
+          if (active) showControls();
+          else resetHideTimer();
+        },
+      });
       container.appendChild(progressBar.render());
       // Only show initially if not already playing (autoplay case)
       if (!isPlaying) {

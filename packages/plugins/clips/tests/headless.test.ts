@@ -164,7 +164,7 @@ describe('headless clips (ui: none)', () => {
     // panel (the only ui dependency is the control registration).
     plugin.open();
     expect(plugin.isOpen()).toBe(true);
-    expect(api.container.querySelector('.sp-clip-panel')).not.toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).not.toBeNull();
 
     plugin.setRange(20, 50);
     expect(api.emit).toHaveBeenCalledWith('clip:changed', { start: 20, end: 50, reason: 'user' });

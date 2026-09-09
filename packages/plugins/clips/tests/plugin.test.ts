@@ -268,11 +268,11 @@ describe('close() and source changes', () => {
 
     expect(emitted(api, 'clip:cancelled')).toEqual([{ reason: 'source-change' }]);
     expect(plugin.isOpen()).toBe(false);
-    // The loop's two subscriptions (registered after init's two) are
-    // released; the init-level load-request/playlist:change listeners stay.
-    expect(disposers.slice(2).every((off) => off.mock.calls.length === 1)).toBe(true);
-    expect(disposers[0].mock.calls.length).toBe(0);
-    expect(disposers[1].mock.calls.length).toBe(0);
+    // The loop's two subscriptions (registered after init's three:
+    // load-request, playlist:change and the media:loaded full-screen watch)
+    // are released; the init-level listeners stay.
+    expect(disposers.slice(3).every((off) => off.mock.calls.length === 1)).toBe(true);
+    expect(disposers.slice(0, 3).every((off) => off.mock.calls.length === 0)).toBe(true);
     expect(api.listenersFor('playback:timeupdate')).toBe(0);
     // And the closed session cannot be re-looped by a stray timeupdate.
     api.fire('playback:timeupdate', { currentTime: 120 });
@@ -651,13 +651,13 @@ describe('configure()', () => {
 describe('overlay integration (Group 3 wiring)', () => {
   it('mounts the panel on open and unmounts it on close', () => {
     const { api, plugin } = setup();
-    expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
 
     plugin.open();
-    expect(api.container.querySelector('.sp-clip-panel')).not.toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).not.toBeNull();
 
     plugin.close();
-    expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
   });
 
   it('the panel Cancel button closes the session like plugin.close()', () => {
@@ -666,17 +666,19 @@ describe('overlay integration (Group 3 wiring)', () => {
     api.container.querySelector<HTMLButtonElement>('.sp-clip-btn--cancel')!.click();
     expect(plugin.isOpen()).toBe(false);
     expect(emitted(api, 'clip:cancelled')).toEqual([{ reason: 'user' }]);
-    expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
   });
 
-  it('a configure() re-clamp flashes the clamp reason in the notice', () => {
+  it('a configure() re-clamp flashes the clamp reason', () => {
     const { api, plugin } = setup();
     plugin.open(); // {70, 100}, 30s long
     plugin.configure({ maxDuration: 10 });
 
-    const notice = api.container.querySelector<HTMLElement>('.sp-clip-notice')!;
-    expect(notice.textContent).toBe('Max 10s');
-    expect(notice.classList.contains('sp-clip-notice--visible')).toBe(true);
+    // The silent flash, not the polite live region: a clamp can re-fire on
+    // every pointermove of a pinned drag, and announcing that is noise.
+    const flash = api.container.querySelector<HTMLElement>('.sp-clip-flash')!;
+    expect(flash.textContent).toBe('Max 10s');
+    expect(flash.classList.contains('sp-clip-flash--visible')).toBe(true);
   });
 
   it('setRange while open re-renders the panel from clipSelection', () => {
@@ -704,7 +706,7 @@ describe('overlay integration (Group 3 wiring)', () => {
       await plugin.commit(); // microtask-only chain; fake timers do not block it
 
       expect(plugin.isOpen()).toBe(false);
-      expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+      expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
       const toast = api.container.querySelector<HTMLElement>('.sp-clip-toast')!;
       expect(toast.textContent).toBe('Clip requested');
       expect(toast.getAttribute('role')).toBe('status');
@@ -730,7 +732,7 @@ describe('overlay integration (Group 3 wiring)', () => {
     plugin.open();
     await plugin.commit();
 
-    const panel = api.container.querySelector<HTMLElement>('.sp-clip-panel');
+    const panel = api.container.querySelector<HTMLElement>('.sp-clip-editor');
     expect(panel).not.toBeNull(); // selector stays open for a retry
     const notice = panel!.querySelector<HTMLElement>('.sp-clip-notice')!;
     // textContent only: the markup must survive as text, never as elements.
@@ -768,7 +770,7 @@ describe('overlay integration (Group 3 wiring)', () => {
     await pending;
 
     expect(lastEmitted(api, 'clip:created')).toMatchObject({ result: { uuid: 'late' } });
-    expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
     expect(api.container.querySelector('.sp-clip-toast')).toBeNull();
   });
 
@@ -798,7 +800,10 @@ describe('overlay integration (Group 3 wiring)', () => {
   it('Escape through the panel routes to a user cancel', () => {
     const { api, plugin } = setup();
     plugin.open();
-    const panel = api.container.querySelector<HTMLElement>('.sp-clip-panel')!;
+    const panel = api.container.querySelector<HTMLElement>('.sp-clip-editor')!;
+    // Escape is scoped to focus inside this player, so two players on a page
+    // cannot close each other's editor.
+    panel.querySelector<HTMLButtonElement>('.sp-clip-btn--cancel')!.focus();
     panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     expect(plugin.isOpen()).toBe(false);
     expect(emitted(api, 'clip:cancelled')).toEqual([{ reason: 'user' }]);
@@ -808,7 +813,7 @@ describe('overlay integration (Group 3 wiring)', () => {
     const { api, plugin } = setup({}, { live: true });
     plugin.open();
     expect(plugin.isOpen()).toBe(false);
-    expect(api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).toBeNull();
     // Only the <video> is in the container - the gate mounted no DOM at all.
     expect(api.container.children).toHaveLength(1);
   });
@@ -839,7 +844,7 @@ describe('overlay integration (Group 3 wiring)', () => {
     expect(plugin.isOpen()).toBe(true);
     expect(plugin.getRange()?.clientRequestId).toBe(secondKey);
     expect(api.store.clipOpen).toBe(true);
-    expect(api.container.querySelector('.sp-clip-panel')).not.toBeNull();
+    expect(api.container.querySelector('.sp-clip-editor')).not.toBeNull();
     expect(api.container.querySelector('.sp-clip-toast')).toBeNull();
     expect(emitted(api, 'clip:cancelled')).toEqual([{ reason: 'user' }]); // only the real close
   });

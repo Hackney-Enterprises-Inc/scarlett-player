@@ -189,6 +189,44 @@ export const styles = `
   height: 5px;
 }
 
+/* ============================================
+   Timeline extension layer (timeline-registry.ts)
+
+   A zero-height line lying exactly on the rail's centre, spanning exactly the
+   rail's width, so an extension can position by percentage and land on the
+   same pixels the seek slider maps a press to. The 10px offset is the rail
+   centre in BOTH wrapper modes: the fine-pointer wrapper is 20px tall with the
+   3px rail centred (8.5..11.5 from the bottom), and the coarse-pointer wrapper
+   is 44px tall with 8.5px of bottom padding and align-items: flex-end, which
+   puts the rail in the same place.
+
+   Inert by default: only the explicit hit targets an extension puts inside it
+   take pointer input, so an ordinary press on the rail still seeks.
+   ============================================ */
+.sp-progress__extension {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  height: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Editing reserves a lane below the rail for an extension's second handle, by
+   lifting the whole wrapper clear of the control bar. The lane above needs no
+   reservation - it is over the picture. */
+.sp-progress-wrapper--editing {
+  bottom: calc(92px + var(--sp-inset-bottom, 0px));
+}
+
+/* While an extension owns the pointer the bar must not also look like it is
+   scrubbing: the tooltip is suppressed inline by the control, and the handle
+   stops responding to hover growth. */
+.sp-progress-wrapper--ext-dragging .sp-progress__handle {
+  transform: translate(-50%, -50%);
+}
+
 .sp-progress__track {
   position: absolute;
   top: 0;

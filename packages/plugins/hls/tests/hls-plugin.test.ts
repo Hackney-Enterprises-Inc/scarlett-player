@@ -1142,20 +1142,23 @@ describe('event-map', () => {
       video.dispatchEvent(new Event('loadedmetadata'));
 
       expect(mockApi.setState).toHaveBeenCalledWith('duration', 60);
-      expect(mockApi.setState).toHaveBeenCalledWith('mediaType', 'video');
     });
 
-    it('should set mediaType to video on loadeddata when videoWidth > 0', () => {
-      Object.defineProperty(video, 'videoWidth', { value: 1920, writable: true });
+    // Classification moved to ./src/media-type.ts on 2026-09-08: these
+    // handlers used to read a zero `videoWidth` as proof of audio, which is
+    // exactly what mislabelled ordinary video on mobile. The element handlers
+    // must now write nothing at all to `mediaType`, whatever the dimensions.
+    it('should not write mediaType on loadedmetadata, whatever the dimensions', () => {
+      Object.defineProperty(video, 'videoWidth', { value: 0, writable: true });
       setupVideoEventHandlers(video, mockApi);
 
-      video.dispatchEvent(new Event('loadeddata'));
+      video.dispatchEvent(new Event('loadedmetadata'));
 
-      expect(mockApi.setState).toHaveBeenCalledWith('mediaType', 'video');
+      expect(mockApi.setState).not.toHaveBeenCalledWith('mediaType', expect.anything());
     });
 
-    it('should not update mediaType on loadeddata when videoWidth is 0', () => {
-      Object.defineProperty(video, 'videoWidth', { value: 0, writable: true });
+    it('should not write mediaType on loadeddata, whatever the dimensions', () => {
+      Object.defineProperty(video, 'videoWidth', { value: 1920, writable: true });
       setupVideoEventHandlers(video, mockApi);
 
       video.dispatchEvent(new Event('loadeddata'));
