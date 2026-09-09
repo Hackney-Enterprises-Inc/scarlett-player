@@ -29,6 +29,7 @@ import type {
   HlsConstructor,
 } from './types';
 import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import type { PlaybackGate } from './event-map';
 import { createMediaTypeClassifier } from './media-type';
 import type { MediaTypeClassifier } from './media-type';
 import {
@@ -142,6 +143,18 @@ export function createHLSPluginWith(
   let cleanupHlsEvents: (() => void) | null = null;
   let cleanupVideoEvents: (() => void) | null = null;
   let isAutoQuality = true; // Track if user has selected auto quality
+
+  /**
+   * Play/pause commands this plugin put in flight, shared by both pipelines.
+   *
+   * One object for the plugin's lifetime rather than one per load: a pipeline
+   * switch tears the element handlers down and builds new ones, and a command
+   * issued either side of that must still be deduped exactly once.
+   */
+  const playbackGate: PlaybackGate = {
+    corePlayRequested: false,
+    corePauseRequested: false,
+  };
 
   /**
    * Evidence-based `mediaType` classification (./media-type.ts).
@@ -838,7 +851,7 @@ export function createHLSPluginWith(
     // picks its source from the live pipeline, so on this branch it measures
     // the element's own `seekable` range - the only source there is here.
     if (api) {
-      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
+      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
     }
 
     // Native HLS has no manifest event to classify from, so the element's
@@ -980,7 +993,7 @@ export function createHLSPluginWith(
     // video.seekable, which under MSE reports neither the sliding window nor
     // anything resembling wall-clock latency.
     if (api) {
-      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
+      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
     }
 
     mediaTypeClassifier?.beginSource(src);
@@ -1448,17 +1461,30 @@ export function createHLSPluginWith(
       mediaTypeClassifier = createMediaTypeClassifier(api);
 
       // Setup playback control listeners
+      //
+      // The `paused` guards are what keep the gate honest: a command that has
+      // nothing to do produces no element event, so setting a flag for it would
+      // leave it standing and swallow the NEXT transition the viewer caused.
+      // (The play guard also prevents recursing when the command was itself
+      // triggered by an element event.)
       const unsubPlay = api.on('playback:play', async () => {
         if (!video) return;
+        if (!video.paused) return;
         try {
+          playbackGate.corePlayRequested = true;
           await video.play();
         } catch (e) {
+          playbackGate.corePlayRequested = false;
           api?.logger.error('Play failed', e);
         }
       });
 
       const unsubPause = api.on('playback:pause', () => {
-        video?.pause();
+        if (!video) return;
+        if (video.paused) return;
+        playbackGate.corePauseRequested = true;
+        playbackGate.corePlayRequested = false;
+        video.pause();
       });
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {

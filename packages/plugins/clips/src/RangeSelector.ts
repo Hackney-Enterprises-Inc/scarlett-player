@@ -466,6 +466,65 @@ export class RangeSelector {
       el.setAttribute('aria-valuetext', `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
       this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
     }
+
+    // After the text is written, because the clamp measures the pill it just
+    // relabelled ("IN 1:04:30" is wider than "IN 0:12").
+    this.clampLabel('start', startPct);
+    this.clampLabel('end', endPct);
+  }
+
+  /**
+   * @internal Keep a handle's label pill inside the track.
+   *
+   * The handle and its stem stay exactly where the timestamp is - they are the
+   * precision, and moving them would make the editor lie. Only the pill slides,
+   * far enough to bring its overhanging edge back inside the track and no
+   * further, so it still reads as belonging to the stem beneath it.
+   *
+   * Needed because the pill is centred on a handle that can sit at 0% or 100%:
+   * a ~60px label then hangs ~30px past the rail, and the player's
+   * `overflow: hidden` cut "IN" clean off (measured 2026-09-09 on a 350px
+   * player, where the IN pill spanned x=2..63 against a player starting at 20).
+   *
+   * Standalone hides its labels entirely (the panel's readout carries the
+   * times), so there is nothing to clamp there.
+   *
+   * @param which - The handle whose label is being placed
+   * @param pct - That handle's position along the track, 0-100
+   */
+  private clampLabel(which: ClipHandle, pct: number): void {
+    const label = this.labels[which];
+    const clear = (): void => {
+      if (label.style.transform) label.style.transform = '';
+    };
+
+    if (this.presentation !== 'timeline') {
+      clear();
+      return;
+    }
+
+    // Same measurement the drag path makes. Both are zero before the track is
+    // laid out (and in jsdom), which is not a reason to guess a shift.
+    const trackWidth = this.track.getBoundingClientRect().width;
+    const pillWidth = label.getBoundingClientRect().width;
+    if (trackWidth <= 0 || pillWidth <= 0) {
+      clear();
+      return;
+    }
+
+    const half = pillWidth / 2;
+    const centre = (pct / 100) * trackWidth;
+    // The shift must be at least `lo` to clear the left edge and at most `hi`
+    // to clear the right; zero when it already sits inside both.
+    const lo = half - centre;
+    const hi = trackWidth - centre - half;
+    // A pill wider than the whole track cannot satisfy both. Keep the left
+    // edge, where the "IN"/"OUT" prefix is, and let the tail run off.
+    const shift = lo > hi ? lo : Math.min(Math.max(0, lo), hi);
+    const rounded = Math.round(shift);
+
+    if (rounded === 0) clear();
+    else label.style.transform = `translateX(${rounded}px)`;
   }
 
   // --------------------------------------------------------------------------

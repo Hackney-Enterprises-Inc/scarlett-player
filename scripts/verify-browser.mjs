@@ -46,6 +46,12 @@
  *      effective LL is reported, the edge threshold flips to GO LIVE when the
  *      viewer drifts back, and clicking it lands on the live SYNC POSITION
  *      rather than past the edge, without stalling.
+ *  10. The watermark on an HLS source: hidden before the first play, visible
+ *      once playback starts from the control bar's own button, and a pause
+ *      from that button heard on the bus exactly once. Started from the
+ *      button rather than `player.play()` on purpose - the button calls
+ *      `video.play()` directly, which is the path that carries no bus event of
+ *      its own and is where the provider's emission is the only source.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -1082,6 +1088,9 @@ const state = (page) => page.evaluate(() => {
       return {
         stage: editor.dataset.stage,
         toolbarReachable,
+        bodyHeight: body.clientHeight,
+        panelHeight: document.querySelector('.sp-clip-details').clientHeight,
+        playerHeight: Math.round(player().height),
         confirmInside: inside(document.querySelector('.sp-clip-btn--confirm')),
         cancelInside: inside(document.querySelector('.sp-clip-btn--cancel')),
         backInside: inside(document.querySelector('.sp-clip-back')),
@@ -1106,6 +1115,17 @@ const state = (page) => page.evaluate(() => {
       stages.stage === 'details' && stages.confirmInside && stages.cancelInside &&
         stages.backInside && stages.panelInside && stages.bodyScrolls,
       JSON.stringify(stages)
+    );
+    // Inside the player and scrollable is not the same as usable. The panel
+    // used to be capped by the RANGE stage's anchor formula even on the stage
+    // that covers the picture, which left it 81px tall on a 197px player - an
+    // 8px body over 199px of content, every field reachable only 8px at a time
+    // (measured 2026-09-09 at 390x844). The stage that covers the picture gets
+    // the picture: the whole player, less the 8px CSS inset top and bottom.
+    record(
+      'the details stage takes the whole 320x180 player, not the range anchor',
+      stages.panelHeight >= stages.playerHeight - 20 && stages.bodyHeight >= 40,
+      `player ${stages.playerHeight}px, panel ${stages.panelHeight}px, body ${stages.bodyHeight}px`
     );
 
     // Submit, and compare what the host received against what the plugin says
@@ -1133,12 +1153,137 @@ const state = (page) => page.evaluate(() => {
       open: window.clipsPlugin.isOpen(),
       controlsBack: getComputedStyle(document.querySelector('.sp-controls')).display !== 'none',
       editingClass: document.getElementById('player').classList.contains('sp-clip-editing'),
+      gestures: !!document.querySelector('.sp-gestures'),
     }));
     record(
       'closing the editor leaves no handles, no reservation and the bar back',
       cleanup.editor === false && cleanup.track === false && cleanup.open === false &&
         cleanup.controlsBack === true && cleanup.editingClass === false,
       JSON.stringify(cleanup)
+    );
+    record(
+      'the gesture surface comes back once the session closes',
+      cleanup.gestures === true,
+      JSON.stringify(cleanup)
+    );
+
+    await page.close();
+  }
+
+  // Portrait-phone players, at both the sizes tsp-web actually renders. Every
+  // portrait phone lands in the `minimal` layout, which is where the editor
+  // gives up the control bar and where the chrome has the least room to spare.
+  for (const size of [{ width: 320, height: 180 }, { width: 375, height: 211 }]) {
+    const label = `${size.width}x${size.height}`;
+    const page = await openClipEditor(390, 844, { player: size });
+
+    // The pill is centred on its handle, so at 0% and 100% a ~60px label hangs
+    // half its width past the rail and the player's overflow:hidden cut the
+    // "IN" clean off. Driven to both extremes rather than measured wherever the
+    // opening selection happens to sit.
+    const labels = await page.evaluate(async () => {
+      const duration = document.querySelector('video').duration;
+      // maxDuration defaults to 60s and the fixture is 60s, so this puts one
+      // handle on each end of the rail at the same time.
+      window.clipsPlugin.setRange(0, duration);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const p = document.getElementById('player').getBoundingClientRect();
+      const read = (which) => {
+        const r = document
+          .querySelector(`[data-clip-handle="${which}"] .sp-clip-handle__label`)
+          .getBoundingClientRect();
+
+        return {
+          left: Math.round(r.left), right: Math.round(r.right),
+          inside: r.left >= p.left - 1 && r.right <= p.right + 1,
+          // The stem is the precision; only the label may be nudged.
+          stemShifted: getComputedStyle(
+            document.querySelector(`[data-clip-handle="${which}"] .sp-clip-handle__stem`)
+          ).transform !== 'none',
+        };
+      };
+
+      return {
+        range: window.clipsPlugin.getRange(),
+        player: { left: Math.round(p.left), right: Math.round(p.right) },
+        start: read('start'),
+        end: read('end'),
+      };
+    });
+    record(
+      `both handle labels stay inside a ${label} player at the ends of the rail`,
+      labels.start.inside === true && labels.end.inside === true &&
+        labels.start.stemShifted === false && labels.end.stemShifted === false,
+      JSON.stringify(labels)
+    );
+
+    // How much of the player the range stage spends on chrome. At full size
+    // that was 44 toolbar + 8 gap + 44 IN + 3 rail + 44 OUT = 143px, which left
+    // ~45px of a 197px player - not a video any more. The slimmed lanes bring
+    // it to ~123px, and the number is the same at both sizes because every part
+    // of it is fixed, so one bound covers both.
+    const picture = await page.evaluate(() => {
+      const p = document.getElementById('player').getBoundingClientRect();
+      const editorTop = document.querySelector('.sp-clip-editor').getBoundingClientRect().top;
+
+      return {
+        player: Math.round(p.height),
+        free: Math.round(editorTop - p.top),
+        chrome: Math.round(p.bottom - editorTop),
+      };
+    });
+    record(
+      `the ${label} range stage keeps its chrome under 130px`,
+      picture.chrome <= 130,
+      JSON.stringify(picture)
+    );
+
+    // Two full-bleed touch features cannot both own the finger: the gesture
+    // surface takes double taps for seeking, and every one of those lands on
+    // the editor the viewer is dragging handles in.
+    const gestures = await page.evaluate(() => ({
+      duringEdit: !!document.querySelector('.sp-gestures'),
+      editing: !!document.querySelector('.sp-clip-editor'),
+    }));
+    record(
+      `the gesture surface stands down while the ${label} editor is open`,
+      gestures.duringEdit === false && gestures.editing === true,
+      JSON.stringify(gestures)
+    );
+
+    // The details stage covers the picture, so it gets the picture: capped by
+    // the RANGE stage's anchor instead, the panel came out 81px tall with an
+    // 8px body over 199px of content (measured 2026-09-09 at 390x844).
+    const details = await page.evaluate(async () => {
+      document.querySelector('.sp-clip-tool--next').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const panel = document.querySelector('.sp-clip-details');
+      const body = document.querySelector('.sp-clip-details__body');
+      const p = document.getElementById('player').getBoundingClientRect();
+      const seen = (el) => {
+        const r = el.getBoundingClientRect();
+
+        return r.height > 0 && r.top >= p.top - 1 && r.bottom <= p.bottom + 1;
+      };
+
+      return {
+        stage: document.querySelector('.sp-clip-editor').dataset.stage,
+        playerHeight: Math.round(p.height),
+        panelHeight: panel.clientHeight,
+        bodyHeight: body.clientHeight,
+        maxHeight: panel.style.maxHeight,
+        // The fields the crushed dialog put out of reach.
+        fieldsSeen: seen(document.querySelector('[data-clip-endpoint="start"]')),
+        readoutSeen: seen(document.querySelector('.sp-clip-readout')),
+      };
+    });
+    record(
+      `the ${label} details dialog takes the whole player and is usable`,
+      details.stage === 'details' &&
+        details.panelHeight >= details.playerHeight - 20 && details.bodyHeight >= 40 &&
+        details.fieldsSeen === true && details.readoutSeen === true,
+      JSON.stringify(details)
     );
 
     await page.close();
@@ -1664,6 +1809,89 @@ const state = (page) => page.evaluate(() => {
 
     await blipPage.close();
   }
+}
+
+// ============================================================ SCENARIO 10
+// The watermark on an HLS source. It is hidden until the first play by
+// contract, and on the HLS provider that play never reached the bus: the
+// provider wrote state on the element's `playing` event and emitted nothing,
+// so `playback:play` - the event the watermark, analytics and media-session
+// all wait on - never fired for the whole session. Measured on the live demo
+// 2026-09-09: video playing, `.sp-watermark` still `visibility: hidden`.
+//
+// Started from the control bar's own play button, which calls `video.play()`
+// directly, because that is the path with no bus event of its own. Driving it
+// through `player.play()` would emit `playback:play` from core and pass on a
+// provider that emits nothing at all.
+{
+  console.log('\n--- Scenario 10: watermark shows on HLS playback (local fixture) ---');
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await blockExternalOrigins(page);
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('button.sp-play', { timeout: 30000 });
+  await loadFixture(page);
+  await page.waitForFunction(
+    () => (document.querySelector('video')?.duration ?? 0) > 0,
+    null,
+    { timeout: 30000 }
+  );
+
+  // The demo's watermark image is hosted, and this harness reaches no external
+  // origin; a text mark is the same element and the same show/hide path.
+  await page.evaluate(() => {
+    window.watermarkPlugin.setText('SCARLETT');
+    document.querySelector('video').muted = true;
+  });
+
+  const visibility = () => page.evaluate(() => {
+    const el = document.querySelector('.sp-watermark');
+    return el ? getComputedStyle(el).visibility : 'missing';
+  });
+
+  const before = await visibility();
+  record(
+    'the watermark is present and hidden before the first play',
+    before === 'hidden',
+    before
+  );
+
+  await page.locator('button.sp-play').scrollIntoViewIfNeeded();
+  const playBox = await page.locator('button.sp-play').boundingBox();
+  await page.mouse.click(playBox.x + playBox.width / 2, playBox.y + playBox.height / 2);
+  await page.waitForTimeout(1200);
+
+  const after = await page.evaluate(async () => {
+    const el = document.querySelector('.sp-watermark');
+    return {
+      visibility: el ? getComputedStyle(el).visibility : 'missing',
+      text: el?.textContent ?? '',
+      playing: !document.querySelector('video').paused,
+    };
+  });
+  record(
+    'the watermark appears once HLS playback starts from the control bar',
+    after.visibility === 'visible' && after.playing === true,
+    JSON.stringify(after)
+  );
+
+  // The other half of the contract: a pause from the same button reaches the
+  // bus too. The mark deliberately stays visible (an unmarked screenshot is
+  // the thing it exists to prevent), so the event is read off the player.
+  const pauseHeard = await page.evaluate(async () => {
+    let heard = 0;
+    const off = window.player.on('playback:pause', () => { heard += 1; });
+    document.querySelector('button.sp-play').click();
+    await new Promise((r) => setTimeout(r, 500));
+    off();
+    return { heard, paused: document.querySelector('video').paused };
+  });
+  record(
+    'a pause from the control bar reaches the bus exactly once',
+    pauseHeard.heard === 1 && pauseHeard.paused === true,
+    JSON.stringify(pauseHeard)
+  );
+
+  await page.close();
 }
 
 // ============================================================ SUMMARY

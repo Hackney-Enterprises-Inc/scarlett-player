@@ -207,6 +207,119 @@ describe('presentation', () => {
   });
 });
 
+/**
+ * The pill is centred on its handle, and a handle can sit at either end of the
+ * track. A ~60px label then hangs ~30px past the rail, and the player's
+ * `overflow: hidden` cut "IN" clean off - measured 2026-09-09 on a 350px
+ * player, where the IN pill spanned x=2..63 against a player starting at 20.
+ *
+ * Only the label moves. The handle and the stem are the precision: shifting
+ * those to keep a label on screen would make the editor point at the wrong
+ * timestamp.
+ */
+describe('label clamping on the timeline', () => {
+  const PILL = 60;
+
+  /**
+   * Give a handle's label a real box; jsdom measures everything at zero, and a
+   * zero-width pill is correctly left alone.
+   *
+   * @param handle - The handle whose label to measure
+   */
+  const givePill = (handle: HTMLElement): void => {
+    const label = handle.querySelector<HTMLElement>('.sp-clip-handle__label')!;
+    label.getBoundingClientRect = () =>
+      ({
+        left: 0, top: 0, width: PILL, height: 18,
+        right: PILL, bottom: 18, x: 0, y: 0, toJSON: () => ({}),
+      }) as DOMRect;
+  };
+
+  const labelOf = (handle: HTMLElement): HTMLElement =>
+    handle.querySelector<HTMLElement>('.sp-clip-handle__label')!;
+
+  /** A timeline selector with both pills measurable and a 600px track. */
+  const timeline = (selection: ClipSelection): Harness => {
+    const h = setup({ selection, presentation: 'timeline' });
+    givePill(h.start);
+    givePill(h.end);
+    // Re-render now that the boxes exist (setup() stubs the track's rect after
+    // construction, so the constructor's own render measured zeros).
+    h.selector.update(selection, BOUNDS);
+    return h;
+  };
+
+  it('pushes the IN pill right when the handle sits at the start of the track', () => {
+    const h = timeline({ start: 0, end: 130 });
+
+    // Centre 0, half-pill 30: the label needs 30px to clear the left edge.
+    expect(labelOf(h.start).style.transform).toBe('translateX(30px)');
+  });
+
+  it('pulls the OUT pill left when the handle sits at the end of the track', () => {
+    const h = timeline({ start: 100, end: 600 });
+
+    expect(labelOf(h.end).style.transform).toBe('translateX(-30px)');
+  });
+
+  it('leaves a pill with room on both sides untouched', () => {
+    const h = timeline({ start: 300, end: 330 });
+
+    expect(labelOf(h.start).style.transform).toBe('');
+    expect(labelOf(h.end).style.transform).toBe('');
+  });
+
+  it('never moves the handle or its stem', () => {
+    const h = timeline({ start: 0, end: 600 });
+
+    // The handle stays exactly on the timestamp it points at.
+    expect(h.start.style.left).toBe('0%');
+    expect(h.end.style.left).toBe('100%');
+    const stem = h.start.querySelector<HTMLElement>('.sp-clip-handle__stem')!;
+    expect(stem.style.transform).toBe('');
+  });
+
+  it('re-clamps when the track is resized under it', () => {
+    const h = timeline({ start: 60, end: 130 });
+    // 10% of 600px = 60px in: the 30px half-pill already fits.
+    expect(labelOf(h.start).style.transform).toBe('');
+
+    // The player narrowed to 200px, so 10% is now 20px in and it does not.
+    h.track.getBoundingClientRect = () =>
+      ({
+        left: 0, top: 0, width: 200, height: 44,
+        right: 200, bottom: 44, x: 0, y: 0, toJSON: () => ({}),
+      }) as DOMRect;
+    h.selector.update({ start: 60, end: 130 }, BOUNDS);
+
+    expect(labelOf(h.start).style.transform).toBe('translateX(10px)');
+  });
+
+  it('leaves standalone labels alone - they are visually hidden there', () => {
+    const h = setup({ selection: { start: 0, end: 600 } });
+    givePill(h.start);
+    h.selector.update({ start: 0, end: 600 }, BOUNDS);
+
+    expect(labelOf(h.start).style.transform).toBe('');
+  });
+
+  it('keeps the readable end of a pill wider than the whole track', () => {
+    const h = setup({ selection: { start: 300, end: 330 }, presentation: 'timeline' });
+    givePill(h.start);
+    // A 60px track: the pill cannot fit, so the left edge wins and the tail
+    // runs off rather than the prefix being cut.
+    h.track.getBoundingClientRect = () =>
+      ({
+        left: 0, top: 0, width: 60, height: 44,
+        right: 60, bottom: 44, x: 0, y: 0, toJSON: () => ({}),
+      }) as DOMRect;
+    h.selector.update({ start: 300, end: 330 }, BOUNDS);
+
+    // Centre 30, half-pill 30: shifted right by 0 - already flush left.
+    expect(labelOf(h.start).style.transform).toBe('');
+  });
+});
+
 describe('keyboard', () => {
   it('ArrowRight/ArrowLeft move the focused handle by one step and preventDefault', () => {
     const h = setup();

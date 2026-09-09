@@ -102,9 +102,19 @@ const COMPACT_HEIGHT = 360;
 const MINIMAL_HEIGHT = 220;
 const TINY_HEIGHT = 160;
 
-/** The lane a handle occupies above the rail, and the gap over it. */
+/**
+ * The lane a handle occupies above the rail, and the gap over it.
+ *
+ * These MUST match the lane heights in `styles.ts`: CSS cannot read a JS
+ * constant, so the anchor arithmetic here and the `height` on
+ * `.sp-clip-track--timeline .sp-clip-handle` are two statements of one number.
+ * `SLIM_*` are the `.sp-clip-editing--minimal` pair - on a portrait phone the
+ * full-size lanes plus the toolbar left ~45px of picture out of 197.
+ */
 const HANDLE_LANE = 44;
 const LANE_GAP = 8;
+const SLIM_LANE = 32;
+const SLIM_GAP = 6;
 
 /** Where the panel sits when there is no timeline to measure against. */
 const FALLBACK_ANCHOR = 64;
@@ -899,6 +909,12 @@ export class ClipOverlay {
     this.applyToolbarVisibility();
     this.applyAnchor();
     this.applySelectorInteractivity();
+
+    // The label clamp is measured against the track's box, so a resize (or an
+    // orientation change) invalidates it. Re-rendering from the unchanged
+    // selection is the whole update: it fires no callbacks, and the selector
+    // treats it as "the world moved", which is exactly what happened.
+    this.selector.update(this.selection, this.bounds);
   }
 
   /** @internal Which toolbar buttons make sense in the current layout and stage. */
@@ -948,22 +964,46 @@ export class ClipOverlay {
     const box = this.container.getBoundingClientRect();
     const height = box.height || this.container.clientHeight;
 
+    // The slim lanes are scoped to the same layouts the CSS scopes them to,
+    // through the `.sp-clip-editing--minimal` class this overlay sets.
+    const slimLanes = this.layout === 'minimal' || this.layout === 'tiny';
+    const lane = slimLanes ? SLIM_LANE : HANDLE_LANE;
+    const gap = slimLanes ? SLIM_GAP : LANE_GAP;
+
     let anchor = FALLBACK_ANCHOR;
     const rail = this.getRailRect?.();
     if (rail && height > 0) {
       // Distance from the container's bottom edge up to the top of the IN lane.
-      anchor = Math.max(0, box.bottom - rail.top) + HANDLE_LANE + LANE_GAP;
+      anchor = Math.max(0, box.bottom - rail.top) + lane + gap;
     }
     this.root.style.bottom = `${Math.round(anchor)}px`;
 
+    if (height <= 0) {
+      this.details.style.maxHeight = '';
+      return;
+    }
+
+    // `tiny` has no picture worth protecting; the panel is the player.
+    if (this.layout === 'tiny') {
+      this.details.style.maxHeight = `${height}px`;
+      return;
+    }
+
+    // Below `regular` the details stage COVERS the picture - the CSS stretches
+    // the panel to `top: 8px / bottom: 8px`, and the range anchor no longer
+    // describes anything it is bounded by. Capping it at `height - anchor`
+    // anyway is what crushed the dialog to 81px on a 197px player: the body
+    // became 8px tall with 199px of content, and the time fields, the readout
+    // and the title were all unreachable (measured 2026-09-09, 390x844).
+    // 16px is the CSS inset, top and bottom.
+    if (this.layout !== 'regular' && this.stage === 'details') {
+      this.details.style.maxHeight = `${Math.max(0, height - 16)}px`;
+      return;
+    }
+
     // Bounded, never clipped: an error notice must not push Create out of the
     // player, so the body scrolls instead of the panel growing.
-    if (height > 0) {
-      const available = Math.max(0, height - anchor - LANE_GAP);
-      this.details.style.maxHeight = this.layout === 'tiny' ? `${height}px` : `${available}px`;
-    } else {
-      this.details.style.maxHeight = '';
-    }
+    this.details.style.maxHeight = `${Math.max(0, height - anchor - gap)}px`;
   }
 
   /**
