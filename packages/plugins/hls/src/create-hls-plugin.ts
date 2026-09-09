@@ -29,6 +29,8 @@ import type {
   HlsConstructor,
 } from './types';
 import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import { createMediaTypeClassifier } from './media-type';
+import type { MediaTypeClassifier } from './media-type';
 import {
   computeLiveMetrics,
   DEFAULT_TARGET_LATENCY,
@@ -140,6 +142,16 @@ export function createHLSPluginWith(
   let cleanupHlsEvents: (() => void) | null = null;
   let cleanupVideoEvents: (() => void) | null = null;
   let isAutoQuality = true; // Track if user has selected auto quality
+
+  /**
+   * Evidence-based `mediaType` classification (./media-type.ts).
+   *
+   * Owned by the plugin rather than by a pipeline, because that is the point:
+   * evidence a source has already produced must survive a retry, a native
+   * error-recovery reload and an AirPlay handoff between hls.js and native.
+   * Created in `init()`, torn down in `destroy()`.
+   */
+  let mediaTypeClassifier: MediaTypeClassifier | null = null;
 
   // Live metrics bookkeeping. `lastLevelDetails` is the most recent live
   // playlist hls.js reported: the timeupdate path and getLiveInfo() measure
@@ -829,6 +841,13 @@ export function createHLSPluginWith(
       cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
     }
 
+    // Native HLS has no manifest event to classify from, so the element's
+    // track lists (where the browser ships them) are the only pre-decode
+    // evidence there is. Same source as a previous pipeline keeps its
+    // evidence; a new one is reset to `unknown` before its metadata lands.
+    mediaTypeClassifier?.beginSource(src);
+    mediaTypeClassifier?.attach(videoEl);
+
     return new Promise((resolve, reject) => {
       let watchdog: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
@@ -964,6 +983,9 @@ export function createHLSPluginWith(
       cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
     }
 
+    mediaTypeClassifier?.beginSource(src);
+    mediaTypeClassifier?.attach(videoEl);
+
     return new Promise((resolve, reject) => {
       if (!hls || !api) {
         reject(new Error('HLS not initialized'));
@@ -1002,8 +1024,11 @@ export function createHLSPluginWith(
       // is an in-flight worker message) must not write state, arm timers,
       // or settle promises against the current session.
       cleanupHlsEvents = setupHlsEventHandlers(hls, api, {
-        onManifestParsed: () => {
+        onManifestParsed: (_levels, manifestData) => {
           if (session !== loadSession) return;
+          // hls.js knows whether the manifest yielded video before a frame is
+          // decoded; that beats waiting for intrinsic dimensions on a phone.
+          mediaTypeClassifier?.noteManifestParsed(manifestData);
           if (!resolved) {
             resolved = true;
             releaseAbort();
@@ -1418,6 +1443,10 @@ export function createHLSPluginWith(
       api = pluginApi;
       api.logger.info(`HLS plugin${variant.logSuffix} initialized`);
 
+      // One classifier for the whole plugin lifetime: its evidence is what
+      // carries a confirmed `mediaType` across retries and pipeline handoffs.
+      mediaTypeClassifier = createMediaTypeClassifier(api);
+
       // Setup playback control listeners
       const unsubPlay = api.on('playback:play', async () => {
         if (!video) return;
@@ -1597,6 +1626,11 @@ export function createHLSPluginWith(
         onlineListener = null;
       }
       cleanup(new Error('HLS load cancelled: player destroyed'));
+
+      // After cleanup(), so a teardown-time event on the element cannot
+      // classify anything on the way out.
+      mediaTypeClassifier?.destroy();
+      mediaTypeClassifier = null;
 
       if (video?.parentNode) {
         video.parentNode.removeChild(video);

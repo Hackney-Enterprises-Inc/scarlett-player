@@ -45,6 +45,10 @@ function createMockApi(state: Record<string, unknown> = {}) {
     getPlugin: vi.fn(() => null),
     onDestroy: vi.fn(),
     subscribeToState: vi.fn(() => vi.fn()),
+    /** Write a state key the way a provider does, without an event. */
+    poke(key: string, value: unknown): void {
+      store[key] = value;
+    },
     fire(event: string, payload?: unknown): void {
       for (const handler of [...(subs.get(event) ?? [])]) handler(payload);
     },
@@ -86,6 +90,53 @@ describe('preview loop', () => {
     expect(api.video.currentTime).toBe(55);
   });
 
+  it('rewinds on a natural end, which publishes paused: true before ended', () => {
+    // A media element that reaches its end sets paused and fires `pause`
+    // BEFORE `ended`, so the provider has already written paused: true by the
+    // time playback:ended is emitted. Reading that state here answered "the
+    // viewer had stopped" for every natural end, and the loop never ran.
+    const api = createMockApi({ paused: false });
+    const loop = createPreviewLoop(asApi(api));
+    loop.start({ start: 55, end: 60 });
+
+    api.fire('playback:timeupdate', { currentTime: 58 });
+    api.poke('paused', true); // the end-of-playback pause
+    api.fire('playback:ended');
+
+    expect(api.video.currentTime).toBe(55);
+  });
+
+  it('does not rewind when the viewer asked for the pause', () => {
+    const api = createMockApi({ paused: false });
+    const loop = createPreviewLoop(asApi(api));
+    loop.start({ start: 55, end: 60 });
+    api.fire('playback:timeupdate', { currentTime: 58 });
+
+    api.fire('playback:pause');
+    api.poke('paused', true);
+    api.fire('playback:ended');
+
+    expect(api.video.currentTime).toBe(0);
+  });
+
+  it('rewinds again once playback is asked for a second time', () => {
+    const api = createMockApi({ paused: false });
+    const loop = createPreviewLoop(asApi(api));
+    loop.start({ start: 55, end: 60 });
+
+    api.poke('paused', true);
+    api.fire('playback:ended');
+    expect(api.video.currentTime).toBe(55);
+
+    api.video.currentTime = 0;
+    api.fire('playback:ended'); // nothing played in between
+    expect(api.video.currentTime).toBe(0);
+
+    api.fire('playback:play');
+    api.fire('playback:ended');
+    expect(api.video.currentTime).toBe(55);
+  });
+
   it('retargets without resubscribing when start() is called again', () => {
     const api = createMockApi();
     const loop = createPreviewLoop(asApi(api));
@@ -112,18 +163,20 @@ describe('preview loop', () => {
     expect(api.video.currentTime).toBe(10);
   });
 
-  it('stop() unsubscribes both playback listeners and clears the target', () => {
+  it('stop() unsubscribes every playback listener and clears the target', () => {
     const api = createMockApi();
     const loop = createPreviewLoop(asApi(api));
     loop.start({ start: 10, end: 40 });
 
     const disposers = api.on.mock.results.map((r) => r.value as ReturnType<typeof vi.fn>);
-    expect(disposers).toHaveLength(2);
+    expect(disposers).toHaveLength(4);
 
     loop.stop();
     expect(disposers.every((off) => off.mock.calls.length === 1)).toBe(true);
     expect(api.listenerCount('playback:timeupdate')).toBe(0);
     expect(api.listenerCount('playback:ended')).toBe(0);
+    expect(api.listenerCount('playback:play')).toBe(0);
+    expect(api.listenerCount('playback:pause')).toBe(0);
 
     // Even a stale handler invoked directly (registry bypassed) must not seek.
     const staleTimeUpdate = api.on.mock.calls[0][1] as (payload: unknown) => void;

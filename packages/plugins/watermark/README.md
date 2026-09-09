@@ -1,6 +1,6 @@
 # @scarlett-player/watermark
 
-Anti-piracy watermark plugin for [Scarlett Player](https://scarlettplayer.com). Overlays text (typically the viewer's email or account id) or an image on the player, at a fixed corner or moving to a random position on a timer, with an optional delay before it first appears. The overlay is shown on play and hidden on pause and ended, so it never sits on the poster.
+Anti-piracy watermark plugin for [Scarlett Player](https://scarlettplayer.com). Overlays text (typically the viewer's email or account id) or an image on the player, at a fixed corner or moving to a random position on a timer, with an optional delay before it first appears. The overlay is hidden until the first play and hidden again on ended, so it never sits on the poster. It stays visible while paused — hiding it there would leave screenshots and screen captures unmarked.
 
 ## Installation
 
@@ -81,7 +81,7 @@ watermark?.getConfig();
 | `setOpacity(opacity)` | Set opacity, clamped to 0 to 1 |
 | `setImageHeight(height)` | Set the maximum image height in px |
 | `setPadding(padding)` | Set the edge padding in px for every edge and re-apply the current position |
-| `show()` / `hide()` | Toggle visibility without touching the timers |
+| `show()` / `hide()` | Toggle the mark's inline `visibility` without touching the timers |
 | `getConfig()` | The original config merged with the current position, opacity, image height and padding |
 
 ## Per-track watermarks
@@ -94,16 +94,18 @@ When `@scarlett-player/playlist` is present the plugin listens for `playlist:cha
 
 ## Styling
 
-The overlay is a single `div` appended to the player container with inline positioning, `pointer-events: none`, white text with a subtle shadow, and a 0.5s transition. It carries these classes for your own CSS:
+The overlay is a single `div` appended to the player container with inline positioning, `pointer-events: none`, white text with a subtle shadow, and a 0.5s transition. Visibility is driven by an inline `visibility` (`hidden` until the first play), not by the classes below, so the plugin needs no stylesheet of its own. It carries these classes for your own CSS:
 
 | Class | When |
 |---|---|
 | `sp-watermark` | Always |
-| `sp-watermark--visible` / `sp-watermark--hidden` | Current visibility |
+| `sp-watermark--visible` / `sp-watermark--hidden` | Current visibility, mirroring the inline `visibility` |
 | `sp-watermark--top-left`, `sp-watermark--top-right`, `sp-watermark--bottom-left`, `sp-watermark--bottom-right`, `sp-watermark--center` | Current position, applied after the first `setPosition()` or dynamic move |
 | `sp-watermark--dynamic` | Present when `dynamic` is on, applied after the first position change |
 
 The element also has a `data-position` attribute holding the current position. No CSS custom properties are used.
+
+A `MutationObserver` on the player container re-attaches the overlay if it is removed and restores its `opacity`, `visibility`, `pointer-events`, `position` and `z-index` if its inline style is edited. It restores the values the plugin last applied — the ones your `setOpacity()` / `hide()` calls set, not the original config — and it only watches the overlay's own style, so styling anything else inside the container is unaffected.
 
 ## Events
 

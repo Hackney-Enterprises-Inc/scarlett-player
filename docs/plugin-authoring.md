@@ -227,6 +227,50 @@ Three consequences for a control that owns a popover:
   or re-rank it with a number. Nothing in your plugin needs to change either
   way.
 
+### Editing on the playback timeline
+
+Some plugins do not want a button in the bar, they want a layer over the
+*timeline*: clip in/out handles, a comment pin, a range marker a viewer can
+drag. `@scarlett-player/ui` exposes a second seam for that, and the reason it is
+a seam rather than a feature of the UI package is dependency direction - the UI
+package knows nothing about clips, reads no clip state, and gains no
+`IPluginAPI` surface for it.
+
+```typescript
+// Optional peer: feature-detect, exactly as you do for registerControl.
+const mod = await import('@scarlett-player/ui');
+if (typeof mod.registerTimelineExtension === 'function') {
+  release = mod.registerTimelineExtension(api.container, (surface) => {
+    surface.element.appendChild(myHandles);      // a positioned layer over the rail
+    return {
+      update: () => reposition(surface.getRailRect()),
+      onSeekStart: () => {},                     // an ordinary seek you do NOT own
+      onSeekEnd: () => {},
+      destroy: () => myHandles.remove(),
+    };
+  });
+}
+```
+
+Four rules that are easy to get wrong:
+
+- **One extension per player, keyed by container.** A second registration
+  replaces and destroys the first; the disposer you were handed only removes
+  *its own* registration, so a late teardown cannot unmount a successor.
+- **The layer takes no pointer input by default.** Give only your explicit hit
+  targets `pointer-events: auto`. A layer that swallowed every press would take
+  scrubbing away from the viewer for the whole session.
+- **Take the leases.** `surface.setEditing(true)` holds the bar visible and
+  reserves room around the rail; `surface.setDragging(true)` suppresses the
+  timeline's own seeking while you own the pointer. Release both on teardown -
+  and expect `destroy()` while your feature is mid-session, because a control-bar
+  rebuild or a UI teardown will call it. Have somewhere else to put your UI.
+- **Register before or after the UI plugin.** Init order is not guaranteed and
+  both orders work; do not try to sequence them.
+
+See `packages/plugins/clips` for a full implementation, including the fallback
+presentation it uses when the seam is absent.
+
 ### Accessibility
 
 The built-in controls meet WCAG 2.5.5 - 44x44px minimum touch targets, real ARIA labels, keyboard navigation with a focus trap on menus, and visible focus states. Match that. `SettingsMenu` is the reference implementation for a popover control.

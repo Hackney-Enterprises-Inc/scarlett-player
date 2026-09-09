@@ -73,6 +73,10 @@ interface ScrubHarness {
   plugin: ReturnType<typeof createClipsPlugin>;
   video: HTMLVideoElement;
   track: HTMLElement;
+  /** The IN handle inside the track, for grabbing at its own position. */
+  startHandle: HTMLElement;
+  /** The OUT handle inside the track. */
+  endHandle: HTMLElement;
   seeks: number[];
   isPlaying: () => boolean;
   play: ReturnType<typeof vi.fn>;
@@ -138,6 +142,8 @@ function setupScrub(
     plugin,
     video,
     track,
+    startHandle: track.querySelector<HTMLElement>('[data-clip-handle="start"]')!,
+    endHandle: track.querySelector<HTMLElement>('[data-clip-handle="end"]')!,
     seeks,
     isPlaying: () => playing,
     play: video.play as ReturnType<typeof vi.fn>,
@@ -176,7 +182,9 @@ describe('drag-to-scrub (task 3.5)', () => {
     vi.setSystemTime(1_000_000);
     const h = setupScrub({}, { playing: false });
 
-    pointer(h.track, 'pointerdown', 150); // end handle
+    // Grabbed exactly on the out handle (100), so the drag applies no offset
+    // and every landed time below is the pointer's own.
+    pointer(h.endHandle, 'pointerdown', 100);
     // First move: 1_000_000, throttle window is fresh -> seeks immediately.
     pointer(h.track, 'pointermove', 140);
     // 30ms and 60ms later: inside the window, dropped.
@@ -200,7 +208,7 @@ describe('drag-to-scrub (task 3.5)', () => {
   it('release seeks to the selection start, resumes the loop and plays again after `seeked`', () => {
     const h = setupScrub({}, { playing: true });
 
-    pointer(h.track, 'pointerdown', 150); // end handle; wasPlaying captured
+    pointer(h.endHandle, 'pointerdown', 100); // out handle; wasPlaying captured
     pointer(h.track, 'pointermove', 150); // drag end -> 150 (first move always seeks)
     expect(h.seeks).toEqual([150]);
     expect(h.play).not.toHaveBeenCalled(); // playing waits for the release + seeked
@@ -237,7 +245,7 @@ describe('drag-to-scrub (task 3.5)', () => {
   it('drag moves route committed selections through clip:changed { reason: user }', () => {
     const h = setupScrub({}, { playing: false });
 
-    pointer(h.track, 'pointerdown', 150);
+    pointer(h.endHandle, 'pointerdown', 100);
     pointer(h.track, 'pointermove', 160);
     pointer(h.track, 'pointerup', 160);
 
@@ -276,7 +284,7 @@ describe('drag-to-scrub (task 3.5)', () => {
     // A source change tears the session down while the pointer is still down.
     h.api.fire('media:load-request', { src: 'next.m3u8' });
 
-    expect(h.api.container.querySelector('.sp-clip-panel')).toBeNull();
+    expect(h.api.container.querySelector('.sp-clip-editor')).toBeNull();
     // The dangling pointerup lands on a destroyed selector's detached track:
     // nothing throws and nothing new seeks.
     const before = h.seeks.length;

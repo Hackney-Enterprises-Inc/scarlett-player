@@ -2,19 +2,43 @@
  * Preview loop controller.
  *
  * While the clip selector is open, playback keeps running and loops over the
- * selection: on `playback:timeupdate`, once `currentTime >= selection.end`
- * the playhead is sent back to `selection.start`. `timeupdate` fires around
- * 4Hz, so the loop can overshoot the out point by up to ~250ms - accepted
- * and documented in the plan. `playback:ended` (out point pinned at
- * duration) also rewinds to the start.
+ * selection: on `playback:timeupdate`, once `currentTime >= selection.end` the
+ * playhead is sent back to `selection.start`. `timeupdate` fires around 4Hz,
+ * so the loop can overshoot the out point by up to ~250ms - accepted and
+ * documented in the plan. `playback:ended` (out point pinned at duration) also
+ * rewinds, but only when playback was actually running: rewinding a video the
+ * viewer let run to the end and walked away from is not a preview, it is a
+ * player that will not stop.
  *
- * The controller is pure logic over `IPluginAPI` events; the only media
- * access is `seekClamped()` from ./media. It owns its own subscriptions
- * (created on `start()`, released on `stop()`) so `stop()` fully unsubscribes
- * even if the surrounding session ends on an unusual path.
+ * "Actually running" is tracked as playback happens (`playback:play`,
+ * `playback:pause` and progress ticks), never read from `paused` state inside
+ * the `ended` handler: a media element that reaches its end sets `paused` and
+ * fires `pause` *before* `ended`, so state says "paused" for every natural end
+ * and the duration out point would never loop at all.
  *
- * `suspend()`/`resume()` exist for handle drags (plan task 3.5): while a drag
- * owns the seek, the loop must not fight it.
+ * The controller is pure logic over `IPluginAPI` events; the only media access
+ * is `seekClamped()` from ./media. It owns its own subscriptions (created on
+ * `start()`, released on `stop()`) so `stop()` fully unsubscribes even if the
+ * surrounding session ends on an unusual path.
+ *
+ * ## Suspension is owned, not toggled
+ *
+ * `retarget()` and `start()` are deliberately different calls, and separating
+ * them is the fix for the loop fighting the viewer. Every selection change used
+ * to run through `start()`, which cleared suspension as a side effect - so an
+ * ordinary scrub past the out point snapped back the instant the range was
+ * re-rendered, and a drag that suspended the loop had it silently restored by
+ * its own `clip:changed`.
+ *
+ * - `retarget()` moves the loop's target and **never** touches suspension.
+ * - `suspend()` takes ownership away from the loop; it stays suspended until
+ *   something explicitly gives it back.
+ * - `resume()` gives it back, and is the only call that does.
+ * - `start()` arms the loop for a new session: target plus an explicit resume.
+ *
+ * That is what lets "seeking beyond OUT keeps working" and "releasing a handle
+ * returns to the in point" both be true, and what lets a drag that began while
+ * the loop was already suspended end still suspended.
  */
 
 import type { IPluginAPI } from '@scarlett-player/core';
@@ -24,19 +48,46 @@ import type { ClipSelection } from './range';
 /** Public surface of the loop controller. */
 export interface PreviewLoop {
   /**
-   * Begin (or retarget) looping a selection. Called again while running, it
-   * updates the loop target without resubscribing, and clears suspension.
-   * A no-op when the loop was disabled with `enabled: false`.
+   * Arm the loop for a selection and hand it ownership of the playhead.
+   *
+   * Subscribes on the first call, and always clears suspension - this is the
+   * "start previewing" call, used when a session opens and when the viewer
+   * explicitly asks to preview. A no-op when the loop was disabled with
+   * `enabled: false`.
    *
    * @param selection - The selection to loop
    */
   start(selection: ClipSelection): void;
+  /**
+   * Move the loop's target without changing who owns the playhead.
+   *
+   * The call every selection change makes. If the loop is suspended it stays
+   * suspended; if it is running it simply loops the new range from now on.
+   *
+   * @param selection - The new selection to loop
+   */
+  retarget(selection: ClipSelection): void;
   /** Stop looping and release the playback-event subscriptions. Idempotent. */
   stop(): void;
-  /** Pause the loop while a drag owns the seek. Subscriptions stay attached. */
+  /**
+   * Suspend looping: something else owns the playhead (a handle drag, or the
+   * viewer scrubbing past the out point). Subscriptions stay attached.
+   */
   suspend(): void;
-  /** Resume looping after a drag ends. */
+  /** Resume looping. The only call that clears suspension besides `start()`. */
   resume(): void;
+  /**
+   * Whether the loop is currently suspended.
+   *
+   * @returns True while something else owns the playhead
+   */
+  isSuspended(): boolean;
+  /**
+   * Whether the loop is armed at all (enabled and given a selection).
+   *
+   * @returns True when a selection is loaded, whatever the suspension state
+   */
+  isArmed(): boolean;
 }
 
 /** Options for {@link createPreviewLoop}. */
@@ -62,19 +113,76 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
   let selection: ClipSelection | null = null;
   let suspended = false;
   let disposers: Array<() => void> = [];
+  /**
+   * Whether playback was running as of the last thing that reported on it.
+   *
+   * Read by `onEnded`, and the reason it cannot ask state instead: reaching the
+   * end of a media resource sets `paused` to true and fires `pause` *before*
+   * `ended`, so by the time `playback:ended` is emitted the provider has
+   * already published `paused: true` for every natural end. Asking state there
+   * answered "the viewer had stopped" for a viewer who had not, and the
+   * duration out point never looped.
+   */
+  let wasPlaying = false;
 
   const rewind = (): void => {
     if (selection) seekClamped(api, selection.start);
   };
 
   const onTimeUpdate = (payload: { currentTime: number }): void => {
+    // Progress while unpaused is the loop's own evidence that playback is
+    // running. It only ever latches this on: a `timeupdate` queued behind the
+    // end-of-playback pause must not read as "the viewer stopped".
+    if (api.getState('paused') !== true) wasPlaying = true;
     if (!selection || suspended) return;
     if (payload.currentTime >= selection.end) rewind();
   };
 
+  /** An explicit request to play: intent to keep playing. */
+  const onPlay = (): void => {
+    wasPlaying = true;
+  };
+
+  /**
+   * An explicit request to pause: intent to stop.
+   *
+   * This is the command event a viewer's pause raises, not the element's own
+   * `pause`, which a natural end fires too - which is exactly why the two can
+   * be told apart here and could not be told apart from `paused` state.
+   */
+  const onPause = (): void => {
+    wasPlaying = false;
+  };
+
+  /**
+   * The media ran to its end with the out point pinned there.
+   *
+   * Only rewinds when playback was actually running. `ended` also arrives for
+   * a viewer who watched to the end and stopped; restarting under them would
+   * be the loop taking the player over rather than previewing a selection.
+   */
   const onEnded = (): void => {
+    const playing = wasPlaying;
+    // The media is stopped now whatever happens next; a further rewind needs
+    // its own play.
+    wasPlaying = false;
     if (!selection || suspended) return;
+    if (!playing) return;
     rewind();
+  };
+
+  /** Subscribe once; both entry points share the subscription. */
+  const ensureSubscribed = (): void => {
+    if (disposers.length > 0) return;
+    // Seed from state: a session that opens over a video already playing gets
+    // no `playback:play` of its own.
+    wasPlaying = api.getState('paused') !== true;
+    disposers = [
+      api.on('playback:timeupdate', onTimeUpdate),
+      api.on('playback:ended', onEnded),
+      api.on('playback:play', onPlay),
+      api.on('playback:pause', onPause),
+    ];
   };
 
   return {
@@ -82,8 +190,13 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
       if (!enabled) return;
       selection = { start: next.start, end: next.end };
       suspended = false;
-      if (disposers.length > 0) return; // already running: retarget only
-      disposers = [api.on('playback:timeupdate', onTimeUpdate), api.on('playback:ended', onEnded)];
+      ensureSubscribed();
+    },
+
+    retarget(next: ClipSelection): void {
+      if (!enabled) return;
+      selection = { start: next.start, end: next.end };
+      ensureSubscribed();
     },
 
     stop(): void {
@@ -91,6 +204,7 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
       disposers = [];
       selection = null;
       suspended = false;
+      wasPlaying = false;
     },
 
     suspend(): void {
@@ -99,6 +213,14 @@ export function createPreviewLoop(api: IPluginAPI, options: PreviewLoopOptions =
 
     resume(): void {
       suspended = false;
+    },
+
+    isSuspended(): boolean {
+      return suspended;
+    },
+
+    isArmed(): boolean {
+      return enabled && selection !== null;
     },
   };
 }

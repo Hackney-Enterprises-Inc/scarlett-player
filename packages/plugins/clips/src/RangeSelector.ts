@@ -1,25 +1,61 @@
 /**
- * RangeSelector - the two-handle in/out clip track.
+ * RangeSelector - the two-handle in/out clip range.
  *
  * A self-contained DOM component: no player, no video element, no
  * `@scarlett-player/ui` imports. It renders one selection state (the plugin's
  * `clipSelection` key is the single source of truth), turns pointer and
- * keyboard input into model calls (`snap` -> `moveStart`/`moveEnd`, which
- * clamp and never push the other handle), and reports every result through
- * callbacks. The only value it owns internally is a drag in progress.
+ * keyboard input into model calls (`snap` -> `moveStart`/`moveEnd`, which clamp
+ * and never push the other handle), and reports every result through
+ * callbacks. The only values it owns internally are a drag in progress and the
+ * presentation it is currently mounted in.
+ *
+ * ## Two presentations, one instance
+ *
+ * The same selector renders either way, and {@link RangeSelector.setPresentation}
+ * switches between them without losing the selection or the session:
+ *
+ * - **`'timeline'`** - mounted into the UI package's timeline extension layer,
+ *   so the handles sit on the *playback* rail the viewer was already scrubbing.
+ *   Two 44px lanes, IN above the rail and OUT below, each handle a labelled
+ *   block with a stem pointing at its exact timestamp. Distinct vertical
+ *   targets are what keeps both handles operable when the selection is a
+ *   pixel wide - a thirty second clip on a two hour source at 300px.
+ *   The track itself takes no pointer input: presses that miss a handle fall
+ *   through to the rail and seek, which is the whole point of being there.
+ * - **`'standalone'`** - the original self-contained rail, used when the UI
+ *   package is absent, is too old to expose the extension seam, or has been
+ *   torn down under a live session. Presses on the background pick the nearer
+ *   handle, because there is no playhead underneath to seek instead.
+ *
+ * ## Pointer rules
  *
  * Pointer Events, not the mouse+touch pair the ProgressBar uses. jsdom 24 has
  * no `PointerEvent` constructor and no `setPointerCapture`, so this component
- * calls `setPointerCapture?.()` / `releasePointerCapture?.()` (optional
- * chaining, never assumes they exist) and reads only `clientX` off the event -
- * which lets tests dispatch `new MouseEvent('pointerdown', ...)`.
+ * calls capture optionally and reads only `clientX`/`pointerId`/`button` off
+ * the event, which lets tests dispatch `new MouseEvent('pointerdown', ...)`.
+ *
+ * - A press on a handle moves **that** handle. Nearest-handle logic is the
+ *   standalone background's behaviour only; with overlapping targets an
+ *   explicit hit must win, or the endpoints of a short selection become
+ *   impossible to tell apart.
+ * - The grab offset is preserved: movement applies the delta from where the
+ *   handle was grabbed, so a finger that lands 8px off-centre does not teleport
+ *   the endpoint by 8px worth of seconds.
+ * - One pointer owns a drag. A second finger is ignored, a secondary or right
+ *   button never starts one.
+ * - Capture is attempted and its failure is survivable: without it the drag
+ *   falls back to guarded document listeners, so a handle dragged off the rail
+ *   still tracks.
+ * - `pointerup` applies its final position exactly once. `pointercancel` and
+ *   `lostpointercapture` keep the last committed range instead, and every exit
+ *   clears ownership exactly once.
  *
  * Every key this component handles calls `preventDefault()`: the UI plugin's
  * document-level shortcut handler bails on `defaultPrevented` and skips slider
  * targets, so arrows on a handle must never also seek the video or toggle
  * playback.
  *
- * ## Callback contract (pinned - tasks 3.3 and 3.5 build on this verbatim)
+ * ## Callback contract
  *
  * ```ts
  * new RangeSelector({
@@ -28,33 +64,22 @@
  *     onChange: (selection, meta) => {},   // after any committed move
  *     onDragStart: (handle) => {},          // pointerdown chose a handle
  *     onDragMove: (handle, time) => {},     // every pointermove, always fires
- *     onDragEnd: (selection) => {},         // pointerup / pointercancel
+ *     onDragEnd: (selection, info) => {},   // release, cancel or lost capture
  *   },
  * });
  * ```
- *
- * - `pointerdown` only *selects* the nearer handle (ties at the exact
- *   midpoint go to start); the first position commit is the first
- *   `pointermove`, so pressing near a handle never jumps it.
- * - `onChange` fires when a move changed the selection **or** was clamped
- *   (a press pinned against a limit keeps reporting `clamped: true` so the
- *   overlay's notice can re-flash; the selection value may be unchanged).
- * - `onDragMove` fires on every `pointermove` during a drag even when the
- *   selection did not change - that is the channel task 3.5 throttles
- *   drag-to-scrub seeks (100ms) on. `time` is the handle's landed
- *   (snapped + clamped) position, never the raw pointer time.
  */
 
-import { formatTime } from '@scarlett-player/core';
 import { moveStart, moveEnd, resolveLimits, snap } from './range';
 import type { ClipSelection, RangeBounds } from './range';
+import { formatTimestamp } from './time-format';
 import type { ClipsPluginConfig } from './types';
 
 /** Which handle an interaction targets. */
 export type ClipHandle = 'start' | 'end';
 
 /** How a move was initiated; surfaced on {@link ClipChangeMeta}. */
-export type ClipMoveSource = 'pointer' | 'keyboard';
+export type ClipMoveSource = 'pointer' | 'keyboard' | 'field' | 'playhead';
 
 /**
  * Which limit refused a clamped move:
@@ -64,16 +89,32 @@ export type ClipMoveSource = 'pointer' | 'keyboard';
  */
 export type ClipClampReason = 'min-duration' | 'max-duration' | 'bounds';
 
+/** Where the selector's handles are mounted. */
+export type ClipPresentation = 'standalone' | 'timeline';
+
 /** Context for a committed move, passed to {@link RangeSelectorCallbacks.onChange}. */
 export interface ClipChangeMeta {
   /** The handle that moved (the other never does - clamp, don't push). */
   handle: ClipHandle;
-  /** Pointer drag vs. keyboard step. */
+  /** How the move was made. */
   source: ClipMoveSource;
   /** True when the model clamped the requested time. */
   clamped: boolean;
   /** Which limit bit, when clamped; null otherwise. */
   clampReason: ClipClampReason | null;
+}
+
+/** How a drag ended, passed to {@link RangeSelectorCallbacks.onDragEnd}. */
+export interface ClipDragEndInfo {
+  /**
+   * True when the drag was interrupted rather than released: `pointercancel`,
+   * a lost capture, or a teardown mid-drag.
+   *
+   * An interrupted drag keeps the last committed range and must **not**
+   * restore playback - the viewer had a finger on a handle and the gesture was
+   * taken away from them; starting playback under that is a surprise.
+   */
+  cancelled: boolean;
 }
 
 /**
@@ -83,36 +124,36 @@ export interface ClipChangeMeta {
 export interface RangeSelectorCallbacks {
   /**
    * After any committed move: fires with the new selection and whether the
-   * move was clamped (plus the reason). Task 3.3's overlay renders the
-   * readout from this and flashes the notice off `meta.clampReason`.
+   * move was clamped (plus the reason).
    *
    * @param selection - The selection after clamp + snap
    * @param meta - Handle, input source and clamp info
    */
   onChange?: (selection: ClipSelection, meta: ClipChangeMeta) => void;
   /**
-   * Pointerdown chose a handle (before any position change). Task 3.5 pauses
+   * Pointerdown chose a handle (before any position change). The plugin pauses
    * playback and suspends the preview loop here.
    *
    * @param handle - The handle now under the pointer
    */
   onDragStart?: (handle: ClipHandle) => void;
   /**
-   * Every pointermove during a drag, continuous (fires even when the
-   * selection is unchanged, e.g. pinned against a limit). Task 3.5 throttles
-   * drag-to-scrub seeks (100ms) off this.
+   * Every pointermove during a drag, continuous (fires even when the selection
+   * is unchanged, e.g. pinned against a limit). The plugin throttles
+   * drag-to-scrub seeks off this.
    *
    * @param handle - The dragged handle
    * @param time - The handle's landed (snapped + clamped) time, media seconds
    */
   onDragMove?: (handle: ClipHandle, time: number) => void;
   /**
-   * Pointerup / pointercancel released the drag. Task 3.5 seeks to
-   * `selection.start`, resumes the loop and restores play state here.
+   * The drag ended. The plugin seeks to `selection.start`, restores the
+   * preview loop and (on a clean release only) the play state.
    *
-   * @param selection - The final selection at release
+   * @param selection - The final selection
+   * @param info - Whether the drag was interrupted rather than released
    */
-  onDragEnd?: (selection: ClipSelection) => void;
+  onDragEnd?: (selection: ClipSelection, info: ClipDragEndInfo) => void;
 }
 
 /** Construction options for {@link RangeSelector}. */
@@ -123,6 +164,11 @@ export interface RangeSelectorOptions {
   bounds: RangeBounds;
   /** Host config: `minDuration`, `maxDuration` and `step` apply here. */
   config: ClipsPluginConfig;
+  /**
+   * Where the handles are mounted.
+   * @defaultValue 'standalone'
+   */
+  presentation?: ClipPresentation;
   /** Integration callbacks; see {@link RangeSelectorCallbacks}. */
   callbacks?: RangeSelectorCallbacks;
 }
@@ -133,59 +179,90 @@ const CLAMP_FLASH_MS = 1000;
 /** Arrow-key multiplier with Shift held. */
 const KEYBOARD_COARSE_FACTOR = 5;
 
+/** Accessible names; also the visible short labels on the timeline lanes. */
+const HANDLE_LABEL: Record<ClipHandle, string> = { start: 'IN', end: 'OUT' };
+const HANDLE_ARIA: Record<ClipHandle, string> = {
+  start: 'Clip in point',
+  end: 'Clip out point',
+};
+
+/** A drag in progress: the only mutable interaction state this component owns. */
+interface DragState {
+  handle: ClipHandle;
+  pointerId: number;
+  /** `pointerTime - handleTime` at press, so the handle moves by the delta. */
+  grabOffset: number;
+  /** Whether `setPointerCapture` succeeded; false means document fallback. */
+  captured: boolean;
+  /** Set once the drag has been ended, so every exit path releases exactly once. */
+  released: boolean;
+}
+
 /**
- * Two-handle clip range track: a `.sp-clip-track` band containing the shaded
+ * Two-handle clip range: a `.sp-clip-track` band containing the shaded
  * `.sp-clip-track__range` and two `role="slider"` handles. See the module
- * docblock for the DOM structure, input rules and the callback contract.
+ * docblock for the presentations, input rules and the callback contract.
  */
 export class RangeSelector {
   private readonly track: HTMLElement;
   private readonly rangeEl: HTMLElement;
   private readonly startHandle: HTMLElement;
   private readonly endHandle: HTMLElement;
+  private readonly labels: Record<ClipHandle, HTMLElement>;
 
   private selection: ClipSelection;
   private bounds: RangeBounds;
   private config: ClipsPluginConfig;
+  private presentation: ClipPresentation;
   private readonly callbacks: RangeSelectorCallbacks;
 
-  /** The drag in progress - the only state this component owns. */
-  private drag: { handle: ClipHandle; pointerId: number } | null = null;
+  private drag: DragState | null = null;
   private clampTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  /** False while frozen by {@link RangeSelector.setInteractive}. */
+  private interactive = true;
 
   /**
    * Builds the selector DOM (detached - the caller mounts `element`).
    *
-   * @param options - Initial selection, bounds, host config and callbacks
+   * @param options - Initial selection, bounds, host config, presentation and
+   * callbacks
    */
   constructor(options: RangeSelectorOptions) {
     this.selection = { start: options.selection.start, end: options.selection.end };
     this.bounds = { min: options.bounds.min, max: options.bounds.max };
     this.config = options.config;
+    this.presentation = options.presentation ?? 'standalone';
     this.callbacks = options.callbacks ?? {};
 
     this.track = document.createElement('div');
-    this.track.className = 'sp-clip-track';
 
     this.rangeEl = document.createElement('div');
     this.rangeEl.className = 'sp-clip-track__range';
     this.track.appendChild(this.rangeEl);
 
-    this.startHandle = this.buildHandle('start', 'Clip start');
-    this.endHandle = this.buildHandle('end', 'Clip end');
+    const start = this.buildHandle('start');
+    const end = this.buildHandle('end');
+    this.startHandle = start.el;
+    this.endHandle = end.el;
+    this.labels = { start: start.label, end: end.label };
     this.track.appendChild(this.startHandle);
     this.track.appendChild(this.endHandle);
 
+    // Bound on the track, not per handle: a drag continues to receive moves
+    // through the captured element, and the target check inside decides
+    // whether a press is a handle grab or background.
     this.track.addEventListener('pointerdown', this.onPointerDown);
     this.track.addEventListener('pointermove', this.onPointerMove);
     this.track.addEventListener('pointerup', this.onPointerUp);
-    this.track.addEventListener('pointercancel', this.onPointerUp);
+    this.track.addEventListener('pointercancel', this.onPointerCancel);
+    this.track.addEventListener('lostpointercapture', this.onLostCapture);
 
+    this.applyPresentationClass();
     this.render();
   }
 
-  /** The track element; the overlay mounts this and owns placement. */
+  /** The track element; the caller mounts this and owns placement. */
   get element(): HTMLElement {
     return this.track;
   }
@@ -204,10 +281,101 @@ export class RangeSelector {
    * @param config - Optional replacement config (limits changed at runtime)
    */
   update(selection: ClipSelection, bounds: RangeBounds, config?: ClipsPluginConfig): void {
+    if (this.destroyed) return;
     this.selection = { start: selection.start, end: selection.end };
     this.bounds = { min: bounds.min, max: bounds.max };
     if (config) this.config = config;
     this.render();
+  }
+
+  /**
+   * Move the handles between the timeline lanes and the standalone rail.
+   *
+   * The caller re-parents `element`; this only changes how it draws. An active
+   * drag is cancelled first - the geometry it was measuring against is about to
+   * stop existing, and continuing would apply a delta from a rail that moved.
+   *
+   * @param presentation - Where the handles are now mounted
+   */
+  setPresentation(presentation: ClipPresentation): void {
+    if (this.destroyed || this.presentation === presentation) return;
+    this.endDrag(true);
+    this.presentation = presentation;
+    this.applyPresentationClass();
+    this.render();
+  }
+
+  /**
+   * The presentation currently in force.
+   *
+   * @returns `'timeline'` or `'standalone'`
+   */
+  getPresentation(): ClipPresentation {
+    return this.presentation;
+  }
+
+  /**
+   * Move focus to one handle.
+   *
+   * @param which - The handle to focus
+   */
+  focusHandle(which: ClipHandle): void {
+    if (this.destroyed) return;
+    this.handleEl(which).focus?.({ preventScroll: true });
+  }
+
+  /**
+   * Whether a pointer drag is in progress.
+   *
+   * @returns True while a handle is held
+   */
+  isDragging(): boolean {
+    return this.drag !== null;
+  }
+
+  /**
+   * Abandon any drag in progress, keeping the range it had reached.
+   *
+   * Reported as a cancellation, so the plugin keeps the last committed
+   * endpoints and leaves playback alone. The device rotating is the case this
+   * exists for: the rail the drag was measuring against has moved, and
+   * continuing to apply a delta against the old geometry would throw the
+   * endpoint somewhere the viewer never dragged it.
+   */
+  cancelDrag(): void {
+    if (this.destroyed) return;
+    this.endDrag(true);
+  }
+
+  /**
+   * Freeze or thaw the handles.
+   *
+   * Frozen handles take no pointer input, leave the tab order and announce
+   * themselves as disabled. Used while a submission is in flight (the range
+   * being submitted must not move under the request) and while the details
+   * stage covers the player, where the timeline behind it is out of reach.
+   *
+   * The freeze is enforced in the handlers, not only in CSS and the tab order:
+   * `tabindex="-1"` removes a handle from tabbing but leaves a handle that was
+   * already focused when the freeze landed focused and taking arrow keys, so
+   * the range could still be moved out from under a submission with the
+   * keyboard.
+   *
+   * Any drag in progress is cancelled, so the endpoint stays where it was
+   * rather than following a finger the editor is no longer listening to.
+   *
+   * @param interactive - False to freeze
+   */
+  setInteractive(interactive: boolean): void {
+    if (this.destroyed) return;
+    this.interactive = interactive;
+    if (!interactive) this.endDrag(true);
+    this.track.classList.toggle('sp-clip-track--frozen', !interactive);
+    for (const which of ['start', 'end'] as const) {
+      const el = this.handleEl(which);
+      el.setAttribute('aria-disabled', String(!interactive));
+      el.setAttribute('tabindex', interactive ? '0' : '-1');
+    }
   }
 
   /**
@@ -216,16 +384,20 @@ export class RangeSelector {
    */
   destroy(): void {
     if (this.destroyed) return;
+    // Before the flag: a drag in flight is an interruption, and the plugin has
+    // to hear about it so it does not restore playback under a closing editor.
+    this.endDrag(true);
     this.destroyed = true;
     this.track.removeEventListener('pointerdown', this.onPointerDown);
     this.track.removeEventListener('pointermove', this.onPointerMove);
     this.track.removeEventListener('pointerup', this.onPointerUp);
-    this.track.removeEventListener('pointercancel', this.onPointerUp);
+    this.track.removeEventListener('pointercancel', this.onPointerCancel);
+    this.track.removeEventListener('lostpointercapture', this.onLostCapture);
+    this.detachDocumentFallback();
     if (this.clampTimer !== null) {
       clearTimeout(this.clampTimer);
       this.clampTimer = null;
     }
-    this.drag = null;
     this.track.remove();
   }
 
@@ -233,16 +405,36 @@ export class RangeSelector {
   // DOM construction / rendering
   // --------------------------------------------------------------------------
 
-  /** @internal Build one slider handle with its ARIA wiring and key handler. */
-  private buildHandle(which: ClipHandle, label: string): HTMLElement {
+  /** @internal Build one slider handle with its stem, label, ARIA and keys. */
+  private buildHandle(which: ClipHandle): { el: HTMLElement; label: HTMLElement } {
     const el = document.createElement('div');
     el.className = `sp-clip-handle sp-clip-handle--${which}`;
     el.setAttribute('role', 'slider');
     el.setAttribute('tabindex', '0');
-    el.setAttribute('aria-label', label);
+    el.setAttribute('aria-label', HANDLE_ARIA[which]);
     el.dataset.clipHandle = which;
+
+    const stem = document.createElement('span');
+    stem.className = 'sp-clip-handle__stem';
+    stem.setAttribute('aria-hidden', 'true');
+    el.appendChild(stem);
+
+    // The visible label doubles as the compact readout: with the lanes on the
+    // playback rail there is no room for a separate "0:12 - 0:47" line, and
+    // putting each time beside its own handle is more use than both together
+    // somewhere else. aria-hidden because the slider announces its own value.
+    const label = document.createElement('span');
+    label.className = 'sp-clip-handle__label';
+    label.setAttribute('aria-hidden', 'true');
+    el.appendChild(label);
+
     el.addEventListener('keydown', (event: KeyboardEvent) => this.onKeyDown(which, event));
-    return el;
+    return { el, label };
+  }
+
+  /** @internal Apply the presentation modifier to the track's class list. */
+  private applyPresentationClass(): void {
+    this.track.className = `sp-clip-track sp-clip-track--${this.presentation}`;
   }
 
   /** @internal Position both handles and the range fill from current state. */
@@ -260,14 +452,19 @@ export class RangeSelector {
     this.startHandle.style.left = `${startPct}%`;
     this.endHandle.style.left = `${endPct}%`;
 
-    for (const [el, time] of [
-      [this.startHandle, this.selection.start],
-      [this.endHandle, this.selection.end],
-    ] as const) {
-      el.setAttribute('aria-valuemin', String(min));
-      el.setAttribute('aria-valuemax', String(max));
-      el.setAttribute('aria-valuenow', String(time));
-      el.setAttribute('aria-valuetext', formatTime(time));
+    const step = this.stepValue();
+    for (const which of ['start', 'end'] as const) {
+      const el = this.handleEl(which);
+      const time = this.selection[which];
+      const limits = this.endpointLimits(which);
+      // The limits a slider announces are the ones it can actually reach: the
+      // other endpoint and the duration limits, not the whole media. A viewer
+      // told "0 to 7200" and then stopped at 118 has been lied to.
+      el.setAttribute('aria-valuemin', String(round(limits.lo)));
+      el.setAttribute('aria-valuemax', String(round(limits.hi)));
+      el.setAttribute('aria-valuenow', String(round(time)));
+      el.setAttribute('aria-valuetext', `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
+      this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
     }
   }
 
@@ -277,62 +474,157 @@ export class RangeSelector {
 
   /**
    * @internal
-   * pointerdown picks the nearer handle - ties (pointer exactly at the
-   * selection midpoint) resolve to the start handle - captures the pointer on
-   * the track and announces the drag. It does NOT move anything yet: pressing
-   * beside a handle must not jump it.
+   * pointerdown starts a drag on a handle. It does NOT move anything: the grab
+   * offset is recorded so the first move applies a delta rather than jumping
+   * the handle to the finger.
    */
   private onPointerDown = (event: PointerEvent): void => {
-    if (this.destroyed || this.drag) return;
-    if (event.button !== 0) return; // primary button / touch only
+    if (this.destroyed || !this.interactive || this.drag) return;
+    // Primary button (or touch/pen, which report 0) only. A right-click or a
+    // stylus barrel press must never grab a handle.
+    if (event.button !== undefined && event.button !== 0) return;
+
+    const which = this.resolveTarget(event);
+    if (which === null) return;
+
     const raw = this.timeFromClientX(event.clientX);
     if (raw === null) return;
-    // Compare on the snap grid: clientX -> time carries float noise that would
-    // otherwise decide an exact-midpoint tie by an epsilon.
-    const which = this.pickHandle(snap(raw, this.stepValue()));
-    this.drag = { handle: which, pointerId: event.pointerId };
-    // Optional: jsdom has no setPointerCapture; real browsers capture moves
-    // and the release event onto the track even outside its bounds.
-    this.track.setPointerCapture?.(event.pointerId);
+
+    const handleEl = this.handleEl(which);
+    let captured = false;
+    try {
+      handleEl.setPointerCapture?.(event.pointerId);
+      captured = typeof handleEl.setPointerCapture === 'function';
+    } catch {
+      // Safari throws for a pointer that has already been released, and jsdom
+      // has no capture at all. Neither is fatal: the document fallback below
+      // keeps the drag tracking.
+      captured = false;
+    }
+
+    this.drag = {
+      handle: which,
+      pointerId: event.pointerId,
+      grabOffset: raw - this.selection[which],
+      captured,
+      released: false,
+    };
+
+    if (!captured) this.attachDocumentFallback();
+
     this.track.classList.add('sp-clip-track--dragging');
-    this.handleEl(which).classList.add('sp-clip-handle--dragging');
-    this.handleEl(which).focus?.({ preventScroll: true });
+    handleEl.classList.add('sp-clip-handle--dragging');
+    handleEl.focus?.({ preventScroll: true });
     this.callbacks.onDragStart?.(which);
   };
 
-  /** @internal Convert clientX to a time on the track, or null if unusable. */
+  /** @internal Move the dragged handle by the delta from where it was grabbed. */
   private onPointerMove = (event: PointerEvent): void => {
-    if (!this.drag) return;
+    if (!this.drag || this.drag.released) return;
     // Only the pointer that started the drag drives it: a second finger on the
     // track must not yank the handle. jsdom's stand-in MouseEvents carry no
     // pointerId at all, so undefined matches the undefined recorded on drag.
     if (event.pointerId !== this.drag.pointerId) return;
     const raw = this.timeFromClientX(event.clientX);
     if (raw === null) return;
-    const landed = this.applyMove(this.drag.handle, raw, 'pointer');
-    // Continuous channel for drag-to-scrub (task 3.5): fires even when the
-    // selection is pinned against a limit and did not change.
+    const landed = this.applyMove(this.drag.handle, raw - this.drag.grabOffset, 'pointer');
+    // Continuous channel for drag-to-scrub: fires even when the selection is
+    // pinned against a limit and did not change.
     this.callbacks.onDragMove?.(this.drag.handle, landed);
   };
 
-  /** @internal Release the drag; pointerup and pointercancel share the path. */
+  /**
+   * @internal A clean release: apply the release coordinates once, then end.
+   *
+   * The final position matters - a fast drag can outrun `pointermove` by
+   * several pixels, and the endpoint the viewer let go on is the one they
+   * meant. Applying it here rather than trusting the last move is what makes
+   * the release land where the finger did.
+   */
   private onPointerUp = (event: PointerEvent): void => {
-    if (!this.drag) return;
-    // A second pointer lifting must not end the drag - nor release a capture
-    // this component never took for it.
+    if (!this.drag || this.drag.released) return;
     if (event.pointerId !== this.drag.pointerId) return;
-    const { handle, pointerId } = this.drag;
-    this.drag = null;
-    this.track.releasePointerCapture?.(pointerId);
-    this.track.classList.remove('sp-clip-track--dragging');
-    this.handleEl(handle).classList.remove('sp-clip-handle--dragging');
-    this.callbacks.onDragEnd?.({ ...this.selection });
+    const raw = this.timeFromClientX(event.clientX);
+    if (raw !== null) this.applyMove(this.drag.handle, raw - this.drag.grabOffset, 'pointer');
+    this.endDrag(false);
+  };
+
+  /** @internal The gesture was taken away: keep the range, restore nothing. */
+  private onPointerCancel = (event: PointerEvent): void => {
+    if (!this.drag || this.drag.released) return;
+    if (event.pointerId !== this.drag.pointerId) return;
+    this.endDrag(true);
   };
 
   /**
-   * @internal Which handle a pointer position targets: the nearer one; an
-   * exact-midpoint tie goes to start (the pointer sits on the start side of
-   * the selection as it crosses the middle).
+   * @internal Capture was lost (a scroll took over, the element was removed).
+   *
+   * Same treatment as a cancel. Fires after a normal `pointerup` too, which the
+   * `released` guard on the drag state absorbs.
+   */
+  private onLostCapture = (event: PointerEvent): void => {
+    if (!this.drag || this.drag.released) return;
+    if (event.pointerId !== this.drag.pointerId) return;
+    this.endDrag(true);
+  };
+
+  /**
+   * @internal End the current drag exactly once, whatever route got here.
+   *
+   * @param cancelled - True when the drag was interrupted rather than released
+   */
+  private endDrag(cancelled: boolean): void {
+    const drag = this.drag;
+    if (!drag || drag.released) return;
+    drag.released = true;
+    this.drag = null;
+
+    if (drag.captured) {
+      try {
+        this.handleEl(drag.handle).releasePointerCapture?.(drag.pointerId);
+      } catch {
+        // Already released by the browser; nothing to undo.
+      }
+    }
+    this.detachDocumentFallback();
+
+    this.track.classList.remove('sp-clip-track--dragging');
+    this.handleEl(drag.handle).classList.remove('sp-clip-handle--dragging');
+    this.callbacks.onDragEnd?.({ ...this.selection }, { cancelled });
+  }
+
+  /**
+   * @internal Which handle a press targets.
+   *
+   * An explicit hit on a handle always wins - with the lanes overlapping on a
+   * short selection, nearest-by-time would pick the wrong one constantly.
+   * Falling back to the nearer handle is the standalone rail's behaviour only;
+   * on the timeline a press that missed both handles belongs to the playhead
+   * underneath, and this returns null so it falls through and seeks.
+   *
+   * @param event - The press
+   * @returns The handle to drag, or null to ignore the press
+   */
+  private resolveTarget(event: PointerEvent): ClipHandle | null {
+    const target = event.target;
+    if (target instanceof Element) {
+      const hit = target.closest<HTMLElement>('[data-clip-handle]');
+      const which = hit?.dataset.clipHandle;
+      if (which === 'start' || which === 'end') return which;
+    }
+
+    if (this.presentation !== 'standalone') return null;
+
+    const raw = this.timeFromClientX(event.clientX);
+    if (raw === null) return null;
+    // Compare on the snap grid: clientX -> time carries float noise that would
+    // otherwise decide an exact-midpoint tie by an epsilon.
+    return this.pickHandle(snap(raw, this.stepValue()));
+  }
+
+  /**
+   * @internal Which handle a background position is nearer to; an exact-midpoint
+   * tie goes to start (the pointer sits on the start side as it crosses).
    */
   private pickHandle(time: number): ClipHandle {
     const { start, end } = this.selection;
@@ -348,6 +640,60 @@ export class RangeSelector {
     return min + Math.min(Math.max(ratio, 0), 1) * (max - min);
   }
 
+  // --- document fallback, for when pointer capture is unavailable -----------
+
+  /**
+   * @internal Whether a document-level event has already been handled on the way up.
+   *
+   * The fallback listens on the document, and an event that started inside the
+   * track reaches the track's own handler first and then bubbles here. Without
+   * this the whole drag is processed twice per move - two model applications,
+   * two `onChange`, two scrub seeks.
+   *
+   * @param event - The event as the document sees it
+   * @returns True when the track's own listener already handled it
+   */
+  private alreadyHandled(event: Event): boolean {
+    const target = event.target;
+    return target instanceof Node && this.track.contains(target);
+  }
+
+  private onDocPointerMove = (event: PointerEvent): void => {
+    if (this.alreadyHandled(event)) return;
+    this.onPointerMove(event);
+  };
+
+  private onDocPointerUp = (event: PointerEvent): void => {
+    if (this.alreadyHandled(event)) return;
+    this.onPointerUp(event);
+  };
+
+  private onDocPointerCancel = (event: PointerEvent): void => {
+    if (this.alreadyHandled(event)) return;
+    this.onPointerCancel(event);
+  };
+
+  /**
+   * @internal Track a drag through the document when capture failed.
+   *
+   * Without capture, moving off the handle stops delivering events to it, and
+   * the drag would freeze mid-gesture with the handle still latched. These are
+   * guarded by the same pointer id, skip anything the track already handled,
+   * and are removed on every exit.
+   */
+  private attachDocumentFallback(): void {
+    document.addEventListener('pointermove', this.onDocPointerMove);
+    document.addEventListener('pointerup', this.onDocPointerUp);
+    document.addEventListener('pointercancel', this.onDocPointerCancel);
+  }
+
+  /** @internal Remove the document fallback. Safe to call when never attached. */
+  private detachDocumentFallback(): void {
+    document.removeEventListener('pointermove', this.onDocPointerMove);
+    document.removeEventListener('pointerup', this.onDocPointerUp);
+    document.removeEventListener('pointercancel', this.onDocPointerCancel);
+  }
+
   // --------------------------------------------------------------------------
   // Keyboard interaction
   // --------------------------------------------------------------------------
@@ -355,28 +701,32 @@ export class RangeSelector {
   /**
    * @internal
    * ArrowLeft/Right step by one `step`, Shift+Arrow by five, Home/End jump to
-   * the track bounds. Every key handled here calls `preventDefault()` so the
-   * UI plugin's document-level shortcuts skip the event.
+   * the endpoint's own effective limits (not the media's - the other handle and
+   * the duration limits are what this handle can actually reach). Every key
+   * handled here calls `preventDefault()` so the UI plugin's shortcuts skip it.
    */
   private onKeyDown(which: ClipHandle, event: KeyboardEvent): void {
-    if (this.destroyed) return;
+    if (this.destroyed || !this.interactive) return;
     const step = this.stepValue();
     const delta = event.shiftKey ? step * KEYBOARD_COARSE_FACTOR : step;
     const current = this.selection[which];
+    const limits = this.endpointLimits(which);
 
     let target: number | null = null;
     switch (event.key) {
       case 'ArrowLeft':
+      case 'ArrowDown':
         target = current - delta;
         break;
       case 'ArrowRight':
+      case 'ArrowUp':
         target = current + delta;
         break;
       case 'Home':
-        target = this.bounds.min;
+        target = limits.lo;
         break;
       case 'End':
-        target = this.bounds.max;
+        target = limits.hi;
         break;
       default:
         return; // unhandled keys (Tab etc.) pass through untouched
@@ -391,10 +741,47 @@ export class RangeSelector {
   // --------------------------------------------------------------------------
 
   /**
-   * @internal The single commit path: snap the requested time, run the
-   * clamping model (`moveStart`/`moveEnd` - the other handle never moves),
-   * re-render, flash + report if clamped, and fire `onChange` when anything
-   * meaningful happened.
+   * Commit a time for one endpoint through the same clamping path a drag uses.
+   *
+   * The exact-timestamp fields and the "set at playhead" buttons come through
+   * here, so every route to a new endpoint snaps, clamps and reports
+   * identically - there is one mutation path, not four.
+   *
+   * @param which - The endpoint to move
+   * @param time - Requested time in media seconds
+   * @param source - How the move was made, for the change metadata
+   * @returns The landed time after snapping and clamping
+   */
+  applyEndpoint(which: ClipHandle, time: number, source: ClipMoveSource): number {
+    if (this.destroyed) return this.selection[which];
+    return this.applyMove(which, time, source);
+  }
+
+  /**
+   * The limits one endpoint can actually reach right now.
+   *
+   * The other endpoint, the min/max duration and the media bounds together;
+   * this is what ARIA announces and what Home/End jump to.
+   *
+   * @param which - The endpoint
+   * @returns Its inclusive `[lo, hi]` in media seconds
+   */
+  endpointLimits(which: ClipHandle): { lo: number; hi: number } {
+    const { minDuration, maxDuration } = resolveLimits(this.config);
+    const { start, end } = this.selection;
+    const { min, max } = this.bounds;
+
+    if (which === 'start') {
+      return { lo: Math.max(min, end - maxDuration), hi: end - minDuration };
+    }
+    return { lo: start + minDuration, hi: Math.min(max, start + maxDuration) };
+  }
+
+  /**
+   * @internal The single commit path: snap the requested time, run the clamping
+   * model (`moveStart`/`moveEnd` - the other handle never moves), re-render,
+   * flash + report if clamped, and fire `onChange` when anything meaningful
+   * happened.
    *
    * @returns The handle's landed time
    */
@@ -468,4 +855,14 @@ export class RangeSelector {
     const step = this.config.step ?? 1;
     return Number.isFinite(step) && step > 0 ? step : 1;
   }
+}
+
+/**
+ * @internal Round an ARIA value to something a screen reader can read out.
+ *
+ * @param value - The raw time
+ * @returns The value at millisecond resolution, without float noise
+ */
+function round(value: number): number {
+  return Number.isFinite(value) ? Number(value.toFixed(3)) : 0;
 }

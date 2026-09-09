@@ -54,16 +54,61 @@ import { submitViaEndpoint } from './submit';
 import { getVideo, seekClamped } from './media';
 import { ClipOverlay } from './ClipOverlay';
 import { ClipButton } from './ClipButton';
-import type { ClipHandle, ClipClampReason } from './RangeSelector';
+import type { ClipDragEndInfo, ClipHandle, ClipClampReason } from './RangeSelector';
 import { styles } from './styles';
 import { PKG_VERSION } from './version';
 
 export type { ClipRange, ClipsPlugin, ClipsPluginConfig, ClipEndpointConfig } from './types';
 export { ClipSubmitError } from './types';
 export { ClipOverlay } from './ClipOverlay';
-export type { ClipOverlayOptions, ClipOverlayCallbacks, ClipNoticeOptions } from './ClipOverlay';
+export type {
+  ClipOverlayOptions,
+  ClipOverlayCallbacks,
+  ClipNoticeOptions,
+  ClipStage,
+  ClipLayout,
+} from './ClipOverlay';
+export { RangeSelector } from './RangeSelector';
+export type {
+  ClipHandle,
+  ClipPresentation,
+  ClipChangeMeta,
+  ClipDragEndInfo,
+  ClipClampReason,
+} from './RangeSelector';
+export { parseTimestamp, formatTimestamp } from './time-format';
 export { ClipButton, CLIP_ICON } from './ClipButton';
 export type { ClipButtonOptions, ClipControl } from './ClipButton';
+
+/**
+ * The UI package's timeline surface, matched structurally rather than
+ * imported.
+ *
+ * `@scarlett-player/ui` is an optional peer: this package must load and work
+ * in a build that has no UI package at all, so the seam is described here and
+ * feature-detected at runtime. A UI too old to export
+ * `registerTimelineExtension` simply keeps the standalone rail.
+ */
+interface UiTimelineSurface {
+  element: HTMLElement;
+  getRailRect(): DOMRect;
+  setEditing(active: boolean): void;
+  setDragging(active: boolean): void;
+}
+
+/** The extension shape the UI package expects back. See {@link UiTimelineSurface}. */
+interface UiTimelineExtension {
+  update(): void;
+  onSeekStart(): void;
+  onSeekEnd(): void;
+  destroy(): void;
+}
+
+/** The optional export this plugin feature-detects on `@scarlett-player/ui`. */
+type RegisterTimelineExtension = (
+  owner: HTMLElement,
+  factory: (surface: UiTimelineSurface) => UiTimelineExtension
+) => () => void;
 
 declare module '@scarlett-player/core' {
   interface StateStore {
@@ -110,10 +155,33 @@ const SEEK_THROTTLE_MS = 100;
 type ClipErrorCode =
   | 'live-unsupported'
   | 'media-type-unsupported'
+  | 'media-type-unknown'
   | 'duration-unknown'
   | 'media-id-unresolved'
+  | 'native-fullscreen-active'
   | RangeErrorCode
   | TitleErrorCode;
+
+/**
+ * Viewer-facing text for each gate.
+ *
+ * `media-type-unknown` is the one that matters most, and it is new: the player
+ * used to call a video "audio" whenever its intrinsic dimensions had not been
+ * measured yet, which on mobile is most of the time before playback starts.
+ * The honest answer is that the player does not know yet, and the honest fix
+ * is to say so and tell the viewer what makes it know.
+ */
+const GATE_MESSAGES: Record<
+  'live-unsupported' | 'media-type-unsupported' | 'media-type-unknown' | 'duration-unknown' | 'native-fullscreen-active',
+  string
+> = {
+  'live-unsupported': 'Live streams cannot be clipped.',
+  'media-type-unsupported': 'Audio cannot be clipped; clips need video.',
+  'media-type-unknown': 'Video information is not available yet. Press Play and try again.',
+  'duration-unknown': 'The video length is not known yet. Press Play and try again.',
+  'native-fullscreen-active':
+    'Exit full screen to create a clip - this device plays full screen in its own player.',
+};
 
 /** An `Error` carrying a machine-readable {@link ClipErrorCode}. */
 export interface ClipOperationError extends Error {
@@ -235,10 +303,33 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
    */
   let clipControl: ClipButton | null = null;
 
-  // --- drag-to-scrub (task 3.5): the drag owns the media while it runs ---
-  let dragging = false;
+  /** Unregisters the timeline extension; null when the UI seam is unavailable. */
+  let releaseTimeline: (() => void) | null = null;
+  /**
+   * The mounted timeline surface, or null when the handles are standalone.
+   *
+   * Set when the UI package mounts this plugin's extension and cleared when it
+   * unmounts one - which happens on a control-bar rebuild as well as on a UI
+   * teardown, so an open session must survive both.
+   */
+  let timelineSurface: UiTimelineSurface | null = null;
+
+  // --- drag-to-scrub: the drag owns the media while it runs ---
   let wasPlayingBeforeDrag = false;
   let lastScrubSeek = 0;
+  /**
+   * Whether the preview loop was already suspended when a drag began.
+   *
+   * A drag that started while the viewer had scrubbed past the out point must
+   * end still suspended: giving the loop back would yank the playhead to the
+   * in point under someone who had deliberately gone elsewhere.
+   */
+  let previewSuspendedBeforeDrag = false;
+
+  /** True while the media element is in the iPhone's own full-screen player. */
+  let nativeFullscreen = false;
+  /** Detaches the current element's full-screen listeners. */
+  let detachFullscreenWatch: (() => void) | null = null;
 
   // --- success toast (transient element on the container) ---
   let toastEl: HTMLElement | null = null;
@@ -304,14 +395,19 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
     // cancel), and that path must unmount the panel too.
     overlay?.destroy();
     overlay = null;
+    // Give the timeline back: the lanes stop being reserved, the bar's normal
+    // hide delay restarts, and the pointer lease is released whatever state
+    // the drag was in.
+    timelineSurface?.setDragging(false);
+    timelineSurface?.setEditing(false);
     // A drag in flight dies with the session: the play state captured at
     // drag start is deliberately NOT restored. On the source-change and
     // destroy paths resuming is moot (the media is gone or going); on a
     // cancel mid-drag, staying paused is the safe read - the viewer had
     // their finger on the handle, and auto-playing under a closing panel
     // would surprise them.
-    dragging = false;
     wasPlayingBeforeDrag = false;
+    previewSuspendedBeforeDrag = false;
   }
 
   /**
@@ -351,6 +447,12 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
     // compares the generation it captured against this counter.
     releaseControls?.();
     releaseControls = null;
+    releaseTimeline?.();
+    releaseTimeline = null;
+    timelineSurface = null;
+    detachFullscreenWatch?.();
+    detachFullscreenWatch = null;
+    nativeFullscreen = false;
     releaseStyles?.();
     releaseStyles = null;
     clipControl = null;
@@ -383,14 +485,15 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
    * `preview.start()` also clears the suspension the drag installed, so the
    * retarget waits for `onDragEnd`.
    */
-  function commitSelection(
-    sel: ClipSelection,
-    reason: 'user' | 'clamp',
-    retargetLoop = true,
-  ): void {
+  function commitSelection(sel: ClipSelection, reason: 'user' | 'clamp'): void {
     selection = sel;
     api?.setState('clipSelection', { start: sel.start, end: sel.end });
-    if (retargetLoop) preview?.start(sel);
+    // Retarget, never resume. `start()` also clears suspension, and routing
+    // every selection change through it is what made an ordinary scrub past
+    // the out point snap straight back: the re-render re-armed the loop the
+    // scrub had just suspended. Moving the target and owning the playhead are
+    // now separate calls (see ./preview.ts).
+    preview?.retarget(sel);
     api?.emit('clip:changed', { start: sel.start, end: sel.end, reason });
     // clipSelection is the single source of truth: echo it to the panel. The
     // selector's update() is render-only (fires no callbacks), so a change
@@ -399,15 +502,18 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
   }
 
   /**
-   * Route a committed move from the selector (drag step or keyboard) through
-   * the same clamping path as `setRange()`, emitting `clip:changed` with
-   * `reason: 'user'`.
+   * Route a committed move from the selector - a drag step, a keyboard step, an
+   * exact-time field or an at-playhead button - through the same clamping path
+   * as `setRange()`, emitting `clip:changed` with `reason: 'user'`.
+   *
+   * One mutation path for every route to a new endpoint: four ways in, one way
+   * through, at most one `clip:changed` per effective change.
    */
   function applySelectionFromSelector(sel: ClipSelection): void {
     if (!api || !sessionOpen) return;
     const step = (cfg.step as number | undefined) ?? 1;
     const snapped: ClipSelection = { start: snap(sel.start, step), end: snap(sel.end, step) };
-    commitSelection(clampSelection(snapped), 'user', !dragging);
+    commitSelection(clampSelection(snapped), 'user');
   }
 
   /** Write the title model-side (trimmed + truncated, mirrored to state). */
@@ -420,22 +526,115 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
   }
 
   /**
+   * Why the current media cannot be clipped, or null when it can.
+   *
+   * The single gate: `open()` reports it, `commit()` re-checks it against
+   * authoritative state before submitting, and a state change while the editor
+   * is open disables submission through it. One definition, so the button, the
+   * open path and the commit path cannot drift.
+   *
+   * `mediaType: 'unknown'` gets its **own** answer. It used to be impossible -
+   * the HLS provider published `audio` whenever intrinsic dimensions were not
+   * measured yet - and rolling it in with audio would tell a viewer on a phone
+   * that their video is not a video. Unknown means "not yet", and the message
+   * says what makes it known.
+   */
+  function mediaGate(): { code: ClipErrorCode; message: string } | null {
+    if (!api) return null;
+
+    if (nativeFullscreen) {
+      return {
+        code: 'native-fullscreen-active',
+        message: GATE_MESSAGES['native-fullscreen-active'],
+      };
+    }
+    if (api.getState('live')) {
+      return { code: 'live-unsupported', message: GATE_MESSAGES['live-unsupported'] };
+    }
+    const mediaType = api.getState('mediaType');
+    if (mediaType === 'unknown' || mediaType === undefined) {
+      return { code: 'media-type-unknown', message: GATE_MESSAGES['media-type-unknown'] };
+    }
+    if (mediaType !== 'video') {
+      return { code: 'media-type-unsupported', message: GATE_MESSAGES['media-type-unsupported'] };
+    }
+    const duration = api.getState('duration');
+    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+      return { code: 'duration-unknown', message: GATE_MESSAGES['duration-unknown'] };
+    }
+    return null;
+  }
+
+  /**
    * Whether the current media is clippable at all - the {@link ClipButton}
-   * visibility gate, mirroring `open()`'s guards. A `mediaId` function that
-   * throws reads as "not clippable": the button hides quietly, and `open()`
-   * is the place that reports the error properly.
+   * visibility gate. A `mediaId` function that throws reads as "not
+   * clippable": the button hides quietly, and `open()` is the place that
+   * reports the error properly.
+   *
+   * Unknown media stays unavailable and does **not** auto-open later: the
+   * button appears once the provider establishes video, and the viewer presses
+   * it themselves.
    */
   function mediaClippable(): boolean {
     if (!api) return false;
-    if (api.getState('live')) return false;
-    if (api.getState('mediaType') !== 'video') return false;
-    const duration = api.getState('duration');
-    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) return false;
+    if (mediaGate() !== null) return false;
     try {
       return resolveMediaId() !== null;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Re-check the gate against live state and block or unblock submission.
+   *
+   * Called whenever `mediaType`, `live` or `duration` moves under an open
+   * editor. The selection is kept and still shown - the viewer's work is not
+   * thrown away - but Create is refused with the precise reason rather than
+   * silently doing nothing.
+   */
+  function refreshGate(): void {
+    if (!sessionOpen || !overlay) return;
+    const gate = mediaGate();
+    overlay.setBlocked(gate ? gate.message : null);
+  }
+
+  /**
+   * Watch the media element for the iPhone's own full-screen player.
+   *
+   * Native video full screen replaces the page's DOM with the OS player, where
+   * custom controls simply do not exist. The editor cannot be shown there, so
+   * the draft is frozen and preserved rather than torn down, and an `open()`
+   * during it errors with a reason instead of silently doing nothing (or, far
+   * worse, calling a fullscreen API the viewer did not ask for).
+   */
+  function watchNativeFullscreen(): void {
+    detachFullscreenWatch?.();
+    detachFullscreenWatch = null;
+    const video = api ? getVideo(api.container) : null;
+    if (!video) return;
+
+    const onBegin = (): void => {
+      nativeFullscreen = true;
+      preview?.suspend();
+      overlay?.setSuspended(true);
+      refreshGate();
+    };
+    const onEnd = (): void => {
+      nativeFullscreen = false;
+      overlay?.setSuspended(false);
+      refreshGate();
+    };
+    video.addEventListener('webkitbeginfullscreen', onBegin);
+    video.addEventListener('webkitendfullscreen', onEnd);
+    detachFullscreenWatch = (): void => {
+      video.removeEventListener('webkitbeginfullscreen', onBegin);
+      video.removeEventListener('webkitendfullscreen', onEnd);
+    };
+
+    nativeFullscreen =
+      (video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean })
+        .webkitDisplayingFullscreen === true;
   }
 
   // --- drag-to-scrub (task 3.5) -------------------------------------------------
@@ -446,12 +645,16 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
 
   /** @internal pointerdown chose a handle (before any position change). */
   function handleDragStart(): void {
-    dragging = true;
     lastScrubSeek = 0; // the first move always seeks, like ProgressBar's drag start
     const video = api ? getVideo(api.container) : null;
     wasPlayingBeforeDrag = video ? !video.paused : false;
     video?.pause();
+    // Remembered, not assumed: a drag begun while the loop was already
+    // suspended (the viewer had scrubbed past the out point) must end still
+    // suspended rather than snapping them back to the in point.
+    previewSuspendedBeforeDrag = preview?.isSuspended() ?? true;
     preview?.suspend();
+    timelineSurface?.setDragging(true);
   }
 
   /** @internal pointermove: seek to the landed handle time, throttled to one seek per 100ms. */
@@ -462,11 +665,37 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
     seekClamped(api, time);
   }
 
-  /** @internal pointerup / pointercancel: land on the in point and give the loop back. */
-  function handleDragEnd(finalSelection: ClipSelection): void {
-    dragging = false;
+  /**
+   * @internal The drag ended - released, cancelled or interrupted.
+   *
+   * A clean release seeks to the in point, retargets the loop, restores the
+   * suspension state the drag found (not an assumed "running"), and resumes
+   * playback if it had been running. An interrupted one - `pointercancel`, a
+   * lost capture, the editor closing under a held handle - keeps the last
+   * committed range and stays paused: the gesture was taken away from the
+   * viewer, and starting playback under that is a surprise, not a courtesy.
+   */
+  function handleDragEnd(finalSelection: ClipSelection, info: ClipDragEndInfo): void {
+    timelineSurface?.setDragging(false);
+
+    // `endSession()` destroys the selector, which ends a held drag through
+    // here - after the loop has already been stopped. Retargeting then would
+    // re-subscribe a loop nobody owns, so every path below is gated on the
+    // session still being open.
+    if (!sessionOpen) {
+      wasPlayingBeforeDrag = false;
+      return;
+    }
+
+    preview?.retarget(finalSelection);
+
+    if (info.cancelled) {
+      wasPlayingBeforeDrag = false;
+      return;
+    }
+
     seekClamped(api, finalSelection.start);
-    preview?.start(finalSelection); // retargets and clears the suspension
+    if (!previewSuspendedBeforeDrag) preview?.resume();
     restorePlayStateAfterDrag();
   }
 
@@ -479,12 +708,110 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
       const resumePlayback = (): void => {
         video.removeEventListener('seeked', resumePlayback);
         if (!sessionOpen) return; // the drag-release raced a close: stay paused
+        // A rejected play() (autoplay policy, an AbortError from a racing
+        // seek) leaves a paused but entirely usable editor rather than an
+        // unhandled rejection.
         video.play().catch(() => {});
       };
       // If a close lands before `seeked`, this listener dangles on the video
       // element until the next seek; it is bounded (removes itself on first
       // fire) and self-heals, so no timer or cleanup path is warranted here.
       video.addEventListener('seeked', resumePlayback);
+    }
+  }
+
+  // --- range editing from outside the handles --------------------------------
+
+  /**
+   * @internal "IN here" / "OUT here": place an endpoint at the media's real
+   * current time.
+   *
+   * The element is asked rather than the `currentTime` state key, which lags a
+   * scrub by up to a frame - the viewer pressed the button on the frame they
+   * are looking at. Placement runs through the selector's own commit path, so
+   * a placement the other endpoint or the duration limits refuse is clamped
+   * and flashed exactly like a dragged one, and the other endpoint never
+   * moves to make room.
+   */
+  function handleSetAtPlayhead(handle: ClipHandle): void {
+    if (!api || !sessionOpen || !overlay) return;
+    const video = getVideo(api.container);
+    const time =
+      video && Number.isFinite(video.currentTime)
+        ? video.currentTime
+        : ((api.getState('currentTime') as number | undefined) ?? 0);
+    overlay.setEndpoint(handle, time);
+  }
+
+  /**
+   * @internal "Preview clip": seek to the in point, arm the loop and play,
+   * inside the viewer's own gesture so autoplay policy allows it.
+   *
+   * With `loopPreview: false` this previews once and enables no loop - the
+   * host asked for no looping, and a button press is not consent to change
+   * that.
+   */
+  function handlePreviewRequest(): void {
+    if (!api || !sessionOpen || !selection) return;
+    seekClamped(api, selection.start);
+    preview?.start(selection);
+
+    const video = getVideo(api.container);
+    if (!video) return;
+    void video.play().catch(() => {
+      // The browser refused to start playback outside a gesture it trusts.
+      // Say so and keep the selection: losing the range over a policy the
+      // viewer cannot see would be indefensible.
+      overlay?.showNotice('Press Play to preview', { autoHideMs: 4000 });
+    });
+  }
+
+  /**
+   * @internal Play/Pause from the editor toolbar.
+   *
+   * Only reachable on a player short enough that the ordinary control bar was
+   * given up for room; without it there would be no way to start playback
+   * while editing on a 320x180 frame.
+   */
+  function handleTogglePlay(): void {
+    const video = api ? getVideo(api.container) : null;
+    if (!video) return;
+    if (video.paused) void video.play().catch(() => {});
+    else video.pause();
+  }
+
+  /**
+   * @internal An ordinary seek began on the playback timeline.
+   *
+   * The loop gives up the playhead and **stays** suspended after the release:
+   * a viewer who scrubbed past the out point wants to be past the out point,
+   * and snapping them back the moment they let go is the loop fighting them.
+   * "Preview clip" is how they ask for it back.
+   */
+  function handleTimelineSeekStart(): void {
+    if (!sessionOpen) return;
+    preview?.suspend();
+  }
+
+  // --- timeline attachment ----------------------------------------------------
+
+  /**
+   * @internal Put the handles wherever they belong right now.
+   *
+   * With a surface they go on the playback rail and the editing lease is
+   * taken; without one they fall back to the panel's own rail. Either way it
+   * is the same selector instance and the same session - the UI package
+   * appearing, rebuilding its bar or disappearing must not cost the viewer
+   * their selection.
+   */
+  function syncTimelineAttachment(): void {
+    if (!overlay) return;
+    if (timelineSurface) {
+      const surface = timelineSurface;
+      overlay.attachTimeline(surface.element, () => surface.getRailRect());
+      surface.setEditing(true);
+    } else {
+      overlay.attachTimeline(null);
     }
   }
 
@@ -556,9 +883,17 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
         onDragStart: handleDragStart,
         onDragMove: handleDragMove,
         onDragEnd: handleDragEnd,
+        onSetAtPlayhead: handleSetAtPlayhead,
+        onPreview: handlePreviewRequest,
+        onTogglePlay: handleTogglePlay,
       },
     });
+    // Before open(), so the first measurement already knows whether the
+    // handles are on the rail and where that rail is.
+    syncTimelineAttachment();
     overlay.open();
+    overlay.setPaused(getVideo(api.container)?.paused ?? true);
+    refreshGate();
   }
 
   /** Shared body of the public `open()`; also called by the control's toggle. */
@@ -566,22 +901,12 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
     if (!api || sessionOpen) return;
 
     // --- gates: error, do not open (v1 is VOD video only) ---
-    if (api.getState('live')) {
-      reportError(clipError('live-unsupported', 'clips: live media cannot be clipped in v1'));
+    const gate = mediaGate();
+    if (gate) {
+      reportError(clipError(gate.code, gate.message));
       return;
     }
-    const mediaType = api.getState('mediaType');
-    if (mediaType !== 'video') {
-      reportError(
-        clipError('media-type-unsupported', `clips: only video is clippable; media type is ${String(mediaType)}`),
-      );
-      return;
-    }
-    const duration = api.getState('duration');
-    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
-      reportError(clipError('duration-unknown', 'clips: media duration is unknown; cannot open'));
-      return;
-    }
+    const duration = api.getState('duration') as number;
     let mediaId: string | null = null;
     try {
       mediaId = resolveMediaId();
@@ -639,6 +964,23 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
     if (mediaId === null) {
       reportError(clipError('media-id-unresolved', 'clips: mediaId could not be resolved at commit time'));
       return;
+    }
+
+    // Re-check the media itself, not just the numbers. Between open() and
+    // Confirm the provider may have established audio, the stream may have gone
+    // live, or the duration may have changed under the selection - and a
+    // selection captured against one source must never be submitted against
+    // another.
+    const gate = mediaGate();
+    if (gate) {
+      reportError(clipError(gate.code, gate.message));
+      overlay?.setBlocked(gate.message);
+      return;
+    }
+    const currentDuration = api.getState('duration') as number;
+    if (currentDuration !== sessionDuration) {
+      sessionDuration = currentDuration;
+      overlay?.update(selection, currentBounds(), cfg);
     }
 
     const rangeCode = validate(selection, cfg, currentBounds());
@@ -744,6 +1086,27 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
         api.on('playlist:change', closeOnSourceChange),
       );
 
+      // A new source is a new element on some providers, so the full-screen
+      // watch follows the media rather than being installed once.
+      watchNativeFullscreen();
+      disposers.push(api.on('media:loaded', watchNativeFullscreen));
+
+      // The gate is re-checked against authoritative state, not against what
+      // was true when the editor opened: classification arriving late (the
+      // whole point of the media-type work), a stream going live, or a
+      // duration change must all reach an open editor.
+      disposers.push(
+        api.subscribeToState((event) => {
+          if (event.key === 'paused') {
+            overlay?.setPaused(event.value === true);
+            return;
+          }
+          if (event.key !== 'mediaType' && event.key !== 'live' && event.key !== 'duration') return;
+          refreshGate();
+          clipControl?.update();
+        }),
+      );
+
       // == GROUP 3 UI SEAM (a): shared stylesheet ==
       // Reference-counted by core: two players share one <style>; the last
       // release removes it. Headless hosts get no DOM at all, so no sheet.
@@ -760,7 +1123,8 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
         const generation = lifecycle;
         const owner = api.container;
         void import('@scarlett-player/ui')
-          .then(({ registerControl, unregisterControl }) => {
+          .then((module) => {
+            const { registerControl, unregisterControl } = module;
             // Destroyed (or re-initialised) while the import was in flight:
             // this registration belongs to a lifecycle that is over.
             if (generation !== lifecycle) return;
@@ -795,6 +1159,43 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
               unregisterControl(CONTROL_ID, { owner });
               clipControl = null;
             };
+
+            // The timeline seam is newer than the control registry, so a host
+            // pinned to an older @scarlett-player/ui simply will not have it.
+            // Feature-detected rather than version-checked: the standalone
+            // rail is a complete editor, and a missing export must degrade,
+            // never throw.
+            const registerTimelineExtension = (
+              module as { registerTimelineExtension?: RegisterTimelineExtension }
+            ).registerTimelineExtension;
+            if (typeof registerTimelineExtension !== 'function') {
+              api?.logger.debug('clips: installed UI has no timeline seam; using the standalone rail');
+              return;
+            }
+
+            releaseTimeline = registerTimelineExtension(owner, (surface) => {
+              timelineSurface = surface;
+              // A session may already be open: the UI plugin can initialise
+              // after clips, and a control-bar rebuild remounts this while the
+              // viewer is mid-edit. Either way the handles move onto the rail
+              // without touching the selection.
+              if (sessionOpen) syncTimelineAttachment();
+
+              return {
+                update: () => overlay?.syncTimelineGeometry(),
+                onSeekStart: handleTimelineSeekStart,
+                // Deliberately empty: the loop stays suspended after an
+                // ordinary seek. See handleTimelineSeekStart.
+                onSeekEnd: () => {},
+                destroy: () => {
+                  timelineSurface = null;
+                  // The UI went away (or rebuilt) under a live session: fall
+                  // back to the panel's own rail rather than losing the
+                  // selection, the title or the request id.
+                  if (sessionOpen) syncTimelineAttachment();
+                },
+              };
+            });
           })
           .catch(() => {
             api?.logger.debug('@scarlett-player/ui not present, clip control not registered');
@@ -820,10 +1221,9 @@ export function createClipsPlugin(config: ClipsPluginConfig = {}): ClipsPlugin {
       if (!api || !sessionOpen) return;
       const step = (cfg.step as number | undefined) ?? 1;
       const snapped: ClipSelection = { start: snap(start, step), end: snap(end, step) };
-      // `!dragging`: a host setRange() landing mid-drag updates the selection
-      // but must not re-arm (and un-suspend) the loop - the drag still owns
-      // the media, same rule as the overlay path in applySelectionFromSelector.
-      commitSelection(clampSelection(snapped), 'user', !dragging);
+      // A host setRange() landing mid-drag updates the selection and retargets
+      // the loop without touching suspension - the drag still owns the media.
+      commitSelection(clampSelection(snapped), 'user');
     },
 
     setTitle(title: string): void {
