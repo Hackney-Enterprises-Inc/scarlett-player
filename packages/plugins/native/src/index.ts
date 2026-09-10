@@ -588,7 +588,19 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         if (!video) return;
         // A command with nothing to do fires no element event, so setting the
         // flag for it would leave it standing and swallow the next real pause.
-        if (video.paused) return;
+        // A play command still in flight is the exception: the element has not
+        // reported it started yet, so nothing has cancelled it and playback
+        // would begin moments after the viewer asked it to stop. Cancel it (an
+        // already-paused element fires no `pause` for this, hence no pause
+        // flag) and drop the play flag, which would otherwise swallow the
+        // `playing` of the next element-driven start.
+        if (video.paused) {
+          if (isCorePlayRequested) {
+            isCorePlayRequested = false;
+            video.pause();
+          }
+          return;
+        }
         isCorePauseRequested = true;
         isCorePlayRequested = false;
         video.pause();

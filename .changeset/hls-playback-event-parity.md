@@ -42,7 +42,10 @@ element, so the bus hears about playback the viewer started.
   `PlaybackGate` swallows exactly one matching element event. Commands that
   have nothing to do (play on a playing element, pause on a paused one) return
   without arming the gate, since no element event follows them and a flag left
-  standing would swallow the viewer's next real transition instead.
+  standing would swallow the viewer's next real transition instead. The one
+  exception is a pause command that arrives while a play command is still in
+  flight: it cancels that play rather than passing over it, and clears its
+  flag, so the play the viewer makes next is heard.
 - **Behaviour note:** the watermark stays hidden until the first play, which is
   its documented lifecycle. What changes is that on an HLS source the first
   play now arrives. A consumer who had grown used to never seeing the mark on

@@ -318,6 +318,24 @@ describe('label clamping on the timeline', () => {
     // Centre 30, half-pill 30: shifted right by 0 - already flush left.
     expect(labelOf(h.start).style.transform).toBe('');
   });
+
+  it('keeps the left edge of an off-centre pill wider than the whole track', () => {
+    const h = setup({ selection: { start: 480, end: 500 }, presentation: 'timeline' });
+    givePill(h.start);
+    // A 40px track with the IN handle at 80%: centre 32, half-pill 30, so the
+    // pill overhangs the right edge by 22 and the left by nothing. Both limits
+    // are negative and lo (-2) > hi (-22) - the case the equal-limits test
+    // above cannot reach. Taking lo puts the left edge exactly on 0 (32 - 30 -
+    // 2) and lets the tail run off, rather than taking hi and cutting "IN".
+    h.track.getBoundingClientRect = () =>
+      ({
+        left: 0, top: 0, width: 40, height: 44,
+        right: 40, bottom: 44, x: 0, y: 0, toJSON: () => ({}),
+      }) as DOMRect;
+    h.selector.update({ start: 480, end: 500 }, BOUNDS);
+
+    expect(labelOf(h.start).style.transform).toBe('translateX(-2px)');
+  });
 });
 
 describe('keyboard', () => {

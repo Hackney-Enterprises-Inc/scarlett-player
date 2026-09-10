@@ -286,6 +286,23 @@ describe.each([
     expect(emits('playback:play')).toBe(1);
   });
 
+  it('cancels a core play the element has not started when a pause command arrives', async () => {
+    const video = getVideo();
+    setPaused(video, true);
+    vi.spyOn(video, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {});
+
+    await busHandler('playback:play')?.();
+    // The element still reports paused - the play has not taken effect yet -
+    // so the pause command must cancel it rather than pass over it.
+    busHandler('playback:pause')?.();
+    expect(pause).toHaveBeenCalled();
+
+    // And the flag it armed is gone, so a later element-driven start is heard.
+    video.dispatchEvent(new Event('playing'));
+    expect(emits('playback:play')).toBe(1);
+  });
+
   it('clears the flag when the play command is rejected', async () => {
     const video = getVideo();
     setPaused(video, true);

@@ -29,4 +29,6 @@ Emit `playback:pause` from the native provider's media element.
   media-session, chromecast and the clips preview all read that event.
 - Deduped against core-issued commands with `isCorePauseRequested`, mirroring
   the `isCorePlayRequested` guard the play path has always had, and a pause
-  command on an already-paused element now returns before arming it.
+  command on an already-paused element now returns before arming it — unless a
+  play command is still in flight, which that pause cancels rather than passing
+  over, clearing its flag so the viewer's next play is heard.

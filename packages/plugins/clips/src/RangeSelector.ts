@@ -468,9 +468,16 @@ export class RangeSelector {
     }
 
     // After the text is written, because the clamp measures the pill it just
-    // relabelled ("IN 1:04:30" is wider than "IN 0:12").
-    this.clampLabel('start', startPct);
-    this.clampLabel('end', endPct);
+    // relabelled ("IN 1:04:30" is wider than "IN 0:12"). The track is measured
+    // once here and handed to both: it cannot change between the two calls, and
+    // reading it again after the first clamp writes a transform would force a
+    // second layout. The pills stay measured per call - their text just changed.
+    // Standalone clamps nothing, so it pays for no measurement at all: this
+    // runs on every pointermove of a drag.
+    const trackWidth =
+      this.presentation === 'timeline' ? this.track.getBoundingClientRect().width : 0;
+    this.clampLabel('start', startPct, trackWidth);
+    this.clampLabel('end', endPct, trackWidth);
   }
 
   /**
@@ -491,8 +498,9 @@ export class RangeSelector {
    *
    * @param which - The handle whose label is being placed
    * @param pct - That handle's position along the track, 0-100
+   * @param trackWidth - The track's measured width in px, from the caller
    */
-  private clampLabel(which: ClipHandle, pct: number): void {
+  private clampLabel(which: ClipHandle, pct: number, trackWidth: number): void {
     const label = this.labels[which];
     const clear = (): void => {
       if (label.style.transform) label.style.transform = '';
@@ -503,9 +511,9 @@ export class RangeSelector {
       return;
     }
 
-    // Same measurement the drag path makes. Both are zero before the track is
-    // laid out (and in jsdom), which is not a reason to guess a shift.
-    const trackWidth = this.track.getBoundingClientRect().width;
+    // The track width is the same measurement the drag path makes. Both it and
+    // the pill are zero before the track is laid out (and in jsdom), which is
+    // not a reason to guess a shift.
     const pillWidth = label.getBoundingClientRect().width;
     if (trackWidth <= 0 || pillWidth <= 0) {
       clear();

@@ -676,6 +676,24 @@ describe('playback:play emission and Chromecast guard', () => {
     expect(emitted('playback:play')).toBe(1);
   });
 
+  it('cancels a core play the element has not started when a pause command arrives', async () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.pause = vi.fn();
+
+    await listeners['playback:play']?.();
+    mockApi.emit.mockClear();
+
+    // jsdom still reports the element paused - the play has not taken effect
+    // yet - so the pause command must cancel it rather than pass over it.
+    listeners['playback:pause']?.();
+    expect(el.pause).toHaveBeenCalled();
+
+    // And the flag it armed is gone, so a later element-driven start is heard.
+    el.dispatchEvent(new Event('playing'));
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:play', undefined);
+  });
+
   it('cancels a pending core pause once playback is running', () => {
     const el = mockApi.container.querySelector('video') as HTMLVideoElement;
     Object.defineProperty(el, 'paused', { value: false, configurable: true });

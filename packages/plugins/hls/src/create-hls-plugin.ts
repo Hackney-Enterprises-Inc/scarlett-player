@@ -1481,7 +1481,21 @@ export function createHLSPluginWith(
 
       const unsubPause = api.on('playback:pause', () => {
         if (!video) return;
-        if (video.paused) return;
+        if (video.paused) {
+          // Nothing to pause, so no element event follows and arming the
+          // dedupe here would swallow the viewer's next real pause. A play
+          // command still in flight is the exception: the element has not
+          // reported it started yet, so nothing has cancelled it and playback
+          // would begin moments after the viewer asked it to stop. Cancel it
+          // (an already-paused element fires no `pause` for this, hence no
+          // pause flag) and drop the play flag, which would otherwise swallow
+          // the `playing` of the next element-driven start.
+          if (playbackGate.corePlayRequested) {
+            playbackGate.corePlayRequested = false;
+            video.pause();
+          }
+          return;
+        }
         playbackGate.corePauseRequested = true;
         playbackGate.corePlayRequested = false;
         video.pause();
