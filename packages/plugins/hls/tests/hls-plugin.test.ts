@@ -219,11 +219,24 @@ describe('HLSPlugin', () => {
 
     it('should handle pause event', () => {
       const video = api.container.querySelector('video') as HTMLVideoElement;
+      // jsdom answers `paused === true` for every element, and the command is
+      // guarded on it (a pause with nothing to do must not arm the dedupe
+      // flag), so the playing case has to say so.
+      Object.defineProperty(video, 'paused', { value: false, configurable: true });
       const pauseSpy = vi.spyOn(video, 'pause');
 
       handlers['playback:pause']?.();
 
       expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('ignores a pause command on an already paused element', () => {
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      const pauseSpy = vi.spyOn(video, 'pause');
+
+      handlers['playback:pause']?.();
+
+      expect(pauseSpy).not.toHaveBeenCalled();
     });
 
     it('should handle seek event', () => {

@@ -37,7 +37,7 @@ The control hides itself on live media, on audio, while the media type is not ye
 
 ## Where the handles are
 
-With `@scarlett-player/ui` installed, the IN and OUT handles are mounted **on the playback timeline itself** - the rail the viewer was already scrubbing - in two 44px lanes, IN above the rail and OUT below it, each labelled with its own timestamp and pointing at it with a stem.
+With `@scarlett-player/ui` installed, the IN and OUT handles are mounted **on the playback timeline itself** - the rail the viewer was already scrubbing - in two 44px lanes (32px on a player short enough to have given up its control bar), IN above the rail and OUT below it, each labelled with its own timestamp and pointing at it with a stem. A label that would hang off the end of the rail slides back inside it; the handle and its stem stay on the timestamp.
 
 Two lanes rather than one is what makes short selections editable: a 30-second clip on a two-hour source is about a pixel and a quarter wide on a 300px rail, and two targets stacked on one line cannot both be hit. Presses that miss a handle fall through to the rail and seek as usual, so the playhead never stops working while the editor is open.
 
@@ -68,7 +68,7 @@ The layout is measured on the **player**, never on the device, so a 320px player
 |---|---|
 | 600px wide and 360px tall or more | Handles on the timeline, an at-playhead toolbar, and the details panel above it, all at once |
 | Narrower or shorter than that | Two steps: **Range** (handles plus one 44px toolbar) and **Details** (Back, exact times, title, and a sticky Cancel / Create footer). Back keeps the selection and the typed title |
-| Shorter than 220px | The ordinary control bar is hidden for the duration of the edit and Play/Pause moves into the toolbar, which keeps roughly 40px of picture visible in a 320x180 frame. It comes straight back on exit |
+| Shorter than 220px | The ordinary control bar is hidden for the duration of the edit and Play/Pause moves into the toolbar, and the handle lanes and labels slim down, which keeps roughly 57px of picture visible in a 320x180 frame and 87px in a 375x211 one. The details step takes the whole player, since it covers the picture anyway. It all comes straight back on exit |
 | Shorter than 160px | A bounded, scrollable editor over the whole player: being able to reach the controls beats being able to see the video |
 
 Visible button labels shorten on a narrow player; the accessible names never do.

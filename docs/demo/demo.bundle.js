@@ -40905,7 +40905,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("currentAudioTrack", null);
     };
   }
-  function setupVideoEventHandlers(video, api, getLiveMetrics) {
+  function setupVideoEventHandlers(video, api, getLiveMetrics, gate) {
     const handlers = [];
     const addHandler = (event, handler) => {
       video.addEventListener(event, handler);
@@ -40927,11 +40927,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("buffering", false);
       api.setState("playbackState", "playing");
       syncEndedFromElement();
+      if (gate) gate.corePauseRequested = false;
+      if (gate?.corePlayRequested) {
+        gate.corePlayRequested = false;
+      } else {
+        api.emit("playback:play", void 0);
+      }
     });
     addHandler("pause", () => {
       api.setState("playing", false);
       api.setState("paused", true);
       api.setState("playbackState", "paused");
+      if (gate) gate.corePlayRequested = false;
+      if (gate?.corePauseRequested) {
+        gate.corePauseRequested = false;
+      } else {
+        api.emit("playback:pause", void 0);
+      }
     });
     addHandler("ended", () => {
       api.setState("playing", false);
@@ -41245,6 +41257,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let cleanupHlsEvents = null;
     let cleanupVideoEvents = null;
     let isAutoQuality = true;
+    const playbackGate = {
+      corePlayRequested: false,
+      corePauseRequested: false
+    };
     let mediaTypeClassifier = null;
     let lastLevelDetails = null;
     let lastLiveMetrics = null;
@@ -41601,7 +41617,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const videoEl = getOrCreateVideo();
       isNative = true;
       if (api) {
-        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
+        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
       }
       mediaTypeClassifier?.beginSource(src);
       mediaTypeClassifier?.attach(videoEl);
@@ -41696,7 +41712,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       isNative = false;
       hls = loader.createHlsInstance(buildHlsConfig());
       if (api) {
-        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics);
+        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
       }
       mediaTypeClassifier?.beginSource(src);
       mediaTypeClassifier?.attach(videoEl);
@@ -41990,14 +42006,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         mediaTypeClassifier = createMediaTypeClassifier(api);
         const unsubPlay = api.on("playback:play", async () => {
           if (!video) return;
+          if (!video.paused) return;
           try {
+            playbackGate.corePlayRequested = true;
             await video.play();
           } catch (e) {
+            playbackGate.corePlayRequested = false;
             api?.logger.error("Play failed", e);
           }
         });
         const unsubPause = api.on("playback:pause", () => {
-          video?.pause();
+          if (!video) return;
+          if (video.paused) return;
+          playbackGate.corePauseRequested = true;
+          playbackGate.corePlayRequested = false;
+          video.pause();
         });
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
           if (!video) return;
@@ -42372,6 +42395,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let derived_title = null;
     let is_audio_source = false;
     let isCorePlayRequested = false;
+    let isCorePauseRequested = false;
     let loadSession = 0;
     let abortPendingLoad2 = null;
     let has_parsed_source = false;
@@ -42464,6 +42488,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("paused", false);
         api?.setState("playbackState", "playing");
         syncEndedFromElement();
+        isCorePauseRequested = false;
         if (isCorePlayRequested) {
           isCorePlayRequested = false;
         } else {
@@ -42475,6 +42500,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("playing", false);
         api?.setState("paused", true);
         api?.setState("playbackState", "paused");
+        if (isCorePauseRequested) {
+          isCorePauseRequested = false;
+        } else {
+          api?.emit("playback:pause", void 0);
+        }
       });
       on("ended", () => {
         api?.setState("playing", false);
@@ -42622,8 +42652,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         const unsubPause = api.on("playback:pause", () => {
           if (api?.getState("chromecastActive")) return;
+          if (!video) return;
+          if (video.paused) return;
+          isCorePauseRequested = true;
           isCorePlayRequested = false;
-          video?.pause();
+          video.pause();
         });
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
           if (api?.getState("chromecastActive")) return;
@@ -46569,6 +46602,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return false;
     }
   }
+  var CLIP_OPEN_KEY = "clipOpen";
   function createGesturesPlugin(config = {}) {
     let api = null;
     let overlay = null;
@@ -46576,6 +46610,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let active = false;
     let runSeconds = 0;
     let pendingHide = null;
+    let clipOpen = false;
     const seekSeconds = config.seekSeconds ?? 10;
     const doubleTapWindowMs = config.doubleTapWindowMs ?? DEFAULT_RECOGNIZER_OPTIONS.doubleTapWindowMs;
     const leftZone = config.zones?.left ?? DEFAULT_RECOGNIZER_OPTIONS.leftZone;
@@ -46681,7 +46716,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const syncSurface = () => {
       if (!active || !api) return;
-      const wantsSurface = api.getState("mediaType") === "video";
+      const wantsSurface = api.getState("mediaType") === "video" && !clipOpen;
       if (wantsSurface && !overlay) {
         overlay = new GestureOverlay(api.container, { onPointer, feedback });
         overlay.setZoneWidths(leftZone, rightZone);
@@ -46714,7 +46749,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         syncSurface();
         const unsubscribe = api.subscribeToState((event) => {
-          if (event.key === "mediaType") syncSurface();
+          if (event.key === "mediaType") {
+            syncSurface();
+            return;
+          }
+          if (event.key === CLIP_OPEN_KEY) {
+            clipOpen = Boolean(event.value);
+            syncSurface();
+          }
         });
         api.onDestroy(() => {
           unsubscribe();
@@ -46733,6 +46775,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         recognizer = null;
         active = false;
         runSeconds = 0;
+        clipOpen = false;
         api = null;
       },
       ownsTapInteraction() {
@@ -48073,6 +48116,51 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         el.setAttribute("aria-valuetext", `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
         this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
       }
+      this.clampLabel("start", startPct);
+      this.clampLabel("end", endPct);
+    }
+    /**
+     * @internal Keep a handle's label pill inside the track.
+     *
+     * The handle and its stem stay exactly where the timestamp is - they are the
+     * precision, and moving them would make the editor lie. Only the pill slides,
+     * far enough to bring its overhanging edge back inside the track and no
+     * further, so it still reads as belonging to the stem beneath it.
+     *
+     * Needed because the pill is centred on a handle that can sit at 0% or 100%:
+     * a ~60px label then hangs ~30px past the rail, and the player's
+     * `overflow: hidden` cut "IN" clean off (measured 2026-09-09 on a 350px
+     * player, where the IN pill spanned x=2..63 against a player starting at 20).
+     *
+     * Standalone hides its labels entirely (the panel's readout carries the
+     * times), so there is nothing to clamp there.
+     *
+     * @param which - The handle whose label is being placed
+     * @param pct - That handle's position along the track, 0-100
+     */
+    clampLabel(which, pct) {
+      const label = this.labels[which];
+      const clear = () => {
+        if (label.style.transform) label.style.transform = "";
+      };
+      if (this.presentation !== "timeline") {
+        clear();
+        return;
+      }
+      const trackWidth = this.track.getBoundingClientRect().width;
+      const pillWidth = label.getBoundingClientRect().width;
+      if (trackWidth <= 0 || pillWidth <= 0) {
+        clear();
+        return;
+      }
+      const half = pillWidth / 2;
+      const centre = pct / 100 * trackWidth;
+      const lo = half - centre;
+      const hi = trackWidth - centre - half;
+      const shift = lo > hi ? lo : Math.min(Math.max(0, lo), hi);
+      const rounded = Math.round(shift);
+      if (rounded === 0) clear();
+      else label.style.transform = `translateX(${rounded}px)`;
     }
     /**
      * @internal End the current drag exactly once, whatever route got here.
@@ -48327,6 +48415,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var TINY_HEIGHT = 160;
   var HANDLE_LANE = 44;
   var LANE_GAP = 8;
+  var SLIM_LANE = 32;
+  var SLIM_GAP = 6;
   var FALLBACK_ANCHOR = 64;
   var ClipOverlay = class {
     /**
@@ -48992,6 +49082,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.applyToolbarVisibility();
       this.applyAnchor();
       this.applySelectorInteractivity();
+      this.selector.update(this.selection, this.bounds);
     }
     /** @internal Which toolbar buttons make sense in the current layout and stage. */
     applyToolbarVisibility() {
@@ -49028,18 +49119,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     applyAnchor() {
       const box = this.container.getBoundingClientRect();
       const height = box.height || this.container.clientHeight;
+      const slimLanes = this.layout === "minimal" || this.layout === "tiny";
+      const lane = slimLanes ? SLIM_LANE : HANDLE_LANE;
+      const gap = slimLanes ? SLIM_GAP : LANE_GAP;
       let anchor = FALLBACK_ANCHOR;
       const rail = this.getRailRect?.();
       if (rail && height > 0) {
-        anchor = Math.max(0, box.bottom - rail.top) + HANDLE_LANE + LANE_GAP;
+        anchor = Math.max(0, box.bottom - rail.top) + lane + gap;
       }
       this.root.style.bottom = `${Math.round(anchor)}px`;
-      if (height > 0) {
-        const available = Math.max(0, height - anchor - LANE_GAP);
-        this.details.style.maxHeight = this.layout === "tiny" ? `${height}px` : `${available}px`;
-      } else {
+      if (height <= 0) {
         this.details.style.maxHeight = "";
+        return;
       }
+      if (this.layout === "tiny") {
+        this.details.style.maxHeight = `${height}px`;
+        return;
+      }
+      if (this.layout !== "regular" && this.stage === "details") {
+        this.details.style.maxHeight = `${Math.max(0, height - 16)}px`;
+        return;
+      }
+      this.details.style.maxHeight = `${Math.max(0, height - anchor - gap)}px`;
     }
     /**
      * @internal Freeze the handles whenever they are out of reach or must not
@@ -49991,9 +50092,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   display: none !important;
 }
 /* With the bar gone the timeline can come back down; the OUT lane then needs
-   only its own 44px of clearance. */
+   only its own slimmed height of clearance (32px, plus 4px of breathing room).
+   The UI package's own 92px default only applies to non-minimal editing. */
 .sp-clip-editing--minimal .sp-progress-wrapper--editing {
-  bottom: calc(44px + var(--sp-inset-bottom, 0px));
+  bottom: calc(36px + var(--sp-inset-bottom, 0px));
+}
+
+/* Slimmer lanes on a portrait-phone player, and nowhere else.
+   The minimal layout is where the control bar has already been given up, and
+   at 350x197 the full-size chrome (44 toolbar + 8 gap + 44 IN + 3 rail + 44
+   OUT) still left ~45px of picture. The trade-off is deliberate: the pill's
+   touch target drops to 32px tall (it stays ~55px wide), while the toolbar and
+   its IN/OUT-here buttons keep the 44px floor.
+
+   KEEP IN SYNC with SLIM_LANE / SLIM_GAP in ClipOverlay.ts, which spends the
+   same two numbers on the panel's anchor: CSS cannot read a JS constant, so
+   both sides state them. */
+.sp-clip-editing--minimal .sp-clip-track--timeline .sp-clip-handle {
+  height: 32px;
+}
+.sp-clip-editing--minimal .sp-clip-track--timeline .sp-clip-handle__label {
+  font-size: 10px;
+  padding: 2px 6px;
 }
 
 /* ==========================================================================

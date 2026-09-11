@@ -322,6 +322,26 @@ describe('timeline attachment', () => {
     // 60 to the rail, plus the 44px IN lane and its 8px gap.
     expect(h.root.style.bottom).toBe('112px');
   });
+
+  it('anchors above the SLIM lane on a player that gave up its control bar', () => {
+    // Same rail geometry, minimal layout: the CSS slims the lane to 32px under
+    // .sp-clip-editing--minimal, and the anchor has to spend the same number or
+    // the panel floats over a gap that is not there.
+    const h = setup({}, { width: 350, height: 197 });
+    const layer = document.createElement('div');
+    h.container.appendChild(layer);
+    const rail = document.createElement('div');
+    // Rail top 60px above the container's bottom edge (197 - 137).
+    rail.getBoundingClientRect = () =>
+      ({ left: 0, top: 137, width: 320, height: 3, right: 320, bottom: 140, x: 0, y: 137, toJSON: () => ({}) }) as DOMRect;
+
+    h.overlay.attachTimeline(layer, () => rail.getBoundingClientRect());
+    h.overlay.syncTimelineGeometry();
+
+    expect(h.overlay.getLayout()).toBe('minimal');
+    // 60 to the rail, plus the 32px IN lane and its 6px gap.
+    expect(h.root.style.bottom).toBe('98px');
+  });
 });
 
 describe('layout and stages', () => {
@@ -432,6 +452,62 @@ describe('layout and stages', () => {
   it('bounds the details panel to the room the player actually has', () => {
     const h = setup({}, { width: 900, height: 400 });
     expect(h.details.style.maxHeight).toBe(`${400 - 64 - 8}px`);
+  });
+
+  /**
+   * On a phone the details stage COVERS the picture (`top: 8px / bottom: 8px`
+   * in CSS), so the range stage's anchor no longer bounds it. Applying that
+   * formula anyway capped the panel at 81px on a 350x197 player: the body was
+   * 8px tall over 199px of content, and the time fields, the readout and the
+   * title were all unreachable (measured 2026-09-09 at 390x844).
+   */
+  describe('details-stage height', () => {
+    it('gives the covering panel the whole player, less the CSS inset', () => {
+      const h = setup({}, { width: 375, height: 211 });
+      expect(h.overlay.getLayout()).toBe('minimal');
+
+      h.next.click();
+
+      expect(h.details.style.maxHeight).toBe(`${211 - 16}px`);
+    });
+
+    it('does the same on a compact player, which also covers the picture', () => {
+      const h = setup({}, { width: 500, height: 400 });
+      expect(h.overlay.getLayout()).toBe('compact');
+
+      h.next.click();
+
+      expect(h.details.style.maxHeight).toBe(`${400 - 16}px`);
+    });
+
+    it('restores the range-stage bound on the way back', () => {
+      const h = setup({}, { width: 375, height: 211 });
+      // Range stage: the anchor formula, with the slim lane and gap.
+      const ranged = `${211 - 64 - 6}px`;
+      expect(h.details.style.maxHeight).toBe(ranged);
+
+      h.next.click();
+      expect(h.details.style.maxHeight).toBe(`${211 - 16}px`);
+
+      h.back.click();
+      expect(h.details.style.maxHeight).toBe(ranged);
+    });
+
+    it('leaves tiny alone: the panel IS the player there', () => {
+      const h = setup({}, { width: 320, height: 140 });
+      expect(h.overlay.getLayout()).toBe('tiny');
+
+      h.next.click();
+
+      expect(h.details.style.maxHeight).toBe('140px');
+    });
+
+    it('leaves regular alone: nothing is covered, so the anchor still bounds it', () => {
+      const h = setup({}, { width: 900, height: 400 });
+      expect(h.overlay.getLayout()).toBe('regular');
+      // No stage switch to make - regular shows both at once.
+      expect(h.details.style.maxHeight).toBe(`${400 - 64 - 8}px`);
+    });
   });
 
   it('abandons a held drag on rotation, keeping the selection and title', () => {

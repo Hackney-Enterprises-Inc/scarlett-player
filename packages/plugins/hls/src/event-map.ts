@@ -373,7 +373,31 @@ export function setupHlsEventHandlers(
 }
 
 /**
+ * Which playback commands the plugin itself put in flight.
+ *
+ * `ScarlettPlayer.play()` and `.pause()` emit `playback:play` / `playback:pause`
+ * on the bus BEFORE the provider touches the element, so the element event they
+ * cause must not emit a second one. Every other route to the element - the UI's
+ * play buttons call `video.play()` directly, as do the keyboard shortcuts and
+ * the browser's own native controls - produces no bus event at all unless the
+ * element handlers emit it.
+ *
+ * One gate object is shared by the plugin and by whichever pipeline is mounted,
+ * so a flag set by a command survives the handoff between the hls.js and native
+ * paths.
+ */
+export interface PlaybackGate {
+  /** A `playback:play` command is in flight; the next `playing` consumes it. */
+  corePlayRequested: boolean;
+  /** A `playback:pause` command is in flight; the next `pause` consumes it. */
+  corePauseRequested: boolean;
+}
+
+/**
  * Setup HTML5 video element event handlers.
+ *
+ * Emits `playback:play` on `playing` and `playback:pause` on `pause` for every
+ * transition the plugin did not command itself (see {@link PlaybackGate}).
  *
  * @param video - Video element
  * @param api - Plugin API
@@ -381,11 +405,16 @@ export function setupHlsEventHandlers(
  *        the hls.js path, where hls.js is the source of latency truth; omitted
  *        on the native path, where the element's own `seekable` range is all
  *        there is and this handler measures from it directly.
+ * @param gate - Shared record of the play/pause commands the plugin issued, so
+ *        the element event they cause is not echoed back onto the bus. Omitted
+ *        (in tests, and by any caller with no commands of its own) means every
+ *        transition is treated as element-driven.
  */
 export function setupVideoEventHandlers(
   video: HTMLVideoElement,
   api: IPluginAPI,
-  getLiveMetrics?: () => LiveMetrics | null
+  getLiveMetrics?: () => LiveMetrics | null,
+  gate?: PlaybackGate
 ): () => void {
   const handlers: Array<{ event: string; handler: EventListener }> = [];
 
@@ -446,12 +475,38 @@ export function setupVideoEventHandlers(
     api.setState('buffering', false);
     api.setState('playbackState', 'playing');
     syncEndedFromElement();
+
+    // Playback is running, so a pause command can no longer be in flight; a
+    // flag left over from one would swallow the viewer's next real pause.
+    if (gate) gate.corePauseRequested = false;
+
+    if (gate?.corePlayRequested) {
+      // ScarlettPlayer.play() already emitted playback:play
+      gate.corePlayRequested = false;
+    } else {
+      // Direct video.play() call (PlayButton, BigPlayButton, keyboard, native
+      // controls). Without this the bus never heard about playback starting on
+      // an HLS source at all, and every consumer of the event - watermark,
+      // analytics, media-session - was dark for the whole session.
+      api.emit('playback:play', undefined);
+    }
   });
 
   addHandler('pause', () => {
     api.setState('playing', false);
     api.setState('paused', true);
     api.setState('playbackState', 'paused');
+
+    // An intervening pause cancels a pending core play: the `playing` that
+    // would have consumed the flag is never coming.
+    if (gate) gate.corePlayRequested = false;
+
+    if (gate?.corePauseRequested) {
+      // ScarlettPlayer.pause() already emitted playback:pause
+      gate.corePauseRequested = false;
+    } else {
+      api.emit('playback:pause', undefined);
+    }
   });
 
   addHandler('ended', () => {

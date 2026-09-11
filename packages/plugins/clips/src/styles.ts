@@ -49,6 +49,7 @@
  * - `.sp-clip-track--frozen`        submission in flight, or covered by details
  * - `.sp-clip-track__range`         shaded selection between the handles
  * - `.sp-clip-handle`               one handle; `role="slider"`, 44px lane
+ *                                   (32px under `.sp-clip-editing--minimal`)
  * - `.sp-clip-handle--start/--end`  the IN / OUT handle
  * - `.sp-clip-handle--dragging`     the handle under the pointer
  * - `.sp-clip-handle--clamped`      flash while a move is refused by a limit
@@ -79,7 +80,8 @@
  * ## Class reference (container - applied by `ClipOverlay.ts`)
  * - `.sp-clip-editing`              an editor is open on this player
  * - `.sp-clip-editing--minimal`     the player is too short to keep the
- *                                   ordinary control bar as well
+ *                                   ordinary control bar as well; also slims
+ *                                   the handle lanes and the label pills
  *
  * ## Class reference (toast - `index.ts`)
  * - `.sp-clip-toast` / `--visible`  transient "Clip requested" pill
@@ -682,9 +684,28 @@ export const styles = `
   display: none !important;
 }
 /* With the bar gone the timeline can come back down; the OUT lane then needs
-   only its own 44px of clearance. */
+   only its own slimmed height of clearance (32px, plus 4px of breathing room).
+   The UI package's own 92px default only applies to non-minimal editing. */
 .sp-clip-editing--minimal .sp-progress-wrapper--editing {
-  bottom: calc(44px + var(--sp-inset-bottom, 0px));
+  bottom: calc(36px + var(--sp-inset-bottom, 0px));
+}
+
+/* Slimmer lanes on a portrait-phone player, and nowhere else.
+   The minimal layout is where the control bar has already been given up, and
+   at 350x197 the full-size chrome (44 toolbar + 8 gap + 44 IN + 3 rail + 44
+   OUT) still left ~45px of picture. The trade-off is deliberate: the pill's
+   touch target drops to 32px tall (it stays ~55px wide), while the toolbar and
+   its IN/OUT-here buttons keep the 44px floor.
+
+   KEEP IN SYNC with SLIM_LANE / SLIM_GAP in ClipOverlay.ts, which spends the
+   same two numbers on the panel's anchor: CSS cannot read a JS constant, so
+   both sides state them. */
+.sp-clip-editing--minimal .sp-clip-track--timeline .sp-clip-handle {
+  height: 32px;
+}
+.sp-clip-editing--minimal .sp-clip-track--timeline .sp-clip-handle__label {
+  font-size: 10px;
+  padding: 2px 6px;
 }
 
 /* ==========================================================================

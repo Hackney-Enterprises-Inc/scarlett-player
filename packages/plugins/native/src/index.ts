@@ -129,6 +129,17 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
   /** Guard tracking whether play was initiated via ScarlettPlayer.play() */
   let isCorePlayRequested = false;
   /**
+   * Guard tracking whether the pause was initiated via ScarlettPlayer.pause().
+   *
+   * The mirror of `isCorePlayRequested`, and it exists for the same reason:
+   * core emits `playback:pause` on the bus before this plugin touches the
+   * element, so the element's own `pause` must not emit a second one - while a
+   * pause from anywhere else (the UI's play button calls `video.pause()`
+   * directly, as do the keyboard shortcut and the browser's native controls)
+   * has to emit, or the bus never hears about it at all.
+   */
+  let isCorePauseRequested = false;
+  /**
    * Load-session guard, mirroring the HLS plugin's.
    *
    * Bumped by every entry point that starts or stops a load (loadSource,
@@ -347,6 +358,10 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api?.setState('playbackState', 'playing');
       syncEndedFromElement();
 
+      // Playback is running, so a pause command can no longer be in flight; a
+      // flag left over from one would swallow the viewer's next real pause.
+      isCorePauseRequested = false;
+
       if (isCorePlayRequested) {
         // ScarlettPlayer.play() already emitted playback:play
         isCorePlayRequested = false;
@@ -357,10 +372,19 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     });
 
     on('pause', () => {
+      // An intervening pause cancels a pending core play: the `playing` that
+      // would have consumed the flag is never coming.
       isCorePlayRequested = false;
       api?.setState('playing', false);
       api?.setState('paused', true);
       api?.setState('playbackState', 'paused');
+
+      if (isCorePauseRequested) {
+        // ScarlettPlayer.pause() already emitted playback:pause
+        isCorePauseRequested = false;
+      } else {
+        api?.emit('playback:pause', undefined);
+      }
     });
 
     on('ended', () => {
@@ -513,6 +537,17 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     cleanupEvents?.();
     cleanupEvents = null;
 
+    // The command gates belong to the source being abandoned. Each is armed
+    // before the element is touched and consumed by the element event that
+    // follows, and that event cannot arrive now the listeners are gone: a
+    // `pause()` issued just before a playlist advance left the flag standing,
+    // and it swallowed the viewer's first real pause on the next item. (The
+    // HLS provider resets its shared gate in loadSource() instead, because
+    // there cleanup() is also how a same-source pipeline switch tears down,
+    // and a command spanning that handoff must still be deduped once.)
+    isCorePlayRequested = false;
+    isCorePauseRequested = false;
+
     if (video) {
       video.pause();
       video.removeAttribute('src');
@@ -561,8 +596,25 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
       const unsubPause = api.on('playback:pause', () => {
         if (api?.getState('chromecastActive')) return;
+        if (!video) return;
+        // A command with nothing to do fires no element event, so setting the
+        // flag for it would leave it standing and swallow the next real pause.
+        // A play command still in flight is the exception: the element has not
+        // reported it started yet, so nothing has cancelled it and playback
+        // would begin moments after the viewer asked it to stop. Cancel it (an
+        // already-paused element fires no `pause` for this, hence no pause
+        // flag) and drop the play flag, which would otherwise swallow the
+        // `playing` of the next element-driven start.
+        if (video.paused) {
+          if (isCorePlayRequested) {
+            isCorePlayRequested = false;
+            video.pause();
+          }
+          return;
+        }
+        isCorePauseRequested = true;
         isCorePlayRequested = false;
-        video?.pause();
+        video.pause();
       });
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {

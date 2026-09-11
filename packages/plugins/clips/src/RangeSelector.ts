@@ -186,6 +186,14 @@ const HANDLE_ARIA: Record<ClipHandle, string> = {
   end: 'Clip out point',
 };
 
+/** A clientX read: the time under the pointer and the box it was measured in. */
+interface TrackPoint {
+  /** Media seconds at that x. */
+  time: number;
+  /** The track's width in px at the moment of the read. */
+  trackWidth: number;
+}
+
 /** A drag in progress: the only mutable interaction state this component owns. */
 interface DragState {
   handle: ClipHandle;
@@ -217,6 +225,20 @@ export class RangeSelector {
   private readonly callbacks: RangeSelectorCallbacks;
 
   private drag: DragState | null = null;
+  /**
+   * Last measured width of each label pill, with the text it was measured for.
+   *
+   * The pill is only as wide as its text, so a re-render that relabels nothing
+   * ("IN 0:12" through every pointermove within that second) can reuse the
+   * number instead of measuring a box the browser has just been told to move.
+   * A zero is never cached: the pill is unmeasurable before layout (and in
+   * jsdom), and remembering that would keep it unmeasurable afterwards.
+   * Dropped wholesale when the presentation changes, which restyles the pill.
+   */
+  private labelWidths: Record<ClipHandle, { text: string; width: number } | null> = {
+    start: null,
+    end: null,
+  };
   private clampTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   /** False while frozen by {@link RangeSelector.setInteractive}. */
@@ -301,6 +323,7 @@ export class RangeSelector {
     if (this.destroyed || this.presentation === presentation) return;
     this.endDrag(true);
     this.presentation = presentation;
+    this.labelWidths = { start: null, end: null };
     this.applyPresentationClass();
     this.render();
   }
@@ -437,8 +460,23 @@ export class RangeSelector {
     this.track.className = `sp-clip-track sp-clip-track--${this.presentation}`;
   }
 
-  /** @internal Position both handles and the range fill from current state. */
-  private render(): void {
+  /**
+   * @internal Position both handles and the range fill from current state.
+   *
+   * @param trackWidth - The track's width in px, when the caller has already
+   * measured it (a pointer move reads the same box to map its clientX). Omitted
+   * elsewhere, and then measured here - before the writes below, never after.
+   */
+  private render(trackWidth?: number): void {
+    // Taken first, so the measurement never follows this render's own writes.
+    // The range and both handles are absolutely positioned inside the track, so
+    // nothing written below can change the width read here. Standalone clamps
+    // nothing, so it pays for no measurement at all.
+    const measuredTrackWidth =
+      this.presentation === 'timeline'
+        ? trackWidth ?? this.track.getBoundingClientRect().width
+        : 0;
+
     const { min, max } = this.bounds;
     const span = max - min;
     const pct = (t: number): number =>
@@ -466,6 +504,92 @@ export class RangeSelector {
       el.setAttribute('aria-valuetext', `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
       this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
     }
+
+    // After the text is written, because the clamp measures the pill it just
+    // relabelled ("IN 1:04:30" is wider than "IN 0:12") - and only when that
+    // text actually changed; see labelWidths. The one track measurement is
+    // handed to both: it cannot change between the two calls, and reading it
+    // again after the first clamp writes a transform would force a second
+    // layout. This runs on every pointermove of a drag.
+    this.clampLabel('start', startPct, measuredTrackWidth);
+    this.clampLabel('end', endPct, measuredTrackWidth);
+  }
+
+  /**
+   * @internal Keep a handle's label pill inside the track.
+   *
+   * The handle and its stem stay exactly where the timestamp is - they are the
+   * precision, and moving them would make the editor lie. Only the pill slides,
+   * far enough to bring its overhanging edge back inside the track and no
+   * further, so it still reads as belonging to the stem beneath it.
+   *
+   * Needed because the pill is centred on a handle that can sit at 0% or 100%:
+   * a ~60px label then hangs ~30px past the rail, and the player's
+   * `overflow: hidden` cut "IN" clean off (measured 2026-09-09 on a 350px
+   * player, where the IN pill spanned x=2..63 against a player starting at 20).
+   *
+   * Standalone hides its labels entirely (the panel's readout carries the
+   * times), so there is nothing to clamp there.
+   *
+   * @param which - The handle whose label is being placed
+   * @param pct - That handle's position along the track, 0-100
+   * @param trackWidth - The track's measured width in px, from the caller
+   */
+  private clampLabel(which: ClipHandle, pct: number, trackWidth: number): void {
+    const label = this.labels[which];
+    const clear = (): void => {
+      if (label.style.transform) label.style.transform = '';
+    };
+
+    if (this.presentation !== 'timeline') {
+      clear();
+      return;
+    }
+
+    // The track width is the same measurement the drag path makes. Both it and
+    // the pill are zero before the track is laid out (and in jsdom), which is
+    // not a reason to guess a shift.
+    const pillWidth = this.labelWidth(which, label);
+    if (trackWidth <= 0 || pillWidth <= 0) {
+      clear();
+      return;
+    }
+
+    const half = pillWidth / 2;
+    const centre = (pct / 100) * trackWidth;
+    // The shift must be at least `lo` to clear the left edge and at most `hi`
+    // to clear the right; zero when it already sits inside both.
+    const lo = half - centre;
+    const hi = trackWidth - centre - half;
+    // A pill wider than the whole track cannot satisfy both. Keep the left
+    // edge, where the "IN"/"OUT" prefix is, and let the tail run off.
+    const shift = lo > hi ? lo : Math.min(Math.max(0, lo), hi);
+    const rounded = Math.round(shift);
+
+    if (rounded === 0) clear();
+    else label.style.transform = `translateX(${rounded}px)`;
+  }
+
+  /**
+   * @internal The pill's width, measured only when its text has changed.
+   *
+   * A pointermove relabels the pill it is about to place, so the first read of
+   * a new timestamp has to hit the box. Every move that lands on the same
+   * timestamp does not, which is most of them at a one-second step - and each
+   * skipped read is a layout the browser does not have to flush mid-drag.
+   *
+   * @param which - The handle whose label is being measured
+   * @param label - That handle's pill
+   * @returns Its width in px; 0 while the pill has no box
+   */
+  private labelWidth(which: ClipHandle, label: HTMLElement): number {
+    const text = label.textContent ?? '';
+    const cached = this.labelWidths[which];
+    if (cached?.text === text) return cached.width;
+
+    const width = label.getBoundingClientRect().width;
+    if (width > 0) this.labelWidths[which] = { text, width };
+    return width;
   }
 
   // --------------------------------------------------------------------------
@@ -487,8 +611,8 @@ export class RangeSelector {
     const which = this.resolveTarget(event);
     if (which === null) return;
 
-    const raw = this.timeFromClientX(event.clientX);
-    if (raw === null) return;
+    const point = this.pointFromClientX(event.clientX);
+    if (point === null) return;
 
     const handleEl = this.handleEl(which);
     let captured = false;
@@ -505,7 +629,7 @@ export class RangeSelector {
     this.drag = {
       handle: which,
       pointerId: event.pointerId,
-      grabOffset: raw - this.selection[which],
+      grabOffset: point.time - this.selection[which],
       captured,
       released: false,
     };
@@ -525,9 +649,14 @@ export class RangeSelector {
     // track must not yank the handle. jsdom's stand-in MouseEvents carry no
     // pointerId at all, so undefined matches the undefined recorded on drag.
     if (event.pointerId !== this.drag.pointerId) return;
-    const raw = this.timeFromClientX(event.clientX);
-    if (raw === null) return;
-    const landed = this.applyMove(this.drag.handle, raw - this.drag.grabOffset, 'pointer');
+    const point = this.pointFromClientX(event.clientX);
+    if (point === null) return;
+    const landed = this.applyMove(
+      this.drag.handle,
+      point.time - this.drag.grabOffset,
+      'pointer',
+      point.trackWidth
+    );
     // Continuous channel for drag-to-scrub: fires even when the selection is
     // pinned against a limit and did not change.
     this.callbacks.onDragMove?.(this.drag.handle, landed);
@@ -544,8 +673,15 @@ export class RangeSelector {
   private onPointerUp = (event: PointerEvent): void => {
     if (!this.drag || this.drag.released) return;
     if (event.pointerId !== this.drag.pointerId) return;
-    const raw = this.timeFromClientX(event.clientX);
-    if (raw !== null) this.applyMove(this.drag.handle, raw - this.drag.grabOffset, 'pointer');
+    const point = this.pointFromClientX(event.clientX);
+    if (point !== null) {
+      this.applyMove(
+        this.drag.handle,
+        point.time - this.drag.grabOffset,
+        'pointer',
+        point.trackWidth
+      );
+    }
     this.endDrag(false);
   };
 
@@ -615,11 +751,11 @@ export class RangeSelector {
 
     if (this.presentation !== 'standalone') return null;
 
-    const raw = this.timeFromClientX(event.clientX);
-    if (raw === null) return null;
+    const point = this.pointFromClientX(event.clientX);
+    if (point === null) return null;
     // Compare on the snap grid: clientX -> time carries float noise that would
     // otherwise decide an exact-midpoint tie by an epsilon.
-    return this.pickHandle(snap(raw, this.stepValue()));
+    return this.pickHandle(snap(point.time, this.stepValue()));
   }
 
   /**
@@ -631,13 +767,27 @@ export class RangeSelector {
     return time - start <= end - time ? 'start' : 'end';
   }
 
-  /** @internal Map a clientX to media seconds; null if the track has no box. */
-  private timeFromClientX(clientX: number): number | null {
+  /**
+   * @internal Map a clientX to media seconds, keeping the measurement it took.
+   *
+   * The width travels with the time because the render that follows a pointer
+   * move needs exactly this number to place the labels, and taking it here -
+   * before the move writes any styles - is what keeps that render from forcing
+   * a second layout on every `pointermove` of a drag.
+   *
+   * @param clientX - Viewport x of the pointer
+   * @returns The time under the pointer and the track width it was read from,
+   * or null if the track has no box (before layout, and in jsdom)
+   */
+  private pointFromClientX(clientX: number): TrackPoint | null {
     const rect = this.track.getBoundingClientRect();
     if (!rect || rect.width <= 0) return null;
     const { min, max } = this.bounds;
     const ratio = (clientX - rect.left) / rect.width;
-    return min + Math.min(Math.max(ratio, 0), 1) * (max - min);
+    return {
+      time: min + Math.min(Math.max(ratio, 0), 1) * (max - min),
+      trackWidth: rect.width,
+    };
   }
 
   // --- document fallback, for when pointer capture is unavailable -----------
@@ -783,9 +933,16 @@ export class RangeSelector {
    * flash + report if clamped, and fire `onChange` when anything meaningful
    * happened.
    *
+   * @param trackWidth - The track's width in px when the caller has already
+   * measured it; forwarded to `render` so a drag measures the track once
    * @returns The handle's landed time
    */
-  private applyMove(which: ClipHandle, requested: number, source: ClipMoveSource): number {
+  private applyMove(
+    which: ClipHandle,
+    requested: number,
+    source: ClipMoveSource,
+    trackWidth?: number
+  ): number {
     const target = snap(requested, this.stepValue());
     const prev = this.selection;
     const next =
@@ -797,7 +954,7 @@ export class RangeSelector {
     const changed = next.start !== prev.start || next.end !== prev.end;
 
     this.selection = next;
-    this.render();
+    this.render(trackWidth);
 
     if (clamped) this.flashClamp(which);
     if (changed || clamped) {

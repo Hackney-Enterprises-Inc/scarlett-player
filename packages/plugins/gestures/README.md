@@ -41,6 +41,7 @@ const player = await createPlayer({
 ## Behaviour
 
 - Not installed for audio: when `mediaType` is `'audio'` at init the plugin stays inactive.
+- The tap surface stands down entirely while a `@scarlett-player/clips` session is open, and comes back when it closes: the editor turns the whole picture into drag handles and a toolbar, and a double-tap-to-seek layer over that is two features competing for the same finger.
 - Seeking is refused while Chromecast or AirPlay is active, on live streams with no seekable range, and on VOD until a finite duration is known.
 - On live DVR a seek is clamped to the seekable range. A forward tap at the live edge announces "Already at the live edge" instead of showing a ripple.
 - Each tap in a run adds `seekSeconds`; the label shows the cumulative total. A tap in the opposite zone ends the run rather than reversing it, and a drag or a second finger cancels it.

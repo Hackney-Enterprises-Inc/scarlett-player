@@ -78,6 +78,15 @@ function hasCoarsePointer(): boolean {
 }
 
 /**
+ * The state key `@scarlett-player/clips` defines while its editor is open.
+ *
+ * A plain string rather than a `StateKey`: this package does not depend on
+ * clips, so the key is not in its view of the state store, and a `===` against
+ * the literal would not type-check.
+ */
+const CLIP_OPEN_KEY = 'clipOpen';
+
+/**
  * Create a Gestures Plugin instance.
  *
  * @param config - Plugin configuration
@@ -92,6 +101,15 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
   let runSeconds = 0;
   /** Set while a tap could still turn into a double tap, so controls do not flash. */
   let pendingHide: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Whether a clip session is open on this player (see {@link syncSurface}).
+   *
+   * Tracked from the state stream rather than read back with `getState`: the
+   * key belongs to `@scarlett-player/clips`, and reading a key no plugin has
+   * defined throws. Untouched here means no clips plugin, which is exactly the
+   * `false` this starts at.
+   */
+  let clipOpen = false;
 
   const seekSeconds = config.seekSeconds ?? 10;
   const doubleTapWindowMs = config.doubleTapWindowMs ?? DEFAULT_RECOGNIZER_OPTIONS.doubleTapWindowMs;
@@ -269,13 +287,18 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
    * reading that as video put a full-bleed tap surface over the audio UI. The
    * cost of waiting is nothing, because this runs again on every `mediaType`
    * change - the surface appears the moment the source is confirmed as video.
+   *
+   * An open clip session also takes the surface away. `@scarlett-player/clips`
+   * turns the whole picture into an editor - drag handles on the timeline, a
+   * toolbar, a details dialog - and a full-bleed double-tap-to-seek layer over
+   * that is two features fighting for the same finger.
    */
   const syncSurface = (): void => {
     if (!active || !api) return;
 
     // Audio has its own compact surface with no picture to tap, and an
     // unclassified source has no picture anyone can vouch for yet.
-    const wantsSurface = api.getState('mediaType') === 'video';
+    const wantsSurface = api.getState('mediaType') === 'video' && !clipOpen;
 
     if (wantsSurface && !overlay) {
       overlay = new GestureOverlay(api.container, { onPointer, feedback });
@@ -316,7 +339,14 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
       syncSurface();
 
       const unsubscribe = api.subscribeToState((event) => {
-        if (event.key === 'mediaType') syncSurface();
+        if (event.key === 'mediaType') {
+          syncSurface();
+          return;
+        }
+        if ((event.key as string) === CLIP_OPEN_KEY) {
+          clipOpen = Boolean(event.value);
+          syncSurface();
+        }
       });
 
       api.onDestroy(() => {
@@ -337,6 +367,7 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
       recognizer = null;
       active = false;
       runSeconds = 0;
+      clipOpen = false;
       api = null;
     },
 

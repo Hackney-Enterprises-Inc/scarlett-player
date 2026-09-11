@@ -619,6 +619,142 @@ describe('playback:play emission and Chromecast guard', () => {
     expect(mockApi.emit).not.toHaveBeenCalledWith('playback:play', undefined);
   });
 
+  it('emits playback:pause on a direct element pause', () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.dispatchEvent(new Event('pause'));
+
+    // The UI's play button, the keyboard shortcut and the browser's native
+    // controls all call video.pause() directly. Without this the bus never
+    // heard about a pause at all, and analytics, media-session, chromecast and
+    // the clips preview were all working from a stale playing state.
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:pause', undefined);
+  });
+
+  it('does not emit duplicate playback:pause when the pause came from core', () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    // jsdom reports every element as paused; the command is guarded on it.
+    Object.defineProperty(el, 'paused', { value: false, configurable: true });
+    el.pause = vi.fn();
+
+    listeners['playback:pause']?.();
+    expect(el.pause).toHaveBeenCalled();
+
+    mockApi.emit.mockClear();
+    el.dispatchEvent(new Event('pause'));
+
+    expect(mockApi.emit).not.toHaveBeenCalledWith('playback:pause', undefined);
+  });
+
+  it('leaves no dedupe flag behind when a pause command has nothing to do', () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.pause = vi.fn();
+
+    // Already paused: no element event follows, so arming the flag here would
+    // swallow the viewer's next real pause instead.
+    listeners['playback:pause']?.();
+    expect(el.pause).not.toHaveBeenCalled();
+
+    el.dispatchEvent(new Event('pause'));
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:pause', undefined);
+  });
+
+  it('cancels a pending core play when a pause arrives before playing', async () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.play = vi.fn().mockResolvedValue(undefined);
+
+    await listeners['playback:play']?.();
+    mockApi.emit.mockClear();
+
+    // The play never reached `playing` - the flag must not survive to swallow
+    // the next start.
+    el.dispatchEvent(new Event('pause'));
+    el.dispatchEvent(new Event('playing'));
+
+    const emitted = (event: string): number =>
+      mockApi.emit.mock.calls.filter(([name]: [string]) => name === event).length;
+    expect(emitted('playback:pause')).toBe(1);
+    expect(emitted('playback:play')).toBe(1);
+  });
+
+  it('cancels a core play the element has not started when a pause command arrives', async () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.pause = vi.fn();
+
+    await listeners['playback:play']?.();
+    mockApi.emit.mockClear();
+
+    // jsdom still reports the element paused - the play has not taken effect
+    // yet - so the pause command must cancel it rather than pass over it.
+    listeners['playback:pause']?.();
+    expect(el.pause).toHaveBeenCalled();
+
+    // And the flag it armed is gone, so a later element-driven start is heard.
+    el.dispatchEvent(new Event('playing'));
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:play', undefined);
+  });
+
+  it('cancels a pending core pause once playback is running', () => {
+    const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(el, 'paused', { value: false, configurable: true });
+    el.pause = vi.fn();
+
+    listeners['playback:pause']?.();
+    el.dispatchEvent(new Event('playing'));
+    mockApi.emit.mockClear();
+
+    el.dispatchEvent(new Event('pause'));
+    expect(mockApi.emit).toHaveBeenCalledWith('playback:pause', undefined);
+  });
+
+  /**
+   * A new source is a new playback session.
+   *
+   * Both guards are armed before the element is touched and consumed by the
+   * element event that follows, and once cleanup() has removed the listeners
+   * that event can never arrive. Left standing, the guard swallows the
+   * viewer's first real transition on the next item - what a playlist
+   * advancing straight after a `pause()` produced.
+   */
+  describe('a load replacing the source', () => {
+    /** Run a full loadSource() to completion on a fresh element state. */
+    const loadNext = async () => {
+      void plugin.loadSource('https://example.com/next.mp4').catch(() => {});
+      const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+      el.dispatchEvent(new Event('loadedmetadata'));
+      mockApi.emit.mockClear();
+      return el;
+    };
+
+    it('drops a pause command left in flight by the previous source', async () => {
+      const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(el, 'paused', { value: false, configurable: true });
+      // A no-op stub is the point: the `pause` event never arrives, exactly as
+      // when the element is torn out from under the command.
+      el.pause = vi.fn();
+
+      listeners['playback:pause']?.();
+      const next = await loadNext();
+
+      // The viewer's own pause on the new source, through the UI's button.
+      next.dispatchEvent(new Event('pause'));
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:pause', undefined);
+    });
+
+    it('drops a play command left in flight by the previous source', async () => {
+      const el = mockApi.container.querySelector('video') as HTMLVideoElement;
+      // Never settles: the play was still pending when the load superseded it,
+      // so neither `playing` nor the rejection path clears the guard.
+      el.play = vi.fn().mockReturnValue(new Promise<void>(() => {}));
+
+      void listeners['playback:play']?.();
+      const next = await loadNext();
+
+      next.dispatchEvent(new Event('playing'));
+      expect(mockApi.emit).toHaveBeenCalledWith('playback:play', undefined);
+    });
+  });
+
   it('does not control video element when chromecastActive is true', async () => {
     state.chromecastActive = true;
     const el = mockApi.container.querySelector('video') as HTMLVideoElement;

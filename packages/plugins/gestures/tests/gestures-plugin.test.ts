@@ -250,6 +250,70 @@ describe('createGesturesPlugin', () => {
     expect(plugin.ownsTapInteraction()).toBe(true);
   });
 
+  /**
+   * The clips editor turns the whole picture into an editor - drag handles on
+   * the timeline, a toolbar, a details dialog. A full-bleed double-tap-to-seek
+   * layer over that is two features fighting for the same finger.
+   */
+  describe('clip sessions', () => {
+    it('stands the surface down while a clip session is open', () => {
+      const api = createMockApi({ mediaType: 'video' });
+      const plugin = createGesturesPlugin();
+      plugin.init(api as never);
+
+      expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+
+      api.setStateAndNotify('clipOpen', true);
+
+      expect(api.container.querySelector('.sp-gestures')).toBeNull();
+      expect(plugin.ownsTapInteraction()).toBe(false);
+    });
+
+    it('brings it back when the session closes', () => {
+      const api = createMockApi({ mediaType: 'video' });
+      const plugin = createGesturesPlugin();
+      plugin.init(api as never);
+
+      api.setStateAndNotify('clipOpen', true);
+      api.setStateAndNotify('clipOpen', false);
+
+      expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+      expect(plugin.ownsTapInteraction()).toBe(true);
+    });
+
+    it('stays down while the session is open even if the media type is restated', () => {
+      const api = createMockApi({ mediaType: 'video' });
+      const plugin = createGesturesPlugin();
+      plugin.init(api as never);
+
+      api.setStateAndNotify('clipOpen', true);
+      api.setStateAndNotify('mediaType', 'video');
+
+      expect(api.container.querySelector('.sp-gestures')).toBeNull();
+    });
+
+    it('installs the surface with no clips plugin in the player at all', () => {
+      // The key is defined by @scarlett-player/clips; nothing ever writes it
+      // here, and the plugin must not go looking for it.
+      const api = createMockApi({ mediaType: 'video' });
+      const plugin = createGesturesPlugin();
+      plugin.init(api as never);
+
+      expect(api.getState).not.toHaveBeenCalledWith('clipOpen');
+      expect(api.container.querySelector('.sp-gestures')).not.toBeNull();
+    });
+
+    it('destroys cleanly while a clip session is open', () => {
+      const api = createMockApi({ mediaType: 'video' });
+      const plugin = createGesturesPlugin();
+      plugin.init(api as never);
+
+      api.setStateAndNotify('clipOpen', true);
+
+      expect(() => plugin.destroy()).not.toThrow();
+    });
+  });
+
   it('destroys cleanly after the surface was torn down for audio', () => {
     const api = createMockApi({ mediaType: 'video' });
     const plugin = createGesturesPlugin();
