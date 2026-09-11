@@ -46,6 +46,15 @@ element, so the bus hears about playback the viewer started.
   exception is a pause command that arrives while a play command is still in
   flight: it cancels that play rather than passing over it, and clears its
   flag, so the play the viewer makes next is heard.
+- A load that replaces the source clears both gate flags. They are armed
+  before the element is touched and consumed by the element event that
+  follows, and once the source is abandoned that event never arrives — the
+  handlers are detached, and on the hls.js path the new ones wait behind the
+  loader import. A `pause()` a playlist issues just before advancing therefore
+  left the flag standing, and it swallowed the viewer's first real pause on the
+  new item. A same-source pipeline switch (`switchToNative()` /
+  `switchToHlsJs()`) deliberately keeps the flags, which is what the gate
+  outliving a pipeline is for.
 - **Behaviour note:** the watermark stays hidden until the first play, which is
   its documented lifecycle. What changes is that on an HLS source the first
   play now arrives. A consumer who had grown used to never seeing the mark on

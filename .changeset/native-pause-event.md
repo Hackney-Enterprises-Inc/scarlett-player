@@ -32,3 +32,8 @@ Emit `playback:pause` from the native provider's media element.
   command on an already-paused element now returns before arming it — unless a
   play command is still in flight, which that pause cancels rather than passing
   over, clearing its flag so the viewer's next play is heard.
+- Both guards are cleared when a source is torn down, so a command left in
+  flight by the previous source cannot dedupe an event belonging to the next
+  one. The consuming element event cannot arrive once the listeners are gone,
+  and the standing flag swallowed the viewer's first real pause (or play) after
+  a playlist advance.

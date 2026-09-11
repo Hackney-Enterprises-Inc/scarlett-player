@@ -1695,6 +1695,23 @@ export function createHLSPluginWith(
       cleanup(new Error('HLS load cancelled: superseded by a new load'));
       currentSrc = src;
 
+      // A new source is a new playback session: no command aimed at the old
+      // one may dedupe an event belonging to this one. Both flags are armed
+      // before the element is touched and consumed by the element event that
+      // follows, and that event cannot arrive once the source is abandoned -
+      // the handlers are detached, and on the hls.js path re-attachment waits
+      // behind the loader import. A `pause()` a playlist issues just before
+      // advancing therefore left `corePauseRequested` standing, and it
+      // swallowed the viewer's first real pause on the new item.
+      //
+      // Deliberately not part of cleanup(): switchToNative() and
+      // switchToHlsJs() call it for the SAME source and re-attach their
+      // handlers in the same task, so a command spanning that handoff must
+      // still be deduped exactly once - the reason the gate outlives a
+      // pipeline in the first place.
+      playbackGate.corePlayRequested = false;
+      playbackGate.corePauseRequested = false;
+
       // Before the load, not after: the poster is what the viewer looks at
       // while the next source is fetched, and on a reused element it is still
       // showing the previous item's art until this runs.

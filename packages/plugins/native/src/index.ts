@@ -537,6 +537,17 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
     cleanupEvents?.();
     cleanupEvents = null;
 
+    // The command gates belong to the source being abandoned. Each is armed
+    // before the element is touched and consumed by the element event that
+    // follows, and that event cannot arrive now the listeners are gone: a
+    // `pause()` issued just before a playlist advance left the flag standing,
+    // and it swallowed the viewer's first real pause on the next item. (The
+    // HLS provider resets its shared gate in loadSource() instead, because
+    // there cleanup() is also how a same-source pipeline switch tears down,
+    // and a command spanning that handoff must still be deduped once.)
+    isCorePlayRequested = false;
+    isCorePauseRequested = false;
+
     if (video) {
       video.pause();
       video.removeAttribute('src');

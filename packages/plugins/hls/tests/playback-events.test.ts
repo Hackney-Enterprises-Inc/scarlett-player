@@ -315,4 +315,56 @@ describe.each([
     video.dispatchEvent(new Event('playing'));
     expect(emits('playback:play')).toBe(1);
   });
+
+  /**
+   * A new source is a new playback session.
+   *
+   * Both flags are armed before the element is touched, so a command still in
+   * flight when the source is replaced never meets the event that would
+   * consume it: cleanup() has detached the handlers, and on the hls.js path
+   * the new ones wait behind the loader import. Left standing, the flag
+   * swallows the viewer's first real transition on the new item - what a
+   * playlist advancing straight after a `pause()` produced.
+   */
+  describe('a load replacing the source', () => {
+    const NEXT = 'http://example.com/next.m3u8';
+
+    /** Run a full loadSource() to completion on whichever pipeline is under test. */
+    const loadNext = async (): Promise<void> => {
+      plugin.loadSource(NEXT).catch(() => {});
+      await flush();
+      getVideo().dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+      (api.emit as Mock).mockClear();
+    };
+
+    it('drops a pause command left in flight by the previous source', async () => {
+      const video = getVideo();
+      setPaused(video, false);
+      // A no-op stub is the point: the `pause` event never arrives, exactly as
+      // when the element is torn out from under the command.
+      vi.spyOn(video, 'pause').mockImplementation(() => {});
+
+      busHandler('playback:pause')?.();
+      await loadNext();
+
+      // The viewer's own pause on the new source, through the UI's button.
+      getVideo().dispatchEvent(new Event('pause'));
+      expect(emits('playback:pause')).toBe(1);
+    });
+
+    it('drops a play command left in flight by the previous source', async () => {
+      const video = getVideo();
+      setPaused(video, true);
+      // Never settles: the play was still pending when the load superseded it,
+      // so neither `playing` nor the rejection path clears the flag.
+      vi.spyOn(video, 'play').mockReturnValue(new Promise<void>(() => {}));
+
+      void busHandler('playback:play')?.();
+      await loadNext();
+
+      getVideo().dispatchEvent(new Event('playing'));
+      expect(emits('playback:play')).toBe(1);
+    });
+  });
 });
