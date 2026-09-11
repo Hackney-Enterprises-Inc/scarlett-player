@@ -47,3 +47,10 @@ Make the clip editor usable on a portrait-phone player.
   Documented trade-off: the pill's touch target is 32px tall on a phone (it
   stays ~55px wide); the toolbar and the IN/OUT-here buttons keep the 44px
   floor.
+- **The clamp stopped measuring twice per pointermove.** Placing the pills
+  needs the track's width, and the render read it back after repositioning the
+  handles - a layout flush the browser had to do mid-drag, for a box the move
+  itself had just measured to map its `clientX`. That measurement is now passed
+  through to the render, and the pill (as wide as its text and nothing else) is
+  re-measured only when it has actually been relabelled. Same clamping, same
+  pixels; the reads just no longer follow the writes.

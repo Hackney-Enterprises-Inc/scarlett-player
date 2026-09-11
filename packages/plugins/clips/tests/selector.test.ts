@@ -319,6 +319,86 @@ describe('label clamping on the timeline', () => {
     expect(labelOf(h.start).style.transform).toBe('');
   });
 
+  /**
+   * A drag renders on every pointermove, and each render places both pills.
+   * Measuring the track again from inside that render - after the handles have
+   * just been repositioned - makes the browser flush layout a second time for a
+   * number the move already read off the same box a moment earlier.
+   */
+  it('measures the track once per pointer event of a drag, not twice', () => {
+    const h = timeline({ start: 100, end: 130 });
+    const rect = {
+      left: 0, top: 0, width: 600, height: 44,
+      right: 600, bottom: 44, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect;
+    const measure = vi.fn(() => rect);
+    h.track.getBoundingClientRect = measure;
+
+    pointer(h.start, 'pointerdown', 100);
+    pointer(h.track, 'pointermove', 60);
+    pointer(h.track, 'pointerup', 60);
+
+    // One read per event that maps a clientX; the renders they drive reuse it.
+    expect(measure).toHaveBeenCalledTimes(3);
+    // And the clamp still ran off a real width: 10% of 600px is 60px in, which
+    // leaves room for the 30px half-pill.
+    expect(labelOf(h.start).style.transform).toBe('');
+  });
+
+  it('clamps a dragged pill against the width the move measured', () => {
+    const h = timeline({ start: 100, end: 130 });
+
+    // Dragged to the very start of the track: centre 0, half-pill 30.
+    pointer(h.start, 'pointerdown', 100);
+    pointer(h.track, 'pointermove', 0);
+
+    expect(labelOf(h.start).style.transform).toBe('translateX(30px)');
+  });
+
+  /**
+   * The pill is exactly as wide as its text, so a move that relabels nothing
+   * has nothing to re-measure - and at a one-second step most moves of a drag
+   * land back on the timestamp they were already showing.
+   */
+  it('re-measures a pill only when its text changed', () => {
+    const h = timeline({ start: 100, end: 130 });
+    const label = labelOf(h.start);
+    const measure = vi.fn(label.getBoundingClientRect.bind(label));
+    label.getBoundingClientRect = measure;
+
+    pointer(h.start, 'pointerdown', 100);
+    pointer(h.track, 'pointermove', 60);
+    expect(label.textContent).toBe('IN 1:00');
+    expect(measure).toHaveBeenCalledTimes(1);
+
+    // Same second, so the same label: nothing to measure.
+    pointer(h.track, 'pointermove', 60.4);
+    expect(measure).toHaveBeenCalledTimes(1);
+
+    // A new second relabels the pill, and the new text gets measured.
+    pointer(h.track, 'pointermove', 61);
+    expect(label.textContent).toBe('IN 1:01');
+    expect(measure).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-measures the pills after a presentation change restyles them', () => {
+    const h = timeline({ start: 100, end: 130 });
+    const label = labelOf(h.start);
+    const measure = vi.fn(label.getBoundingClientRect.bind(label));
+    label.getBoundingClientRect = measure;
+
+    h.selector.update({ start: 0, end: 130 }, BOUNDS);
+    expect(measure).toHaveBeenCalledTimes(1);
+
+    // Standalone hides the pills; back on the timeline they are a different
+    // box, and the cached width belongs to the presentation it was taken in.
+    h.selector.setPresentation('standalone');
+    h.selector.setPresentation('timeline');
+    h.selector.update({ start: 0, end: 130 }, BOUNDS);
+    expect(measure).toHaveBeenCalledTimes(2);
+    expect(labelOf(h.start).style.transform).toBe('translateX(30px)');
+  });
+
   it('keeps the left edge of an off-centre pill wider than the whole track', () => {
     const h = setup({ selection: { start: 480, end: 500 }, presentation: 'timeline' });
     givePill(h.start);
