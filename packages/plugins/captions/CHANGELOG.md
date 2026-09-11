@@ -1,5 +1,114 @@
 # @scarlett-player/captions
 
+## 1.14.0
+
+### Patch Changes
+
+- [#97](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/97) [`f4908eb`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/f4908eb42d3f3816afeb691d1a2ef05d56c0c1ba) Thanks [@alexhackney](https://github.com/alexhackney)! - Make the clip editor usable on a portrait-phone player.
+
+  **`@scarlett-player/clips`**
+  - **The details dialog was crushed.** `applyAnchor()` applied the range stage's
+    anchor formula on every layout, but below `regular` the details stage covers
+    the picture and the CSS stretches it to `top: 8px / bottom: 8px` — the anchor
+    bounds nothing there. The panel came out 81px tall on a 197px player: an 8px
+    body over 199px of content, with the time fields, the readout and the title
+    all out of reach behind 8px-at-a-time scrolling. The covering stage now gets
+    the player, less the 8px inset top and bottom; `tiny` and `regular` are
+    unchanged.
+  - **Handle labels no longer leave the player.** The `IN 0:12` / `OUT 0:47`
+    pill is centred on its handle, so at either end of the rail a ~60px label
+    hung half its width past it and the player's `overflow: hidden` cut the
+    prefix off (measured on a 350px player: the IN pill spanned x=2..63 against a
+    player starting at 20). Only the label slides now, by the smallest shift that
+    brings it back inside the track. The handle and its stem stay exactly on the
+    timestamp they point at, and the clamp is recomputed on resize.
+  - **Slimmer chrome on a phone.** Under `.sp-clip-editing--minimal` only — the
+    layout that has already given up the control bar, which is where every
+    portrait phone lands — the handle lanes drop from 44px to 32px, the pills to
+    10px/2px-6px, and the timeline sits 36px off the bottom instead of 44px. The
+    range stage's chrome goes from 143px to ~123px, so a 197px player keeps ~74px
+    of picture instead of ~45px. Desktop and tablet keep the 44px lanes.
+    Documented trade-off: the pill's touch target is 32px tall on a phone (it
+    stays ~55px wide); the toolbar and the IN/OUT-here buttons keep the 44px
+    floor.
+  - **The clamp stopped measuring twice per pointermove.** Placing the pills
+    needs the track's width, and the render read it back after repositioning the
+    handles - a layout flush the browser had to do mid-drag, for a box the move
+    itself had just measured to map its `clientX`. That measurement is now passed
+    through to the render, and the pill (as wide as its text and nothing else) is
+    re-measured only when it has actually been relabelled. Same clamping, same
+    pixels; the reads just no longer follow the writes.
+
+- [#97](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/97) [`f4908eb`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/f4908eb42d3f3816afeb691d1a2ef05d56c0c1ba) Thanks [@alexhackney](https://github.com/alexhackney)! - Stand the gesture surface down while a clip session is open.
+
+  **`@scarlett-player/gestures`**
+  - `syncSurface()` keyed on `mediaType` alone, so the full-bleed
+    double-tap-to-seek layer stayed armed over an open clip editor — two features
+    competing for the same finger on the one screen where both are touch-only.
+    The surface is now torn down while `clipOpen` is true and rebuilt when the
+    session closes, through the existing construct/destroy path.
+  - The key belongs to `@scarlett-player/clips` and is tracked from the state
+    stream rather than read back, so a player with no clips plugin installed is
+    unaffected.
+
+- [#97](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/97) [`f4908eb`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/f4908eb42d3f3816afeb691d1a2ef05d56c0c1ba) Thanks [@alexhackney](https://github.com/alexhackney)! - Emit `playback:play` and `playback:pause` from the HLS provider's own media
+  element, so the bus hears about playback the viewer started.
+
+  **`@scarlett-player/hls`**
+  - The element handlers wrote state on `playing` and `pause` and emitted
+    nothing. Every play control in the UI package calls `video.play()` /
+    `video.pause()` on the element directly, so on an HLS source `playback:play`
+    never fired at all — for the whole session. Anything waiting on it was dark:
+    the watermark (which is hidden until the first play by contract), the
+    analytics QoE timeline, media-session, the clips preview. Measured on the
+    demo 2026-09-09: video playing, `.sp-watermark` still `visibility: hidden`.
+    The native provider has always emitted play from its element; this is the
+    same bridge on the shared factory, so both the hls.js and the native-HLS
+    pipeline get it.
+  - `playback:pause` is emitted the same way, on both providers. Nothing emitted
+    it before except `ScarlettPlayer.pause()`, so a viewer pausing with the play
+    button, the keyboard or the browser's own controls produced no event.
+  - Neither is emitted twice. `ScarlettPlayer.play()` / `.pause()` put their
+    event on the bus before the provider touches the element, and a shared
+    `PlaybackGate` swallows exactly one matching element event. Commands that
+    have nothing to do (play on a playing element, pause on a paused one) return
+    without arming the gate, since no element event follows them and a flag left
+    standing would swallow the viewer's next real transition instead. The one
+    exception is a pause command that arrives while a play command is still in
+    flight: it cancels that play rather than passing over it, and clears its
+    flag, so the play the viewer makes next is heard.
+  - A load that replaces the source clears both gate flags. They are armed
+    before the element is touched and consumed by the element event that
+    follows, and once the source is abandoned that event never arrives — the
+    handlers are detached, and on the hls.js path the new ones wait behind the
+    loader import. A `pause()` a playlist issues just before advancing therefore
+    left the flag standing, and it swallowed the viewer's first real pause on the
+    new item. A same-source pipeline switch (`switchToNative()` /
+    `switchToHlsJs()`) deliberately keeps the flags, which is what the gate
+    outliving a pipeline is for.
+  - **Behaviour note:** the watermark stays hidden until the first play, which is
+    its documented lifecycle. What changes is that on an HLS source the first
+    play now arrives. A consumer who had grown used to never seeing the mark on
+    HLS will see it from the first play onwards.
+
+- [#97](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/97) [`f4908eb`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/f4908eb42d3f3816afeb691d1a2ef05d56c0c1ba) Thanks [@alexhackney](https://github.com/alexhackney)! - Emit `playback:pause` from the native provider's media element.
+
+  **`@scarlett-player/native`**
+  - The `pause` handler wrote state and emitted nothing, so a pause the viewer
+    made through the play button, the keyboard or the browser's native controls
+    never reached the bus — only `ScarlettPlayer.pause()` did. Analytics,
+    media-session, chromecast and the clips preview all read that event.
+  - Deduped against core-issued commands with `isCorePauseRequested`, mirroring
+    the `isCorePlayRequested` guard the play path has always had, and a pause
+    command on an already-paused element now returns before arming it — unless a
+    play command is still in flight, which that pause cancels rather than passing
+    over, clearing its flag so the viewer's next play is heard.
+  - Both guards are cleared when a source is torn down, so a command left in
+    flight by the previous source cannot dedupe an event belonging to the next
+    one. The consuming element event cannot arrive once the listeners are gone,
+    and the standing flag swallowed the viewer's first real pause (or play) after
+    a playlist advance.
+
 ## 1.13.0
 
 ### Patch Changes
