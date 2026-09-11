@@ -42017,7 +42017,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         const unsubPause = api.on("playback:pause", () => {
           if (!video) return;
-          if (video.paused) return;
+          if (video.paused) {
+            if (playbackGate.corePlayRequested) {
+              playbackGate.corePlayRequested = false;
+              video.pause();
+            }
+            return;
+          }
           playbackGate.corePauseRequested = true;
           playbackGate.corePlayRequested = false;
           video.pause();
@@ -42164,6 +42170,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.setState("live", false);
         cleanup(new Error("HLS load cancelled: superseded by a new load"));
         currentSrc = src;
+        playbackGate.corePlayRequested = false;
+        playbackGate.corePauseRequested = false;
         applyPoster();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
@@ -42615,6 +42623,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const cleanup = () => {
       cleanupEvents?.();
       cleanupEvents = null;
+      isCorePlayRequested = false;
+      isCorePauseRequested = false;
       if (video) {
         video.pause();
         video.removeAttribute("src");
@@ -42653,7 +42663,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubPause = api.on("playback:pause", () => {
           if (api?.getState("chromecastActive")) return;
           if (!video) return;
-          if (video.paused) return;
+          if (video.paused) {
+            if (isCorePlayRequested) {
+              isCorePlayRequested = false;
+              video.pause();
+            }
+            return;
+          }
           isCorePauseRequested = true;
           isCorePlayRequested = false;
           video.pause();
@@ -47822,6 +47838,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      */
     constructor(options) {
       this.drag = null;
+      /**
+       * Last measured width of each label pill, with the text it was measured for.
+       *
+       * The pill is only as wide as its text, so a re-render that relabels nothing
+       * ("IN 0:12" through every pointermove within that second) can reuse the
+       * number instead of measuring a box the browser has just been told to move.
+       * A zero is never cached: the pill is unmeasurable before layout (and in
+       * jsdom), and remembering that would keep it unmeasurable afterwards.
+       * Dropped wholesale when the presentation changes, which restyles the pill.
+       */
+      this.labelWidths = {
+        start: null,
+        end: null
+      };
       this.clampTimer = null;
       this.destroyed = false;
       /** False while frozen by {@link RangeSelector.setInteractive}. */
@@ -47840,8 +47870,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (event.button !== void 0 && event.button !== 0) return;
         const which = this.resolveTarget(event);
         if (which === null) return;
-        const raw = this.timeFromClientX(event.clientX);
-        if (raw === null) return;
+        const point = this.pointFromClientX(event.clientX);
+        if (point === null) return;
         const handleEl = this.handleEl(which);
         let captured = false;
         try {
@@ -47853,7 +47883,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         this.drag = {
           handle: which,
           pointerId: event.pointerId,
-          grabOffset: raw - this.selection[which],
+          grabOffset: point.time - this.selection[which],
           captured,
           released: false
         };
@@ -47867,9 +47897,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.onPointerMove = (event) => {
         if (!this.drag || this.drag.released) return;
         if (event.pointerId !== this.drag.pointerId) return;
-        const raw = this.timeFromClientX(event.clientX);
-        if (raw === null) return;
-        const landed = this.applyMove(this.drag.handle, raw - this.drag.grabOffset, "pointer");
+        const point = this.pointFromClientX(event.clientX);
+        if (point === null) return;
+        const landed = this.applyMove(
+          this.drag.handle,
+          point.time - this.drag.grabOffset,
+          "pointer",
+          point.trackWidth
+        );
         this.callbacks.onDragMove?.(this.drag.handle, landed);
       };
       /**
@@ -47883,8 +47918,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       this.onPointerUp = (event) => {
         if (!this.drag || this.drag.released) return;
         if (event.pointerId !== this.drag.pointerId) return;
-        const raw = this.timeFromClientX(event.clientX);
-        if (raw !== null) this.applyMove(this.drag.handle, raw - this.drag.grabOffset, "pointer");
+        const point = this.pointFromClientX(event.clientX);
+        if (point !== null) {
+          this.applyMove(
+            this.drag.handle,
+            point.time - this.drag.grabOffset,
+            "pointer",
+            point.trackWidth
+          );
+        }
         this.endDrag(false);
       };
       /** @internal The gesture was taken away: keep the range, restore nothing. */
@@ -47977,6 +48019,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (this.destroyed || this.presentation === presentation) return;
       this.endDrag(true);
       this.presentation = presentation;
+      this.labelWidths = { start: null, end: null };
       this.applyPresentationClass();
       this.render();
     }
@@ -48094,8 +48137,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     applyPresentationClass() {
       this.track.className = `sp-clip-track sp-clip-track--${this.presentation}`;
     }
-    /** @internal Position both handles and the range fill from current state. */
-    render() {
+    /**
+     * @internal Position both handles and the range fill from current state.
+     *
+     * @param trackWidth - The track's width in px, when the caller has already
+     * measured it (a pointer move reads the same box to map its clientX). Omitted
+     * elsewhere, and then measured here - before the writes below, never after.
+     */
+    render(trackWidth) {
+      const measuredTrackWidth = this.presentation === "timeline" ? trackWidth ?? this.track.getBoundingClientRect().width : 0;
       const { min, max } = this.bounds;
       const span = max - min;
       const pct = (t) => Number.isFinite(span) && span > 0 ? Math.min(Math.max((t - min) / span, 0), 1) * 100 : 0;
@@ -48116,8 +48166,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         el.setAttribute("aria-valuetext", `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`);
         this.labels[which].textContent = `${HANDLE_LABEL[which]} ${formatTimestamp(time, step)}`;
       }
-      this.clampLabel("start", startPct);
-      this.clampLabel("end", endPct);
+      this.clampLabel("start", startPct, measuredTrackWidth);
+      this.clampLabel("end", endPct, measuredTrackWidth);
     }
     /**
      * @internal Keep a handle's label pill inside the track.
@@ -48137,8 +48187,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      *
      * @param which - The handle whose label is being placed
      * @param pct - That handle's position along the track, 0-100
+     * @param trackWidth - The track's measured width in px, from the caller
      */
-    clampLabel(which, pct) {
+    clampLabel(which, pct, trackWidth) {
       const label = this.labels[which];
       const clear = () => {
         if (label.style.transform) label.style.transform = "";
@@ -48147,8 +48198,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         clear();
         return;
       }
-      const trackWidth = this.track.getBoundingClientRect().width;
-      const pillWidth = label.getBoundingClientRect().width;
+      const pillWidth = this.labelWidth(which, label);
       if (trackWidth <= 0 || pillWidth <= 0) {
         clear();
         return;
@@ -48161,6 +48211,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const rounded = Math.round(shift);
       if (rounded === 0) clear();
       else label.style.transform = `translateX(${rounded}px)`;
+    }
+    /**
+     * @internal The pill's width, measured only when its text has changed.
+     *
+     * A pointermove relabels the pill it is about to place, so the first read of
+     * a new timestamp has to hit the box. Every move that lands on the same
+     * timestamp does not, which is most of them at a one-second step - and each
+     * skipped read is a layout the browser does not have to flush mid-drag.
+     *
+     * @param which - The handle whose label is being measured
+     * @param label - That handle's pill
+     * @returns Its width in px; 0 while the pill has no box
+     */
+    labelWidth(which, label) {
+      const text = label.textContent ?? "";
+      const cached = this.labelWidths[which];
+      if (cached?.text === text) return cached.width;
+      const width = label.getBoundingClientRect().width;
+      if (width > 0) this.labelWidths[which] = { text, width };
+      return width;
     }
     /**
      * @internal End the current drag exactly once, whatever route got here.
@@ -48203,9 +48273,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (which === "start" || which === "end") return which;
       }
       if (this.presentation !== "standalone") return null;
-      const raw = this.timeFromClientX(event.clientX);
-      if (raw === null) return null;
-      return this.pickHandle(snap(raw, this.stepValue()));
+      const point = this.pointFromClientX(event.clientX);
+      if (point === null) return null;
+      return this.pickHandle(snap(point.time, this.stepValue()));
     }
     /**
      * @internal Which handle a background position is nearer to; an exact-midpoint
@@ -48215,13 +48285,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const { start, end } = this.selection;
       return time - start <= end - time ? "start" : "end";
     }
-    /** @internal Map a clientX to media seconds; null if the track has no box. */
-    timeFromClientX(clientX) {
+    /**
+     * @internal Map a clientX to media seconds, keeping the measurement it took.
+     *
+     * The width travels with the time because the render that follows a pointer
+     * move needs exactly this number to place the labels, and taking it here -
+     * before the move writes any styles - is what keeps that render from forcing
+     * a second layout on every `pointermove` of a drag.
+     *
+     * @param clientX - Viewport x of the pointer
+     * @returns The time under the pointer and the track width it was read from,
+     * or null if the track has no box (before layout, and in jsdom)
+     */
+    pointFromClientX(clientX) {
       const rect = this.track.getBoundingClientRect();
       if (!rect || rect.width <= 0) return null;
       const { min, max } = this.bounds;
       const ratio = (clientX - rect.left) / rect.width;
-      return min + Math.min(Math.max(ratio, 0), 1) * (max - min);
+      return {
+        time: min + Math.min(Math.max(ratio, 0), 1) * (max - min),
+        trackWidth: rect.width
+      };
     }
     // --- document fallback, for when pointer capture is unavailable -----------
     /**
@@ -48339,9 +48423,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
      * flash + report if clamped, and fire `onChange` when anything meaningful
      * happened.
      *
+     * @param trackWidth - The track's width in px when the caller has already
+     * measured it; forwarded to `render` so a drag measures the track once
      * @returns The handle's landed time
      */
-    applyMove(which, requested, source) {
+    applyMove(which, requested, source, trackWidth) {
       const target = snap(requested, this.stepValue());
       const prev = this.selection;
       const next = which === "start" ? moveStart(prev, target, this.config, this.bounds) : moveEnd(prev, target, this.config, this.bounds);
@@ -48349,7 +48435,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const clamped = landed !== target;
       const changed = next.start !== prev.start || next.end !== prev.end;
       this.selection = next;
-      this.render();
+      this.render(trackWidth);
       if (clamped) this.flashClamp(which);
       if (changed || clamped) {
         this.callbacks.onChange?.({ ...next }, {
@@ -51581,7 +51667,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.13.0" : "dev";
+  var VERSION = true ? "1.14.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
