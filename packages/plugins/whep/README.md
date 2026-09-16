@@ -24,8 +24,13 @@ const player = await createPlayer({
 });
 ```
 
-The plugin claims any URL whose path contains `/whep/v1/`, so it can sit next
-to the HLS and native providers and the core picks it for a WHEP source.
+The plugin claims any URL with a path segment named `whep`, which is where
+every WHEP server it has met puts its endpoint: a Tmesis box at
+`/whep/v1/streams/<id>`, MediaMTX at `/<path>/whep`, the WISH drafts'
+examples at `/whep/<id>`. It can therefore sit next to the HLS and native
+providers and the core picks it for a WHEP source. A server whose endpoint
+path carries no `whep` segment is not claimed; put the plugin in front of a
+host-side `canPlay` wrapper for that.
 
 ## What it does
 
@@ -70,11 +75,13 @@ are not wired.
 ### The latency estimate
 
 `liveLatency` is the mean time a video frame spent in the browser's jitter
-buffer (`jitterBufferDelay / jitterBufferEmittedCount` on the inbound video
-track) plus half the round trip on the selected candidate pair. It is the
-**receiver's share of the delay, an estimate**, not glass to glass: it cannot
-see the encoder, the server's tap, or the publisher's uplink. An end-to-end
-number needs a clock burned into the picture and read off the screen.
+buffer over the frames emitted since the previous poll (the change in
+`jitterBufferDelay` over the change in `jitterBufferEmittedCount` on the
+inbound video track, read once a second) plus half the round trip on the
+selected candidate pair. It is the **receiver's share of the delay, an
+estimate**, not glass to glass: it cannot see the encoder, the server's tap,
+or the publisher's uplink. An end-to-end number needs a clock burned into the
+picture and read off the screen.
 
 ## Configuration
 
@@ -116,7 +123,7 @@ flash an error every poll.
 | `201` | joined | | |
 | `400` | the offer could not be applied | `SOURCE_LOAD_FAILED` | no |
 | `401`, `403` | the token was refused (`detail.type: 'network'`, the status in `detail.httpStatus`; core has no auth-flavoured code) | `SOURCE_LOAD_FAILED` | no |
-| `404` | no such stream or session | `SOURCE_LOAD_FAILED` | no |
+| `404` | no such stream or session | `SOURCE_LOAD_FAILED` | no on the first join (a wrong URL); yes once the source has played, because the endpoint is known and the publisher left (MediaMTX answers a path with no publisher this way, where Tmesis answers `409`) |
 | `405`, `413`, `415` | the request was not a WHEP offer the server takes | `SOURCE_LOAD_FAILED` | no |
 | `406` with a JSON body | the offer accepts neither H.264 (Constrained Baseline) nor Opus (`detail.type: 'media'`) | `SOURCE_LOAD_FAILED` | no |
 | `406` with an `application/sdp` body | a server counter-offer, which this plugin does not answer (below) | `SOURCE_LOAD_FAILED` | no |
@@ -139,7 +146,9 @@ the dead session first.
 
 `load()` resolves once the connection is up, after any reconnect attempts the
 join needed (so a monitor opened before the producer starts plays as soon as
-the stream goes live), and rejects when the failure is terminal, the window
+the stream goes live; on Tmesis, which answers `409` until then. MediaMTX
+answers `404`, which is terminal on a first join, so open a MediaMTX monitor
+after the publisher), and rejects when the failure is terminal, the window
 closes, or a newer load or `destroy()` supersedes it.
 
 ### Not in v1
@@ -164,7 +173,10 @@ whep.getSessionUrl(); // the session resource, absolute, or null while not joine
 `DEFAULT_WHEP_CONFIG` exports the defaults above. `classifyResponse`,
 `classifyTransport`, `parseRetryAfter`, `readErrorEnvelope`, `WHEPError` and
 `estimateLatency` are exported for hosts that want the same classification or
-measurement outside the plugin.
+measurement outside the plugin. `estimateLatency(report, previousSample)`
+returns the counters it read as `sample`; hand them to the next call so the
+estimate covers only the frames emitted in between, as the plugin's own
+poll does.
 
 ## License
 

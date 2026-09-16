@@ -29,7 +29,7 @@ import { ErrorCode, type IPluginAPI, type PluginType, sanitizeUrl } from '@scarl
 import { PKG_VERSION } from './version';
 import { WHEPError, classifyTransport, type WHEPFailure } from './errors';
 import { deleteSession, postOffer } from './session';
-import { estimateLatency } from './latency';
+import { estimateLatency, type LatencySample } from './latency';
 import type { IWHEPPlugin, WHEPPluginConfig } from './types';
 
 export type { IWHEPPlugin, WHEPPluginConfig, WHEPTokenProvider } from './types';
@@ -42,11 +42,20 @@ export {
   type WHEPFailure,
   type TransportFailureKind,
 } from './errors';
-export { estimateLatency, type LatencyEstimate } from './latency';
+export { estimateLatency, type LatencyEstimate, type LatencySample } from './latency';
 export { PKG_VERSION } from './version';
 
-/** A source this plugin claims: any URL whose path contains `/whep/v1/`. */
-const WHEP_PATH = /\/whep\/v1\//;
+/**
+ * A source this plugin claims: any URL with a path segment named `whep`.
+ *
+ * That is where every WHEP server this plugin has met puts its endpoint:
+ * a Tmesis box at `/whep/v1/streams/<id>`, MediaMTX at `/<path>/whep`, and
+ * the WISH drafts' own examples at `/whep/<id>`. The segment has to stand on
+ * its own (`/whep/` or a trailing `/whep`), so a path that merely contains
+ * the letters, or a query string that names one, is left to the other
+ * providers.
+ */
+const WHEP_PATH = /(?:^|\/)whep(?:\/|$)/i;
 
 /**
  * How long to wait for ICE gathering before sending the offer anyway.
@@ -144,6 +153,14 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
   let sessionUrl: string | null = null;
   /** The endpoint of the current source. */
   let currentSrc = '';
+  /**
+   * Whether the current source has connected at least once. A `404` before
+   * that is a wrong URL and terminal; after it, the endpoint is known to
+   * exist and the `404` means the publisher went away (MediaMTX answers a
+   * path with no publisher that way, where Tmesis answers `409`), which is
+   * worth waiting out like any other outage.
+   */
+  let hasJoined = false;
 
   /**
    * Load-session guard, mirroring the native and HLS providers'.
@@ -363,15 +380,19 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
   /**
    * Start polling `getStats()` for the latency estimate.
    *
-   * The number is the receiver's share of the delay (the jitter buffer plus
-   * half the round trip) and is labelled an estimate wherever it appears; it
-   * cannot see the encoder or the server's tap.
+   * The number is the receiver's share of the delay (the jitter buffer over
+   * the last second's frames plus half the round trip) and is labelled an
+   * estimate wherever it appears; it cannot see the encoder or the server's
+   * tap.
    *
    * @param pc - The connection to poll
    */
   const startLatencyPoll = (pc: RTCPeerConnection): void => {
     stopLatencyPoll();
     const session = loadSession;
+    // The counters the previous tick saw, so each estimate covers the frames
+    // emitted since then rather than the mean since the join.
+    let lastSample: LatencySample | null = null;
     latencyTimer = setInterval(() => {
       if (session !== loadSession || peer !== pc || !api) {
         stopLatencyPoll();
@@ -381,8 +402,9 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
         .getStats()
         .then((report) => {
           if (session !== loadSession || !api) return;
-          const estimate = estimateLatency(report as unknown as Iterable<unknown>);
+          const estimate = estimateLatency(report as unknown as Iterable<unknown>, lastSample);
           if (!estimate) return;
+          lastSample = estimate.sample;
           const previous = api.getState('liveLatency');
           if (Math.abs(previous - estimate.latency) > LATENCY_EPSILON) {
             api.setState('liveLatency', estimate.latency);
@@ -598,7 +620,8 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
    */
   const handleFailure = (failure: WHEPFailure): void => {
     if (!api) return;
-    const willReconnect = failure.recoverable && autoReconnect && currentSrc !== '';
+    const recoverable = failure.recoverable || (hasJoined && failure.detail.httpStatus === 404);
+    const willReconnect = recoverable && autoReconnect && currentSrc !== '';
     // Quiet only while the window stays open: a terminal failure inside it
     // (the stream deleted mid-outage, say) must still reach the overlay, or
     // "reconnecting" would stand forever with nothing coming to take it down.
@@ -716,7 +739,13 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
         if (superseded() || peer !== pc) return;
         switch (pc.connectionState) {
           case 'connected':
-            clearDisconnectTimer();
+            if (disconnectTimer !== null) {
+              // Back inside the grace period: the `buffering` the
+              // disconnect raised comes down here, because a MediaStream
+              // element fires no `canplay` for a hiccup it never noticed.
+              clearDisconnectTimer();
+              api?.setState('buffering', false);
+            }
             finish();
             break;
           case 'disconnected':
@@ -848,6 +877,7 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
     const attempt = reconnectAttempts;
     const elapsedMs = Date.now() - reconnectWindowStart;
     cancelReconnect();
+    hasJoined = true;
 
     api.setState('source', { src, type: SOURCE_TYPE });
     // The element can report `playing` before the connection state settles
@@ -991,6 +1021,7 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
       loadSession++;
       cleanup(new Error('Player destroyed during load'), true);
       currentSrc = '';
+      hasJoined = false;
 
       if (video?.parentNode) {
         video.parentNode.removeChild(video);
@@ -1009,6 +1040,7 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
       const session = ++loadSession;
       cleanup(new Error('Load superseded by a newer source'), true);
       currentSrc = src;
+      hasJoined = false;
 
       api.setState('playbackState', 'loading');
       api.setState('buffering', true);

@@ -230,6 +230,23 @@
       color: #888;
     }
 
+    .live-hint a {
+      color: #ccc;
+    }
+
+    .live-snippet {
+      margin: 8px 0;
+      padding: 10px 12px;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #bbb;
+      font-size: 0.72rem;
+      line-height: 1.5;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
     .analytics-header {
       display: flex;
       align-items: center;
@@ -892,6 +909,10 @@
         <span class="btn-title">MP4 Progressive</span>
         <span class="btn-format">4K Direct Download</span>
       </button>
+      <button class="sub-menu-btn" data-demo="whep">
+        <span class="btn-title">WHEP Monitor</span>
+        <span class="btn-format">WebRTC, your own endpoint</span>
+      </button>
     </div>
   </div>
 
@@ -921,6 +942,17 @@
       <button id="load-btn">Load</button>
     </div>
 
+    <!-- WHEP endpoint box. Its own bar rather than the one above so the VOD
+         URL stays put while a monitor is joined; the WHEP Monitor panel
+         further down shows the session, latency and reconnect state. -->
+    <div class="custom-url-label">Or join a WHEP endpoint (WebRTC)</div>
+    <div class="url-bar">
+      <input type="text" id="whep-url-input"
+        placeholder="https://box.example.com:8889/whep/v1/streams/show-1  or  http://localhost:8889/live/whep"
+        autocomplete="off" spellcheck="false">
+      <button id="whep-join-btn">Join</button>
+    </div>
+
     <div id="player"></div>
 
     <div class="info">
@@ -929,6 +961,7 @@
         <span class="feature active">Core</span>
         <span class="feature active">HLS</span>
         <span class="feature active">Native (MP4/WebM)</span>
+        <span class="feature active">WHEP (WebRTC)</span>
         <span class="feature active">UI Controls</span>
         <span class="feature active">AirPlay</span>
         <span class="feature active">Chromecast</span>
@@ -1272,6 +1305,46 @@ playlist.<span class="function">add</span>([
     </div>
   </div>
 
+  <!-- WHEP monitor: WebRTC playback over WHEP through @scarlett-player/whep.
+       The endpoint box sits under the player's URL bar at the top; this panel
+       is the readout. Wired in demo.ts (join, session, latency, reconnect),
+       like the Watermark and Clip panels. -->
+  <div class="info">
+    <div class="live-header">
+      <h2>WHEP Monitor</h2>
+      <span class="live-badge" id="whep-badge">Not joined</span>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Session</div>
+        <div class="stat-value" id="whep-session" style="font-size: 0.85rem; word-break: break-all;">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Latency (receiver est.)</div>
+        <div class="stat-value" id="whep-latency">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Reconnect</div>
+        <div class="stat-value" id="whep-reconnect" style="font-size: 0.85rem;">&mdash;</div>
+      </div>
+    </div>
+    <div class="live-hint">
+      Paste the WHEP endpoint of a Tmesis preview (<code>/whep/v1/streams/&lt;id&gt;</code>)
+      or of any WHEP server that answers offers into the box under the player's URL bar. The plugin claims a URL by its
+      <code>whep</code> path segment, sends a receive-only H.264 + Opus offer,
+      and reconnects on <code>409</code>, <code>503</code> and lost connections.
+      No server handy? <a href="https://github.com/bluenviron/mediamtx" target="_blank" rel="noopener">MediaMTX</a>
+      on this machine plus one ffmpeg command gives you a local one:
+      <pre class="live-snippet">./mediamtx &amp;
+ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 \
+  -c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline -pix_fmt yuv420p -g 30 \
+  -c:a libopus -f rtsp rtsp://localhost:8554/live
+# then join  http://localhost:8889/live/whep</pre>
+      The latency figure is the browser's share only (jitter buffer plus half
+      the round trip), not glass to glass.
+    </div>
+  </div>
+
   <!-- Analytics beacons, captured in the page by the plugin's customBeacon hook -->
   <div class="info">
     <div class="analytics-header">
@@ -1368,13 +1441,16 @@ playlist.<span class="function">add</span>([
       }
 
       // Effective LL, not requested LL: the manifest has to carry EXT-X-PART
-      // or advertise CAN-BLOCK-RELOAD for this to light up.
+      // or advertise CAN-BLOCK-RELOAD for this to light up. A WHEP source
+      // (source.type is the protocol's media type) is WebRTC: always at the
+      // edge, no target latency, nothing to seek to.
+      const isWhep = state.source?.type === 'application/sdp';
       const lowLatency = !!state.lowLatencyMode;
-      badge.textContent = lowLatency ? 'LL-HLS active' : 'LL-HLS off';
+      badge.textContent = isWhep ? 'WebRTC (WHEP)' : lowLatency ? 'LL-HLS active' : 'LL-HLS off';
       badge.classList.toggle('live-badge--on', lowLatency);
 
       document.getElementById('live-kind').textContent =
-        isLive ? (lowLatency ? 'Live (low latency)' : 'Live') : 'Not live';
+        isLive ? (isWhep ? 'Live (WebRTC)' : lowLatency ? 'Live (low latency)' : 'Live') : 'Not live';
       document.getElementById('live-latency').textContent =
         isLive ? state.liveLatency.toFixed(2) + 's' : '\u2014';
       document.getElementById('live-target').textContent =
@@ -1382,7 +1458,7 @@ playlist.<span class="function">add</span>([
       document.getElementById('live-edge').textContent =
         isLive ? (state.liveEdge ? 'At edge' : 'Behind') : '\u2014';
 
-      goLive.disabled = !isLive;
+      goLive.disabled = !isLive || isWhep;
     }
 
     document.getElementById('live-golive')?.addEventListener('click', () => {
@@ -1467,6 +1543,15 @@ playlist.<span class="function">add</span>([
         // Update active state
         document.querySelectorAll('#video-submenu .sub-menu-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+
+        // WHEP has no preset URL: hand over to the WHEP Monitor panel.
+        if (demo === 'whep') {
+          const input = document.getElementById('whep-url-input');
+          input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          input?.focus();
+          console.log('Paste a WHEP endpoint into the WHEP Monitor panel and press Join');
+          return;
+        }
 
         // Load the video
         const url = DEMO_URLS[demo];

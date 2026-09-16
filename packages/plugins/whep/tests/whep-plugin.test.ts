@@ -103,16 +103,24 @@ describe('createWHEPPlugin', () => {
 describe('canPlay', () => {
   const plugin = createWHEPPlugin();
 
-  it('claims a URL whose path contains /whep/v1/', () => {
+  it('claims a URL with a whep path segment: Tmesis, MediaMTX, the draft examples', () => {
     expect(plugin.canPlay('https://box.example.com:8889/whep/v1/streams/show-1')).toBe(true);
     expect(plugin.canPlay('http://10.0.0.5:8889/whep/v1/streams/a?token=x')).toBe(true);
     expect(plugin.canPlay('/whep/v1/streams/relative')).toBe(true);
+    expect(plugin.canPlay('http://localhost:8889/mystream/whep')).toBe(true);
+    expect(plugin.canPlay('http://localhost:8889/mystream/whep/')).toBe(true);
+    expect(plugin.canPlay('https://whep.example.com/whep/endpoint-1')).toBe(true);
+    expect(plugin.canPlay('https://example.com/WHEP/x')).toBe(true);
   });
 
   it('leaves everything else to other providers', () => {
     expect(plugin.canPlay('https://cdn.example.com/live/show-1/index.m3u8')).toBe(false);
     expect(plugin.canPlay('https://example.com/video.mp4')).toBe(false);
     expect(plugin.canPlay('https://example.com/other?next=/whep/v1/streams/x')).toBe(false);
+    // The letters inside a longer segment, or the host name alone, are not it.
+    expect(plugin.canPlay('https://example.com/whepish/stream.m3u8')).toBe(false);
+    expect(plugin.canPlay('https://example.com/my-whep-stream.mp4')).toBe(false);
+    expect(plugin.canPlay('https://whep.example.com/stream.m3u8')).toBe(false);
   });
 });
 
@@ -416,6 +424,42 @@ describe('the error table', () => {
     expect(api.emitted('error:reconnecting')).toHaveLength(1);
   });
 
+  it('a 404 after the stream had played is the publisher leaving: recoverable, then recovers', async () => {
+    // MediaMTX answers a path with no publisher with 404 (Tmesis: 409), so a
+    // stream that played and then lost its publisher must wait it out.
+    const gone = () => reply(404, '{"status":"error","error":"no stream is available on path \'live\'"}', { 'Content-Type': 'application/json' });
+    const fetchMock = installFetch([answer(), gone, gone, answer('/whep/v1/streams/show-1/sessions/again')]);
+    const { plugin, api } = await setup();
+    await load(plugin);
+
+    FakePeerConnection.instances[0].setConnectionState('failed');
+    await settle();
+    expect(api.emitted('error:reconnecting')).toHaveLength(1);
+
+    await settle(2000); // attempt 1: 404
+    expect(fetchMock.posts()).toHaveLength(2);
+    expect(api.emitted('error:reconnecting')).toHaveLength(2);
+    // The 404 is reported quietly inside the window, not as a fatal error.
+    expect(fatalErrors(api)).toHaveLength(1);
+    expect(api.logger.warn).toHaveBeenCalledWith(expect.stringContaining("no stream is available on path 'live'"));
+
+    await settle(4000); // attempt 2: 404 again
+    await settle(8000); // attempt 3: back
+    expect(fetchMock.posts()).toHaveLength(4);
+    expect(api.emitted('error:recovered')).toHaveLength(1);
+    expect(plugin.getSessionUrl()).toContain('/sessions/again');
+  });
+
+  it('a 404 on the first join stays terminal even if an earlier source had played', async () => {
+    installFetch([answer(), envelope(404, 'not_found', 'no such stream')]);
+    const { plugin, api } = await setup();
+    await load(plugin);
+
+    const { loading } = await load(plugin, 'https://origin.example.com:8889/whep/v1/streams/other');
+    await expect(loading).rejects.toThrow(/not found/);
+    expect(api.emitted('error:reconnecting')).toEqual([]);
+  });
+
   it('autoReconnect: false makes a recoverable failure terminal', async () => {
     const fetchMock = installFetch([envelope(409, 'not_live', 'x', '5')]);
     const { plugin, api } = await setup({ autoReconnect: false });
@@ -499,12 +543,16 @@ describe('a lost connection', () => {
     const pc = FakePeerConnection.instances[0];
     pc.setConnectionState('disconnected');
     await settle(3000);
+    expect(api.state.get('buffering')).toBe(true);
     pc.setConnectionState('connected');
     await settle(5000);
 
     expect(fatalErrors(api)).toEqual([]);
     expect(FakePeerConnection.instances).toHaveLength(1);
     expect(pc.closed).toBe(false);
+    // A MediaStream element fires no canplay for a hiccup it never saw, so
+    // the buffering the disconnect raised must come down with the recovery.
+    expect(api.state.get('buffering')).toBe(false);
   });
 
   it('treats a disconnected state past the grace period as lost', async () => {
@@ -555,14 +603,25 @@ describe('the latency estimate', () => {
     expect(api.state.get('liveLatency')).toBeCloseTo(0.06, 5);
     expect(api.emitted('live:latency')).toEqual([{ latency: expect.closeTo(0.06, 5) }]);
 
-    // Unchanged: no second write.
+    // Unchanged counters mean no frame was emitted: no second write.
     await settle(1000);
     expect(api.emitted('live:latency')).toHaveLength(1);
+
+    // Sixty more frames that each waited 200 ms: the estimate is the window
+    // (0.2 + 0.01), not the mean since the join (0.125 + 0.01).
+    FakePeerConnection.options.stats = [
+      { id: 'in-v', type: 'inbound-rtp', kind: 'video', jitterBufferDelay: 15, jitterBufferEmittedCount: 120 },
+      { id: 't', type: 'transport', selectedCandidatePairId: 'pair-b' },
+      { id: 'pair-b', type: 'candidate-pair', state: 'succeeded', currentRoundTripTime: 0.02 },
+    ];
+    await settle(1000);
+    expect(api.state.get('liveLatency')).toBeCloseTo(0.21, 5);
+    expect(api.emitted('live:latency')).toHaveLength(2);
 
     // Stops with the connection.
     await plugin.destroy();
     await settle(3000);
-    expect(api.emitted('live:latency')).toHaveLength(1);
+    expect(api.emitted('live:latency')).toHaveLength(2);
   });
 });
 

@@ -34,10 +34,17 @@ describe('readErrorEnvelope', () => {
     });
   });
 
+  it('reads the MediaMTX envelope, a flat string', () => {
+    expect(readErrorEnvelope('{"status":"error","error":"no stream is available on path \'live\'"}')).toEqual({
+      message: "no stream is available on path 'live'",
+    });
+    expect(readErrorEnvelope('{"error":""}')).toEqual({});
+  });
+
   it('yields nothing for other bodies', () => {
     expect(readErrorEnvelope('')).toEqual({});
     expect(readErrorEnvelope('v=0')).toEqual({});
-    expect(readErrorEnvelope('{"error":"string"}')).toEqual({});
+    expect(readErrorEnvelope('{"error":42}')).toEqual({});
     expect(readErrorEnvelope('{"error":{"code":5}}')).toEqual({ code: undefined, message: undefined });
   });
 });

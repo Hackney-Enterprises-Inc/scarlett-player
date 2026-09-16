@@ -34,12 +34,40 @@ describe('estimateLatency', () => {
 
   it('reads the older mediaType spelling and reports no RTT when no pair succeeded', () => {
     const report = [{ id: 'in', type: 'inbound-rtp', mediaType: 'video', jitterBufferDelay: 1, jitterBufferEmittedCount: 10 }];
-    expect(estimateLatency(report)).toEqual({ latency: 0.1, jitterBufferSeconds: 0.1, rttSeconds: 0 });
+    expect(estimateLatency(report)).toEqual({
+      latency: 0.1,
+      jitterBufferSeconds: 0.1,
+      rttSeconds: 0,
+      sample: { jitterBufferDelay: 1, jitterBufferEmittedCount: 10 },
+    });
   });
 
   it('is null before any video frame was emitted, and for audio only', () => {
     expect(estimateLatency([])).toBeNull();
     expect(estimateLatency([{ id: 'in', type: 'inbound-rtp', kind: 'video', jitterBufferDelay: 0, jitterBufferEmittedCount: 0 }])).toBeNull();
     expect(estimateLatency([{ id: 'in', type: 'inbound-rtp', kind: 'audio', jitterBufferDelay: 1, jitterBufferEmittedCount: 10 }])).toBeNull();
+  });
+
+  it('measures only the frames emitted since the previous sample', () => {
+    const first = estimateLatency([inbound]);
+    expect(first?.jitterBufferSeconds).toBeCloseTo(0.05, 10);
+
+    // Sixty more frames that each waited a full second: the mean since the
+    // join would read 0.367 s and hide it; the window reads it as it is.
+    const later = { ...inbound, jitterBufferDelay: 66, jitterBufferEmittedCount: 180 };
+    const second = estimateLatency([later], first?.sample);
+    expect(second?.jitterBufferSeconds).toBeCloseTo(1, 10);
+    expect(second?.sample).toEqual({ jitterBufferDelay: 66, jitterBufferEmittedCount: 180 });
+  });
+
+  it('is null when no frame was emitted since the previous sample, so the last value stands', () => {
+    const first = estimateLatency([inbound]);
+    expect(estimateLatency([inbound], first?.sample)).toBeNull();
+  });
+
+  it('starts over when the counters went backwards (a new track)', () => {
+    const first = estimateLatency([{ ...inbound, jitterBufferDelay: 600, jitterBufferEmittedCount: 6000 }]);
+    const restarted = estimateLatency([{ ...inbound, jitterBufferDelay: 2, jitterBufferEmittedCount: 20 }], first?.sample);
+    expect(restarted?.jitterBufferSeconds).toBeCloseTo(0.1, 10);
   });
 });

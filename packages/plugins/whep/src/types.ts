@@ -99,7 +99,10 @@ export interface IWHEPPlugin {
   type: PluginType;
   /** One-line description. */
   description: string;
-  /** True for a URL whose path contains `/whep/v1/`. */
+  /**
+   * True for a URL with a path segment named `whep` (`/whep/v1/streams/<id>`
+   * on a Tmesis box, `/<path>/whep` on MediaMTX, `/whep/<id>` elsewhere).
+   */
   canPlay(src: string): boolean;
   /** Wires the playback control listeners; called by the core once selected. */
   init(api: IPluginAPI): Promise<void>;

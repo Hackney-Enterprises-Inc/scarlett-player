@@ -80,8 +80,9 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
  * Read the `error.code` and `error.message` out of a JSON error envelope.
  *
  * Tmesis answers every non-201 with `{"error":{"code":...,"message":...}}`;
- * another server may answer with anything, so a body that is not that shape
- * yields nothing rather than throwing.
+ * MediaMTX with `{"status":"error","error":"<message>"}`, which yields the
+ * message alone. Another server may answer with anything, so a body that
+ * is neither shape yields nothing rather than throwing.
  *
  * @param body - The response body text
  * @returns The code and message found, each possibly `undefined`
@@ -89,8 +90,9 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
 export function readErrorEnvelope(body: string): { code?: string; message?: string } {
   if (!body) return {};
   try {
-    const parsed = JSON.parse(body) as { error?: { code?: unknown; message?: unknown } };
+    const parsed = JSON.parse(body) as { error?: { code?: unknown; message?: unknown } | string };
     const error = parsed?.error;
+    if (typeof error === 'string') return error ? { message: error } : {};
     if (!error || typeof error !== 'object') return {};
     return {
       code: typeof error.code === 'string' ? error.code : undefined,

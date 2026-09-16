@@ -93,6 +93,7 @@ async function build() {
           ['chapters', 'packages/plugins/chapters/src/index.ts'],
           ['gestures', 'packages/plugins/gestures/src/index.ts'],
           ['clips', 'packages/plugins/clips/src/index.ts'],
+          ['whep', 'packages/plugins/whep/src/index.ts'],
         ].map(([name, rel]) => [
           `@scarlett-player/${name}`,
           path.join(__dirname, '..', rel),

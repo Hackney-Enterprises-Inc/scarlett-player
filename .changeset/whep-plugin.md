@@ -23,15 +23,17 @@
 WHEP: new `@scarlett-player/whep` provider plugin - WebRTC playback over WHEP
 (WebRTC-HTTP Egress Protocol) for sub-second live monitoring.
 
-`createWHEPPlugin(config)` claims any URL whose path contains `/whep/v1/`,
+`createWHEPPlugin(config)` claims any URL with a path segment named `whep`
+(`/whep/v1/streams/<id>` on a Tmesis box, `/<path>/whep` on MediaMTX),
 offers receive-only H.264 and Opus, `POST`s the offer as `application/sdp`
 (with `Authorization: Bearer` from `token` or an async `tokenProvider`),
 applies the `201` answer, remembers the session `Location`, and plays the
 remote tracks into a video element created the way the native provider
 creates its own. It reports the live keys the HLS provider sets for a source
 with no DVR (`live`, `liveEdge`, `seekableRange: null`, `lowLatencyMode`) and
-a receiver-side `liveLatency` estimate from `getStats()` (jitter buffer plus
-half the round trip), emitted as `live:latency`.
+a receiver-side `liveLatency` estimate from `getStats()` (the jitter buffer
+over the last second's frames plus half the round trip), emitted as
+`live:latency`.
 
 Failures map onto the core's error codes (the package README carries the
 table: `401`/`404`/`406`/`415` are `SOURCE_LOAD_FAILED`, `409 not_live` and
@@ -45,4 +47,6 @@ once. Server counter-offers (`406` with an SDP body) and trickle ICE are not
 supported in v1.
 
 Built for the Tmesis low-delay preview; plays any WHEP server that answers
-offers.
+offers. The demo page gains a WHEP Monitor panel: a URL box for an endpoint
+(there is no public WHEP stream to preload), the session, the latency
+estimate and the reconnect state.
