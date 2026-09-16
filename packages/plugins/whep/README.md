@@ -207,7 +207,9 @@ ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency
 Stop the ffmpeg process mid-play to watch the reconnect scheduler: the
 connection fails, the attempts that follow get MediaMTX's `404` (recoverable
 once the source has played), and the stream recovers when ffmpeg is
-restarted.
+restarted inside `reconnectWindowMs` (five minutes by default). Past that
+the scheduler gives up (`error:reconnect-exhausted`, a final fatal `error`,
+and `load()` rejects), so restart ffmpeg and press Join again.
 
 ## License
 
