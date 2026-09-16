@@ -39733,11 +39733,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
 
   // packages/plugins/ui/src/version.ts
-  var PKG_VERSION4;
+  var PKG_VERSION5;
   var init_version2 = __esm({
     "packages/plugins/ui/src/version.ts"() {
       "use strict";
-      PKG_VERSION4 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+      PKG_VERSION5 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
     }
   });
 
@@ -40197,7 +40197,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "ui-controls",
       name: "UI Controls",
       type: "ui",
-      version: PKG_VERSION4,
+      version: PKG_VERSION5,
       async init(pluginApi) {
         api = pluginApi;
         releaseStyles = injectSharedStyles(STYLE_ID, styles);
@@ -41893,8 +41893,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         emitReconnectExhausted(elapsed_ms, window_ms);
         return;
       }
-      const LONG_OUTAGE_MS = 6e5;
-      if (isLive && elapsed_ms > LONG_OUTAGE_MS) {
+      const LONG_OUTAGE_MS2 = 6e5;
+      if (isLive && elapsed_ms > LONG_OUTAGE_MS2) {
         api?.emit("error:reconnecting", {
           attempt: reconnectAttempts + 1,
           delayMs: 0,
@@ -42814,11 +42814,921 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return plugin;
   }
 
+  // packages/plugins/whep/src/index.ts
+  init_src();
+
+  // packages/plugins/whep/src/version.ts
+  var PKG_VERSION4 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+
+  // packages/plugins/whep/src/errors.ts
+  init_src();
+  var WHEPError = class extends Error {
+    /**
+     * @param failure - The classification to carry
+     */
+    constructor(failure) {
+      super(failure.message);
+      this.name = "WHEPError";
+      this.failure = failure;
+    }
+  };
+  var SDP_MEDIA_TYPE = "application/sdp";
+  function parseRetryAfter(value, now2 = Date.now()) {
+    if (!value) return void 0;
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return Number(trimmed) * 1e3;
+    }
+    const at = Date.parse(trimmed);
+    if (Number.isNaN(at)) return void 0;
+    const delta = at - now2;
+    return delta > 0 ? delta : void 0;
+  }
+  function readErrorEnvelope(body) {
+    if (!body) return {};
+    try {
+      const parsed = JSON.parse(body);
+      const error = parsed?.error;
+      if (typeof error === "string") return error ? { message: error } : {};
+      if (!error || typeof error !== "object") return {};
+      return {
+        code: typeof error.code === "string" ? error.code : void 0,
+        message: typeof error.message === "string" ? error.message : void 0
+      };
+    } catch {
+      return {};
+    }
+  }
+  function classifyResponse(status2, contentType, retryAfter, body, url) {
+    const envelope = readErrorEnvelope(body);
+    const detail = { type: "network", httpStatus: status2, url: sanitizeUrl(url) };
+    const retryAfterMs = parseRetryAfter(retryAfter);
+    const said = envelope.message ? `: ${envelope.message}` : "";
+    switch (status2) {
+      case 401:
+      case 403:
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: `WHEP endpoint refused the token (${status2})${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail
+        };
+      case 404:
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: `WHEP endpoint not found (404)${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail
+        };
+      case 406: {
+        const counterOffer = (contentType ?? "").toLowerCase().startsWith(SDP_MEDIA_TYPE);
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: counterOffer ? "WHEP server sent a counter-offer (406 with an SDP body); this plugin does not support server offers" : `WHEP server cannot serve a codec this browser accepts (406)${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail: { ...detail, type: "media" }
+        };
+      }
+      case 409:
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP stream is not live yet (409)${said}`,
+          recoverable: true,
+          retryAfterMs,
+          serverCode: envelope.code,
+          detail
+        };
+      case 503:
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP endpoint unavailable (503)${said}`,
+          recoverable: true,
+          retryAfterMs,
+          serverCode: envelope.code,
+          detail
+        };
+      case 400:
+      case 405:
+      case 413:
+      case 415:
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: `WHEP endpoint rejected the offer (${status2})${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail
+        };
+      default:
+        if (status2 >= 500) {
+          return {
+            code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+            message: `WHEP endpoint failed (${status2})${said}`,
+            recoverable: true,
+            retryAfterMs,
+            serverCode: envelope.code,
+            detail
+          };
+        }
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: `WHEP endpoint answered ${status2}${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail
+        };
+    }
+  }
+  function classifyTransport(kind, url, cause) {
+    const detail = { type: "network", url: sanitizeUrl(url) };
+    const said = cause ? `: ${cause}` : "";
+    switch (kind) {
+      case "fetch":
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP request failed${said}`,
+          recoverable: true,
+          detail
+        };
+      case "ice":
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP connection lost${said}`,
+          recoverable: true,
+          detail
+        };
+      case "timeout":
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP join timed out${said}`,
+          recoverable: true,
+          detail
+        };
+      case "answer":
+        return {
+          code: "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */,
+          message: `WHEP answer could not be applied${said}`,
+          recoverable: true,
+          detail: { ...detail, type: "media" }
+        };
+    }
+  }
+
+  // packages/plugins/whep/src/session.ts
+  function headersFor(token, contentType) {
+    const headers = {};
+    if (contentType) headers["Content-Type"] = contentType;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return headers;
+  }
+  async function postOffer(endpoint, offer, token, signal2) {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: headersFor(token, SDP_MEDIA_TYPE),
+        body: offer,
+        signal: signal2
+      });
+    } catch (error) {
+      if (signal2?.aborted) throw error;
+      throw new WHEPError(classifyTransport("fetch", endpoint, error?.message));
+    }
+    const body = await response.text();
+    if (response.status !== 201) {
+      throw new WHEPError(
+        classifyResponse(
+          response.status,
+          response.headers.get("Content-Type"),
+          response.headers.get("Retry-After"),
+          body,
+          endpoint
+        )
+      );
+    }
+    const location2 = response.headers.get("Location");
+    let sessionUrl = null;
+    if (location2) {
+      try {
+        const resolved = new URL(location2, endpoint);
+        if (resolved.origin === new URL(endpoint).origin) {
+          sessionUrl = resolved.toString();
+        }
+      } catch {
+        sessionUrl = null;
+      }
+    }
+    return { answer: body, sessionUrl };
+  }
+  async function deleteSession(sessionUrl, token, keepalive) {
+    try {
+      await fetch(sessionUrl, { method: "DELETE", headers: headersFor(token), keepalive });
+    } catch {
+    }
+  }
+
+  // packages/plugins/whep/src/latency.ts
+  function estimateLatency(report, previous = null) {
+    let inbound = null;
+    let selectedPairId;
+    const pairs = [];
+    for (const raw of report) {
+      const entry = Array.isArray(raw) ? raw[1] : raw;
+      if (!entry || typeof entry !== "object") continue;
+      switch (entry.type) {
+        case "inbound-rtp":
+          if ((entry.kind ?? entry.mediaType) === "video") inbound = entry;
+          break;
+        case "transport":
+          if (entry.selectedCandidatePairId) selectedPairId = entry.selectedCandidatePairId;
+          break;
+        case "candidate-pair":
+          pairs.push(entry);
+          break;
+      }
+    }
+    if (!inbound) return null;
+    const sample = {
+      jitterBufferDelay: inbound.jitterBufferDelay ?? 0,
+      jitterBufferEmittedCount: inbound.jitterBufferEmittedCount ?? 0
+    };
+    const base = previous && previous.jitterBufferEmittedCount <= sample.jitterBufferEmittedCount ? previous : { jitterBufferDelay: 0, jitterBufferEmittedCount: 0 };
+    const emitted = sample.jitterBufferEmittedCount - base.jitterBufferEmittedCount;
+    if (emitted <= 0) return null;
+    const jitterBufferSeconds = (sample.jitterBufferDelay - base.jitterBufferDelay) / emitted;
+    let pair = selectedPairId ? pairs.find((p) => p.id === selectedPairId) : void 0;
+    if (!pair) pair = pairs.find((p) => p.state === "succeeded" && p.nominated);
+    if (!pair) pair = pairs.find((p) => p.state === "succeeded");
+    const rttSeconds = pair?.currentRoundTripTime ?? 0;
+    return {
+      latency: jitterBufferSeconds + rttSeconds / 2,
+      jitterBufferSeconds,
+      rttSeconds,
+      sample
+    };
+  }
+
+  // packages/plugins/whep/src/index.ts
+  var WHEP_PATH = /(?:^|\/)whep(?:\/|$)/i;
+  var GATHER_TIMEOUT_MS = 1e3;
+  var LATENCY_POLL_MS = 1e3;
+  var LATENCY_EPSILON = 5e-3;
+  var DISCONNECT_GRACE_MS = 5e3;
+  var LONG_OUTAGE_MS = 6e5;
+  var SOURCE_TYPE = "application/sdp";
+  var DEFAULT_WHEP_CONFIG = {
+    autoReconnect: true,
+    reconnectBaseDelayMs: 2e3,
+    reconnectMaxDelayMs: 3e4,
+    reconnectWindowMs: 3e5,
+    loadTimeoutMs: 1e4
+  };
+  var SupersededError = class extends Error {
+    /**
+     * @param reason - Why the join was abandoned
+     */
+    constructor(reason) {
+      super(reason);
+      this.name = "SupersededError";
+    }
+  };
+  function createWHEPPlugin(config) {
+    const autoReconnect = config?.autoReconnect ?? DEFAULT_WHEP_CONFIG.autoReconnect;
+    const reconnectBaseDelayMs = config?.reconnectBaseDelayMs ?? DEFAULT_WHEP_CONFIG.reconnectBaseDelayMs;
+    const reconnectMaxDelayMs = config?.reconnectMaxDelayMs ?? DEFAULT_WHEP_CONFIG.reconnectMaxDelayMs;
+    const reconnectWindowMs = config?.reconnectWindowMs ?? DEFAULT_WHEP_CONFIG.reconnectWindowMs;
+    const loadTimeoutMs = config?.loadTimeoutMs ?? DEFAULT_WHEP_CONFIG.loadTimeoutMs;
+    const iceServers = config?.iceServers ?? [];
+    let api = null;
+    let video = null;
+    let cleanupEvents = null;
+    let peer = null;
+    let sessionUrl = null;
+    let currentSrc = "";
+    let hasJoined = false;
+    let loadSession = 0;
+    let pendingLoad = null;
+    let latencyTimer = null;
+    let disconnectTimer = null;
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
+    let reconnectWindowStart = 0;
+    let reconnectTrigger = null;
+    let reconnectExhausted = false;
+    let isReconnecting = false;
+    let isCorePlayRequested = false;
+    let isCorePauseRequested = false;
+    const resolveToken = async () => {
+      if (config?.tokenProvider) {
+        try {
+          const token = await config.tokenProvider();
+          return token || null;
+        } catch (error) {
+          api?.logger.warn("WHEP token provider failed; sending no token", error);
+          return null;
+        }
+      }
+      return config?.token || null;
+    };
+    const applyPoster = () => {
+      if (!video) return;
+      video.poster = api?.getState("poster") || "";
+    };
+    const getOrCreateVideo = () => {
+      if (video) return video;
+      const existing = api?.container.querySelector("video");
+      if (existing) {
+        video = existing;
+        return video;
+      }
+      video = document.createElement("video");
+      video.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;display:block;object-fit:contain;background:#000";
+      video.controls = false;
+      video.playsInline = true;
+      video.autoplay = false;
+      applyPoster();
+      api?.container.appendChild(video);
+      return video;
+    };
+    const playElement = async () => {
+      if (!video) return;
+      try {
+        await video.play();
+      } catch (error) {
+        isCorePlayRequested = false;
+        api?.logger.info("WHEP: autoplay refused; waiting for the viewer", {
+          reason: error?.name
+        });
+      }
+    };
+    const setupEventListeners = (videoEl) => {
+      const handlers = [];
+      const on = (event, handler) => {
+        videoEl.addEventListener(event, handler);
+        handlers.push([event, handler]);
+      };
+      on("play", () => {
+        api?.setState("paused", false);
+      });
+      on("playing", () => {
+        api?.setState("playing", true);
+        api?.setState("paused", false);
+        api?.setState("buffering", false);
+        api?.setState("playbackState", "playing");
+        isCorePauseRequested = false;
+        if (isCorePlayRequested) {
+          isCorePlayRequested = false;
+        } else {
+          api?.emit("playback:play", void 0);
+        }
+      });
+      on("pause", () => {
+        isCorePlayRequested = false;
+        api?.setState("playing", false);
+        api?.setState("paused", true);
+        api?.setState("playbackState", "paused");
+        if (isCorePauseRequested) {
+          isCorePauseRequested = false;
+        } else {
+          api?.emit("playback:pause", void 0);
+        }
+      });
+      on("loadedmetadata", () => {
+        api?.setState("duration", 0);
+        api?.emit("media:loadedmetadata", { duration: 0 });
+      });
+      on("canplay", () => {
+        api?.setState("buffering", false);
+        api?.emit("media:canplay", void 0);
+      });
+      on("waiting", () => {
+        api?.setState("buffering", true);
+        api?.emit("media:waiting", void 0);
+      });
+      on("volumechange", () => {
+        api?.setState("volume", videoEl.volume);
+        api?.setState("muted", videoEl.muted);
+        api?.emit("volume:change", { volume: videoEl.volume, muted: videoEl.muted });
+      });
+      on("error", () => {
+        const error = videoEl.error;
+        api?.logger.error("WHEP: video element error", { mediaErrorCode: error?.code });
+        handleFailure({
+          code: "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */,
+          message: error?.message || "Decode error on the WHEP stream",
+          recoverable: true,
+          detail: { type: "media", url: sanitizeUrl(currentSrc) }
+        });
+      });
+      return () => {
+        for (const [event, handler] of handlers) {
+          videoEl.removeEventListener(event, handler);
+        }
+      };
+    };
+    const stopLatencyPoll = () => {
+      if (latencyTimer !== null) {
+        clearInterval(latencyTimer);
+        latencyTimer = null;
+      }
+    };
+    const startLatencyPoll = (pc) => {
+      stopLatencyPoll();
+      const session = loadSession;
+      let lastSample = null;
+      latencyTimer = setInterval(() => {
+        if (session !== loadSession || peer !== pc || !api) {
+          stopLatencyPoll();
+          return;
+        }
+        void pc.getStats().then((report) => {
+          if (session !== loadSession || !api) return;
+          const estimate = estimateLatency(report, lastSample);
+          if (!estimate) return;
+          lastSample = estimate.sample;
+          const previous = api.getState("liveLatency");
+          if (Math.abs(previous - estimate.latency) > LATENCY_EPSILON) {
+            api.setState("liveLatency", estimate.latency);
+            api.emit("live:latency", { latency: estimate.latency });
+          }
+        }).catch(() => {
+        });
+      }, LATENCY_POLL_MS);
+    };
+    const clearDisconnectTimer = () => {
+      if (disconnectTimer !== null) {
+        clearTimeout(disconnectTimer);
+        disconnectTimer = null;
+      }
+    };
+    const closeConnection = (keepalive) => {
+      stopLatencyPoll();
+      clearDisconnectTimer();
+      const pc = peer;
+      peer = null;
+      if (pc) {
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        try {
+          pc.close();
+        } catch {
+        }
+      }
+      const url = sessionUrl;
+      sessionUrl = null;
+      if (url) {
+        void resolveToken().then((token) => deleteSession(url, token, keepalive));
+      }
+      if (video) {
+        video.srcObject = null;
+      }
+    };
+    const resetLiveKeys = () => {
+      if (!api) return;
+      api.setState("liveLatency", 0);
+      api.setState("liveEdge", false);
+      api.setState("seekableRange", null);
+      if (api.getState("lowLatencyMode")) {
+        api.setState("lowLatencyMode", false);
+        api.emit("live:lowlatency", { enabled: false });
+      }
+      api.setState("live", false);
+    };
+    const cancelReconnect = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      reconnectAttempts = 0;
+      reconnectWindowStart = 0;
+      reconnectTrigger = null;
+      reconnectExhausted = false;
+      isReconnecting = false;
+    };
+    const settleLoad = (error) => {
+      const pending = pendingLoad;
+      pendingLoad = null;
+      if (!pending) return;
+      if (error) pending.reject(error);
+      else pending.resolve();
+    };
+    const cleanup = (reason, keepalive) => {
+      cancelReconnect();
+      settleLoad(reason);
+      closeConnection(keepalive);
+      if (cleanupEvents) {
+        cleanupEvents();
+        cleanupEvents = null;
+      }
+      isCorePlayRequested = false;
+      isCorePauseRequested = false;
+      resetLiveKeys();
+    };
+    const emitReconnectExhausted = (elapsedMs, windowMs) => {
+      if (reconnectExhausted) return;
+      reconnectExhausted = true;
+      isReconnecting = false;
+      const attempts = reconnectAttempts;
+      const trigger = reconnectTrigger;
+      api?.emit("error:reconnect-exhausted", { attempts, elapsedMs, windowMs });
+      api?.setState("playbackState", "error");
+      api?.setState("buffering", false);
+      const message = `WHEP auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1e3)}s`;
+      api?.emit("error", {
+        code: trigger?.code ?? "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
+        message,
+        fatal: true,
+        timestamp: Date.now(),
+        detail: {
+          ...trigger?.detail ?? { type: "other" },
+          retriesExhausted: true,
+          attempts,
+          reconnectExhausted: true
+        }
+      });
+      settleLoad(new Error(message));
+    };
+    const scheduleReconnect = (failure) => {
+      if (reconnectExhausted) return;
+      if (reconnectTimer) return;
+      const windowMs = reconnectWindowMs;
+      const elapsedMs = Date.now() - reconnectWindowStart;
+      if (elapsedMs > windowMs) {
+        api?.logger.warn(`WHEP auto-reconnect window exhausted after ${reconnectAttempts} attempts`);
+        emitReconnectExhausted(elapsedMs, windowMs);
+        return;
+      }
+      const base = failure.retryAfterMs ?? reconnectBaseDelayMs;
+      const cap = Math.max(reconnectMaxDelayMs, base);
+      const backoff = Math.min(base * Math.pow(2, reconnectAttempts), cap);
+      const jittered = Math.round(backoff * (0.7 + Math.random() * 0.3));
+      const delayMs = failure.retryAfterMs ? Math.max(failure.retryAfterMs, jittered) : jittered;
+      api?.logger.info(`WHEP: scheduling reconnect attempt ${reconnectAttempts + 1} in ${delayMs}ms`, {
+        reason: failure.serverCode ?? failure.message
+      });
+      api?.emit("error:reconnecting", {
+        attempt: reconnectAttempts + 1,
+        delayMs,
+        elapsedMs,
+        windowMs,
+        ...elapsedMs > LONG_OUTAGE_MS ? { longOutage: true } : {}
+      });
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void attemptReconnect();
+      }, delayMs);
+    };
+    const handleFailure = (failure) => {
+      if (!api) return;
+      const recoverable = failure.recoverable || hasJoined && failure.detail.httpStatus === 404;
+      const willReconnect = recoverable && autoReconnect && currentSrc !== "";
+      const reconnecting = isReconnecting && !reconnectExhausted && willReconnect;
+      api.setState("buffering", false);
+      if (!reconnecting) {
+        api.setState("playbackState", "error");
+        api.logger.error(`WHEP: ${failure.message}`, {
+          code: failure.code,
+          serverCode: failure.serverCode,
+          httpStatus: failure.detail.httpStatus
+        });
+        api.emit("error", {
+          code: failure.code,
+          message: failure.message,
+          fatal: true,
+          timestamp: Date.now(),
+          detail: { ...failure.detail, attempts: reconnectAttempts }
+        });
+      } else {
+        api.logger.warn(`WHEP: reconnect attempt ${reconnectAttempts} failed: ${failure.message}`);
+      }
+      if (!willReconnect) {
+        cancelReconnect();
+        settleLoad(new Error(failure.message));
+        return;
+      }
+      if (!isReconnecting) {
+        isReconnecting = true;
+        reconnectWindowStart = Date.now();
+        reconnectTrigger = failure;
+      }
+      scheduleReconnect(failure);
+    };
+    const waitForGathering = (pc, timeoutMs) => new Promise((resolve2) => {
+      if (pc.iceGatheringState === "complete") {
+        resolve2();
+        return;
+      }
+      let timer = null;
+      const done = () => {
+        pc.removeEventListener("icegatheringstatechange", check);
+        if (timer !== null) clearTimeout(timer);
+        resolve2();
+      };
+      const check = () => {
+        if (pc.iceGatheringState === "complete") done();
+      };
+      pc.addEventListener("icegatheringstatechange", check);
+      timer = setTimeout(done, timeoutMs);
+    });
+    const connect = async (session, src) => {
+      const superseded = () => session !== loadSession;
+      const check = () => {
+        if (superseded()) throw new SupersededError("WHEP join superseded");
+      };
+      const pc = new RTCPeerConnection({ iceServers });
+      peer = pc;
+      const stream = new MediaStream();
+      const abort = new AbortController();
+      let settled = false;
+      let watchdog = null;
+      const connection = new Promise((resolve2, reject) => {
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          if (watchdog !== null) {
+            clearTimeout(watchdog);
+            watchdog = null;
+          }
+          if (error) reject(error);
+          else resolve2();
+        };
+        pc.ontrack = (event) => {
+          if (superseded() || peer !== pc || !video) return;
+          if (!stream.getTracks().includes(event.track)) {
+            stream.addTrack(event.track);
+          }
+          if (video.srcObject !== stream) {
+            video.srcObject = stream;
+            void playElement();
+          }
+        };
+        pc.onconnectionstatechange = () => {
+          if (superseded() || peer !== pc) return;
+          switch (pc.connectionState) {
+            case "connected":
+              if (disconnectTimer !== null) {
+                clearDisconnectTimer();
+                api?.setState("buffering", false);
+              }
+              finish();
+              break;
+            case "disconnected":
+              if (disconnectTimer === null) {
+                api?.setState("buffering", true);
+                disconnectTimer = setTimeout(() => {
+                  disconnectTimer = null;
+                  if (superseded() || peer !== pc) return;
+                  const failure = classifyTransport("ice", src, "disconnected");
+                  if (!settled) finish(new WHEPError(failure));
+                  else lostConnection(failure);
+                }, DISCONNECT_GRACE_MS);
+              }
+              break;
+            case "failed": {
+              clearDisconnectTimer();
+              const failure = classifyTransport("ice", src, "failed");
+              if (!settled) finish(new WHEPError(failure));
+              else lostConnection(failure);
+              break;
+            }
+            default:
+              break;
+          }
+        };
+        if (loadTimeoutMs > 0) {
+          watchdog = setTimeout(() => {
+            watchdog = null;
+            abort.abort();
+            finish(new WHEPError(classifyTransport("timeout", src, `${loadTimeoutMs}ms`)));
+          }, loadTimeoutMs);
+        }
+        const exchange = async () => {
+          pc.addTransceiver("video", { direction: "recvonly" });
+          pc.addTransceiver("audio", { direction: "recvonly" });
+          const offer = await pc.createOffer();
+          check();
+          await pc.setLocalDescription(offer);
+          check();
+          await waitForGathering(pc, GATHER_TIMEOUT_MS);
+          check();
+          const sdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
+          const token = await resolveToken();
+          check();
+          const result = await postOffer(src, sdp, token, abort.signal);
+          if (superseded() || peer !== pc) {
+            const orphan = result.sessionUrl;
+            if (orphan) void resolveToken().then((t) => deleteSession(orphan, t, true));
+            throw new SupersededError("WHEP join superseded");
+          }
+          sessionUrl = result.sessionUrl;
+          try {
+            await pc.setRemoteDescription({ type: "answer", sdp: result.answer });
+          } catch (error) {
+            throw new WHEPError(classifyTransport("answer", src, error?.message));
+          }
+          check();
+        };
+        exchange().catch((error) => {
+          if (abort.signal.aborted && !(error instanceof WHEPError) && !(error instanceof SupersededError)) {
+            return;
+          }
+          finish(error);
+        });
+      });
+      try {
+        await connection;
+      } catch (error) {
+        if (peer === pc) {
+          closeConnection(true);
+        }
+        throw error;
+      }
+    };
+    const lostConnection = (failure) => {
+      api?.setState("playing", false);
+      api?.setState("buffering", true);
+      closeConnection(true);
+      handleFailure(failure);
+    };
+    const join = async (session, src) => {
+      try {
+        await connect(session, src);
+      } catch (error) {
+        if (session !== loadSession || error instanceof SupersededError) return;
+        if (error instanceof WHEPError) {
+          handleFailure(error.failure);
+        } else {
+          handleFailure(classifyTransport("fetch", src, error?.message));
+        }
+        return;
+      }
+      if (session !== loadSession || !api || !peer) return;
+      if (video) {
+        const muted = api.getState("muted");
+        const volume = api.getState("volume");
+        if (muted !== void 0) video.muted = muted;
+        if (volume !== void 0) video.volume = volume;
+      }
+      const recovered = isReconnecting;
+      const attempt = reconnectAttempts;
+      const elapsedMs = Date.now() - reconnectWindowStart;
+      cancelReconnect();
+      hasJoined = true;
+      api.setState("source", { src, type: SOURCE_TYPE });
+      if (api.getState("playbackState") !== "playing") {
+        api.setState("playbackState", "ready");
+      }
+      api.setState("live", true);
+      api.setState("liveEdge", true);
+      api.setState("seekableRange", null);
+      if (!api.getState("lowLatencyMode")) {
+        api.setState("lowLatencyMode", true);
+        api.emit("live:lowlatency", { enabled: true });
+      }
+      api.emit("media:loaded", { src, type: SOURCE_TYPE });
+      api.logger.info("WHEP: joined", { src: sanitizeUrl(src), session: sessionUrl ? "yes" : "none" });
+      if (recovered) {
+        api.emit("error:recovered", { attempt, elapsedMs });
+      }
+      startLatencyPoll(peer);
+      settleLoad();
+    };
+    const attemptReconnect = async () => {
+      if (!api || currentSrc === "") return;
+      const session = ++loadSession;
+      reconnectAttempts++;
+      const src = currentSrc;
+      api.logger.info(`WHEP: reconnect attempt ${reconnectAttempts}`, { src: sanitizeUrl(src) });
+      closeConnection(true);
+      api.setState("playbackState", "loading");
+      api.setState("buffering", true);
+      await join(session, src);
+    };
+    const onPageHide = () => {
+      const url = sessionUrl;
+      if (!url) return;
+      sessionUrl = null;
+      void resolveToken().then((token) => deleteSession(url, token, true));
+    };
+    const plugin = {
+      id: "whep-provider",
+      name: "WHEP Provider",
+      version: PKG_VERSION4,
+      type: "provider",
+      description: "WebRTC playback over WHEP (WebRTC-HTTP Egress Protocol) for sub-second live monitoring",
+      canPlay(src) {
+        try {
+          const url = new URL(src, typeof window !== "undefined" ? window.location.href : "http://localhost/");
+          return WHEP_PATH.test(url.pathname);
+        } catch {
+          return WHEP_PATH.test(src);
+        }
+      },
+      async init(pluginApi) {
+        api = pluginApi;
+        api.logger.info("WHEP plugin initialized");
+        const unsubPlay = api.on("playback:play", async () => {
+          if (!video) return;
+          if (!video.paused) return;
+          try {
+            isCorePlayRequested = true;
+            await video.play();
+          } catch (error) {
+            isCorePlayRequested = false;
+            api?.logger.error("Play failed", error);
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          if (!video) return;
+          if (video.paused) {
+            if (isCorePlayRequested) {
+              isCorePlayRequested = false;
+              video.pause();
+            }
+            return;
+          }
+          isCorePauseRequested = true;
+          isCorePlayRequested = false;
+          video.pause();
+        });
+        const unsubVolume = api.on("volume:change", ({ volume, muted }) => {
+          if (video) {
+            video.volume = volume;
+            video.muted = muted;
+          }
+        });
+        const unsubMute = api.on("volume:mute", ({ muted }) => {
+          if (video) video.muted = muted;
+        });
+        const unsubPoster = api.subscribeToState((event) => {
+          if (event.key === "poster") applyPoster();
+        });
+        if (typeof window !== "undefined") {
+          window.addEventListener("pagehide", onPageHide);
+        }
+        api.onDestroy(() => {
+          unsubPlay();
+          unsubPause();
+          unsubVolume();
+          unsubMute();
+          unsubPoster();
+          if (typeof window !== "undefined") {
+            window.removeEventListener("pagehide", onPageHide);
+          }
+        });
+      },
+      async destroy() {
+        api?.logger.info("WHEP plugin destroying");
+        loadSession++;
+        cleanup(new Error("Player destroyed during load"), true);
+        currentSrc = "";
+        hasJoined = false;
+        if (video?.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+        video = null;
+        api = null;
+      },
+      async loadSource(src) {
+        if (!api) throw new Error("Plugin not initialized");
+        api.logger.info("Loading WHEP source", { src: sanitizeUrl(src) });
+        const session = ++loadSession;
+        cleanup(new Error("Load superseded by a newer source"), true);
+        currentSrc = src;
+        hasJoined = false;
+        api.setState("playbackState", "loading");
+        api.setState("buffering", true);
+        api.setState("mediaType", "video");
+        api.setState("qualities", []);
+        api.setState("currentQuality", null);
+        api.setState("duration", 0);
+        api.setState("live", true);
+        api.setState("liveEdge", true);
+        api.setState("seekableRange", null);
+        const videoEl = getOrCreateVideo();
+        videoEl.style.display = "block";
+        applyPoster();
+        cleanupEvents = setupEventListeners(videoEl);
+        const load = new Promise((resolve2, reject) => {
+          pendingLoad = { resolve: resolve2, reject };
+        });
+        void join(session, src);
+        return load;
+      },
+      getSessionUrl() {
+        return sessionUrl;
+      }
+    };
+    return plugin;
+  }
+
   // demo/demo.ts
   init_src2();
 
   // packages/plugins/airplay/src/version.ts
-  var PKG_VERSION5 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION6 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/airplay/src/index.ts
   function isAirPlaySupported2() {
@@ -42927,7 +43837,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "airplay",
       name: "AirPlay",
       type: "feature",
-      version: PKG_VERSION5,
+      version: PKG_VERSION6,
       async init(pluginApi) {
         api = pluginApi;
         api.setState("airplayAvailable", false);
@@ -43058,7 +43968,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/chromecast/src/version.ts
-  var PKG_VERSION6 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION7 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/chromecast/src/index.ts
   function chromecastPlugin() {
@@ -43220,7 +44130,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       id: "chromecast",
       name: "Chromecast",
       type: "feature",
-      version: PKG_VERSION6,
+      version: PKG_VERSION7,
       async init(pluginApi) {
         api = pluginApi;
         api.setState("chromecastAvailable", false);
@@ -43628,7 +44538,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/playlist/src/version.ts
-  var PKG_VERSION7 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION8 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/playlist/src/index.ts
   var DEFAULT_CONFIG2 = {
@@ -43798,7 +44708,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "playlist",
       name: "Playlist",
-      version: PKG_VERSION7,
+      version: PKG_VERSION8,
       type: "feature",
       description: "Playlist management with shuffle, repeat, and gapless playback",
       async init(pluginApi) {
@@ -44075,7 +44985,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/media-session/src/version.ts
-  var PKG_VERSION8 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION9 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/media-session/src/index.ts
   var DEFAULT_CONFIG3 = {
@@ -44241,7 +45151,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "media-session",
       name: "Media Session",
-      version: PKG_VERSION8,
+      version: PKG_VERSION9,
       type: "feature",
       description: "Media Session API integration for system-level media controls",
       async init(pluginApi) {
@@ -44357,7 +45267,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   init_src();
 
   // packages/plugins/audio-ui/src/version.ts
-  var PKG_VERSION9 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION10 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/audio-ui/src/index.ts
   var SEEK_STEP_SECONDS = 5;
@@ -45018,7 +45928,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const plugin = {
       id: "audio-ui",
       name: "Audio UI",
-      version: PKG_VERSION9,
+      version: PKG_VERSION10,
       type: "ui",
       description: "Compact audio player interface",
       async init(pluginApi) {
@@ -45126,7 +46036,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/watermark/src/version.ts
-  var PKG_VERSION10 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION11 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/watermark/src/index.ts
   var POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
@@ -45265,7 +46175,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "watermark",
       name: "Watermark",
-      version: PKG_VERSION10,
+      version: PKG_VERSION11,
       type: "feature",
       description: "Anti-piracy watermark overlay with text/image support and dynamic repositioning",
       init(pluginApi) {
@@ -46091,7 +47001,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 `;
 
   // packages/plugins/share/src/version.ts
-  var PKG_VERSION11 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION12 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/share/src/index.ts
   var STYLE_ID3 = "sp-share-styles";
@@ -46202,7 +47112,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "share",
       name: "Share",
-      version: PKG_VERSION11,
+      version: PKG_VERSION12,
       type: "feature",
       description: "Native share sheet, copy link, timestamps and embed codes",
       init(pluginApi) {
@@ -46605,7 +47515,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   };
 
   // packages/plugins/gestures/src/version.ts
-  var PKG_VERSION12 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION13 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/gestures/src/index.ts
   function hasCoarsePointer() {
@@ -46746,7 +47656,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "gestures",
       name: "Gestures",
-      version: PKG_VERSION12,
+      version: PKG_VERSION13,
       type: "feature",
       init(pluginApi) {
         api = pluginApi;
@@ -46801,7 +47711,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/captions/src/version.ts
-  var PKG_VERSION13 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION14 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/captions/src/index.ts
   var HLS_SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated";
@@ -46984,7 +47894,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "captions",
       name: "Captions",
-      version: PKG_VERSION13,
+      version: PKG_VERSION14,
       type: "feature",
       description: "WebVTT subtitles and closed captions with HLS extraction",
       init(pluginApi) {
@@ -47373,7 +48283,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 `;
 
   // packages/plugins/chapters/src/version.ts
-  var PKG_VERSION14 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION15 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/chapters/src/index.ts
   var STYLE_ID5 = "sp-chapters-styles";
@@ -47443,7 +48353,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "chapters",
       name: "Chapters",
-      version: PKG_VERSION14,
+      version: PKG_VERSION15,
       type: "feature",
       init(pluginApi) {
         const generation = ++lifecycle;
@@ -50251,7 +51161,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 `;
 
   // packages/plugins/clips/src/version.ts
-  var PKG_VERSION15 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION16 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/clips/src/index.ts
   var DEFAULT_TITLE_MAX_LENGTH3 = 80;
@@ -50744,7 +51654,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return {
       id: "clips",
       name: "Clips",
-      version: PKG_VERSION15,
+      version: PKG_VERSION16,
       type: "feature",
       description: "Viewer-created clips with two-handle range selection, preview loop and host submission",
       init(pluginApi) {
@@ -51161,10 +52071,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/analytics/src/version.ts
-  var PKG_VERSION16 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
+  var PKG_VERSION17 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/analytics/src/index.ts
-  var PLUGIN_VERSION = PKG_VERSION16;
+  var PLUGIN_VERSION = PKG_VERSION17;
   var PLUGIN_NAME = "scarlett-player";
   var DEFAULT_CONFIG5 = {
     heartbeatInterval: 1e4,
@@ -51872,6 +52782,7 @@ Cada trampa se prueba una sola vez.
       opacity: 0.5,
       imageHeight: 64
     });
+    const whepPlugin = createWHEPPlugin();
     const player = await createPlayer({
       container,
       src: VIDEO_URL,
@@ -51886,6 +52797,11 @@ Cada trampa se prueba una sola vez.
         // HLS streams (.m3u8)
         createNativePlugin(),
         // Native formats (MP4, WebM, MOV, MKV)
+        // WebRTC over WHEP, claimed by a `whep` path segment. There is no
+        // public WHEP stream to preload, so the WHEP Monitor panel is a URL
+        // box; the instance is kept in scope so the panel can read the
+        // session URL the server handed back.
+        whepPlugin,
         uiPlugin({
           hideDelay: 3e3,
           theme: {
@@ -52057,6 +52973,88 @@ Cada trampa se prueba una sola vez.
     });
     document.getElementById("watermark-show-btn")?.addEventListener("click", () => watermarkPlugin.show());
     document.getElementById("watermark-hide-btn")?.addEventListener("click", () => watermarkPlugin.hide());
+    const whepUrlInput = document.getElementById("whep-url-input");
+    const whepJoinBtn = document.getElementById("whep-join-btn");
+    const whepBadge = document.getElementById("whep-badge");
+    const whepSession = document.getElementById("whep-session");
+    const whepLatency = document.getElementById("whep-latency");
+    const whepReconnect = document.getElementById("whep-reconnect");
+    const WHEP_URL_KEY = "scarlett-demo-whep-url";
+    try {
+      const remembered = window.localStorage.getItem(WHEP_URL_KEY);
+      if (remembered && whepUrlInput) whepUrlInput.value = remembered;
+    } catch {
+    }
+    const isWhepSource = () => player.getState().source?.type === "application/sdp";
+    let whepReconnecting = false;
+    const setWhepBadge = (text, on) => {
+      if (!whepBadge) return;
+      whepBadge.textContent = text;
+      whepBadge.classList.toggle("live-badge--on", on);
+    };
+    const joinWhep = async () => {
+      const url = whepUrlInput?.value.trim();
+      if (!url || !whepJoinBtn) return;
+      try {
+        window.localStorage.setItem(WHEP_URL_KEY, url);
+      } catch {
+      }
+      whepJoinBtn.disabled = true;
+      whepJoinBtn.textContent = "Joining...";
+      whepReconnecting = false;
+      setWhepBadge("Joining", false);
+      if (whepReconnect) whepReconnect.textContent = "\u2014";
+      try {
+        await player.load(url);
+        console.log("WHEP joined:", url);
+      } catch (e) {
+        console.error("WHEP join failed:", e.message);
+      } finally {
+        whepJoinBtn.disabled = false;
+        whepJoinBtn.textContent = "Join";
+      }
+    };
+    whepJoinBtn?.addEventListener("click", () => void joinWhep());
+    whepUrlInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void joinWhep();
+    });
+    player.on("error:reconnecting", (e) => {
+      if (!isWhepSource() || !whepReconnect) return;
+      const delay = (e.delayMs / 1e3).toFixed(1);
+      whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
+      whepReconnecting = true;
+      setWhepBadge("Reconnecting", false);
+      console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
+    });
+    player.on("error:recovered", (e) => {
+      if (!isWhepSource() || !whepReconnect) return;
+      whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : "recovered";
+      whepReconnecting = false;
+      console.log("WHEP recovered");
+    });
+    player.on("error:reconnect-exhausted", (e) => {
+      if (!isWhepSource() || !whepReconnect) return;
+      whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
+      whepReconnecting = false;
+      setWhepBadge("Gave up", false);
+    });
+    window.setInterval(() => {
+      const state = player.getState();
+      const whep = isWhepSource();
+      const session = whep ? whepPlugin.getSessionUrl() : null;
+      if (whepSession) {
+        whepSession.textContent = session ? session.replace(/^https?:\/\/[^/]+/, "") : "\u2014";
+        whepSession.title = session ?? "";
+      }
+      if (whepLatency) {
+        whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : "\u2014";
+      }
+      if (whep && whepReconnecting) setWhepBadge("Reconnecting", false);
+      else if (whep && state.playbackState === "playing") setWhepBadge("Playing", true);
+      else if (whep && state.playbackState === "ready") setWhepBadge("Joined", true);
+      else if (whep && state.playbackState === "error") setWhepBadge("Error", false);
+      else if (!whep) setWhepBadge("Not joined", false);
+    }, 500);
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
@@ -52073,6 +53071,7 @@ Cada trampa se prueba una sola vez.
     window.player = player;
     window.watermarkPlugin = watermarkPlugin;
     window.clipsPlugin = clipsPlugin;
+    window.whepPlugin = whepPlugin;
     console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
     console.log("Access player via window.player");
     const audioContainer = document.getElementById("audio-player");

@@ -5,6 +5,7 @@
 import { createPlayer } from '../packages/core/src/index';
 import { createHLSPlugin } from '../packages/plugins/hls/src/index';
 import { createNativePlugin } from '../packages/plugins/native/src/index';
+import { createWHEPPlugin } from '../packages/plugins/whep/src/index';
 import { uiPlugin } from '../packages/plugins/ui/src/index';
 import { airplayPlugin } from '../packages/plugins/airplay/src/index';
 import { chromecastPlugin } from '../packages/plugins/chromecast/src/index';
@@ -369,7 +370,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     imageHeight: 64,
   });
 
-  // Provider plugins (HLS and Native) are tried in order - first one that can play the source wins
+  // Kept in scope for the WHEP Monitor panel below, like the two above.
+  const whepPlugin = createWHEPPlugin();
+
+  // Provider plugins (HLS, Native, WHEP) are tried in order - first one that can play the source wins
   const player = await createPlayer({
     container,
     src: VIDEO_URL,
@@ -382,6 +386,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // hls.js only takes the LL path when the playlist carries EXT-X-PART.
       createHLSPlugin({ lowLatencyMode: true }), // HLS streams (.m3u8)
       createNativePlugin(),   // Native formats (MP4, WebM, MOV, MKV)
+      // WebRTC over WHEP, claimed by a `whep` path segment. There is no
+      // public WHEP stream to preload, so the WHEP Monitor panel is a URL
+      // box; the instance is kept in scope so the panel can read the
+      // session URL the server handed back.
+      whepPlugin,
       uiPlugin({
         hideDelay: 3000,
         theme: {
@@ -586,6 +595,113 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('watermark-show-btn')?.addEventListener('click', () => watermarkPlugin.show());
   document.getElementById('watermark-hide-btn')?.addEventListener('click', () => watermarkPlugin.hide());
 
+  // WHEP Monitor panel. A URL box rather than a preset: a WHEP endpoint is a
+  // live WebRTC session on a server (a Tmesis box, MediaMTX, ...) and there is
+  // no public one to point the demo at. The endpoint is remembered in
+  // localStorage so a reload keeps it. Joining goes through player.load(), so
+  // the provider is chosen the way it is for any other URL.
+  const whepUrlInput = document.getElementById('whep-url-input') as HTMLInputElement | null;
+  const whepJoinBtn = document.getElementById('whep-join-btn') as HTMLButtonElement | null;
+  const whepBadge = document.getElementById('whep-badge');
+  const whepSession = document.getElementById('whep-session');
+  const whepLatency = document.getElementById('whep-latency');
+  const whepReconnect = document.getElementById('whep-reconnect');
+  const WHEP_URL_KEY = 'scarlett-demo-whep-url';
+
+  try {
+    const remembered = window.localStorage.getItem(WHEP_URL_KEY);
+    if (remembered && whepUrlInput) whepUrlInput.value = remembered;
+  } catch {
+    // Storage may be unavailable (private mode); the box just starts empty.
+  }
+
+  /** Whether the player's current source is the WHEP provider's. */
+  const isWhepSource = (): boolean => player.getState().source?.type === 'application/sdp';
+
+  // True from a scheduled reconnect until recovery or exhaustion. Between
+  // attempts the provider's playbackState is 'error', so without this the
+  // 500 ms readout below would overwrite "Reconnecting" with "Error".
+  let whepReconnecting = false;
+
+  const setWhepBadge = (text: string, on: boolean): void => {
+    if (!whepBadge) return;
+    whepBadge.textContent = text;
+    whepBadge.classList.toggle('live-badge--on', on);
+  };
+
+  const joinWhep = async (): Promise<void> => {
+    const url = whepUrlInput?.value.trim();
+    if (!url || !whepJoinBtn) return;
+    try {
+      window.localStorage.setItem(WHEP_URL_KEY, url);
+    } catch {
+      // Not remembered, still joined.
+    }
+    whepJoinBtn.disabled = true;
+    whepJoinBtn.textContent = 'Joining...';
+    whepReconnecting = false;
+    setWhepBadge('Joining', false);
+    if (whepReconnect) whepReconnect.textContent = '—';
+    try {
+      await player.load(url);
+      console.log('WHEP joined:', url);
+    } catch (e) {
+      console.error('WHEP join failed:', (e as Error).message);
+    } finally {
+      whepJoinBtn.disabled = false;
+      whepJoinBtn.textContent = 'Join';
+    }
+  };
+
+  whepJoinBtn?.addEventListener('click', () => void joinWhep());
+  whepUrlInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void joinWhep();
+  });
+
+  // The reconnect column: the scheduler's own events, which the HLS provider
+  // emits with the same names, so this panel only reads them for WHEP.
+  player.on('error:reconnecting', (e) => {
+    if (!isWhepSource() || !whepReconnect) return;
+    const delay = (e.delayMs / 1000).toFixed(1);
+    whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
+    whepReconnecting = true;
+    setWhepBadge('Reconnecting', false);
+    console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
+  });
+  player.on('error:recovered', (e) => {
+    if (!isWhepSource() || !whepReconnect) return;
+    whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : 'recovered';
+    whepReconnecting = false;
+    console.log('WHEP recovered');
+  });
+  player.on('error:reconnect-exhausted', (e) => {
+    if (!isWhepSource() || !whepReconnect) return;
+    whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
+    whepReconnecting = false;
+    setWhepBadge('Gave up', false);
+  });
+
+  // Session and latency, on a timer like the page's own stats panel: the
+  // session URL is on the plugin, not in state, and the latency estimate
+  // moves once a second.
+  window.setInterval(() => {
+    const state = player.getState();
+    const whep = isWhepSource();
+    const session = whep ? whepPlugin.getSessionUrl() : null;
+    if (whepSession) {
+      whepSession.textContent = session ? session.replace(/^https?:\/\/[^/]+/, '') : '—';
+      whepSession.title = session ?? '';
+    }
+    if (whepLatency) {
+      whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : '—';
+    }
+    if (whep && whepReconnecting) setWhepBadge('Reconnecting', false);
+    else if (whep && state.playbackState === 'playing') setWhepBadge('Playing', true);
+    else if (whep && state.playbackState === 'ready') setWhepBadge('Joined', true);
+    else if (whep && state.playbackState === 'error') setWhepBadge('Error', false);
+    else if (!whep) setWhepBadge('Not joined', false);
+  }, 500);
+
   // Log events for debugging
   player.on('playback:play', () => console.log('▶️ Playing'));
   player.on('playback:pause', () => console.log('⏸️ Paused'));
@@ -610,6 +726,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   (window as any).player = player;
   (window as any).watermarkPlugin = watermarkPlugin;
   (window as any).clipsPlugin = clipsPlugin;
+  (window as any).whepPlugin = whepPlugin;
 
   console.log(`🎬 Scarlett Player v${VERSION} Demo Ready`);
   console.log('Access player via window.player');

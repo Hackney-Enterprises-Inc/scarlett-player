@@ -1,0 +1,56 @@
+{
+  "name": "@scarlett-player/whep",
+  "version": "1.14.0",
+  "description": "WHEP (WebRTC-HTTP Egress Protocol) provider plugin for Scarlett Player: sub-second live monitoring of a Tmesis preview or any WHEP server that answers offers",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "peerDependencies": {
+    "@scarlett-player/core": "^1.9.0"
+  },
+  "devDependencies": {
+    "@scarlett-player/core": "workspace:*",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.6.0",
+    "jsdom": "^24.0.0"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "webrtc",
+    "whep",
+    "live",
+    "low-latency",
+    "scarlett"
+  ],
+  "author": "The Stream Platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hackney-Enterprises-Inc/scarlett-player.git",
+    "directory": "packages/plugins/whep"
+  },
+  "bugs": {
+    "url": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/issues"
+  },
+  "homepage": "https://scarlettplayer.com"
+}
