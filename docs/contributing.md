@@ -438,7 +438,7 @@ upgraded to 3.x.
 
 Merging a changeset to `main` makes `release.yml` open (or update) a
 `chore: release packages` PR on the `changeset-release/main` branch. Merging
-that PR versions all eighteen packages together, publishes each to npm through
+that PR versions all nineteen packages together, publishes each to npm through
 trusted publishing (OIDC, no token), tags `v<version>`, creates the GitHub
 release, and uploads the embed bundles to the CDN through
 `scripts/upload-cdn.sh`. Versions are never bumped by hand.
@@ -605,7 +605,7 @@ liveRegion.textContent = 'Video playing';
 ## Version Guidelines
 
 **Semantic Versioning** (SemVer), applied through Changesets in fixed mode: all
-eighteen packages share one version number, so a release publishes them
+nineteen packages share one version number, so a release publishes them
 together even where a package did not change.
 
 - MAJOR: Breaking changes

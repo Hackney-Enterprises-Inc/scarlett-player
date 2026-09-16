@@ -15,6 +15,7 @@
 - **Poster & Big Play Button** - Artwork before the first frame, a centred play affordance over it, and `setPoster()` to change it mid-session (the playlist swaps it per track)
 - **Adaptive Bitrate** - ABR with manual quality override
 - **Live Streaming** - Live indicator, DVR seeking, seek-to-live, latency tracking
+- **WHEP Monitoring** - Sub-second WebRTC playback over WHEP for a producer's low-delay preview (Tmesis, MediaMTX, any server that answers offers), with the HLS provider's reconnect scheduler
 - **AirPlay & Chromecast** - Built-in casting with session management
 - **Playlists** - Queue management, shuffle, repeat modes, auto-advance
 - **Analytics** - QoE metrics, engagement tracking, beacon transport
@@ -42,6 +43,7 @@ npm install @scarlett-player/core @scarlett-player/native @scarlett-player/audio
 
 # Optional plugins
 npm install @scarlett-player/native        # Native media (MP4, WebM, MP3, WAV, FLAC, etc.)
+npm install @scarlett-player/whep          # WebRTC over WHEP: sub-second live monitoring
 npm install @scarlett-player/airplay       # AirPlay casting
 npm install @scarlett-player/chromecast    # Chromecast casting
 npm install @scarlett-player/analytics     # QoE metrics & engagement tracking
@@ -216,6 +218,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/core` | Core engine - reactive state, event bus, plugin system, error handling |
 | `@scarlett-player/hls` | HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
 | `@scarlett-player/native` | Native provider - video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
+| `@scarlett-player/whep` | WHEP provider - WebRTC playback over WHEP for sub-second live monitoring; bearer token or async token provider, the HLS provider's reconnect knobs, a receiver-side latency estimate. Answers only (no server counter-offers) |
 | `@scarlett-player/ui` | Video UI - play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
 | `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
 | `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
@@ -357,7 +360,7 @@ node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture on
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 18 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 19 packages share the same version number.
 
 ```bash
 pnpm changeset        # Create a changeset for your changes
@@ -373,6 +376,7 @@ packages/
   plugins/
     hls/            # HLS provider (hls.js + native Safari)
     native/         # Native media (video + audio formats)
+    whep/           # WHEP provider (WebRTC, sub-second live monitoring)
     ui/             # Video UI controls
     audio-ui/       # Audio player UI (full, compact, mini layouts)
     airplay/        # AirPlay casting

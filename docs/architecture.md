@@ -51,7 +51,7 @@ ever carried a `plugin-` prefix), the name here is the one the code uses.
                                |
 +------------------------------v--------------------------------+
 |  Plugins (one npm package each)                               |
-|   provider:  hls, native                                      |
+|   provider:  hls, native, whep                                |
 |   ui:        ui, audio-ui                                     |
 |   feature:   playlist, captions, chapters, clips,             |
 |              gestures, share, watermark, media-session,       |
@@ -86,7 +86,7 @@ controls.
 
 ## Packages
 
-Eighteen packages, all published at one version by a fixed Changesets group.
+Nineteen packages, all published at one version by a fixed Changesets group.
 
 | Path | Package |
 |---|---|
@@ -95,6 +95,7 @@ Eighteen packages, all published at one version by a fixed Changesets group.
 | `packages/embed` | `@scarlett-player/embed` |
 | `packages/plugins/hls` | `@scarlett-player/hls` |
 | `packages/plugins/native` | `@scarlett-player/native` |
+| `packages/plugins/whep` | `@scarlett-player/whep` |
 | `packages/plugins/ui` | `@scarlett-player/ui` |
 | `packages/plugins/audio-ui` | `@scarlett-player/audio-ui` |
 | `packages/plugins/playlist` | `@scarlett-player/playlist` |
@@ -582,7 +583,7 @@ caused state to drift from the element.
 - The playlist plugin registers its control-bar controls through
   `void import('@scarlett-player/ui')` and logs and continues when the UI package
   is absent, which is what makes it work headless.
-- Versioning is Changesets in fixed mode: all eighteen packages share one
+- Versioning is Changesets in fixed mode: all nineteen packages share one
   version number.
 
 ## Testing

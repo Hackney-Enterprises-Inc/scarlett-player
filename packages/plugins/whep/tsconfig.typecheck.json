@@ -1,0 +1,13 @@
+{
+  "//": "Type-checks src AND tests. The build config sets rootDir ./src while including tests/**/*, so a plain `tsc --noEmit` fails with TS6059 before it checks anything; every test file therefore went unchecked until 2026-09-02. `pnpm build` still uses tsconfig.json, so this file cannot change what tsup's --dts emits.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "//exclude": "Restated on purpose. `exclude` is inherited from the extended config and filters `include`, so a package that later excludes \"tests\" there would silently drop every test file out of this program and each type guarantee in them would pass vacuously.",
+  "exclude": ["node_modules", "dist"]
+}

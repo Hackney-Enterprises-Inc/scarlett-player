@@ -24,7 +24,8 @@
       "@scarlett-player/share",
       "@scarlett-player/chapters",
       "@scarlett-player/gestures",
-      "@scarlett-player/clips"
+      "@scarlett-player/clips",
+      "@scarlett-player/whep"
     ]
   ],
   "linked": [],
