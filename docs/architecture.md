@@ -111,7 +111,7 @@ Nineteen packages, all published at one version by a fixed Changesets group.
 | `packages/plugins/analytics` | `@scarlett-player/analytics` |
 
 There is no React package and no presets package. Every directory under
-`packages/plugins/` is one of the fifteen plugin packages above; the empty
+`packages/plugins/` is one of the sixteen plugin packages above; the empty
 placeholder directories that used to sit beside them were deleted on
 2026-09-02. A name under `packages/plugins/` means a package only when it has a
 `package.json`.

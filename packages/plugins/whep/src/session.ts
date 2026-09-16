@@ -17,8 +17,10 @@ export interface JoinResult {
   answer: string;
   /**
    * The session resource from `Location`, resolved against the endpoint to
-   * an absolute URL, or `null` when the server sent none (the DELETE is
-   * then skipped, and the server frees the session by ICE timeout).
+   * an absolute URL, or `null` when the server sent none or named another
+   * origin (the DELETE is then skipped, and the server frees the session by
+   * ICE timeout). Another origin is refused because the DELETE carries the
+   * bearer token, which must not travel to a host the endpoint did not name.
    */
   sessionUrl: string | null;
 }
@@ -85,7 +87,10 @@ export async function postOffer(
   let sessionUrl: string | null = null;
   if (location) {
     try {
-      sessionUrl = new URL(location, endpoint).toString();
+      const resolved = new URL(location, endpoint);
+      if (resolved.origin === new URL(endpoint).origin) {
+        sessionUrl = resolved.toString();
+      }
     } catch {
       sessionUrl = null;
     }

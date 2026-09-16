@@ -618,6 +618,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   /** Whether the player's current source is the WHEP provider's. */
   const isWhepSource = (): boolean => player.getState().source?.type === 'application/sdp';
 
+  // True from a scheduled reconnect until recovery or exhaustion. Between
+  // attempts the provider's playbackState is 'error', so without this the
+  // 500 ms readout below would overwrite "Reconnecting" with "Error".
+  let whepReconnecting = false;
+
   const setWhepBadge = (text: string, on: boolean): void => {
     if (!whepBadge) return;
     whepBadge.textContent = text;
@@ -634,6 +639,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     whepJoinBtn.disabled = true;
     whepJoinBtn.textContent = 'Joining...';
+    whepReconnecting = false;
     setWhepBadge('Joining', false);
     if (whepReconnect) whepReconnect.textContent = '—';
     try {
@@ -658,17 +664,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!isWhepSource() || !whepReconnect) return;
     const delay = (e.delayMs / 1000).toFixed(1);
     whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
+    whepReconnecting = true;
     setWhepBadge('Reconnecting', false);
     console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
   });
   player.on('error:recovered', (e) => {
     if (!isWhepSource() || !whepReconnect) return;
     whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : 'recovered';
+    whepReconnecting = false;
     console.log('WHEP recovered');
   });
   player.on('error:reconnect-exhausted', (e) => {
     if (!isWhepSource() || !whepReconnect) return;
     whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
+    whepReconnecting = false;
     setWhepBadge('Gave up', false);
   });
 
@@ -686,7 +695,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (whepLatency) {
       whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : '—';
     }
-    if (whep && state.playbackState === 'playing') setWhepBadge('Playing', true);
+    if (whep && whepReconnecting) setWhepBadge('Reconnecting', false);
+    else if (whep && state.playbackState === 'playing') setWhepBadge('Playing', true);
     else if (whep && state.playbackState === 'ready') setWhepBadge('Joined', true);
     else if (whep && state.playbackState === 'error') setWhepBadge('Error', false);
     else if (!whep) setWhepBadge('Not joined', false);

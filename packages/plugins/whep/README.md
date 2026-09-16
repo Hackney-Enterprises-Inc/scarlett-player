@@ -43,7 +43,9 @@ does (absolute inside the container, `playsInline`, no native controls, the
    for ICE gathering so the offer carries the browser's host candidates;
 2. `POST`s the offer as `application/sdp` (with `Authorization: Bearer` when
    a token is configured), applies the `201` answer, and remembers the session
-   resource from `Location`;
+   resource from `Location`. A `Location` on another origin is ignored (the
+   bearer token must not travel to a host the endpoint did not name; the
+   server then frees the session by ICE timeout, as when it sends none);
 3. attaches the remote tracks to the element and calls `play()`. When the
    browser's autoplay policy refuses (sound on, no gesture yet), the element
    stays paused and the viewer's own play works;
@@ -114,9 +116,12 @@ reconnect scheduler the HLS provider uses: `error:reconnecting` on each
 scheduled attempt, `error:recovered` when one connects, and
 `error:reconnect-exhausted` followed by a final fatal `error` carrying
 `detail.reconnectExhausted` when the window closes. Inside a window only the
-first failure emits the fatal `error`; the attempts that follow emit
-`error:reconnecting` again, so a stream that is not live for a while does not
-flash an error every poll.
+first recoverable failure emits the fatal `error`; the recoverable failures
+that follow emit `error:reconnecting` again, so a stream that is not live for
+a while does not flash an error every poll. A terminal failure inside the
+window (the stream deleted mid-outage, say) still emits its fatal `error` and
+ends the window, so a "reconnecting" overlay always has something to take it
+down.
 
 | Answer | Meaning (Tmesis) | Code | Reconnect |
 |---|---|---|---|
@@ -176,7 +181,33 @@ whep.getSessionUrl(); // the session resource, absolute, or null while not joine
 measurement outside the plugin. `estimateLatency(report, previousSample)`
 returns the counters it read as `sample`; hand them to the next call so the
 estimate covers only the frames emitted in between, as the plugin's own
-poll does.
+poll does. `readErrorEnvelope` reads both the Tmesis envelope
+(`{"error":{"code","message"}}`) and MediaMTX's flat one
+(`{"status":"error","error":"..."}`).
+
+Types: `IWHEPPlugin`, `WHEPPluginConfig`, `WHEPTokenProvider`, `WHEPFailure`,
+`TransportFailureKind`, `LatencyEstimate`, `LatencySample`. `PKG_VERSION` is
+the package version the build was produced from.
+
+## Trying it locally
+
+There is no public WHEP stream. [MediaMTX](https://github.com/bluenviron/mediamtx)
+(one binary, default config) plus an ffmpeg test publisher gives you an
+endpoint on this machine; the demo page at `demo/index.html` has a WHEP box
+that joins it:
+
+```bash
+./mediamtx &
+ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 \
+  -c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline -pix_fmt yuv420p -g 30 \
+  -c:a libopus -f rtsp rtsp://localhost:8554/live
+# then join  http://localhost:8889/live/whep
+```
+
+Stop the ffmpeg process mid-play to watch the reconnect scheduler: the
+connection fails, the attempts that follow get MediaMTX's `404` (recoverable
+once the source has played), and the stream recovers when ffmpeg is
+restarted.
 
 ## License
 

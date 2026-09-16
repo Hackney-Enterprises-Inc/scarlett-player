@@ -43012,7 +43012,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let sessionUrl = null;
     if (location2) {
       try {
-        sessionUrl = new URL(location2, endpoint).toString();
+        const resolved = new URL(location2, endpoint);
+        if (resolved.origin === new URL(endpoint).origin) {
+          sessionUrl = resolved.toString();
+        }
       } catch {
         sessionUrl = null;
       }
@@ -52983,6 +52986,7 @@ Cada trampa se prueba una sola vez.
     } catch {
     }
     const isWhepSource = () => player.getState().source?.type === "application/sdp";
+    let whepReconnecting = false;
     const setWhepBadge = (text, on) => {
       if (!whepBadge) return;
       whepBadge.textContent = text;
@@ -52997,6 +53001,7 @@ Cada trampa se prueba una sola vez.
       }
       whepJoinBtn.disabled = true;
       whepJoinBtn.textContent = "Joining...";
+      whepReconnecting = false;
       setWhepBadge("Joining", false);
       if (whepReconnect) whepReconnect.textContent = "\u2014";
       try {
@@ -53017,17 +53022,20 @@ Cada trampa se prueba una sola vez.
       if (!isWhepSource() || !whepReconnect) return;
       const delay = (e.delayMs / 1e3).toFixed(1);
       whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
+      whepReconnecting = true;
       setWhepBadge("Reconnecting", false);
       console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
     });
     player.on("error:recovered", (e) => {
       if (!isWhepSource() || !whepReconnect) return;
       whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : "recovered";
+      whepReconnecting = false;
       console.log("WHEP recovered");
     });
     player.on("error:reconnect-exhausted", (e) => {
       if (!isWhepSource() || !whepReconnect) return;
       whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
+      whepReconnecting = false;
       setWhepBadge("Gave up", false);
     });
     window.setInterval(() => {
@@ -53041,7 +53049,8 @@ Cada trampa se prueba una sola vez.
       if (whepLatency) {
         whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : "\u2014";
       }
-      if (whep && state.playbackState === "playing") setWhepBadge("Playing", true);
+      if (whep && whepReconnecting) setWhepBadge("Reconnecting", false);
+      else if (whep && state.playbackState === "playing") setWhepBadge("Playing", true);
       else if (whep && state.playbackState === "ready") setWhepBadge("Joined", true);
       else if (whep && state.playbackState === "error") setWhepBadge("Error", false);
       else if (!whep) setWhepBadge("Not joined", false);

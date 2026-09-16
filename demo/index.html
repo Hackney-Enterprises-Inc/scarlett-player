@@ -525,6 +525,7 @@
     }
 
     .custom-url-label {
+      display: block;
       font-size: 0.75rem;
       color: #888;
       text-transform: uppercase;
@@ -945,7 +946,7 @@
     <!-- WHEP endpoint box. Its own bar rather than the one above so the VOD
          URL stays put while a monitor is joined; the WHEP Monitor panel
          further down shows the session, latency and reconnect state. -->
-    <div class="custom-url-label">Or join a WHEP endpoint (WebRTC)</div>
+    <label class="custom-url-label" for="whep-url-input">Or join a WHEP endpoint (WebRTC)</label>
     <div class="url-bar">
       <input type="text" id="whep-url-input"
         placeholder="https://box.example.com:8889/whep/v1/streams/show-1  or  http://localhost:8889/live/whep"

@@ -243,6 +243,18 @@ describe('loadSource', () => {
     expect(fetchMock.deletes()).toHaveLength(0);
   });
 
+  it('ignores a Location on another origin, so the token never travels there', async () => {
+    const fetchMock = installFetch([answer('https://elsewhere.example.net/whep/sessions/abc')]);
+    const { plugin } = await setup({ token: 'secret' });
+
+    await expect((await load(plugin)).loading).resolves.toBeUndefined();
+    expect(plugin.getSessionUrl()).toBeNull();
+
+    await plugin.destroy();
+    await settle();
+    expect(fetchMock.deletes()).toHaveLength(0);
+  });
+
   it('rejects and closes the first connection when a newer load supersedes it', async () => {
     installFetch([answer(), answer('/whep/v1/streams/show-2/sessions/def')]);
     FakePeerConnection.options.outcome = 'never';

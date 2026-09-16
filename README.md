@@ -92,6 +92,35 @@ const player = await createPlayer({
 });
 ```
 
+### Live monitor (WHEP, WebRTC)
+
+```typescript
+import { createPlayer } from '@scarlett-player/core';
+import { createWHEPPlugin } from '@scarlett-player/whep';
+import { uiPlugin } from '@scarlett-player/ui';
+
+// Sub-second playback of a producer's preview. The plugin claims any URL
+// with a `whep` path segment (a Tmesis box's /whep/v1/streams/<id>,
+// MediaMTX's /<path>/whep), so it can sit next to the HLS and native
+// providers and the core picks it per source.
+const monitor = await createPlayer({
+  container: document.getElementById('monitor'),
+  src: 'https://box.example.com:8889/whep/v1/streams/show-1',
+  plugins: [
+    createWHEPPlugin({
+      tokenProvider: async () => await fetchPreviewToken(), // omit for an open endpoint
+      reconnectWindowMs: Infinity, // keep polling until the producer goes live
+    }),
+    uiPlugin(),
+  ],
+});
+
+// `live`, `liveEdge` and `liveLatency` state are set the way the HLS
+// provider sets them; `liveLatency` is the receiver's share only (jitter
+// buffer plus half the round trip), refreshed once a second.
+monitor.on('live:latency', ({ latency }) => console.log(`${latency.toFixed(3)}s`));
+```
+
 ### Audio (with playlist and lock screen controls)
 
 ```typescript
@@ -358,6 +387,12 @@ node scripts/verify-browser.mjs                # 39 checks, exits non-zero on fa
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
 ```
 
+The harness has no WHEP scenario: WebRTC needs a real server, not a static
+fixture. To exercise `@scarlett-player/whep` end to end, run MediaMTX locally
+with an ffmpeg test publisher (the exact commands are printed in the demo's
+WHEP Monitor panel and in the package README) and join
+`http://localhost:8889/live/whep` from the demo's WHEP box.
+
 ### Versioning
 
 Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 19 packages share the same version number.
@@ -392,7 +427,7 @@ packages/
     clips/          # Viewer-created clips (range selection, loop preview, host submission)
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
-demo/               # Interactive demo (video + audio players)
+demo/               # Interactive demo (video + audio players, WHEP monitor URL box)
 docs/               # Landing page + architecture docs
 scripts/            # CI guards, browser verification harness, HLS fixture, CDN upload
 ```
@@ -432,6 +467,7 @@ configs), so no transpilation below that is applied.
 - [x] Mobile gesture controls (double-tap seek)
 - [x] Viewer-created clips (range selection, loop preview, host submission)
 - [x] Low-latency HLS (LL-HLS) - part loading, latency catch-up, live metrics, GO LIVE
+- [x] WHEP (WebRTC) live monitoring - sub-second preview, bearer tokens, the HLS reconnect scheduler, receiver-side latency
 - [ ] Mobile gesture controls (swipe for volume and brightness) - Sprint 2
 - [ ] DRM support - Sprint 2
 - [ ] Internationalization (i18n) - Sprint 2
