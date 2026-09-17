@@ -52577,7 +52577,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.15.0" : "dev";
+  var VERSION = true ? "1.15.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
@@ -53038,7 +53038,7 @@ Cada trampa se prueba una sola vez.
       whepReconnecting = false;
       setWhepBadge("Gave up", false);
     });
-    window.setInterval(() => {
+    const whepReadout = window.setInterval(() => {
       const state = player.getState();
       const whep = isWhepSource();
       const session = whep ? whepPlugin.getSessionUrl() : null;
@@ -53055,6 +53055,7 @@ Cada trampa se prueba una sola vez.
       else if (whep && state.playbackState === "error") setWhepBadge("Error", false);
       else if (!whep) setWhepBadge("Not joined", false);
     }, 500);
+    player.on("player:destroy", () => window.clearInterval(whepReadout));
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
