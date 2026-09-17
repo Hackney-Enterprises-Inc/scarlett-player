@@ -24,12 +24,13 @@ const player = await createPlayer({
 });
 ```
 
-The plugin claims any URL with a path segment named `whep`, which is where
-every WHEP server it has met puts its endpoint: a Tmesis box at
-`/whep/v1/streams/<id>`, MediaMTX at `/<path>/whep`, the WISH drafts'
-examples at `/whep/<id>`. It can therefore sit next to the HLS and native
-providers and the core picks it for a WHEP source. A server whose endpoint
-path carries no `whep` segment is not claimed; put the plugin in front of a
+The plugin claims any URL with a path segment named `whep`, or whose last
+segment is `whep.stream`, which is where every WHEP server it has met puts
+its endpoint: a Tmesis box at `/whep/v1/streams/<id>`, MediaMTX at
+`/<path>/whep`, the WISH drafts' examples at `/whep/<id>`, Nimble Streamer
+at `/<app>/<stream>/whep.stream`. It can therefore sit next to the HLS and
+native providers and the core picks it for a WHEP source. A server whose
+endpoint path carries neither is not claimed; put the plugin in front of a
 host-side `canPlay` wrapper for that.
 
 ## What it does

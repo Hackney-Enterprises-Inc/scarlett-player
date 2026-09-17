@@ -684,7 +684,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Session and latency, on a timer like the page's own stats panel: the
   // session URL is on the plugin, not in state, and the latency estimate
   // moves once a second.
-  window.setInterval(() => {
+  //
+  // Stopped on destroy. The page's own stats poller reads `window.player`
+  // and stops the moment an integrator nulls it, but this closure holds the
+  // instance directly, and getState() on a destroyed player throws by
+  // design - every 500ms, as an uncaught error, which is what failed the
+  // browser harness's churn + destroy scenario from 2026-09-16.
+  const whepReadout = window.setInterval(() => {
     const state = player.getState();
     const whep = isWhepSource();
     const session = whep ? whepPlugin.getSessionUrl() : null;
@@ -701,6 +707,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     else if (whep && state.playbackState === 'error') setWhepBadge('Error', false);
     else if (!whep) setWhepBadge('Not joined', false);
   }, 500);
+  player.on('player:destroy', () => window.clearInterval(whepReadout));
 
   // Log events for debugging
   player.on('playback:play', () => console.log('▶️ Playing'));

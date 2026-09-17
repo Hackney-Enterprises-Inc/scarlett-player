@@ -1330,9 +1330,10 @@ playlist.<span class="function">add</span>([
       </div>
     </div>
     <div class="live-hint">
-      Paste the WHEP endpoint of a Tmesis preview (<code>/whep/v1/streams/&lt;id&gt;</code>)
+      Paste the WHEP endpoint of a Tmesis preview (<code>/whep/v1/streams/&lt;id&gt;</code>),
+      of Nimble Streamer (<code>/&lt;app&gt;/&lt;stream&gt;/whep.stream</code>)
       or of any WHEP server that answers offers into the box under the player's URL bar. The plugin claims a URL by its
-      <code>whep</code> path segment, sends a receive-only H.264 + Opus offer,
+      <code>whep</code> path segment or trailing <code>whep.stream</code>, sends a receive-only H.264 + Opus offer,
       and reconnects on <code>409</code>, <code>503</code> and lost connections.
       No server handy? <a href="https://github.com/bluenviron/mediamtx" target="_blank" rel="noopener">MediaMTX</a>
       on this machine plus one ffmpeg command gives you a local one:
