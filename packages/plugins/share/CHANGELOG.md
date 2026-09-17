@@ -22,8 +22,8 @@
   Failures map onto the core's error codes (the package README carries the
   table: `401`/`404`/`406`/`415` are `SOURCE_LOAD_FAILED`, `409 not_live` and
   `503 max_monitors`/`preview_disabled` are `MEDIA_NETWORK_ERROR`) and the
-  recoverable ones enter the same reconnect scheduler as the HLS provider, with
-  the same knobs and defaults (`autoReconnect`, `reconnectBaseDelayMs`,
+  recoverable ones enter a WHEP-specific reconnect scheduler, with the same
+  configurable knobs and base defaults as the HLS provider (`autoReconnect`, `reconnectBaseDelayMs`,
   `reconnectMaxDelayMs`, `reconnectWindowMs`) plus `loadTimeoutMs` (10 s), the
   server's `Retry-After` setting the first delay. `destroy()` and `pagehide`
   `DELETE` the session (`keepalive`) so a closed tab frees its monitor slot at
