@@ -993,9 +993,25 @@ const state = (page) => page.evaluate(() => {
       t: +document.querySelector('video').currentTime.toFixed(2),
     }));
 
+    // In VISUAL viewport coordinates, which is what CDP touch input takes.
+    // getBoundingClientRect() answers in the layout viewport, and under mobile
+    // emulation the two are not the same thing: the demo page is wider than
+    // 320px, so Chromium lays it out in a 431x766 layout viewport and shows a
+    // 320x568 visual viewport into it. Opening the editor focuses the
+    // toolbar's play button, and when that button's bottom edge sits below the
+    // visual viewport Chromium centres it by scrolling the visual viewport
+    // first (its full 198px) and the page second, after which every touch
+    // aimed with layout coordinates landed 198px low, on the features list
+    // under the player. It passed until 2026-09-11 only because the button's
+    // bottom edge happened to sit 4px inside the visual viewport; the slimmer
+    // minimal-layout lanes and the lower rail moved the toolbar ~22px down
+    // and crossed it.
     const endBox = await page.evaluate(() => {
       const r = document.querySelector('[data-clip-handle="end"]').getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      return {
+        x: r.left + r.width / 2 - window.visualViewport.offsetLeft,
+        y: r.top + r.height / 2 - window.visualViewport.offsetTop,
+      };
     });
     await page.touchscreen.tap(endBox.x, endBox.y);
     const client = await page.context().newCDPSession(page);

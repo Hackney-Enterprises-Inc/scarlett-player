@@ -46,16 +46,18 @@ export { estimateLatency, type LatencyEstimate, type LatencySample } from './lat
 export { PKG_VERSION } from './version';
 
 /**
- * A source this plugin claims: any URL with a path segment named `whep`.
+ * A source this plugin claims: any URL with a path segment named `whep`,
+ * or whose last segment is Nimble Streamer's `whep.stream`.
  *
  * That is where every WHEP server this plugin has met puts its endpoint:
- * a Tmesis box at `/whep/v1/streams/<id>`, MediaMTX at `/<path>/whep`, and
- * the WISH drafts' own examples at `/whep/<id>`. The segment has to stand on
- * its own (`/whep/` or a trailing `/whep`), so a path that merely contains
- * the letters, or a query string that names one, is left to the other
- * providers.
+ * a Tmesis box at `/whep/v1/streams/<id>`, MediaMTX at `/<path>/whep`, the
+ * WISH drafts' own examples at `/whep/<id>`, and Nimble Streamer at
+ * `/<app>/<stream>/whep.stream`. The segment has to stand on its own
+ * (`/whep/`, a trailing `/whep` or a trailing `/whep.stream`), so a path
+ * that merely contains the letters, or a query string that names one, is
+ * left to the other providers.
  */
-const WHEP_PATH = /(?:^|\/)whep(?:\/|$)/i;
+const WHEP_PATH = /(?:^|\/)whep(?:\/|$)|\/whep\.stream$/i;
 
 /**
  * How long to wait for ICE gathering before sending the offer anyway.

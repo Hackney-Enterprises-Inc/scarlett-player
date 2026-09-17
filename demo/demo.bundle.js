@@ -43071,7 +43071,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
 
   // packages/plugins/whep/src/index.ts
-  var WHEP_PATH = /(?:^|\/)whep(?:\/|$)/i;
+  var WHEP_PATH = /(?:^|\/)whep(?:\/|$)|\/whep\.stream$/i;
   var GATHER_TIMEOUT_MS = 1e3;
   var LATENCY_POLL_MS = 1e3;
   var LATENCY_EPSILON = 5e-3;

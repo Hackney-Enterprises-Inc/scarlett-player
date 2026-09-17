@@ -113,6 +113,14 @@ describe('canPlay', () => {
     expect(plugin.canPlay('https://example.com/WHEP/x')).toBe(true);
   });
 
+  it('claims a Nimble Streamer endpoint, which ends in whep.stream', () => {
+    expect(plugin.canPlay('https://ingest.example.com/live/show-1/whep.stream')).toBe(true);
+    expect(plugin.canPlay('https://ingest.example.com:8443/live/show-1/whep.stream?token=x')).toBe(true);
+    expect(plugin.canPlay('https://ingest.example.com/live/show-1/WHEP.STREAM')).toBe(true);
+    // Only as the endpoint itself, not as a directory on the way to something else.
+    expect(plugin.canPlay('https://ingest.example.com/whep.stream/show-1/index.m3u8')).toBe(false);
+  });
+
   it('leaves everything else to other providers', () => {
     expect(plugin.canPlay('https://cdn.example.com/live/show-1/index.m3u8')).toBe(false);
     expect(plugin.canPlay('https://example.com/video.mp4')).toBe(false);
@@ -121,6 +129,8 @@ describe('canPlay', () => {
     expect(plugin.canPlay('https://example.com/whepish/stream.m3u8')).toBe(false);
     expect(plugin.canPlay('https://example.com/my-whep-stream.mp4')).toBe(false);
     expect(plugin.canPlay('https://whep.example.com/stream.m3u8')).toBe(false);
+    expect(plugin.canPlay('https://example.com/live/show-1/whep.streams')).toBe(false);
+    expect(plugin.canPlay('https://example.com/live/show-1/notwhep.stream')).toBe(false);
   });
 });
 
