@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.15.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.15.2
+
 ## 1.15.1
 
 ### Patch Changes
