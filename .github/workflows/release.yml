@@ -281,10 +281,24 @@ jobs:
           # too (copied from demo/index.html): ignoring it would take the whole
           # page down rather than just its script.
           #
+          # The site redesign (2026-09-19) added more generated output, all of
+          # it deployed the same way and checked the same way. Every page
+          # links its stylesheet and assets as siblings, so build.cjs mirrors
+          # the authored docs/site.css and docs/assets/ beside each generated
+          # page (demo/site.css + demo/assets/ for the source route the
+          # browser harness loads, docs/demo/site.css + docs/demo/assets/ for
+          # the served route), and emits the homepage's module entry to
+          # docs/site/: a stable home.js the page links, plus hashed chunks
+          # under docs/site/chunks/ that home.js imports on the first Play.
+          # A missing mirror renders the page unstyled; a missing chunk
+          # breaks the homepage player.
+          #
           # Fail here instead: the step is continue-on-error, and "Publish
           # results" reads steps.demo.outcome, so this reports rather than
           # aborting the rest of the release.
-          for artifact in demo/demo.bundle.js docs/demo/demo.bundle.js docs/demo/index.html; do
+          for artifact in \
+            demo/demo.bundle.js docs/demo/demo.bundle.js docs/demo/index.html \
+            demo/site.css docs/demo/site.css docs/site/home.js; do
             if [ ! -s "$artifact" ]; then
               echo "::error::$artifact missing or empty after build"
               exit 1
@@ -295,15 +309,50 @@ jobs:
             fi
           done
 
-          if git diff --quiet demo/ docs/demo/; then
-            echo "Demo bundle unchanged, skipping commit"
+          # The mirrored asset directories and the chunk directory are checked
+          # as a whole: present, non-empty (home.js imports at least one
+          # chunk, so an empty docs/site/chunks/ is a homepage that cannot
+          # start its player), and nothing inside them ignored.
+          # `git ls-files -io` lists exactly the untracked files an ignore
+          # rule would make `git add` skip. Source maps are exempt, as the
+          # demo's are: nothing serves them and .gitignore already keeps
+          # them out of the tree on purpose.
+          for dir in demo/assets docs/demo/assets docs/site/chunks; do
+            if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir")" ]; then
+              echo "::error::$dir missing or empty after build"
+              exit 1
+            fi
+            ignored=$(git ls-files --others --ignored --exclude-standard -- "$dir" | grep -v '\.map$' || true)
+            if [ -n "$ignored" ]; then
+              echo "::error::$dir contains gitignored files, so this commit cannot ship them and the deployed page would 404:"
+              echo "$ignored"
+              exit 1
+            fi
+          done
+
+          # `git status`, not `git diff`: a diff sees only tracked files, and
+          # the first build after an asset is added to docs/assets/ leaves
+          # its mirror UNTRACKED under demo/assets/ and docs/demo/assets/. If
+          # nothing tracked changed in the same build, a diff would report
+          # "unchanged", the mirror would never be committed, and production
+          # would 404 on it. Ignored files are not listed, so the .map files
+          # do not count as changes.
+          #
+          # docs/index.html is authored, but build.cjs stamps it (the
+          # stylesheet and home.js digests, the version badge) exactly as it
+          # stamps demo/index.html, so it is committed here for the same
+          # reason demo/index.html is.
+          if [ -z "$(git status --porcelain -- demo/ docs/demo/ docs/site/ docs/index.html)" ]; then
+            echo "Demo site unchanged, skipping commit"
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            # Whole directories, matching the git diff check above. The build
+            # Whole directories, matching the git status check above. The build
             # also stamps ?v=<version> onto the script tag in each index.html,
-            # and an explicit file list would silently leave that out.
-            git add demo/ docs/demo/
+            # and an explicit file list would silently leave that out. A
+            # directory pathspec also stages removals, which is what retires
+            # a superseded hashed chunk from docs/site/chunks/.
+            git add demo/ docs/demo/ docs/site/ docs/index.html
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             git push
             echo "- Demo site updated" >> $GITHUB_STEP_SUMMARY

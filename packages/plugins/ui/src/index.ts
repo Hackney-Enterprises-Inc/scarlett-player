@@ -194,6 +194,24 @@ const FALLBACK_BAR_HEIGHT = 56;
 const MIN_MENU_HEIGHT = 120;
 
 /**
+ * How long a layout slot may stay without a registered control before the
+ * plugin warns about it.
+ *
+ * Plugin init order is not guaranteed, and the plugins that contribute
+ * controls (playlist, chapters) register them from inside
+ * `import('@scarlett-player/ui').then(...)`, which lands at least a microtask
+ * after this plugin has built its bar. Warning inline at build time therefore
+ * flagged every one of those controls on every mount, and again on each
+ * rebuild that followed. The bar is built first and the layout judged after
+ * this grace instead: the ui chunk is normally already loaded so the import
+ * resolves at once, but a host that split it lazily may still be fetching it.
+ * A typo in the layout still warns, just this much later.
+ *
+ * @internal Exported so the tests do not hard-code the number.
+ */
+export const UNRESOLVED_SLOT_GRACE_MS = 1500;
+
+/**
  * One control in the bar, with everything the fit loop needs to place it.
  */
 interface ControlEntry {
@@ -270,6 +288,25 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   /** Set when the container resized, or before the first fit, so the next update refits. */
   let fitPending = true;
   let addedContainerClass = false;
+  /**
+   * Set while a control-bar rebuild is queued on the microtask queue.
+   *
+   * A plugin registers its controls back to back in one tick, and each
+   * registration used to tear the whole bar down and build it again. One
+   * rebuild after the tick settles is enough. Reset by destroy(), which is
+   * how a flush that lands after teardown knows to do nothing.
+   */
+  let rebuildQueued = false;
+  /**
+   * Layout slots the last build found no control for.
+   *
+   * Filled by createControl(), cleared by every populateControlBar() (a
+   * rebuild re-judges the whole layout), and read once when the grace timer
+   * fires: whatever is still here then is warned about.
+   */
+  const unresolvedSlots = new Set<string>();
+  /** The grace timer, see {@link UNRESOLVED_SLOT_GRACE_MS}; null once fired or cleared. */
+  let unresolvedSlotTimer: ReturnType<typeof setTimeout> | null = null;
 
   const layout = config.controls || DEFAULT_LAYOUT;
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
@@ -333,10 +370,31 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
           }
         }
 
-        api.logger.warn(`Unknown control slot: ${slot}`);
+        // Not registered yet, or never will be. The plugin that owns it may
+        // simply not have run, so this is judged after the grace period
+        // rather than warned about here, see UNRESOLVED_SLOT_GRACE_MS.
+        unresolvedSlots.add(slot);
+        api.logger.debug(`No control registered for slot "${slot}" yet`);
         return null;
       }
     }
+  };
+
+  /**
+   * Warn about every layout slot that still has no control.
+   *
+   * Runs once, when the grace timer fires. A slot a rebuild resolved in the
+   * meantime is no longer in the set, so it stays quiet.
+   */
+  const reportUnresolvedSlots = (): void => {
+    unresolvedSlotTimer = null;
+
+    for (const slot of unresolvedSlots) {
+      api.logger.warn(
+        `Control slot "${slot}" has no registered control after ${UNRESOLVED_SLOT_GRACE_MS}ms - is the plugin installed?`
+      );
+    }
+    unresolvedSlots.clear();
   };
 
   /**
@@ -349,6 +407,10 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     if (!controlBar) {
       return;
     }
+
+    // Every slot is judged afresh: one a registration just resolved must not
+    // be warned about because an earlier build could not fill it.
+    unresolvedSlots.clear();
 
     const rules = new Map(
       resolveFitItems(layout, config.priority).map((template) => [template.id, template])
@@ -770,6 +832,35 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
     populateControlBar();
     updateControls();
+  };
+
+  /**
+   * Run the queued rebuild, unless destroy() cleared it in the meantime.
+   */
+  const flushRebuild = (): void => {
+    if (!rebuildQueued) {
+      return;
+    }
+
+    rebuildQueued = false;
+    rebuildControlBar();
+  };
+
+  /**
+   * Queue one control-bar rebuild for the end of the current tick.
+   *
+   * The registry notifies once per `registerControl()` call, and a plugin
+   * registers its controls back to back. Rebuilding inline for each one
+   * destroyed and recreated every control in the bar N times per mount;
+   * coalescing on the microtask queue makes that one rebuild.
+   */
+  const queueRebuild = (): void => {
+    if (rebuildQueued) {
+      return;
+    }
+
+    rebuildQueued = true;
+    queueMicrotask(flushRebuild);
   };
 
   /**
@@ -1196,6 +1287,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       // Create controls (excluding progress bar which is separate)
       populateControlBar();
 
+      // Anything the first build could not fill gets the grace period to be
+      // registered by a plugin that has not run yet. Later rebuilds are only
+      // ever triggered by registrations, which resolve slots rather than
+      // unresolve them, so one timer armed here is enough - and a layout
+      // that built clean never needs it.
+      if (unresolvedSlots.size > 0) {
+        unresolvedSlotTimer = setTimeout(reportUnresolvedSlots, UNRESOLVED_SLOT_GRACE_MS);
+      }
+
       container.appendChild(controlBar);
 
       // One observer for both jobs: refitting the bar and bounding the menus.
@@ -1230,7 +1330,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       }
 
       // Plugin init order is not guaranteed, so a control this layout asks for
-      // may register after the bar was already built. Rebuild when that happens.
+      // may register after the bar was already built. Rebuild when that
+      // happens - once per tick, however many registrations the tick brings.
       controlRegistryUnsubscribe = onControlRegistered((id, owner) => {
         if (!layout.includes(id)) {
           return;
@@ -1242,8 +1343,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
           return;
         }
 
-        api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
-        rebuildControlBar();
+        api.logger.debug(`Control "${id}" registered after init, queuing a control bar rebuild`);
+        queueRebuild();
       });
 
       // Set up interaction handlers
@@ -1347,6 +1448,15 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
 
       controlRegistryUnsubscribe?.();
       controlRegistryUnsubscribe = null;
+
+      // A rebuild queued this tick must find nothing to do when it flushes,
+      // and the grace verdict on the layout is moot for a bar that is gone.
+      rebuildQueued = false;
+      if (unresolvedSlotTimer) {
+        clearTimeout(unresolvedSlotTimer);
+        unresolvedSlotTimer = null;
+      }
+      unresolvedSlots.clear();
 
       // Destroy controls (the overflow tray is one of them)
       controls.forEach((c) => c.destroy());

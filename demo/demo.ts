@@ -1,8 +1,13 @@
 /**
- * Scarlett Player Demo
+ * Scarlett Player playground: player and plugin setup.
+ *
+ * This file builds the three players (video, full audio, mini audio) with
+ * every plugin the playground demonstrates, then hands them to the site
+ * controller (site-controller.ts), which owns everything the page shows
+ * around them. Nothing in here touches the page layout.
  */
 
-import { createPlayer } from '../packages/core/src/index';
+import { ScarlettPlayer } from '../packages/core/src/index';
 import { createHLSPlugin } from '../packages/plugins/hls/src/index';
 import { createNativePlugin } from '../packages/plugins/native/src/index';
 import { createWHEPPlugin } from '../packages/plugins/whep/src/index';
@@ -20,9 +25,10 @@ import { createChaptersPlugin } from '../packages/plugins/chapters/src/index';
 import { createClipsPlugin } from '../packages/plugins/clips/src/index';
 import { createAnalyticsPlugin } from '../packages/plugins/analytics/src/index';
 import type { Chapter } from '../packages/core/src/index';
-import type { BeaconPayload } from '../packages/plugins/analytics/src/index';
+import type { IPlaylistPlugin } from '../packages/plugins/playlist/src/index';
 import type { ClipRange } from '../packages/plugins/clips/src/index';
-import type { WatermarkPosition } from '../packages/plugins/watermark/src/index';
+import { SAMPLE, SCENARIOS, parseLocation } from './scenarios';
+import { createSiteController, type AudioTrackSpec, type SiteController } from './site-controller';
 
 // Version injected at build time
 declare const __VERSION__: string;
@@ -30,9 +36,6 @@ const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev';
 
 // Expose version globally
 (window as any).SCARLETT_VERSION = VERSION;
-
-// Demo video URL - supports both HLS (.m3u8) and native formats (.mp4, .webm, .mov, .mkv)
-const VIDEO_URL = 'https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8';
 
 // Big Buck Bunny runs about 10:34. Everything below is timed against that.
 const VIDEO_DURATION_SECONDS = 634;
@@ -150,234 +153,116 @@ const VIDEO_CHAPTERS: Chapter[] = [
   { time: 520, label: 'Credits', subtitle: 'Peach open movie', endTime: VIDEO_DURATION_SECONDS },
 ];
 
-/** Rows kept in the Analytics Log panel before the oldest are dropped. */
-const ANALYTICS_LOG_LIMIT = 50;
-
 /**
- * Beacon fields worth showing in the log, in the order they are rendered.
- *
- * A beacon carries roughly twenty environment fields that are identical on
- * every row (browser, os, screen size), so the panel shows only the handful
- * that change from event to event.
+ * The caption tracks as the code panel describes them: hosted .vtt files in
+ * place of the blob URLs the demo really uses, since a blob URL is useless
+ * outside this page.
  */
-const ANALYTICS_DETAIL_KEYS = [
-  'startupTime',
-  'currentTime',
-  'seekTo',
-  'duration',
-  'bitrate',
-  'height',
-  'watchTime',
-  'playTime',
-  'qoeScore',
-  'rebufferCount',
-  'errorMessage',
-  'exitType',
-  'completionRate',
+const SNIPPET_CAPTIONS = [
+  { language: 'en', label: 'English', src: 'captions/en.vtt' },
+  { language: 'es', label: 'Spanish', src: 'captions/es.vtt' },
 ];
-
-/**
- * Render the interesting part of a beacon as a short `key=value` string.
- *
- * @param payload - Beacon the analytics plugin was about to transmit
- * @returns Up to three formatted fields, or an empty string when none apply
- */
-function formatBeaconDetail(payload: BeaconPayload): string {
-  const parts: string[] = [];
-
-  for (const key of ANALYTICS_DETAIL_KEYS) {
-    if (parts.length >= 3) break;
-
-    const value = payload[key];
-    if (value === undefined || value === null || value === '') continue;
-
-    parts.push(`${key}=${typeof value === 'number' ? Math.round(value * 10) / 10 : String(value)}`);
-  }
-
-  return parts.join('  ');
-}
-
-/**
- * Add one beacon to the Analytics Log panel, newest first.
- *
- * @param payload - Beacon the analytics plugin was about to transmit
- */
-function appendAnalyticsRow(payload: BeaconPayload): void {
-  const log = document.getElementById('analytics-log');
-  if (!log) return;
-
-  log.querySelector('.analytics-empty')?.remove();
-
-  const row = document.createElement('div');
-  row.className = 'analytics-row';
-
-  const time = document.createElement('span');
-  time.className = 'analytics-time';
-  time.textContent = new Date(payload.timestamp).toLocaleTimeString();
-
-  const event = document.createElement('span');
-  event.className = 'analytics-event';
-  event.textContent = String(payload.event);
-
-  const detail = document.createElement('span');
-  detail.className = 'analytics-detail';
-  detail.textContent = formatBeaconDetail(payload);
-
-  row.append(time, event, detail);
-  log.prepend(row);
-
-  while (log.childElementCount > ANALYTICS_LOG_LIMIT) {
-    log.lastElementChild?.remove();
-  }
-}
-
-/**
- * Empty the Analytics Log panel and put its placeholder line back.
- */
-function clearAnalyticsLog(): void {
-  const log = document.getElementById('analytics-log');
-  if (!log) return;
-
-  log.innerHTML = '<div class="analytics-empty">Beacons will appear here as you play the video...</div>';
-}
-
-/** Rows kept in the Clip Log panel before the oldest are dropped. */
-const CLIP_LOG_LIMIT = 30;
-
-/**
- * Add one line to the Clip Log panel, newest first.
- *
- * Modelled on the Analytics Log rows: time, event, short detail - plus an
- * optional pretty-printed JSON block underneath, which is how the payload of
- * a requested clip is shown. The JSON goes in via `textContent`, never
- * innerHTML: it contains viewer-entered title text.
- *
- * @param event - The clip event name or simulated server status
- * @param detail - One-line summary shown next to the event
- * @param json - Optional payload rendered as a JSON block
- */
-function appendClipRow(event: string, detail: string, json?: unknown): void {
-  const log = document.getElementById('clip-log');
-  if (!log) return;
-
-  log.querySelector('.clip-log-empty')?.remove();
-
-  const row = document.createElement('div');
-  row.className = 'clip-row';
-
-  const head = document.createElement('div');
-  head.className = 'clip-row-head';
-
-  const time = document.createElement('span');
-  time.className = 'clip-time';
-  time.textContent = new Date().toLocaleTimeString();
-
-  const eventName = document.createElement('span');
-  eventName.className = 'clip-event';
-  eventName.textContent = event;
-
-  const detailEl = document.createElement('span');
-  detailEl.className = 'clip-detail';
-  detailEl.textContent = detail;
-
-  head.append(time, eventName, detailEl);
-  row.append(head);
-
-  if (json !== undefined) {
-    const pre = document.createElement('pre');
-    pre.className = 'clip-json';
-    pre.textContent = JSON.stringify(json, null, 2);
-    row.append(pre);
-  }
-
-  log.prepend(row);
-
-  while (log.childElementCount > CLIP_LOG_LIMIT) {
-    log.lastElementChild?.remove();
-  }
-}
-
-/**
- * Empty the Clip Log panel and put its placeholder line back.
- */
-function clearClipLog(): void {
-  const log = document.getElementById('clip-log');
-  if (!log) return;
-
-  log.innerHTML = '<div class="clip-log-empty">Clips you create will appear here...</div>';
-}
-
-/**
- * The clips server faked, so the demo needs no API behind it.
- *
- * Stands in for the Laravel package: prints the payload the plugin captured,
- * then plays out a simulated rendering-to-ready sequence (202 today,
- * "rendering" at ~2s, "ready" with a URL at ~4s). The resolved value is the
- * realistic 202 body, which `clip:created` carries as `result`.
- *
- * @param range - The captured clip range, exactly what a real host POSTs
- * @returns Resolves with the fake 202 body right away, statuses follow
- */
-function fakeClipCreation(range: ClipRange): Promise<{ uuid: string; status_url: string }> {
-  const uuid = crypto.randomUUID();
-  const clipUrl = `https://example.com/clips/${uuid}`;
-
-  // Also kept in memory for the browser harness (scripts/verify-browser.mjs),
-  // which needs the exact payload rather than the rendered log row - and
-  // needs it locally, because no scenario in that harness may depend on an
-  // external origin.
-  const captures = ((window as unknown as { __clipCaptures?: ClipRange[] }).__clipCaptures ??= []);
-  captures.push(range);
-
-  appendClipRow('clip:requested', `POST /api/clips (simulated)`, range);
-  window.setTimeout(() => appendClipRow('status', 'rendering'), 2000);
-  window.setTimeout(() => appendClipRow('status', `ready  url=${clipUrl}`), 4000);
-
-  return Promise.resolve({ uuid, status_url: clipUrl });
-}
 
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
   const container = document.getElementById('player');
-  if (!container) {
-    console.error('Player container not found');
+  const audioContainer = document.getElementById('audio-player');
+  const miniContainer = document.getElementById('mini-player');
+  if (!container || !audioContainer || !miniContainer) {
+    console.error('Player containers not found');
     return;
   }
 
-  // Create and initialise the player with its plugins. createPlayer() is the
-  // documented entry point every README teaches: it constructs, initialises
-  // the plugins and loads `src`, and its promise resolves after `player:ready`
-  // has been emitted.
-  //
-  // The clips plugin instance is kept in scope because the Clip Controls
-  // panel below calls configure()/open() on it. The demo fakes the server
-  // through onCreate (task 4.3 of the clips plan); a real host running the
-  // Laravel package would write `endpoint: { url: '/api/clips' }` instead.
+  // The scenario the page opens on decides which sample, if any, the video
+  // player starts loading. A page opened on #audio fetches no video manifest.
+  const initial = parseLocation(window.location.hash, window.location.search);
+  const initialScenario = SCENARIOS[initial.id];
+  const initialVideoSrc = initialScenario.group === 'cinema' ? initialScenario.src : null;
+
+  // Player and plugin instances live outside the arrays so the controller can
+  // call their public methods (configure/open on clips, the watermark
+  // setters, setTheme on the UIs, getSessionUrl on WHEP).
+  let controller: SiteController | null = null;
+
+  // The clips server faked, so the demo needs no API behind it. Stands in for
+  // the Laravel package: records the payload the plugin captured, then plays
+  // out a simulated rendering-to-ready sequence (202 today, "rendering" at
+  // ~2s, "ready" with a URL at ~4s). Nothing is processed or published.
+  const fakeClipCreation = (range: ClipRange): Promise<{ uuid: string; status_url: string }> => {
+    const uuid = crypto.randomUUID();
+    const clipUrl = `https://example.com/clips/${uuid}`;
+
+    // Also kept in memory for the browser harness (scripts/verify-browser.mjs),
+    // which needs the exact payload rather than the rendered log row - and
+    // needs it locally, because no scenario in that harness may depend on an
+    // external origin.
+    const captures = ((window as unknown as { __clipCaptures?: ClipRange[] }).__clipCaptures ??= []);
+    captures.push(range);
+
+    controller?.logClip('clip:requested', 'POST /api/clips (simulated)', range);
+    window.setTimeout(() => controller?.logClip('status', 'rendering (simulated)'), 2000);
+    window.setTimeout(() => controller?.logClip('status', `ready (simulated)  url=${clipUrl}`), 4000);
+
+    return Promise.resolve({ uuid, status_url: clipUrl });
+  };
+
   const clipsPlugin = createClipsPlugin({
     mediaId: 'demo-bbb',
     onCreate: fakeClipCreation,
   });
 
-  // Held in scope for the same reason, for the Watermark Controls panel. A
-  // consumer would reach for `player.getPlugin<IWatermarkPlugin>('watermark')`
-  // as the README shows; this file compiles core from src while the plugins
-  // resolve its types from dist, so that generic does not line up here - the
-  // same mismatch the clip:* event casts below work around.
+  // Off by default for the public showcase: the plugin still mounts and
+  // shows on play, but with no text and no image it renders nothing. The
+  // Customize panel gives it content when the switch is turned on.
   const watermarkPlugin = createWatermarkPlugin({
-    imageUrl: 'https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png',
     position: 'bottom-right',
     opacity: 0.5,
     imageHeight: 64,
   });
 
-  // Kept in scope for the WHEP Monitor panel below, like the two above.
   const whepPlugin = createWHEPPlugin();
 
-  // Provider plugins (HLS, Native, WHEP) are tried in order - first one that can play the source wins
-  const player = await createPlayer({
+  const videoUI = uiPlugin({
+    hideDelay: 3000,
+    theme: {
+      accentColor: '#e50914',
+    },
+    // Spelled out because 'share', 'chapters' and 'clip' are not in the
+    // default layout - those plugins register their controls, but a layout
+    // has to ask for them. This is the default order with 'chapters'
+    // inserted before the settings menu, 'clip' before it too, and 'share'
+    // before the cast buttons.
+    controls: [
+      'play',
+      'skip-backward',
+      'skip-forward',
+      'volume',
+      'time',
+      'live-indicator',
+      'bandwidth-indicator',
+      'spacer',
+      'clip',
+      'chapters',
+      'settings',
+      'captions',
+      'share',
+      'chromecast',
+      'airplay',
+      'pip',
+      'fullscreen',
+    ],
+  });
+
+  const chaptersPlugin = createChaptersPlugin({
+    chapters: VIDEO_CHAPTERS,
+  });
+
+  // Provider plugins (HLS, Native, WHEP) are tried in order - first one that
+  // can play the source wins.
+  const player = new ScarlettPlayer({
     container,
-    src: VIDEO_URL,
-    poster: 'https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg',
+    src: initialVideoSrc ?? undefined,
+    poster: SAMPLE.poster,
     logLevel: 'debug',
     plugins: [
       // lowLatencyMode is opt-in for consumers and off by default; the demo
@@ -387,40 +272,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       createHLSPlugin({ lowLatencyMode: true }), // HLS streams (.m3u8)
       createNativePlugin(),   // Native formats (MP4, WebM, MOV, MKV)
       // WebRTC over WHEP, claimed by a `whep` path segment. There is no
-      // public WHEP stream to preload, so the WHEP Monitor panel is a URL
-      // box; the instance is kept in scope so the panel can read the
-      // session URL the server handed back.
+      // public WHEP stream to preload; the Live monitor scenario takes an
+      // endpoint from the visitor.
       whepPlugin,
-      uiPlugin({
-        hideDelay: 3000,
-        theme: {
-          accentColor: '#e50914',
-        },
-        // Spelled out because 'share', 'chapters' and 'clip' are not in the
-        // default layout - those plugins register their controls, but a layout
-        // has to ask for them. This is the default order with 'chapters'
-        // inserted before the settings menu, 'clip' before it too, and 'share'
-        // before the cast buttons.
-        controls: [
-          'play',
-          'skip-backward',
-          'skip-forward',
-          'volume',
-          'time',
-          'live-indicator',
-          'bandwidth-indicator',
-          'spacer',
-          'clip',
-          'chapters',
-          'settings',
-          'captions',
-          'share',
-          'chromecast',
-          'airplay',
-          'pip',
-          'fullscreen',
-        ],
-      }),
+      videoUI,
       airplayPlugin(),
       chromecastPlugin(),
       watermarkPlugin,
@@ -453,15 +308,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       // An inline list, so no chapters file is fetched. The plugin writes
       // `chapters` state (the progress bar paints a marker per boundary) and
       // registers the 'chapters' control listed above.
-      createChaptersPlugin({
-        chapters: VIDEO_CHAPTERS,
-      }),
+      chaptersPlugin,
       // Viewer-created clips: the button above (in the 'clip' slot) opens a
       // two-handle selector that loops the selection, and Confirm hands the
       // captured range to fakeClipCreation - the stand-in for the highlights
       // server. Video-only, so this plugin is deliberately absent from the
-      // audio player. The instance lives outside the array so the Clip
-      // Controls panel can reconfigure and open it.
+      // audio player.
       clipsPlugin,
       // Nothing leaves the page: `customBeacon` replaces the transport, so the
       // plugin never calls navigator.sendBeacon or fetch, and `beaconUrl` -
@@ -477,374 +329,146 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Faster than the 10s default so the demo panel fills while someone is
         // still looking at it.
         heartbeatInterval: 5000,
-        customBeacon: (_url, payload) => appendAnalyticsRow(payload),
+        customBeacon: (_url, payload) => controller?.logBeacon(payload),
       }),
-    ].filter(Boolean),
+    ],
   });
 
-  // Analytics Log panel controls
-  document.getElementById('analytics-clear')?.addEventListener('click', clearAnalyticsLog);
+  // ===== Audio players =====
+  const audioUI = createAudioUIPlugin({
+    layout: 'full',
+    showShuffle: true,
+    showRepeat: true,
+    theme: {
+      primary: '#e50914',
+      progressFill: '#e50914',
+      background: '#14161c',
+    },
+  });
 
-  // Clip Log panel controls. The lookups stay optional-chained: a panel this
-  // page does not happen to carry must not take the player down. (Until
-  // 2026-09-08 that was a live risk rather than defensive coding - the served
-  // page, docs/demo/index.html, was hand-mirrored and had fallen three panels
-  // behind. build.cjs now generates it from this page's index.html.)
-  document.getElementById('clip-clear')?.addEventListener('click', clearClipLog);
+  const audioPlayer = new ScarlettPlayer({
+    container: audioContainer,
+    logLevel: 'debug',
+    plugins: [
+      createNativePlugin(),   // Native audio support
+      createPlaylistPlugin({
+        autoAdvance: true,
+        autoLoad: false,
+        persist: false,
+      }),
+      createMediaSessionPlugin({
+        seekOffset: 10,
+      }),
+      audioUI,
+    ],
+  });
 
-  // Clip Controls panel: the four limit sliders feed plugin.configure() as one
-  // patch, and "Open selector" calls plugin.open(). Wired here rather than in
-  // the page's inline script so the handlers see the live instance, which is
-  // what the Watermark Controls panel below now does too.
-  const clipLimitInputs = {
-    minDuration: document.getElementById('clip-min') as HTMLInputElement | null,
-    maxDuration: document.getElementById('clip-max') as HTMLInputElement | null,
-    defaultDuration: document.getElementById('clip-preroll') as HTMLInputElement | null,
-    step: document.getElementById('clip-step') as HTMLInputElement | null,
-  };
-  const clipLimitLabels = {
-    minDuration: document.getElementById('clip-min-value'),
-    maxDuration: document.getElementById('clip-max-value'),
-    defaultDuration: document.getElementById('clip-preroll-value'),
-    step: document.getElementById('clip-step-value'),
-  };
+  const miniUI = createAudioUIPlugin({
+    layout: 'mini',
+    showArtwork: false,
+    showArtist: false,
+    showTime: false,
+    showVolume: false,
+    showShuffle: false,
+    showRepeat: false,
+    showNavigation: false,
+    theme: {
+      primary: '#e50914',
+      progressFill: '#e50914',
+      background: '#14161c',
+    },
+  });
 
-  function applyClipLimits(): void {
-    const raw = {
-      minDuration: Number(clipLimitInputs.minDuration?.value ?? 5),
-      maxDuration: Number(clipLimitInputs.maxDuration?.value ?? 60),
-      defaultDuration: Number(clipLimitInputs.defaultDuration?.value ?? 30),
-      step: Number(clipLimitInputs.step?.value ?? 1),
-    };
-    // The sliders have independent ranges, so they can ask for min > max or a
-    // pre-roll outside [min, max]. configure() resolves both the same way
-    // (min drops to max; defaultDuration clamps into the pair), so normalize
-    // here first and show *those* numbers - a label reading 100s while the
-    // plugin runs 60s is the demo lying about what it just configured.
-    const maxDuration = raw.maxDuration;
-    const minDuration = Math.min(raw.minDuration, maxDuration);
-    const values = {
-      minDuration,
-      maxDuration,
-      defaultDuration: Math.min(Math.max(raw.defaultDuration, minDuration), maxDuration),
-      step: raw.step,
-    };
-    for (const key of Object.keys(values) as Array<keyof typeof values>) {
-      const label = clipLimitLabels[key];
-      if (label) label.textContent = String(values[key]);
+  const miniPlayer = new ScarlettPlayer({
+    container: miniContainer,
+    logLevel: 'debug',
+    plugins: [createNativePlugin(), miniUI],
+  });
+
+  // The playlist loads nothing by itself (autoLoad: false); this handler
+  // loads whatever track it selects, without autoplay. The promise is kept
+  // so loadAudioTrack() below can await the load the selection triggered.
+  const playlist = audioPlayer.getPlugin<IPlaylistPlugin>('playlist');
+  let pendingAudioLoad: Promise<void> = Promise.resolve();
+  audioPlayer.on('playlist:change', (e) => {
+    if (!e.track?.src) return;
+    console.log('🎵 Loading track:', e.track.title);
+    const load = audioPlayer.load(e.track.src);
+    // Handled here so an unawaited selection (auto-advance) never surfaces as
+    // an unhandled rejection; the awaiting caller still sees the failure.
+    load.catch((err) => console.error('Failed to load track:', err));
+    pendingAudioLoad = load;
+  });
+
+  /**
+   * Put one track in the full audio player's playlist and load it. The
+   * playlist drives the audio UI's title and artwork.
+   *
+   * @param track - The track to load
+   * @returns Resolves once the source has loaded
+   */
+  const loadAudioTrack = async (track: AudioTrackSpec): Promise<void> => {
+    if (!playlist) {
+      await audioPlayer.load(track.src);
+      return;
     }
-    clipsPlugin.configure(values);
-  }
-
-  for (const input of Object.values(clipLimitInputs)) {
-    input?.addEventListener('input', applyClipLimits);
-  }
-  document.getElementById('clip-open-btn')?.addEventListener('click', () => clipsPlugin.open());
-
-  // Watermark Controls panel. Also wired here rather than in the page's inline
-  // script: that script runs while the page is still parsing, so the
-  // `window.watermarkPlugin` it used to read was always undefined and every
-  // control on the panel silently did nothing (the buttons still took their
-  // `active` class, so it looked broken rather than dead).
-  const watermarkImageInput = document.getElementById('watermark-image-input') as HTMLInputElement | null;
-  document.getElementById('watermark-image-btn')?.addEventListener('click', () => {
-    const url = watermarkImageInput?.value.trim();
-    if (url) watermarkPlugin.setImage(url);
-  });
-
-  const watermarkTextInput = document.getElementById('watermark-text-input') as HTMLInputElement | null;
-  document.getElementById('watermark-text-btn')?.addEventListener('click', () => {
-    const text = watermarkTextInput?.value.trim();
-    if (text) watermarkPlugin.setText(text);
-  });
-
-  const positionButtons = document.querySelectorAll<HTMLElement>('.position-btn[data-pos]');
-  positionButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const pos = btn.dataset.pos as WatermarkPosition | undefined;
-      if (pos) watermarkPlugin.setPosition(pos);
-      positionButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-
-  const opacityInput = document.getElementById('watermark-opacity') as HTMLInputElement | null;
-  opacityInput?.addEventListener('input', () => {
-    const value = parseFloat(opacityInput.value);
-    const label = document.getElementById('opacity-value');
-    if (label) label.textContent = value.toFixed(1);
-    watermarkPlugin.setOpacity(value);
-  });
-
-  const imageHeightInput = document.getElementById('watermark-imageheight') as HTMLInputElement | null;
-  imageHeightInput?.addEventListener('input', () => {
-    const value = parseInt(imageHeightInput.value, 10);
-    const label = document.getElementById('imageheight-value');
-    if (label) label.textContent = String(value);
-    watermarkPlugin.setImageHeight(value);
-  });
-
-  const paddingInput = document.getElementById('watermark-padding') as HTMLInputElement | null;
-  paddingInput?.addEventListener('input', () => {
-    const value = parseInt(paddingInput.value, 10);
-    const label = document.getElementById('padding-value');
-    if (label) label.textContent = String(value);
-    watermarkPlugin.setPadding(value);
-  });
-
-  document.getElementById('watermark-show-btn')?.addEventListener('click', () => watermarkPlugin.show());
-  document.getElementById('watermark-hide-btn')?.addEventListener('click', () => watermarkPlugin.hide());
-
-  // WHEP Monitor panel. A URL box rather than a preset: a WHEP endpoint is a
-  // live WebRTC session on a server (a Tmesis box, MediaMTX, ...) and there is
-  // no public one to point the demo at. The endpoint is remembered in
-  // localStorage so a reload keeps it. Joining goes through player.load(), so
-  // the provider is chosen the way it is for any other URL.
-  const whepUrlInput = document.getElementById('whep-url-input') as HTMLInputElement | null;
-  const whepJoinBtn = document.getElementById('whep-join-btn') as HTMLButtonElement | null;
-  const whepBadge = document.getElementById('whep-badge');
-  const whepSession = document.getElementById('whep-session');
-  const whepLatency = document.getElementById('whep-latency');
-  const whepReconnect = document.getElementById('whep-reconnect');
-  const WHEP_URL_KEY = 'scarlett-demo-whep-url';
-
-  try {
-    const remembered = window.localStorage.getItem(WHEP_URL_KEY);
-    if (remembered && whepUrlInput) whepUrlInput.value = remembered;
-  } catch {
-    // Storage may be unavailable (private mode); the box just starts empty.
-  }
-
-  /** Whether the player's current source is the WHEP provider's. */
-  const isWhepSource = (): boolean => player.getState().source?.type === 'application/sdp';
-
-  // True from a scheduled reconnect until recovery or exhaustion. Between
-  // attempts the provider's playbackState is 'error', so without this the
-  // 500 ms readout below would overwrite "Reconnecting" with "Error".
-  let whepReconnecting = false;
-
-  const setWhepBadge = (text: string, on: boolean): void => {
-    if (!whepBadge) return;
-    whepBadge.textContent = text;
-    whepBadge.classList.toggle('live-badge--on', on);
+    playlist.clear();
+    playlist.add([{ ...track, artwork: track.artwork ?? SAMPLE.artwork }]);
+    playlist.play(track.id);
+    await pendingAudioLoad;
   };
 
-  const joinWhep = async (): Promise<void> => {
-    const url = whepUrlInput?.value.trim();
-    if (!url || !whepJoinBtn) return;
-    try {
-      window.localStorage.setItem(WHEP_URL_KEY, url);
-    } catch {
-      // Not remembered, still joined.
-    }
-    whepJoinBtn.disabled = true;
-    whepJoinBtn.textContent = 'Joining...';
-    whepReconnecting = false;
-    setWhepBadge('Joining', false);
-    if (whepReconnect) whepReconnect.textContent = '—';
-    try {
-      await player.load(url);
-      console.log('WHEP joined:', url);
-    } catch (e) {
-      console.error('WHEP join failed:', (e as Error).message);
-    } finally {
-      whepJoinBtn.disabled = false;
-      whepJoinBtn.textContent = 'Join';
-    }
-  };
-
-  whepJoinBtn?.addEventListener('click', () => void joinWhep());
-  whepUrlInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') void joinWhep();
-  });
-
-  // The reconnect column: the scheduler's own events, which the HLS provider
-  // emits with the same names, so this panel only reads them for WHEP.
-  player.on('error:reconnecting', (e) => {
-    if (!isWhepSource() || !whepReconnect) return;
-    const delay = (e.delayMs / 1000).toFixed(1);
-    whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
-    whepReconnecting = true;
-    setWhepBadge('Reconnecting', false);
-    console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
-  });
-  player.on('error:recovered', (e) => {
-    if (!isWhepSource() || !whepReconnect) return;
-    whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : 'recovered';
-    whepReconnecting = false;
-    console.log('WHEP recovered');
-  });
-  player.on('error:reconnect-exhausted', (e) => {
-    if (!isWhepSource() || !whepReconnect) return;
-    whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
-    whepReconnecting = false;
-    setWhepBadge('Gave up', false);
-  });
-
-  // Session and latency, on a timer like the page's own stats panel: the
-  // session URL is on the plugin, not in state, and the latency estimate
-  // moves once a second.
-  //
-  // Stopped on destroy. The page's own stats poller reads `window.player`
-  // and stops the moment an integrator nulls it, but this closure holds the
-  // instance directly, and getState() on a destroyed player throws by
-  // design - every 500ms, as an uncaught error, which is what failed the
-  // browser harness's churn + destroy scenario from 2026-09-16.
-  const whepReadout = window.setInterval(() => {
-    const state = player.getState();
-    const whep = isWhepSource();
-    const session = whep ? whepPlugin.getSessionUrl() : null;
-    if (whepSession) {
-      whepSession.textContent = session ? session.replace(/^https?:\/\/[^/]+/, '') : '—';
-      whepSession.title = session ?? '';
-    }
-    if (whepLatency) {
-      whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : '—';
-    }
-    if (whep && whepReconnecting) setWhepBadge('Reconnecting', false);
-    else if (whep && state.playbackState === 'playing') setWhepBadge('Playing', true);
-    else if (whep && state.playbackState === 'ready') setWhepBadge('Joined', true);
-    else if (whep && state.playbackState === 'error') setWhepBadge('Error', false);
-    else if (!whep) setWhepBadge('Not joined', false);
-  }, 500);
-  player.on('player:destroy', () => window.clearInterval(whepReadout));
-
-  // Log events for debugging
+  // Log events for the browser console; the page's own event log is the
+  // controller's, scoped to the active player.
   player.on('playback:play', () => console.log('▶️ Playing'));
   player.on('playback:pause', () => console.log('⏸️ Paused'));
   player.on('media:loaded', (e) => console.log('📺 Media loaded:', e));
-  player.on('media:loadedmetadata', (e) => console.log('📊 Metadata:', e));
-  player.on('quality:levels', (e) => console.log('🎯 Quality levels:', e));
-  player.on('chapter:change', (e) => console.log('🔖 Chapter:', e.chapter?.label ?? 'none'));
-  player.on('track:text', (e) => console.log('💬 Text track:', e.trackId ?? 'off'));
   player.on('error', (e) => console.error('❌ Error:', e));
-  // The clip:* events are declared by merging into PlayerEventMap from the
-  // clips package's own type surface; the demo's mixed source/dist program
-  // resolves that augmentation against a different copy of core than the
-  // player's own events, so they are cast like the 'playlist:change' handler
-  // in the audio section below.
-  player.on('clip:opened' as any, (e: any) => console.log(`🎬 Clip opened: ${e.start}s – ${e.end}s`));
-  player.on('clip:changed' as any, (e: any) => console.log(`✂️ Clip range: ${e.start}s – ${e.end}s (${e.reason})`));
-  player.on('clip:created' as any, (e: any) => console.log('✂️ Clip created:', e.result));
-  player.on('clip:cancelled' as any, (e: any) => console.log(`🚫 Clip cancelled (${e.reason})`));
-  player.on('clip:error' as any, (e: any) => console.error('❌ Clip error:', e.error?.message ?? e.error));
+  audioPlayer.on('playback:play', () => console.log('🎵 Audio Playing'));
+  audioPlayer.on('playback:pause', () => console.log('🎵 Audio Paused'));
 
-  // Expose player globally for debugging
+  // Expose the instances globally: the browser harness drives window.player,
+  // window.clipsPlugin and window.watermarkPlugin, and they are handy in a
+  // devtools console. Set before the controller runs, so a page-script fault
+  // cannot take them with it.
   (window as any).player = player;
   (window as any).watermarkPlugin = watermarkPlugin;
   (window as any).clipsPlugin = clipsPlugin;
   (window as any).whepPlugin = whepPlugin;
+  (window as any).audioPlayer = audioPlayer;
+  (window as any).miniPlayer = miniPlayer;
 
-  console.log(`🎬 Scarlett Player v${VERSION} Demo Ready`);
-  console.log('Access player via window.player');
+  // init() is what createPlayer() does after construction: it initialises
+  // the plugins and, for the video player, loads the initial source. Started
+  // before the controller routes, so the page reflects the hash while the
+  // first manifest is still on its way; the controller awaits the promise
+  // for the player it is about to load through.
+  const ready = {
+    video: player.init().catch((err) => console.error('Player init failed:', err)),
+    audio: audioPlayer.init().catch((err) => console.error('Audio player init failed:', err)),
+    mini: miniPlayer.init().catch((err) => console.error('Mini player init failed:', err)),
+  };
 
-  // ===== Audio Player Demo =====
-  const audioContainer = document.getElementById('audio-player');
-  if (audioContainer) {
-    // Sample audio tracks for the playlist
-    const audioTracks = [
-      {
-        id: 'llama',
-        src: 'https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3',
-        title: "Winamp - It Really Whips the Llama's Ass",
-        artist: 'Winamp',
-        artwork: 'https://vod.thestreamplatform.com/demo/scarlett-player-sq-thumb.jpg',
-      },
-    ];
+  controller = createSiteController({
+    version: VERSION,
+    players: { video: player, audio: audioPlayer, mini: miniPlayer },
+    ui: videoUI,
+    audioUI,
+    miniUI,
+    clips: clipsPlugin,
+    watermark: watermarkPlugin,
+    whep: whepPlugin,
+    chapters: chaptersPlugin,
+    captions: SNIPPET_CAPTIONS,
+    chapterList: VIDEO_CHAPTERS,
+    initialVideoSrc,
+    ready,
+    loadAudioTrack,
+  });
+  controller.start();
 
-    // Create audio player with playlist, media session, and audio UI
-    const audioPlayer = await createPlayer({
-      container: audioContainer,
-      logLevel: 'debug',
-      plugins: [
-        createNativePlugin(),   // Native audio support
-        createPlaylistPlugin({
-          autoAdvance: true,
-          autoLoad: false,
-          persist: false,
-        }),
-        createMediaSessionPlugin({
-          seekOffset: 10,
-        }),
-        createAudioUIPlugin({
-          layout: 'full',
-          showShuffle: true,
-          showRepeat: true,
-          theme: {
-            primary: '#6366f1',
-            background: '#18181b',
-          },
-        }),
-      ].filter(Boolean),
-    });
+  await Promise.all(Object.values(ready));
 
-    // Get playlist plugin
-    const playlist = audioPlayer.getPlugin<any>('playlist');
-
-    // Handle playlist track changes - load the source through the player
-    // The audio-ui plugin automatically updates title/artwork from this event
-    audioPlayer.on('playlist:change' as any, async (e: any) => {
-      if (e?.track?.src) {
-        console.log('🎵 Loading track:', e.track.title);
-        try {
-          await audioPlayer.load(e.track.src);
-          // Don't auto-play - let user click the play button
-        } catch (err) {
-          console.error('Failed to load track:', err);
-        }
-      }
-    });
-
-    // Add tracks to playlist and select first track (but don't play)
-    if (playlist) {
-      playlist.add(audioTracks);
-      // Select the first track to load it (emits playlist:change)
-      playlist.play(0);
-    }
-
-    // Log audio player events
-    audioPlayer.on('playback:play', () => console.log('🎵 Audio Playing'));
-    audioPlayer.on('playback:pause', () => console.log('🎵 Audio Paused'));
-
-    // Expose audio player globally
-    (window as any).audioPlayer = audioPlayer;
-
-    console.log('🎵 Audio Player Demo Ready');
-    console.log('Access audio player via window.audioPlayer');
-  }
-
-  // ===== Mini Audio Player Demo =====
-  const miniContainer = document.getElementById('mini-player');
-  if (miniContainer) {
-    // Create mini audio player with compact UI (no artwork)
-    const miniPlayer = await createPlayer({
-      container: miniContainer,
-      logLevel: 'debug',
-      plugins: [
-        createNativePlugin(),
-        createAudioUIPlugin({
-          layout: 'mini',
-          showArtwork: false,
-          showArtist: false,
-          showTime: false,
-          showVolume: false,
-          showShuffle: false,
-          showRepeat: false,
-          showNavigation: false,
-          theme: {
-            primary: '#e50914',
-            background: '#1f2937',
-          },
-        }),
-      ].filter(Boolean),
-    });
-
-    // Load the same audio track
-    await miniPlayer.load('https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3');
-
-    // Expose mini player globally
-    (window as any).miniPlayer = miniPlayer;
-
-    console.log('🎵 Mini Player Demo Ready');
-  }
+  console.log(`🎬 Scarlett Player v${VERSION} Playground Ready`);
+  console.log('Access the players via window.player, window.audioPlayer and window.miniPlayer');
 });
