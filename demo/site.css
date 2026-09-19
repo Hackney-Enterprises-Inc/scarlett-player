@@ -1,0 +1,379 @@
+/*
+ * Scarlett Player site stylesheet.
+ *
+ * Ported from the design mockup (.docs/mockups/scarlett-site/style.css, the
+ * design source of truth) one rule per line, with the preview-only rules
+ * removed (.preview-badge, .review-note, .sample-badge, .film-grain), the
+ * mockup's simulated player controls dropped in favour of the real UI
+ * plugin's own styles, and the placeholder photograph gone: every image on
+ * the site is our own. Site-specific additions live at the end of the file.
+ *
+ * Authored here only. demo/build.cjs mirrors this file to demo/site.css and
+ * docs/demo/site.css so every page links it as a sibling (`site.css`); never
+ * edit the copies.
+ */
+/* Self-hosted type (SIL OFL, licence texts beside the files in assets/fonts/):
+   Carter One for display, Cantarell 400/700 for everything else. Latin
+   subsets only, referenced as siblings like every other asset. */
+@font-face{font-family:"Carter One";font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/carter-one-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Cantarell;font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/cantarell-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Cantarell;font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/cantarell-700-latin.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+:root{--bg:#0b0c10;--surface:#14161c;--text:#f5f3ef;--muted:#979ba8;--border:#292c35;--accent:#e50914;--player-accent:#e50914;--font-body:Cantarell,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:"Carter One",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:18px/1.6 var(--font-body)}
+button,input,select{font:inherit}
+button,a,input,select{-webkit-tap-highlight-color:transparent}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;color:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid #fff;outline-offset:5px}
+[hidden]{display:none!important}
+.wrap{width:min(1200px,calc(100% - 80px));margin:auto}
+.header{height:102px;display:flex;align-items:center;gap:42px;border-bottom:1px solid #ffffff0c}
+.brand{display:flex;align-items:center}
+.header nav{display:flex;gap:30px;margin-left:auto;color:#babcc5;font-size:16px}
+.header nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 2px}
+.header nav a:hover{color:white}
+.hero{padding-top:66px}
+.eyebrow{font-size:12px;letter-spacing:2px;font-weight:700;display:flex;align-items:center;gap:10px;color:#bfc0c8;margin:0 0 22px}
+.pulse,.tiny-dot{display:inline-block;width:6px;height:6px;background:#ef3340;border-radius:50%}
+.pulse{box-shadow:0 0 12px #e5091480}
+.hero h1{font-family:var(--font-display);font-size:clamp(44px,7vw,96px);line-height:1.02;letter-spacing:0;margin:0;font-weight:400}
+.hero h1>span{color:#7e818c}
+.hero-bottom{display:flex;align-items:center;justify-content:space-between;margin:27px 0 36px}
+/* Alex, 2026-09-19: the hero is centred (heading, eyebrow, sub-copy and CTA as one block), a departure from the mockup's left-aligned hero. The sub-copy and CTA stack under the heading; the ≤480px block already turns .hero-bottom into flow layout with the CTA's own top margin. */
+.hero{text-align:center}.hero .eyebrow{justify-content:center}.hero-bottom{flex-direction:column;gap:28px;justify-content:center}
+@media(max-width:480px){.hero-bottom p br{display:none}}
+.hero-bottom p{color:#aaaeb9;font-size:19px;line-height:1.7;margin:0}
+.button{display:inline-flex;justify-content:center;align-items:center;gap:35px;border-radius:7px;padding:12px 20px;border:1px solid transparent;font-weight:700;font-size:15px}
+.primary{background:var(--accent);color:#fff}
+.primary:hover{background:#f3222c}
+.secondary{background:#232631;border-color:#363a46}
+.showcase-wrap{position:relative}
+.showcase-wrap:before{content:"";position:absolute;inset:10% -5% -8%;background:radial-gradient(ellipse,#b3181e24,transparent 67%);pointer-events:none}
+.showcase{height:510px;position:relative;border:1px solid #ffffff24;border-radius:14px;overflow:hidden;background:#000;box-shadow:0 32px 70px #0004}
+.film-heading{position:absolute;left:46px;top:42px}
+.film-kicker{font-size:11px;font-weight:700;letter-spacing:2px;color:#eceae1b0}
+.film-heading h2,.film-title{font-family:var(--font-display);font-size:46px;letter-spacing:0;line-height:1.12;margin:19px 0;font-weight:400}
+.quality-badge{position:absolute;right:24px;top:26px;font:11px ui-monospace,monospace;letter-spacing:1px;background:#0b131b65;border:1px solid #ffffff30;border-radius:5px;padding:6px 9px}
+.quality-badge span{color:#b3bac5;margin:0 5px}
+.film-label{position:absolute;left:28px;bottom:88px;font-size:12px;font-weight:700;letter-spacing:2px}
+.film-label span{display:block;font-size:11px;color:#a8b1bd;margin-top:5px;letter-spacing:1.5px}
+.showcase-caption{position:relative;display:flex;justify-content:space-between;padding:16px 0;font-size:14px;color:#9297a4}
+.showcase-caption .tiny-dot{background:#648372;width:5px;height:5px;margin-right:7px}
+.showcase-caption a{color:#e4e5e8}
+.showcase-caption a span{margin-left:15px}
+.proof{display:flex;align-items:center;justify-content:space-between;padding:36px 0 44px;border-bottom:1px solid var(--border);gap:15px;font-size:17px;color:#bbbec6}
+.proof>span{font-size:11px;letter-spacing:1.7px;color:#8b92a0}
+.proof b{color:#41444e}
+.possibilities{padding-top:82px}
+.section-heading{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:34px}
+.section-heading h2,.start h2{font-family:var(--font-display);font-size:45px;line-height:1.15;font-weight:400;letter-spacing:0;margin:0}
+.section-heading .eyebrow{margin-bottom:16px}
+.section-heading>p{color:var(--muted);font-size:16px;margin:0}
+.story-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.story{min-width:0;border-top:1px solid #343741;padding-top:24px}
+.story:hover .text-link{color:#ff5b62}
+.story-number{display:block;font:11px ui-monospace,monospace;letter-spacing:1.6px;color:#8e939f;margin:25px 0 12px}
+.story h3{font-family:var(--font-display);font-size:24px;letter-spacing:0;margin:0 0 10px;font-weight:400}
+.story p{font-size:15px;line-height:1.8;color:var(--muted);margin:0 0 20px}
+.text-link{font-size:14px;font-weight:700}
+.mini-landscape,.audio-art,.clip-art{height:158px;border:1px solid #ffffff12;border-radius:9px;overflow:hidden;position:relative}
+.mini-landscape{background:#11141c;display:grid;place-items:center}
+.audio-art{display:flex;align-items:center;gap:16px;padding:20px;background:radial-gradient(ellipse at 20% 10%,#333546,#171921 80%)}
+.audio-art small{font-size:11px;letter-spacing:1.5px;color:#9a9eaa}
+.audio-art strong{display:block;font-size:13px;font-weight:400;margin:5px 0 14px}
+.clip-art{background:#171a21;padding:36px 14px}
+.clip-selection{position:absolute;top:32px;left:22%;height:66px;width:57%;border:2px solid #f3515b;border-radius:4px;display:flex;justify-content:space-between}
+.clip-selection i{background:#ef4251;width:5px}
+.clip-selection b{position:absolute;top:74px;text-align:center;width:100%;font:11px ui-monospace,monospace;color:#bdc1cd}
+.start{margin-top:90px;padding:65px 0;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1.1fr;gap:65px;align-items:center}
+.start h2 span{color:#7e8491}
+.start p:not(.eyebrow){color:var(--muted);font-size:16px;margin:22px 0}
+.code-card{background:#12141a;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.code-tabs,.panel-tabs{display:flex;gap:22px;border-bottom:1px solid var(--border);padding:0 20px}
+.code-tabs button,.panel-tabs button{background:none;border:0;font-size:13px;padding:16px 0;color:#8f94a1;border-bottom:2px solid transparent}
+.code-tabs button.selected,.panel-tabs button.selected{color:white;border-bottom-color:var(--accent)}
+.code-tabs button.copy{margin-left:auto;color:#b5b9c3;font-size:12px}
+pre{font:13px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;color:#bdc5d7;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:25px;min-height:170px}
+.code-foot{border-top:1px solid #ffffff09;padding:10px 20px;font-size:13px;color:#9096a3}
+.code-foot .tiny-dot{background:#6e977f;margin-right:8px}
+.built{border-top:1px solid var(--border);text-align:center;padding:46px 0}
+.built>span{font-size:11px;letter-spacing:1.7px;color:#828895}
+.built p{font-size:18px;color:#a6aab6;margin-bottom:0}
+.built strong{color:#eeeff2;font-weight:700}
+.built p>span{margin-left:17px}
+.footer{display:flex;align-items:center;gap:24px;padding:25px 0 70px;border-top:1px solid var(--border)}
+.footer>span{font-size:13px;color:#7f8592}
+.footer>div{margin-left:auto;display:flex;gap:25px;color:#858b98;font-size:12px}
+.toast{position:fixed;bottom:62px;left:50%;transform:translateX(-50%);background:#e8e9ed;color:#15171b;border-radius:8px;padding:10px 17px;font-size:14px;opacity:0;pointer-events:none;z-index:10;max-width:90vw}
+.toast.visible{opacity:1}
+.playground{padding-top:38px}
+.playground-title{display:flex;justify-content:space-between;align-items:center}
+.playground-title h1{font-family:var(--font-display);font-size:54px;line-height:1.1;letter-spacing:0;font-weight:400;margin:0 0 13px}
+.playground-title h1>span{color:var(--accent)}
+.playground-title .eyebrow{margin-bottom:14px}
+.playground-title p:not(.eyebrow){font-size:15px;color:var(--muted);margin:0}
+.back-link{font-size:13px;color:#9ba0ad}
+.scenario-nav{display:flex;gap:6px;margin:28px 0 24px;border-bottom:1px solid var(--border);padding-bottom:15px}
+.scenario-nav button,.scenario-nav a{border:1px solid transparent;background:none;border-radius:7px;padding:9px 17px;font-size:14px;color:#8d93a2}
+.scenario-nav button span,.scenario-nav a span{margin-left:7px}
+.scenario-nav button.selected,.scenario-nav a.selected,.scenario-nav a[aria-current=page]{background:#22252f;border-color:#353947;color:white}
+.workbench{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+.stage-column{min-width:0}
+.stage-column .showcase{height:auto;aspect-ratio:16/9;border-radius:10px}
+.stage-column .film-heading{left:27px;top:25px}
+.stage-column .film-heading h2,.stage-column .film-title{font-size:32px;margin-top:12px}
+.stage-column .film-kicker{font-size:11px}
+.stage-column .quality-badge{font-size:11px;right:18px;top:18px}
+.stage-column .film-label{font-size:11px;bottom:74px;left:22px}
+.stage-column .film-label span{font-size:11px}
+.stage-meta{display:flex;justify-content:space-between;align-items:center;margin:17px 0 20px;gap:10px}
+.stage-meta strong,.stage-title{font-size:17px;font-weight:700;display:block;margin:0;font-family:var(--font-body);letter-spacing:0}
+.stage-meta div>span{font-size:13px;color:#8f95a3;display:block;margin-top:3px}
+.feature-actions{display:flex;gap:8px;flex-wrap:wrap}
+.feature-actions button{background:#171921;border:1px solid #292e3b;padding:10px 14px;border-radius:6px;font-size:14px;color:#bdc3ce}
+.feature-actions button span{margin-left:5px}
+.feature-actions button.active,.feature-actions button[aria-pressed=true]{border-color:var(--player-accent);color:white}
+.diagnostics{border-top:1px solid var(--border);margin-top:27px;font-size:14px;color:#9ba2b0}
+.diagnostics summary{cursor:pointer;padding:16px 0}
+.diagnostics summary span{float:right;color:#8b92a0;font-size:12px}
+.diagnostics p{line-height:1.8}
+.settings{border:1px solid var(--border);background:#12141a;border-radius:10px;overflow:hidden}
+.panel-tabs{gap:27px;padding:0 22px}
+.panel-tabs button{font-size:14px}
+.panel-tabs button span{margin-left:37px;color:#777e8e}
+.setting-group{padding:22px;border-bottom:1px solid #262a34}
+.setting-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.setting-group label,.setting-title{font-size:14px;font-weight:700}
+.setting-heading button{border:0;background:none;color:#8b92a0;font-size:12px;padding:14px 8px;margin:-14px -8px}
+.setting-group p{font-size:12px;color:#818999;margin:4px 0 14px}
+.setting-group p:last-child{margin-bottom:0}
+.swatches{display:flex;gap:11px;align-items:center;margin-top:18px}
+.swatches>button{width:28px;height:28px;border-radius:50%;background:var(--swatch);border:3px solid #12141a;outline:1px solid transparent}
+.swatches>button[aria-pressed=true]{outline-color:#d2d5df}
+.custom-color{width:27px;height:27px;overflow:hidden;border-radius:50%;border:1px solid #697181}
+.custom-color input{width:38px;height:38px;border:0;transform:translate(-6px,-6px);padding:0;cursor:pointer}
+.hex{font:11px ui-monospace,monospace;color:#939aaa;display:block;margin-top:13px}
+.setting-heading input[role=switch]{appearance:none;width:28px;height:17px;border-radius:10px;background:#363d4b;position:relative;cursor:pointer;margin:0}
+.setting-heading input[role=switch]:after{content:"";width:11px;height:11px;border-radius:50%;position:absolute;top:3px;left:3px;background:#bac0cc}
+.setting-heading input:checked{background:var(--player-accent)}
+.setting-heading input:checked:after{left:14px;background:white}
+.setting-group select,.watermark-fields input,.source-form input{width:100%;background:#1b1e27;border:1px solid #303747;color:#d1d6df;border-radius:5px;padding:9px 10px;font-size:13px;margin-top:9px;min-width:0}
+.watermark-fields{margin-top:15px}
+.settings-note{display:flex;align-items:center;gap:12px;padding:18px 22px;color:#db737a}
+.settings-note p{font-size:12px;line-height:1.7;color:#939aaa;margin:0}
+.settings-note strong{font-weight:400;color:#c4cad4}
+.playground-bottom{text-align:center;margin:60px 0 50px;border-top:1px solid var(--border);padding-top:36px}
+.playground-bottom>span{font-size:11px;color:#7e8797;letter-spacing:1.5px}
+.playground-bottom p{font-family:var(--font-display);font-size:24px;font-weight:400;color:#c1c6d0}
+.playground-bottom .text-link{font-size:13px}
+#code-panel{padding:18px}
+.code-description{font-size:12px;color:#9ba2b1}
+#playground-code{padding:15px 0;font-size:11.5px}
+#code-panel .button{font-size:13px;width:100%}
+#clip-panel{padding:18px;margin-top:16px;border:1px solid #343947;border-radius:8px;background:#141821}
+.clip-heading{display:flex;justify-content:space-between;font-size:14px}
+.clip-heading span{color:#a7aebb;font:12px ui-monospace,monospace}
+#clip-panel small,#chapter-panel small{display:block;margin-top:10px;font-size:12px;color:#9098aa}
+.audio-stage,.empty-stage{aspect-ratio:16/9;border:1px solid #343849;border-radius:10px;background:radial-gradient(ellipse at top,#303245,#11141c 85%);display:flex;align-items:center;justify-content:center;padding:30px}
+.empty-stage{flex-direction:column;text-align:center;gap:10px}
+.empty-stage .empty-icon{font-size:30px;color:#ce6c75}
+.empty-stage h2{font-family:var(--font-display);font-size:29px;font-weight:400;margin:0;letter-spacing:0}
+.empty-stage p{font-size:14px;max-width:320px;color:#99a2b4;margin:0 0 10px}
+.source-form{max-width:360px;width:100%;text-align:left}
+.source-form label{font-size:12px;color:#b1bacb}
+.source-form>div{display:flex;gap:8px;margin-top:6px}
+.source-form input{margin:0}
+.source-form button{font-size:13px;font-weight:700;background:var(--accent);border:0;border-radius:5px;padding:9px 16px;min-height:44px;color:#fff}
+.skip{position:absolute;left:20px;top:-60px;z-index:20;background:white;color:black;padding:8px}
+.skip:focus{top:10px}
+@media(min-width:1600px){.wrap{width:min(1280px,calc(100% - 100px))}.showcase{height:540px}}
+@media(max-width:1099px){.wrap{width:calc(100% - 48px)}.workbench{grid-template-columns:minmax(0,1fr) 280px;gap:18px}.film-heading h2,.film-title{font-size:38px}.showcase{height:450px}.proof{flex-wrap:wrap;justify-content:center}.proof>span{width:100%;text-align:center}.story-grid{gap:16px}.story h3{font-size:21px}.audio-art{padding:12px;gap:10px}.start{gap:30px}.stage-column .film-heading h2,.stage-column .film-title{font-size:26px}.stage-column .film-label{display:none}.stage-column .film-kicker{display:none}.playground-title h1{font-size:48px}.header{gap:25px}}
+@media(max-width:800px){.workbench{grid-template-columns:1fr}.settings{margin-top:10px}.hero h1{font-size:clamp(44px,10vw,72px)}.header nav{gap:18px}.showcase{height:420px}.story-grid{grid-template-columns:1fr}.story{display:block}.mini-landscape,.audio-art,.clip-art{height:200px}.audio-art{padding:35px;gap:30px}.audio-art strong{font-size:18px}.story p br{display:none}.story-number{margin-top:20px}.story{padding-top:20px;margin-bottom:15px}.story h3{font-size:27px}.clip-art{padding-top:56px}.clip-selection{top:52px}.section-heading>p{display:none}.start{grid-template-columns:1fr;gap:30px}.footer{flex-wrap:wrap;gap:15px}.footer>div{width:100%;margin:0;justify-content:space-between}.stage-column .film-heading h2,.stage-column .film-title{font-size:34px}.stage-column .film-kicker{display:block}.stage-column .film-label{display:block}}
+@media(max-width:480px){.wrap{width:calc(100% - 32px)}.header{height:78px;gap:15px}.header nav{gap:15px;font-size:14px}.header nav .github{display:none}.hero{padding-top:40px}.eyebrow{font-size:11px;letter-spacing:1.3px;margin-bottom:21px}.hero h1{font-size:clamp(37px,11.5vw,44px)}.hero-bottom{display:block;margin:22px 0 28px}.hero-bottom p{font-size:16px}.hero-bottom .button{margin-top:23px;font-size:14px;padding:11px 16px;gap:35px}.showcase{height:355px}.film-heading{left:20px;top:24px}.film-heading h2,.film-title{font-size:28px;margin-top:12px}.film-kicker{font-size:11px;letter-spacing:1.3px}.quality-badge{top:17px;right:14px;font-size:11px;padding:4px 6px}.film-label{font-size:11px;left:18px;bottom:82px}.film-label span{font-size:11px}.showcase-caption{font-size:13px;padding-top:12px}.showcase-caption a span{margin-left:5px}.proof{padding:25px 0 30px;font-size:14px;gap:11px}.proof>span{margin-bottom:4px;font-size:11px}.possibilities{padding-top:45px}.section-heading h2,.start h2{font-size:34px}.section-heading{margin-bottom:25px}.story-grid{gap:25px}.start{margin-top:35px;padding-top:40px}.start p:not(.eyebrow){font-size:15px}.code-tabs{gap:20px;padding:0 15px}.code-tabs button{font-size:12px}pre{font-size:12px;padding:20px 15px}.built{padding:30px 0}.built p{font-size:15px}.built>span{font-size:11px}.footer>span{font-size:12px}.footer>div{font-size:12px;gap:10px}.playground{padding-top:24px}.playground-title .eyebrow{font-size:11px;margin-bottom:10px}.playground-title h1{font-size:36px;margin-bottom:8px}.playground-title p:not(.eyebrow){font-size:13px}.back-link{display:none}.scenario-nav{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:20px 0 16px;padding-bottom:12px}.scenario-nav button,.scenario-nav a{padding:7px 8px;font-size:13px;text-align:left;min-height:35px}.stage-column .showcase{aspect-ratio:16/9}.stage-column .film-heading{left:16px;top:13px}.stage-column .film-heading h2,.stage-column .film-title{font-size:22px;line-height:1.1;margin-top:10px}.stage-column .film-kicker{font-size:11px;letter-spacing:1px}.stage-column .quality-badge{display:none}.stage-column .film-label{display:none}.stage-meta{margin:14px 0 16px}.stage-meta strong,.stage-title{font-size:15px}.stage-meta div>span{font-size:12px}.feature-actions{gap:5px}.feature-actions button{font-size:13px;padding:8px 10px;min-height:35px}.feature-actions button span{margin-left:2px}.diagnostics{margin-top:22px}.playground-bottom{margin-top:30px}.playground-bottom p{font-size:19px}.audio-stage,.empty-stage{padding:14px;min-height:215px}.empty-stage h2{font-size:24px}.empty-stage p{font-size:13px;margin:0}.empty-stage .empty-icon{font-size:22px}.source-form>div{gap:5px}.source-form input{font-size:13px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+.audio-stage,.empty-stage{width:100%;min-width:0}
+@media(max-width:480px){.playground-title p:not(.eyebrow){line-height:1.4}.playground{padding-top:18px}.scenario-nav{margin-top:15px;margin-bottom:12px}.scenario-nav button,.scenario-nav a{min-height:32px;padding-top:5px;padding-bottom:5px}}
+@media(max-width:480px){.showcase-wrap:before{inset:10% -3% -8%}}
+.showcase-wrap:before{inset:10% 0 -8%}
+/* Phones: the four scenario pills in ONE row at 44px touch height (plan
+   section 5), wrapping to two rows only when the labels do not fit (320px).
+   The title block is tightened so the player top stays under 260px at
+   390x844 with room to spare against the 280px acceptance line. */
+@media(max-width:480px){.playground{padding-top:8px}.playground-title .eyebrow{margin-bottom:8px}.playground-title h1{margin-bottom:6px}.playground-title p:not(.eyebrow){line-height:1.3}.scenario-nav{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;margin-bottom:8px;padding-bottom:10px}.scenario-nav button,.scenario-nav a{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:4px 4px;font-size:12px;text-align:center;white-space:nowrap}.feature-actions button{min-height:44px}}
+
+/* ============================================================
+   Site additions (not in the mockup). The mockup simulated its
+   player, forms, code panel and diagnostics; these rules dress the
+   real ones. Values reuse the palette above.
+   ============================================================ */
+
+/* Signal lockup in place of the mockup's text wordmark. 34px tall keeps the
+   header; the SVG is 1030x338, so 48px tall is ~146px wide. */
+.brand img{display:block;height:48px;width:auto}
+.footer .brand img{height:48px}
+
+/* Version badge in the header slot the mockup's preview badge occupied. */
+.version-badge{font:11px ui-monospace,monospace;letter-spacing:1.2px;border:1px solid var(--border);border-radius:5px;padding:6px 9px;color:#9fa3af;white-space:nowrap}
+@media(max-width:800px){.version-badge{display:none}}
+
+/* The header's nav links are the site's page navigation. */
+.header nav a[aria-current=page]{color:white}
+
+/* Visually hidden, still read out. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* The showcase frame holds the real player: the frame keeps the mockup's
+   border, radius and shadow, the player fills it at 16:9 and paints its own
+   controls. `isolation` gives the poster layer a stacking context to sit in
+   above the player, which isolates itself too. */
+.showcase{isolation:isolate}
+.showcase #player{width:100%;aspect-ratio:16/9;background:#000}
+.showcase #player video{width:100%;height:100%;object-fit:contain}
+.poster-layer{position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(90deg,#070f19a8,transparent 75%),linear-gradient(0deg,#060a13dc,transparent 35%)}
+.poster-layer h2,.poster-layer .film-title{color:var(--text)}
+
+/* Stage status beside the sample title: loading, error and live badges. */
+.stage-status{font:11px ui-monospace,monospace;letter-spacing:.8px;color:#9da4b2;padding:5px 7px;border:1px solid #303541;border-radius:4px;white-space:nowrap}
+.stage-status[data-tone=live]{border-color:var(--player-accent);color:white}
+.stage-status[data-tone=error]{border-color:#7a2a2f;color:#ff8d93}
+.stage-status:empty{display:none}
+
+/* Audio stage: the real audio UI centred in the mockup's audio frame. */
+.audio-frame{width:min(100%,420px);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px #0006}
+.audio-frame--mini{width:min(100%,520px)}
+
+/* Empty stages: validation, loading and retry states for the source forms. */
+.source-form fieldset{border:0;padding:0;margin:0 0 8px;display:flex;gap:14px;font-size:13px;color:#b1bacb}
+.source-form fieldset legend{padding:0;margin-bottom:4px}
+.source-form fieldset label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.source-form fieldset input{margin:0;accent-color:var(--player-accent)}
+.source-form button:disabled{opacity:.55;cursor:default}
+.form-note{font-size:12px;color:#8f97a8;margin:8px 0 0;line-height:1.6}
+.form-error{font-size:12px;color:#ff8d93;margin:8px 0 0;line-height:1.6}
+.form-error:empty{display:none}
+.form-error a{text-decoration:underline}
+.empty-stage .source-form>div{flex-wrap:wrap}
+.empty-stage .source-form>div input{flex:1 1 200px}
+
+/* Feature panels under the stage: the chapter list and the clip panel. */
+#chapter-panel{padding:18px;margin-top:16px;border:1px solid #343947;border-radius:8px;background:#141821}
+.chapter-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:4px}
+.chapter-list button{width:100%;display:flex;justify-content:space-between;gap:10px;align-items:baseline;background:none;border:1px solid transparent;border-radius:6px;padding:8px 10px;font-size:14px;color:#bdc3ce;text-align:left}
+.chapter-list button:hover{border-color:#2f3442}
+.chapter-list button[aria-current=true]{border-color:var(--player-accent);color:white}
+.chapter-list button small{font:11px ui-monospace,monospace;color:#8f95a3}
+.chapter-list button b{font-weight:500}
+.chapter-list button b span{display:block;font-size:12px;color:#8f95a3;font-weight:400}
+#clip-panel .clip-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+#clip-panel .clip-actions button{background:#171921;border:1px solid #292e3b;padding:9px 14px;border-radius:6px;font-size:13px;color:#bdc3ce}
+#clip-panel .clip-actions button.primary{background:var(--accent);border-color:transparent;color:white}
+#clip-panel details{margin:12px 0 10px;font-size:13px;color:#9ba2b0}
+#clip-panel details summary{cursor:pointer;padding:4px 0}
+.range-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;font-size:12px;color:#b1bacb;margin-top:8px}
+.range-row input[type=range]{grid-column:1/-1;width:100%;margin:0;accent-color:var(--player-accent)}
+.range-row output{font:11px ui-monospace,monospace;color:#d1d6df}
+#clip-panel p{font-size:13px;color:#bdc3ce;margin:8px 0 0}
+
+/* Watermark settings revealed when the switch is on. */
+.watermark-fields label{display:block;margin-top:12px}
+.watermark-fields fieldset{border:0;padding:0;margin:0;display:flex;gap:14px;font-size:13px}
+.watermark-fields fieldset legend{font-size:14px;font-weight:700;padding:0;margin-bottom:6px}
+.watermark-fields fieldset label{display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;cursor:pointer}
+.watermark-fields fieldset input{width:auto;margin:0;accent-color:var(--player-accent)}
+.watermark-fields .range-row{margin-top:12px}
+.watermark-fields select{width:100%;background:#1b1e27;border:1px solid #303747;color:#d1d6df;border-radius:5px;padding:9px 10px;font-size:13px;margin-top:9px;min-width:0}
+
+/* Connection state rows in the Customize panel (WHEP, custom source). */
+.state-list{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;font-size:12px;margin:12px 0 0;color:#b1bacb}
+.state-list dt{color:#8f95a3}
+.state-list dd{margin:0;font:11px ui-monospace,monospace;color:#d1d6df;overflow-wrap:anywhere}
+.setting-group .button{margin-top:14px;font-size:13px;width:100%;gap:10px}
+
+/* Code panel: three integration tabs in the settings panel, the omitted
+   settings note, and the snippet rendered as text. */
+#code-panel .code-tabs{padding:0;gap:18px;margin-bottom:12px}
+#code-panel .code-tabs button{padding:10px 0}
+#code-panel .code-tabs button[aria-selected=true],.code-tabs button[aria-selected=true],.panel-tabs button[aria-selected=true]{color:white;border-bottom-color:var(--accent)}
+#code-panel .code-tabs button:disabled{opacity:.45;cursor:default}
+#playground-code{min-height:120px;max-height:420px;overflow:auto}
+.code-omitted{font-size:12px;color:#c9a04a;line-height:1.6;margin:0 0 12px}
+.code-omitted:empty{display:none}
+.code-install{font:11px/1.7 ui-monospace,monospace;color:#9ba2b1;margin:0 0 6px;overflow-wrap:anywhere}
+
+/* Diagnostics disclosure: compact state cards, the log panels and their
+   actions. Everything in here is below the fold and only rendered while
+   the disclosure is open. */
+.diagnostics summary .diag-count{float:none;margin-left:8px;color:#ff8d93}
+.diag-section{margin:6px 0 18px}
+.diag-section h3{font:11px ui-monospace,monospace;letter-spacing:1.5px;text-transform:uppercase;color:#7e8797;margin:0 0 10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.diag-section h3 button{background:#171921;border:1px solid #292e3b;padding:5px 12px;border-radius:5px;font:12px var(--font-body);color:#bdc3ce;letter-spacing:0;text-transform:none}
+.diag-section h3 button:disabled{opacity:.45;cursor:default}
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.diag-stat{background:#12141a;border:1px solid #262a34;border-radius:6px;padding:10px 12px;min-width:0}
+.diag-stat--wide{grid-column:1/-1}
+.diag-label{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#7e8797;margin-bottom:4px}
+.diag-value{font-size:15px;color:#e4e5e8;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.diag-badge{display:inline-block;border:1px solid #303541;border-radius:999px;padding:3px 9px;font:11px ui-monospace,monospace;letter-spacing:.8px;color:#9da4b2}
+.diag-badge[data-on=true]{border-color:var(--player-accent);color:white}
+.diag-log{background:#0d0f14;border:1px solid #1f232d;border-radius:6px;padding:10px 12px;font:11.5px/1.7 ui-monospace,monospace;max-height:220px;overflow:auto;color:#9ba2b0}
+.diag-log:empty:before{content:attr(data-empty);color:#646d7d}
+.diag-row{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:0 12px;align-items:baseline}
+.diag-row time{color:#7f8592}
+.diag-row .diag-event{color:#e5a0a4}
+.diag-row[data-level=error] .diag-event{color:#ff8d93}
+.diag-row[data-level=warn] .diag-event{color:#e0b25a}
+.diag-row .diag-detail{color:#9ba2b0;overflow-wrap:anywhere}
+.diag-row pre{grid-column:1/-1;font:inherit;color:#9cdcfe;padding:4px 0 8px;min-height:0;white-space:pre;overflow-x:auto}
+.diag-hint{font-size:12px;color:#8f97a8;line-height:1.7;margin:10px 0 0}
+.diag-hint code{font:inherit;color:#c4cad4}
+.diag-hint pre{font-size:11px;padding:10px 12px;min-height:0;background:#0d0f14;border:1px solid #1f232d;border-radius:6px;white-space:pre;overflow-x:auto;margin:8px 0}
+.diag-hint details summary{cursor:pointer;color:#b1bacb}
+
+/* ============================================================
+   Homepage (docs/index.html). Rules supplied by the homepage work:
+   a real 16:9 player in the showcase frame, story-card captures,
+   the code card's tab panels, the built strip link and the footer.
+   ============================================================ */
+/* A real 16:9 player in the frame. Two classes so the rule beats the mockup's fixed heights at every breakpoint regardless of source order. The key art sits under the player mount, the poster layer above both; home.ts hides the image and the layer on the first `playing`. */
+.showcase.showcase--player{height:auto;aspect-ratio:16/9;background:#000}
+.showcase--player>.poster-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
+.showcase-player{position:absolute;inset:0;z-index:1}
+/* The poster layer is inert except for its play affordance and status. */
+.showcase-poster .big-play,.showcase-poster .showcase-status{pointer-events:auto}
+.big-play{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);width:69px;height:69px;border:1px solid #fff6;background:#ffffff20;backdrop-filter:blur(10px);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:21px;transition:background .2s,opacity .2s}
+.big-play-glyph{padding-left:5px}
+.big-play:hover,.big-play:focus-visible{background:var(--player-accent)}
+.showcase-poster.is-loading .big-play{opacity:.55;cursor:progress}
+.showcase-poster.is-ready .big-play{background:var(--player-accent);border-color:#fff9}
+.showcase-poster.is-failed .big-play{border-color:#ff8d93}
+.showcase-status{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);margin:0;font:11px ui-monospace,monospace;letter-spacing:1px;color:#e4e5e8;background:#0b131ba6;border:1px solid #ffffff30;border-radius:5px;padding:6px 10px;white-space:nowrap;max-width:calc(100% - 40px);overflow:hidden;text-overflow:ellipsis}
+.showcase-status:empty{display:none}
+@media(max-width:480px){.big-play{width:54px;height:54px;font-size:17px;top:55%}.showcase-status{font-size:11px;bottom:14px}}
+/* Story-card art: our key art and player captures, no CSS scenery. Watch and Create fill the frame; Listen keeps the mockup's cover-beside-text layout with the square key art where the fake record was. */
+.mini-landscape>img,.clip-art>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.audio-art>img{width:78px;height:78px;border-radius:8px;flex-shrink:0;object-fit:cover}
+.audio-art>div{min-width:0}
+@media(max-width:1099px){.audio-art>img{width:60px;height:60px}}
+@media(max-width:800px){.audio-art>img{width:95px;height:95px}}
+.audio-art>.audio-capture{width:auto;height:auto;flex:1;min-width:0;max-height:118px;border-radius:6px;object-fit:contain;object-position:left center}
+@media(max-width:800px){.audio-art>.audio-capture{max-height:130px}}
+/* Get started code card: real tabs (role=tab) and hidden panels. */
+.code-panels{position:relative}
+.code-panels pre:focus-visible{outline-offset:-4px}
+/* The built strip's link is the whole line. */
+.built p a{color:inherit}
+.built p a:hover strong{color:#ff5b62}
+.built p a>span{margin-left:17px}
+/* Footer: five links plus the release tag wrap on phones. */
+.footer>div{flex-wrap:wrap;row-gap:8px}
+/* Phone showcase: at 16:9 a 358px frame is ~200px tall, so the sample title goes (as the mockup's playground stage does) and the heading shrinks. */
+@media(max-width:480px){.showcase--player .film-label{display:none}.showcase--player .film-heading{left:16px;top:16px}.showcase--player .film-heading h2{font-size:24px;margin-top:8px}.showcase--player .film-kicker{font-size:11px}}
+@media(max-width:359px){.scenario-nav button,.scenario-nav a{flex-basis:calc(50% - 3px)}.playground-title h1{font-size:32px}}
+/* The audio stage grows with the full audio UI (it is taller than 16:9 on a
+   phone); an explicit min-height would replace the content-based one that
+   aspect-ratio boxes get and leave the player overflowing the frame. */
+@media(max-width:480px){.audio-stage,.empty-stage{min-height:auto}}
+/* Touch targets (plan D.2, WCAG 2.5.8): the hero CTA and the code-card tabs are at least 44px on both axes at every width. */
+.hero-bottom .button{min-height:44px}
+.code-tabs button{min-width:44px;min-height:44px}

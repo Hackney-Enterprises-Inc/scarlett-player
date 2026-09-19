@@ -2,296 +2,228 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Scarlett Player - Modern Video Player</title>
-  <meta name="description" content="A lightweight, plugin-based video player for the modern web. HLS streaming, native video formats, and casting support.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scarlett Player | Modular Video &amp; Audio Player</title>
+  <meta name="description" content="Open-source, plugin-based video and audio player for the web. HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, in TypeScript with a Vue wrapper.">
+  <link rel="canonical" href="https://scarlettplayer.com/">
+  <meta name="theme-color" content="#0b0c10">
+  <link rel="icon" href="assets/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="assets/brand/signal-icon-on-dark.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Scarlett Player">
+  <meta property="og:title" content="Scarlett Player | Modular Video &amp; Audio Player">
+  <meta property="og:description" content="Open-source, plugin-based video and audio player for the web. HLS, native formats, WHEP live, captions, chapters, clips and casting.">
+  <meta property="og:url" content="https://scarlettplayer.com/">
+  <meta property="og:image" content="https://scarlettplayer.com/assets/share-1200x630.jpg">
+  <meta property="og:image:secure_url" content="https://scarlettplayer.com/assets/share-1200x630.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Scarlett Player key art with the Signal logo in the corner">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Scarlett Player | Modular Video &amp; Audio Player">
+  <meta name="twitter:description" content="Open-source, plugin-based video and audio player for the web. HLS, native formats, WHEP live, captions, chapters, clips and casting.">
+  <meta name="twitter:image" content="https://scarlettplayer.com/assets/share-1200x630.jpg">
+  <meta name="twitter:image:alt" content="Scarlett Player key art with the Signal logo in the corner">
+  <link rel="preload" href="assets/fonts/carter-one-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/cantarell-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css?v=36aa3ff4">
   <script src="https://cdn.usefathom.com/script.js" data-site="OFIAHQME" defer></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            scarlett: {
-              DEFAULT: '#e50914',
-              dark: '#b20710',
-              light: '#f40d17'
-            }
-          }
-        }
-      }
+  <script type="module" src="site/home.js?v=3cfa10f7"></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "Scarlett Player",
+    "description": "Modular, plugin-based video and audio player for the web.",
+    "url": "https://scarlettplayer.com/",
+    "codeRepository": "https://github.com/Hackney-Enterprises-Inc/scarlett-player",
+    "programmingLanguage": "TypeScript",
+    "runtimePlatform": "Web browser",
+    "license": "https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE",
+    "author": {
+      "@type": "Organization",
+      "name": "The Stream Platform",
+      "url": "https://thestreamplatform.com"
     }
+  }
   </script>
-  <style>
-    .gradient-bg {
-      background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
-    }
-    .code-block {
-      background: #0d0d0d;
-      border: 1px solid #333;
-    }
-    .feature-card {
-      background: linear-gradient(180deg, #2a2a2a 0%, #1f1f1f 100%);
-      border: 1px solid #333;
-    }
-    .feature-card:hover {
-      border-color: #e50914;
-    }
-    .animated-gradient {
-      background: linear-gradient(
-        90deg,
-        #e50914,
-        #ff4d4d,
-        #ffffff,
-        #ff9999,
-        #e50914,
-        #b20710,
-        #e50914
-      );
-      background-size: 300% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: gradient-shift 6s ease infinite;
-    }
-    @keyframes gradient-shift {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-  </style>
 </head>
-<body class="gradient-bg text-white min-h-screen">
-  <!-- Hero -->
-  <header class="max-w-5xl mx-auto px-6 pt-20 pb-16 text-center">
-    <h1 class="text-6xl md:text-7xl font-black tracking-tight mb-4">
-      <span class="animated-gradient">SCARLETT PLAYER</span>
-    </h1>
-    <p class="text-xl text-gray-400 mb-8 max-w-2xl mx-auto">
-      A lightweight, plugin-based video player for the modern web.
-      Only bundle what you need.
-    </p>
-    <div class="flex flex-wrap justify-center gap-4">
-      <a href="https://scarlettplayer.com/demo/"
-         class="bg-scarlett hover:bg-scarlett-light px-8 py-3 rounded-lg font-semibold transition-colors">
-        Try the Demo
-      </a>
-      <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player"
-         class="bg-white/10 hover:bg-white/20 px-8 py-3 rounded-lg font-semibold transition-colors">
-        View on GitHub
-      </a>
-    </div>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="header wrap">
+    <a class="brand" href="./" aria-label="Scarlett Player home">
+      <img class="brand-lockup" src="assets/brand/signal-on-dark.svg" width="146" height="48" alt="Scarlett Player">
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="demo/">Playground</a>
+      <a href="#start">Get started</a>
+      <a class="github" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+    <span class="version-badge" id="version">v1.15.1</span>
   </header>
 
-  <!-- Features -->
-  <section class="max-w-5xl mx-auto px-6 py-16">
-    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F9E9;</div>
-        <h3 class="font-semibold mb-2">Plugin Architecture</h3>
-        <p class="text-gray-400 text-sm">Modular design. HLS, UI, casting - all separate plugins. Bundle only what you use.</p>
+  <main id="main">
+    <section id="home-view" aria-labelledby="hero-heading">
+      <div class="hero wrap">
+        <p class="eyebrow"><span class="pulse" aria-hidden="true"></span> OPEN SOURCE. ENDLESS POSSIBILITIES.</p>
+        <h1 id="hero-heading">Your content.<br><span>Center stage.</span></h1>
+        <div class="hero-bottom">
+          <p>A beautiful player. A modular foundation. <br>Video and audio, exactly the way you want them.</p>
+          <a class="button primary" href="demo/">Make it yours <span aria-hidden="true">↗</span></a>
+        </div>
       </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F3AC;</div>
-        <h3 class="font-semibold mb-2">HLS + Native Video</h3>
-        <p class="text-gray-400 text-sm">Adaptive streaming with hls.js. Native support for MP4, WebM, MOV, MKV.</p>
-      </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F4FA;</div>
-        <h3 class="font-semibold mb-2">Casting Support</h3>
-        <p class="text-gray-400 text-sm">Built-in AirPlay and Chromecast plugins with seamless HLS switching.</p>
-      </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F4DD;</div>
-        <h3 class="font-semibold mb-2">TypeScript First</h3>
-        <p class="text-gray-400 text-sm">Fully typed API with excellent IDE support and developer experience.</p>
-      </div>
-    </div>
-    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F3B5;</div>
-        <h3 class="font-semibold mb-2">Audio Player UI</h3>
-        <p class="text-gray-400 text-sm">Compact audio player with artwork, progress, and multiple layout modes.</p>
-      </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F4CB;</div>
-        <h3 class="font-semibold mb-2">Playlist Support</h3>
-        <p class="text-gray-400 text-sm">Queue management with shuffle, repeat modes, and auto-advance.</p>
-      </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F4F1;</div>
-        <h3 class="font-semibold mb-2">Media Session</h3>
-        <p class="text-gray-400 text-sm">Lock screen controls and media keys on mobile and desktop.</p>
-      </div>
-      <div class="feature-card rounded-xl p-6 transition-colors">
-        <div class="text-2xl mb-3">&#x1F4E6;</div>
-        <h3 class="font-semibold mb-2">Framework Ready</h3>
-        <p class="text-gray-400 text-sm">Vue 3 wrapper included.</p>
-      </div>
-    </div>
-  </section>
 
-  <!-- Code Example -->
-  <section class="max-w-5xl mx-auto px-6 py-16">
-    <h2 class="text-2xl font-bold mb-8 text-center">Quick Start</h2>
-    <div class="code-block rounded-xl p-6 overflow-x-auto">
-      <pre class="text-sm font-mono"><code class="text-gray-300"><span class="text-purple-400">import</span> { ScarlettPlayer } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/core'</span>;
-<span class="text-purple-400">import</span> { createHLSPlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/hls'</span>;
-<span class="text-purple-400">import</span> { createNativePlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/native'</span>;
-<span class="text-purple-400">import</span> { uiPlugin } <span class="text-purple-400">from</span> <span class="text-green-400">'@scarlett-player/ui'</span>;
+      <div class="wrap showcase-wrap">
+        <div class="showcase showcase--player" id="showcase" data-src="https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8" data-poster="assets/key-art-169.jpg">
+          <img class="poster-image" src="assets/key-art-169.jpg" srcset="assets/key-art-169-960.jpg 960w, assets/key-art-169.jpg 1980w" sizes="(min-width: 1600px) 1280px, (min-width: 1100px) min(1200px, calc(100vw - 80px)), (min-width: 481px) calc(100vw - 48px), calc(100vw - 32px)" width="1980" height="1080" alt="" fetchpriority="high" decoding="async">
+          <div class="showcase-player" id="home-player"></div>
+          <div class="poster-layer showcase-poster" id="showcase-poster">
+            <div class="film-heading">
+              <span class="film-kicker">THE SCARLETT EXPERIENCE</span>
+              <h2>A little closer<br>to extraordinary.</h2>
+            </div>
+            <span class="quality-badge">4K <span aria-hidden="true">·</span> HLS ADAPTIVE</span>
+            <a class="big-play" id="showcase-play" href="demo/" aria-label="Play the sample video" data-action="play"><span class="big-play-glyph" aria-hidden="true">▶</span></a>
+            <span class="film-label">BIG BUCK BUNNY <span>SAMPLE / BLENDER FOUNDATION</span></span>
+            <p class="showcase-status" id="showcase-status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+        <div class="showcase-caption">
+          <span><span class="tiny-dot" aria-hidden="true"></span> Your story looks good here.</span>
+          <a href="demo/">Explore the player <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
 
-<span class="text-purple-400">const</span> player = <span class="text-purple-400">new</span> <span class="text-yellow-400">ScarlettPlayer</span>({
-  container: <span class="text-cyan-400">document</span>.<span class="text-yellow-400">getElementById</span>(<span class="text-green-400">'player'</span>),
+      <section class="proof wrap" aria-label="Supported technology">
+        <span>MADE FOR THE MODERN WEB</span>
+        <div>HLS streaming</div><b aria-hidden="true">·</b>
+        <div>Native video</div><b aria-hidden="true">·</b>
+        <div>Audio</div><b aria-hidden="true">·</b>
+        <div>TypeScript</div><b aria-hidden="true">·</b>
+        <div>Vue</div><b aria-hidden="true">·</b>
+        <div>WHEP</div>
+      </section>
+
+      <section class="possibilities wrap" aria-labelledby="possibilities-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ONE PLAYER. YOUR POSSIBILITIES.</p>
+            <h2 id="possibilities-heading">More than a play button.</h2>
+          </div>
+          <p>Start with the essentials.<br>Add what makes it yours.</p>
+        </div>
+        <div class="story-grid">
+          <a class="story story-watch" href="demo/#hls">
+            <div class="mini-landscape">
+              <img src="assets/captures/watch-player.jpg" width="1200" height="513" alt="" loading="lazy" decoding="async">
+            </div>
+            <span class="story-number">01 / WATCH</span>
+            <h3>Every frame. Beautiful.</h3>
+            <p>Adaptive streaming, captions, and chapters. <br>A viewing experience that gets out of the way.</p>
+            <span class="text-link">Explore video ↗</span>
+          </a>
+          <a class="story story-audio" href="demo/#audio">
+            <div class="audio-art">
+              <img src="assets/key-art-square.jpg" width="1080" height="1080" alt="" loading="lazy" decoding="async">
+              <img class="audio-capture" src="assets/captures/listen-audio.jpg" width="840" height="420" alt="" loading="lazy" decoding="async">
+            </div>
+            <span class="story-number">02 / LISTEN</span>
+            <h3>Small player. Big presence.</h3>
+            <p>Music, podcasts, and everything in between. <br>Audio that feels right at home.</p>
+            <span class="text-link">Explore audio ↗</span>
+          </a>
+          <a class="story story-create" href="demo/?feature=clips#hls">
+            <div class="clip-art">
+              <img src="assets/captures/create-clips.jpg" width="1184" height="506" alt="" loading="lazy" decoding="async">
+            </div>
+            <span class="story-number">03 / CREATE</span>
+            <h3>Make the moment travel.</h3>
+            <p>Clip a highlight. Share a moment. <br>Put your own signature on the experience.</p>
+            <span class="text-link">Try the creative tools ↗</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="start wrap" id="start" aria-labelledby="start-heading">
+        <div>
+          <p class="eyebrow">LESS SETUP. MORE SHOWTIME.</p>
+          <h2 id="start-heading">Fits your stack.<br><span>Feels like yours.</span></h2>
+          <p>Embed it in a page or build it into your app.<br>Bring only the plugins you need.</p>
+          <a href="demo/" class="text-link">Build your player ↗</a>
+        </div>
+        <div class="code-card">
+          <div class="code-tabs" role="tablist" aria-label="Integration example">
+            <button class="selected" type="button" role="tab" id="tab-embed" aria-selected="true" aria-controls="code-embed" data-snippet="embed">Embed</button>
+            <button type="button" role="tab" id="tab-typescript" aria-selected="false" aria-controls="code-typescript" tabindex="-1" data-snippet="typescript">TypeScript</button>
+            <button type="button" role="tab" id="tab-vue" aria-selected="false" aria-controls="code-vue" tabindex="-1" data-snippet="vue">Vue</button>
+            <button class="copy" type="button" data-copy="home-code" hidden>Copy</button>
+          </div>
+          <div id="home-code" class="code-panels">
+            <pre id="code-embed" role="tabpanel" aria-labelledby="tab-embed" tabindex="0">&lt;div
+  data-scarlett-player
+  data-src="https://example.com/film.m3u8"
+  data-brand-color="#e50914"
+&gt;&lt;/div&gt;
+&lt;script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.video.umd.cjs"&gt;&lt;/script&gt;</pre>
+            <pre id="code-typescript" role="tabpanel" aria-labelledby="tab-typescript" tabindex="0" hidden>// npm install @scarlett-player/core @scarlett-player/hls @scarlett-player/ui
+import { createPlayer } from '@scarlett-player/core';
+import { createHLSPlugin } from '@scarlett-player/hls';
+import { uiPlugin } from '@scarlett-player/ui';
+
+const player = await createPlayer({
+  container: '#player',
+  src: 'https://example.com/film.m3u8',
   plugins: [
-    <span class="text-yellow-400">createHLSPlugin</span>(),       <span class="text-gray-500">// HLS streams (.m3u8)</span>
-    <span class="text-yellow-400">createNativePlugin</span>(),    <span class="text-gray-500">// Native formats (MP4, WebM)</span>
-    <span class="text-yellow-400">uiPlugin</span>({
-      theme: { accentColor: <span class="text-green-400">'#e50914'</span> },
-    }),
+    createHLSPlugin(),
+    uiPlugin({ theme: { accentColor: '#e50914' } }),
   ],
 });
 
-<span class="text-purple-400">await</span> player.<span class="text-yellow-400">load</span>(<span class="text-green-400">'https://example.com/video.m3u8'</span>);</code></pre>
-    </div>
-  </section>
+// Later, when the page tears down:
+player.destroy();</pre>
+            <pre id="code-vue" role="tabpanel" aria-labelledby="tab-vue" tabindex="0" hidden>&lt;script setup lang="ts"&gt;
+// npm install @scarlett-player/vue @scarlett-player/hls @scarlett-player/ui
+import { ScarlettPlayerComponent as ScarlettPlayer } from '@scarlett-player/vue';
+import { createHLSPlugin } from '@scarlett-player/hls';
+import { uiPlugin } from '@scarlett-player/ui';
 
-  <!-- Packages -->
-  <section class="max-w-5xl mx-auto px-6 py-16">
-    <h2 class="text-2xl font-bold mb-8 text-center">Packages</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-left">
-        <thead>
-          <tr class="border-b border-gray-700">
-            <th class="py-3 px-4 text-gray-400 font-medium">Package</th>
-            <th class="py-3 px-4 text-gray-400 font-medium">Description</th>
-          </tr>
-        </thead>
-        <tbody class="text-sm">
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/core</td>
-            <td class="py-3 px-4 text-gray-300">Core player engine with state management and event system</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/embed</td>
-            <td class="py-3 px-4 text-gray-300">CDN embed - data attributes, UMD and ESM bundles, iframe helper</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/hls</td>
-            <td class="py-3 px-4 text-gray-300">HLS playback provider (hls.js + native Safari fallback)</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/native</td>
-            <td class="py-3 px-4 text-gray-300">Native video provider (MP4, WebM, MOV, MKV)</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/ui</td>
-            <td class="py-3 px-4 text-gray-300">Video UI controls with keyboard shortcuts and theming</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/audio-ui</td>
-            <td class="py-3 px-4 text-gray-300">Compact audio player UI (podcasts, music)</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/analytics</td>
-            <td class="py-3 px-4 text-gray-300">QoE metrics and engagement tracking</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/playlist</td>
-            <td class="py-3 px-4 text-gray-300">Queue management, shuffle, repeat modes</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/media-session</td>
-            <td class="py-3 px-4 text-gray-300">Lock screen and media key controls</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/airplay</td>
-            <td class="py-3 px-4 text-gray-300">AirPlay casting support</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/chromecast</td>
-            <td class="py-3 px-4 text-gray-300">Chromecast casting support</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/captions</td>
-            <td class="py-3 px-4 text-gray-300">WebVTT subtitles and closed captions, extracted from HLS manifests</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/chapters</td>
-            <td class="py-3 px-4 text-gray-300">Chapter markers on the progress bar, chapter list, seek to chapter</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/gestures</td>
-            <td class="py-3 px-4 text-gray-300">Touch gestures - double-tap seek, tap to toggle controls</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/share</td>
-            <td class="py-3 px-4 text-gray-300">Native share sheet, copy link, timestamps and embed codes</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/clips</td>
-            <td class="py-3 px-4 text-gray-300">Viewer-created clips - two-handle range selection, loop preview, host submission</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/watermark</td>
-            <td class="py-3 px-4 text-gray-300">Anti-piracy text or image overlay with dynamic repositioning</td>
-          </tr>
-          <tr class="border-b border-gray-800">
-            <td class="py-3 px-4 font-mono text-scarlett">@scarlett-player/vue</td>
-            <td class="py-3 px-4 text-gray-300">Vue 3 component wrapper</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
+const plugins = [
+  createHLSPlugin(),
+  uiPlugin({ theme: { accentColor: '#e50914' } }),
+];
+&lt;/script&gt;
 
-  <!-- Keyboard Shortcuts -->
-  <section class="max-w-5xl mx-auto px-6 py-16">
-    <h2 class="text-2xl font-bold mb-8 text-center">Keyboard Shortcuts</h2>
-    <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-4 text-center">
-      <div class="feature-card rounded-lg p-4">
-        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">Space</kbd>
-        <p class="text-gray-400 text-sm mt-2">Play/Pause</p>
-      </div>
-      <div class="feature-card rounded-lg p-4">
-        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">M</kbd>
-        <p class="text-gray-400 text-sm mt-2">Toggle Mute</p>
-      </div>
-      <div class="feature-card rounded-lg p-4">
-        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">F</kbd>
-        <p class="text-gray-400 text-sm mt-2">Fullscreen</p>
-      </div>
-      <div class="feature-card rounded-lg p-4">
-        <kbd class="bg-gray-800 px-3 py-1 rounded text-sm font-mono">&larr; &rarr;</kbd>
-        <p class="text-gray-400 text-sm mt-2">Seek &plusmn;5s</p>
-      </div>
-    </div>
-  </section>
+&lt;template&gt;
+  &lt;ScarlettPlayer src="https://example.com/film.m3u8" :plugins="plugins" /&gt;
+&lt;/template&gt;</pre>
+          </div>
+          <div class="code-foot"><span class="tiny-dot" aria-hidden="true"></span> A small beginning. Room to grow.</div>
+        </div>
+      </section>
 
-  <!-- TSP Branding -->
-  <section class="max-w-5xl mx-auto px-6 py-16">
-    <div class="feature-card rounded-xl p-8 text-center">
-      <p class="text-gray-400 text-sm uppercase tracking-wider mb-3">Built for</p>
-      <a href="https://thestreamplatform.com" class="text-2xl font-bold text-white hover:text-scarlett transition-colors">
-        The Stream Platform
-      </a>
-      <p class="text-gray-400 mt-4 max-w-xl mx-auto">
-        Scarlett Player is the official video player for The Stream Platform - powering live streaming, VOD, and PPV for creators and businesses.
-      </p>
-      <a href="https://thestreamplatform.com"
-         class="inline-block mt-6 bg-white/10 hover:bg-white/20 px-6 py-2 rounded-lg text-sm font-medium transition-colors">
-        Learn more &rarr;
-      </a>
-    </div>
-  </section>
+      <div class="built wrap">
+        <span>BUILT FOR REAL EXPERIENCES</span>
+        <p><a href="https://thestreamplatform.com" rel="noopener">The player behind <strong>The Stream Platform</strong><span aria-hidden="true">↗</span></a></p>
+      </div>
+    </section>
+  </main>
 
-  <!-- Footer -->
-  <footer class="max-w-5xl mx-auto px-6 py-12 border-t border-gray-800 text-center">
-    <p class="text-gray-500 text-sm">
-      <span class="text-scarlett font-semibold">Scarlett Player</span> - Modular. Extensible. Yours.
-    </p>
-    <p class="text-gray-600 text-xs mt-2">
-      Built with inspiration from Vidstack and Mux Player.
-    </p>
+  <footer class="footer wrap">
+    <a class="brand" href="./" aria-label="Scarlett Player home">
+      <img class="brand-lockup" src="assets/brand/signal-on-dark.svg" width="146" height="48" alt="Scarlett Player">
+    </a>
+    <span>Modular. Extensible. Yours.</span>
+    <div>
+      <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player">Source ↗</a>
+      <a href="https://www.npmjs.com/package/@scarlett-player/core">npm ↗</a>
+      <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE">MIT license</a>
+      <a href="https://peach.blender.org/" title="Sample video: Big Buck Bunny, © 2008 Blender Foundation, licensed CC BY 3.0">Sample: Big Buck Bunny · Blender Foundation · CC BY 3.0</a>
+      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.15.1">v1.15.1</a>
+    </div>
   </footer>
+  <div class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

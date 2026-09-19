@@ -4,6 +4,10 @@
  * Covers the contract plugin packages rely on: register a factory under an id,
  * have it render when a layout asks for it, and have that work whether the
  * registration happens before or after the UI plugin initialises.
+ *
+ * A registration after init queues one rebuild on the microtask queue rather
+ * than rebuilding inline, so every test that registers after `plugin.init`
+ * awaits {@link flushRebuild} before reading the bar.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -14,6 +18,7 @@ import {
   unregisterControlsFor,
   getControlFactory,
   resetControlRegistry,
+  UNRESOLVED_SLOT_GRACE_MS,
 } from '../src/index';
 import type { Control } from '../src/types';
 import type { IPluginAPI } from '@scarlett-player/core';
@@ -66,6 +71,14 @@ function createTestControl(label: string): Control {
     destroy: vi.fn(() => el.remove()),
   };
 }
+
+/**
+ * Let the rebuild a late registration queued run.
+ *
+ * The plugin coalesces registrations onto one `queueMicrotask`, so one
+ * microtask turn is exactly what separates "registered" from "rendered".
+ */
+const flushRebuild = (): Promise<void> => Promise.resolve();
 
 describe('control registry', () => {
   let api: MockPluginAPI;
@@ -123,11 +136,24 @@ describe('control registry', () => {
     });
 
     it('warns and skips an unknown slot with nothing registered', async () => {
-      const plugin = uiPlugin({ controls: ['play', 'ghost'] });
-      await plugin.init(api);
+      vi.useFakeTimers();
+      try {
+        const plugin = uiPlugin({ controls: ['play', 'ghost'] });
+        await plugin.init(api);
 
-      expect(api.logger.warn).toHaveBeenCalledWith(expect.stringContaining('ghost'));
-      expect(api.container.querySelector('.sp-ghost')).toBeNull();
+        expect(api.container.querySelector('.sp-ghost')).toBeNull();
+        // Not yet: the plugin that owns the slot may simply not have run.
+        expect(api.logger.warn).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(UNRESOLVED_SLOT_GRACE_MS);
+
+        expect(api.logger.warn).toHaveBeenCalledTimes(1);
+        expect(api.logger.warn).toHaveBeenCalledWith(expect.stringContaining('ghost'));
+
+        await plugin.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('survives a factory that throws', async () => {
@@ -157,6 +183,7 @@ describe('control registry', () => {
       expect(api.container.querySelector('.sp-demo')).toBeNull();
 
       registerControl('demo', () => createTestControl('demo'));
+      await flushRebuild();
 
       expect(api.container.querySelector('.sp-demo')).not.toBeNull();
     });
@@ -166,6 +193,7 @@ describe('control registry', () => {
       await plugin.init(api);
 
       registerControl('demo', () => createTestControl('demo'));
+      await flushRebuild();
 
       const bar = api.container.querySelector('.sp-controls');
       const rendered = Array.from(bar?.children ?? []);
@@ -180,14 +208,15 @@ describe('control registry', () => {
       const before = bar?.children.length;
 
       registerControl('unused', () => createTestControl('unused'));
+      await flushRebuild();
 
       expect(api.container.querySelector('.sp-unused')).toBeNull();
       expect(bar?.children.length).toBe(before);
     });
 
     it('destroys the previous controls when rebuilding', async () => {
-      const firstControl = createTestControl('play-stub');
-      registerControl('demo', () => createTestControl('demo'));
+      const first = createTestControl('demo');
+      registerControl('demo', () => first);
 
       const plugin = uiPlugin({ controls: ['demo'] });
       await plugin.init(api);
@@ -198,9 +227,66 @@ describe('control registry', () => {
       // Re-registering replaces the factory and rebuilds; the old instance must
       // be destroyed rather than left orphaned in the DOM.
       registerControl('demo', () => createTestControl('demo'));
+      await flushRebuild();
 
       expect(api.container.querySelectorAll('.sp-demo').length).toBe(1);
-      expect(firstControl).toBeDefined();
+      expect(first.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it('rebuilds once for several registrations in one tick', async () => {
+      // The playlist plugin registers three ids back to back. Each used to
+      // tear the bar down and build it again, so every control was destroyed
+      // and recreated once per registration.
+      const plugin = uiPlugin({ controls: ['one', 'play', 'two', 'three'] });
+      await plugin.init(api);
+
+      // All three land before anything is rebuilt, so `one` is created by the
+      // first rebuild. A rebuild destroys every control it replaces exactly
+      // once, so its destroy count is the number of rebuilds that followed.
+      const one = createTestControl('one');
+      registerControl('one', () => one, { owner: api.container });
+      registerControl('two', () => createTestControl('two'), { owner: api.container });
+      registerControl('three', () => createTestControl('three'), { owner: api.container });
+
+      expect(api.container.querySelector('.sp-one')).toBeNull();
+
+      await flushRebuild();
+
+      const bar = api.container.querySelector('.sp-controls');
+      const rendered = Array.from(bar?.children ?? []);
+      expect(rendered[0]?.classList.contains('sp-one')).toBe(true);
+      expect(rendered[1]?.classList.contains('sp-play')).toBe(true);
+      expect(rendered[2]?.classList.contains('sp-two')).toBe(true);
+      expect(rendered[3]?.classList.contains('sp-three')).toBe(true);
+      expect(one.destroy).not.toHaveBeenCalled();
+
+      // Nothing else was queued: a second turn changes nothing.
+      await flushRebuild();
+      expect(one.destroy).not.toHaveBeenCalled();
+      expect(api.container.querySelectorAll('.sp-one').length).toBe(1);
+
+      await plugin.destroy();
+    });
+
+    it('stays quiet about a slot registered inside the grace period', async () => {
+      vi.useFakeTimers();
+      try {
+        const plugin = uiPlugin({ controls: ['play', 'late'] });
+        await plugin.init(api);
+
+        vi.advanceTimersByTime(UNRESOLVED_SLOT_GRACE_MS - 1);
+        registerControl('late', () => createTestControl('late'));
+        await flushRebuild();
+
+        vi.advanceTimersByTime(UNRESOLVED_SLOT_GRACE_MS * 2);
+
+        expect(api.logger.warn).not.toHaveBeenCalled();
+        expect(api.container.querySelector('.sp-late')).not.toBeNull();
+
+        await plugin.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('stops rebuilding once the plugin is destroyed', async () => {
@@ -209,7 +295,46 @@ describe('control registry', () => {
       await plugin.destroy();
 
       expect(() => registerControl('demo', () => createTestControl('demo'))).not.toThrow();
+      await flushRebuild();
       expect(document.querySelector('.sp-demo')).toBeNull();
+    });
+
+    it('drops a queued rebuild when destroyed before it flushes', async () => {
+      const existing = createTestControl('existing');
+      registerControl('existing', () => existing);
+
+      const plugin = uiPlugin({ controls: ['existing', 'demo'] });
+      await plugin.init(api);
+
+      const late = createTestControl('demo');
+      registerControl('demo', () => late);
+      await plugin.destroy();
+
+      // Teardown destroyed the rendered control once. The flush that lands
+      // now must not rebuild a bar that is gone, so no further destroy calls
+      // and no late control ever created.
+      await expect(flushRebuild()).resolves.toBeUndefined();
+
+      expect(existing.destroy).toHaveBeenCalledTimes(1);
+      expect(late.destroy).not.toHaveBeenCalled();
+      expect(api.container.querySelector('.sp-controls')).toBeNull();
+      expect(api.container.querySelector('.sp-demo')).toBeNull();
+      expect(api.container.querySelector('.sp-existing')).toBeNull();
+    });
+
+    it('clears the grace timer when destroyed before it fires', async () => {
+      vi.useFakeTimers();
+      try {
+        const plugin = uiPlugin({ controls: ['play', 'ghost'] });
+        await plugin.init(api);
+        await plugin.destroy();
+
+        vi.advanceTimersByTime(UNRESOLVED_SLOT_GRACE_MS * 2);
+
+        expect(api.logger.warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
@@ -362,6 +487,7 @@ describe('multi-player isolation', () => {
     const before = apiA.container.querySelector('.sp-controls')?.children.length;
 
     registerControl('demo', () => createTestControl('b-only'), { owner: apiB.container });
+    await flushRebuild();
 
     expect(apiA.container.querySelector('.sp-b-only')).toBeNull();
     expect(apiA.container.querySelector('.sp-controls')?.children.length).toBe(before);

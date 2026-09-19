@@ -1,8 +1,17 @@
+<p align="center">
+  <a href="https://scarlettplayer.com/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/signal-on-dark.svg">
+      <img src="docs/assets/brand/signal.svg" alt="Scarlett Player" width="280">
+    </picture>
+  </a>
+</p>
+
 # Scarlett Player
 
 **A lightweight, plugin-based media player for the modern web**
 
-**[Live Demo](https://scarlettplayer.com/demo/)** | **[Documentation](https://scarlettplayer.com/)**
+**[scarlettplayer.com](https://scarlettplayer.com/)** | **[Playground](https://scarlettplayer.com/demo/)** | **[Architecture](./docs/architecture.md)** | **[Writing a plugin](./docs/plugin-authoring.md)** | **[Embed](./packages/embed/README.md)**
 
 > **Built for [The Stream Platform](https://thestreamplatform.com)** - the official player powering live streaming, VOD, and PPV for combat sports events.
 
@@ -30,7 +39,7 @@
 - **Vue 3 Integration** - Component wrapper and composable with reactive state
 - **CDN Embed** - Drop-in script tag, no bundler required
 - **TypeScript** - Fully typed API across all packages
-- **2,300+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
+- **2,700+ Tests** - Vitest unit coverage plus a headless-Chrome verification harness with local HLS fixtures
 
 ## Installation
 
@@ -215,7 +224,7 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
      media session, captions, gestures, watermark, share -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Or pin a version: .../scarlett-player/v1.11.1/embed.umd.cjs -->
+<!-- Or pin a version: .../scarlett-player/v1.15.1/embed.umd.cjs -->
 
 <!-- Video player via data attributes -->
 <div data-scarlett-player
@@ -359,21 +368,29 @@ has already passed. It goes away once vitest moves to 3.x.
 ```bash
 pnpm install          # Install dependencies
 pnpm build            # Build all packages (core first, then plugins)
-pnpm test             # Run all tests (2,300+)
+pnpm test             # Run all tests (2,700+)
 pnpm typecheck        # Type check all packages
 pnpm lint             # ESLint
 pnpm format           # Prettier
 pnpm validate         # package-script check + lint + build + package-type check + typecheck + test
-node demo/build.cjs   # Rebuild demo site
+node demo/build.cjs   # Rebuild the site outputs: demo bundle, homepage entry (docs/site/), stamped pages, mirrored site.css + assets
 ```
+
+`docs/` is what scarlettplayer.com serves. `docs/index.html`, `docs/site.css`
+and `docs/assets/` are authored; `docs/demo/` and `docs/site/` are generated
+by `node demo/build.cjs`, which also mirrors `site.css` and `assets/` beside
+each generated page (every page references them as siblings). CI rebuilds and
+commits those outputs on every push to `main`, so leave the rebuilt files out
+of a branch's commits.
 
 ### Browser verification harness
 
 Real-browser checks that jsdom cannot cover (error recovery, reconnects,
 destroy-mid-append races, malformed live playlist refreshes, and narrow-viewport
-control reachability, which needs a layout engine and a coarse pointer). Requires a local
-Chrome and ffmpeg on PATH; the HLS fixture is generated on first run into the
-gitignored `scripts/fixtures/`.
+control reachability, which needs a layout engine and a coarse pointer). Requires
+Playwright's bundled Chromium (`npx playwright install --with-deps chromium`) and
+ffmpeg on PATH; the HLS fixture is generated on first run into the gitignored
+`scripts/fixtures/`.
 
 Scenario 1 exercises the committed demo bundle, so on a branch run `node
 demo/build.cjs` first and leave the rebuilt bundle out of the commit (CI
@@ -383,9 +400,16 @@ fails because that version is where `setPoster()` was added.
 ```bash
 pnpm build && node demo/build.cjs
 python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
-node scripts/verify-browser.mjs                # 39 checks, exits non-zero on failure
+node scripts/verify-browser.mjs                # playback scenarios, exits non-zero on failure
+node scripts/verify-site.mjs                   # site pages: overflow 320-1440, player placement, asset resolution, no media before Play
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
 ```
+
+`verify-browser.mjs` drives the source demo at `/demo/`; `verify-site.mjs`
+covers the homepage (`/docs/`) and both demo routes (`/docs/demo/` is what
+production serves at `/demo/`), every scenario hash, and every stylesheet,
+image, icon and font a page links. Both abort every request to an origin other
+than `127.0.0.1`, so neither needs the public internet.
 
 The harness has no WHEP scenario: WebRTC needs a real server, not a static
 fixture. To exercise `@scarlett-player/whep` end to end, run MediaMTX locally
@@ -427,8 +451,10 @@ packages/
     clips/          # Viewer-created clips (range selection, loop preview, host submission)
   vue/              # Vue 3 component + composable
   embed/            # CDN embed (video, audio, and full builds)
-demo/               # Interactive demo (video + audio players, WHEP monitor URL box)
-docs/               # Landing page + architecture docs
+demo/               # Playground source: index.html, demo.ts, site-controller.ts, scenarios.ts, snippets.ts;
+                    # home.ts + home-player.ts (homepage entry, player loaded on Play); build.cjs
+docs/               # scarlettplayer.com root: index.html, site.css, assets/ (brand, key art, fonts, icons),
+                    # robots.txt, sitemap.xml, the Markdown guides; demo/ and site/ are generated
 scripts/            # CI guards, browser verification harness, HLS fixture, CDN upload
 ```
 

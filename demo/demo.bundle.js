@@ -1799,11 +1799,6 @@
   });
 
   // packages/core/src/scarlett-player.ts
-  async function createPlayer(options) {
-    const player = new ScarlettPlayer(options);
-    await player.init();
-    return player;
-  }
   var ScarlettPlayer;
   var init_scarlett_player = __esm({
     "packages/core/src/scarlett-player.ts"() {
@@ -3619,8 +3614,8 @@
   function toHex(x) {
     return ("0" + x.toString(16).toUpperCase()).slice(-2);
   }
-  function addLeadingZero(num) {
-    return (num < 10 ? "0" : "") + num;
+  function addLeadingZero(num2) {
+    return (num2 < 10 ? "0" : "") + num2;
   }
   function patchEncyptionData(initSegment, decryptdata) {
     if (!initSegment || !decryptdata) {
@@ -4332,13 +4327,13 @@
   }
   function codecsSetSelectionPreferenceValue(codecSet) {
     const limitedHevcSupport = userAgentHevcSupportIsInaccurate();
-    return codecSet.split(",").reduce((num, fourCC) => {
+    return codecSet.split(",").reduce((num2, fourCC) => {
       const lowerPriority = limitedHevcSupport && isHEVC(fourCC);
       const preferenceValue = lowerPriority ? 9 : sampleEntryCodesISO.video[fourCC];
       if (preferenceValue) {
-        return (preferenceValue * 2 + num) / (num ? 3 : 2);
+        return (preferenceValue * 2 + num2) / (num2 ? 3 : 2);
       }
-      return (sampleEntryCodesISO.audio[fourCC] + num) / (num ? 2 : 1);
+      return (sampleEntryCodesISO.audio[fourCC] + num2) / (num2 ? 2 : 1);
     }, 0);
   }
   function getCodecCompatibleNameLower(lowerCaseCodec, preferManagedMediaSource = true) {
@@ -39745,6 +39740,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var src_exports = {};
   __export(src_exports, {
     DEFAULT_PRIORITY: () => DEFAULT_PRIORITY,
+    UNRESOLVED_SLOT_GRACE_MS: () => UNRESOLVED_SLOT_GRACE_MS,
     assertFitLayout: () => assertFitLayout,
     default: () => src_default,
     formatLiveTime: () => formatLiveTime,
@@ -39794,6 +39790,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let lastFitSignature = null;
     let fitPending = true;
     let addedContainerClass = false;
+    let rebuildQueued = false;
+    const unresolvedSlots = /* @__PURE__ */ new Set();
+    let unresolvedSlotTimer = null;
     const layout = config.controls || DEFAULT_LAYOUT;
     const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
     const showBigPlayButton = config.bigPlayButton !== false;
@@ -39845,15 +39844,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               return null;
             }
           }
-          api.logger.warn(`Unknown control slot: ${slot}`);
+          unresolvedSlots.add(slot);
+          api.logger.debug(`No control registered for slot "${slot}" yet`);
           return null;
         }
       }
+    };
+    const reportUnresolvedSlots = () => {
+      unresolvedSlotTimer = null;
+      for (const slot of unresolvedSlots) {
+        api.logger.warn(
+          `Control slot "${slot}" has no registered control after ${UNRESOLVED_SLOT_GRACE_MS}ms - is the plugin installed?`
+        );
+      }
+      unresolvedSlots.clear();
     };
     const populateControlBar = () => {
       if (!controlBar) {
         return;
       }
+      unresolvedSlots.clear();
       const rules = new Map(
         resolveFitItems(layout, config.priority).map((template) => [template.id, template])
       );
@@ -40042,6 +40052,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       fitPending = true;
       populateControlBar();
       updateControls();
+    };
+    const flushRebuild = () => {
+      if (!rebuildQueued) {
+        return;
+      }
+      rebuildQueued = false;
+      rebuildControlBar();
+    };
+    const queueRebuild = () => {
+      if (rebuildQueued) {
+        return;
+      }
+      rebuildQueued = true;
+      queueMicrotask(flushRebuild);
     };
     const updateControls = () => {
       controls.forEach((c) => c.update());
@@ -40271,6 +40295,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         controlBar.setAttribute("role", "toolbar");
         controlBar.setAttribute("aria-label", "Video controls");
         populateControlBar();
+        if (unresolvedSlots.size > 0) {
+          unresolvedSlotTimer = setTimeout(reportUnresolvedSlots, UNRESOLVED_SLOT_GRACE_MS);
+        }
         container.appendChild(controlBar);
         if (responsive && typeof ResizeObserver === "function") {
           resizeObserver = new ResizeObserver((observed) => {
@@ -40298,8 +40325,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (owner && owner !== api.container) {
             return;
           }
-          api.logger.debug(`Control "${id}" registered after init, rebuilding control bar`);
-          rebuildControlBar();
+          api.logger.debug(`Control "${id}" registered after init, queuing a control bar rebuild`);
+          queueRebuild();
         });
         container.addEventListener("pointerdown", handlePointerActivity, { passive: true });
         container.addEventListener("pointermove", handlePointerActivity, { passive: true });
@@ -40363,6 +40390,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         document.removeEventListener("keydown", handleKeyDown);
         controlRegistryUnsubscribe?.();
         controlRegistryUnsubscribe = null;
+        rebuildQueued = false;
+        if (unresolvedSlotTimer) {
+          clearTimeout(unresolvedSlotTimer);
+          unresolvedSlotTimer = null;
+        }
+        unresolvedSlots.clear();
         controls.forEach((c) => c.destroy());
         controls = [];
         entries = [];
@@ -40423,7 +40456,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
   }
-  var DEFAULT_LAYOUT, STYLE_ID, DEFAULT_HIDE_DELAY, ACTIVATION_KEYS, SLIDER_KEYS, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, RESIZE_FALLBACK_DEBOUNCE_MS, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, src_default;
+  var DEFAULT_LAYOUT, STYLE_ID, DEFAULT_HIDE_DELAY, ACTIVATION_KEYS, SLIDER_KEYS, UNMEASURED_CONTROL_WIDTH, FALLBACK_VOLUME_SLIDER_WIDTH, OVERFLOW_BUTTON_WIDTH, FALLBACK_BAR_PADDING_X, FALLBACK_BAR_GAP, RESIZE_FALLBACK_DEBOUNCE_MS, MENU_HEIGHT_RESERVE, FALLBACK_BAR_HEIGHT, MIN_MENU_HEIGHT, UNRESOLVED_SLOT_GRACE_MS, src_default;
   var init_src2 = __esm({
     "packages/plugins/ui/src/index.ts"() {
       "use strict";
@@ -40478,6 +40511,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       MENU_HEIGHT_RESERVE = 16;
       FALLBACK_BAR_HEIGHT = 56;
       MIN_MENU_HEIGHT = 120;
+      UNRESOLVED_SLOT_GRACE_MS = 1500;
       src_default = uiPlugin;
     }
   });
@@ -52576,10 +52610,1771 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // demo/scenarios.ts
+  var SAMPLE = {
+    hls: "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8",
+    mp4: "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo.mp4",
+    audio: "https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3",
+    poster: "assets/key-art-169.jpg",
+    artwork: "assets/key-art-square.jpg",
+    videoTitle: "Big Buck Bunny",
+    audioTitle: "Winamp - It Really Whips the Llama's Ass",
+    audioArtist: "Winamp"
+  };
+  var VIDEO_CAPABILITIES = {
+    accent: true,
+    watermark: true,
+    captions: true,
+    chapters: true,
+    clips: true,
+    format: true,
+    layout: false,
+    analytics: true
+  };
+  var AUDIO_CAPABILITIES = {
+    accent: true,
+    watermark: false,
+    captions: false,
+    chapters: false,
+    clips: false,
+    format: false,
+    layout: true,
+    analytics: false
+  };
+  var SCENARIOS = {
+    hls: {
+      id: "hls",
+      group: "cinema",
+      player: "video",
+      stage: "video",
+      src: SAMPLE.hls,
+      title: SAMPLE.videoTitle,
+      detail: "Cinematic sample \xB7 HLS adaptive \xB7 4K",
+      badge: "4K \xB7 HLS ADAPTIVE",
+      capabilities: VIDEO_CAPABILITIES
+    },
+    mp4: {
+      id: "mp4",
+      group: "cinema",
+      player: "video",
+      stage: "video",
+      src: SAMPLE.mp4,
+      title: SAMPLE.videoTitle,
+      detail: "Cinematic sample \xB7 MP4 progressive \xB7 4K",
+      badge: "4K \xB7 MP4 PROGRESSIVE",
+      capabilities: VIDEO_CAPABILITIES
+    },
+    audio: {
+      id: "audio",
+      group: "audio",
+      player: "audio",
+      stage: "audio",
+      src: SAMPLE.audio,
+      title: SAMPLE.audioTitle,
+      detail: "Audio sample \xB7 full layout \xB7 artwork, playlist, media keys",
+      capabilities: AUDIO_CAPABILITIES
+    },
+    "audio-mini": {
+      id: "audio-mini",
+      group: "audio",
+      player: "mini",
+      stage: "audio",
+      src: SAMPLE.audio,
+      title: SAMPLE.audioTitle,
+      detail: "Audio sample \xB7 mini layout \xB7 one compact bar",
+      capabilities: AUDIO_CAPABILITIES
+    },
+    whep: {
+      id: "whep",
+      group: "live",
+      player: "video",
+      stage: "whep",
+      src: null,
+      title: "Live monitor",
+      detail: "Your endpoint \xB7 WebRTC over WHEP \xB7 no sample connection",
+      capabilities: {
+        accent: true,
+        watermark: false,
+        captions: false,
+        chapters: false,
+        clips: false,
+        format: false,
+        layout: false,
+        analytics: true
+      }
+    },
+    custom: {
+      id: "custom",
+      group: "custom",
+      player: "video",
+      stage: "custom",
+      src: null,
+      title: "Your stream",
+      detail: "Video or audio \xB7 bring your own source",
+      capabilities: {
+        accent: true,
+        // Decided per load: video sources get the watermark, audio does not.
+        watermark: false,
+        captions: false,
+        chapters: false,
+        clips: false,
+        format: false,
+        layout: false,
+        analytics: true
+      }
+    }
+  };
+  var DEFAULT_SCENARIO = "hls";
+  var ALIASES = {
+    playground: "hls",
+    clips: "hls",
+    video: "hls",
+    "audio-full": "audio",
+    live: "whep"
+  };
+  function parseLocation(hash2, search = "") {
+    const raw = hash2.replace(/^#/, "");
+    const [name = "", hashQuery = ""] = raw.split("?");
+    const params = new URLSearchParams(search.replace(/^\?/, ""));
+    const hashParams = new URLSearchParams(hashQuery);
+    const requested = hashParams.get("feature") ?? params.get("feature");
+    let feature = requested === "clips" ? "clips" : null;
+    if (name === "") {
+      return { id: DEFAULT_SCENARIO, feature, known: true };
+    }
+    const lower = name.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(SCENARIOS, lower)) {
+      return { id: lower, feature, known: true };
+    }
+    const alias = Object.prototype.hasOwnProperty.call(ALIASES, lower) ? ALIASES[lower] : void 0;
+    if (alias) {
+      if (lower === "clips") feature = "clips";
+      return { id: alias, feature, known: true };
+    }
+    return { id: DEFAULT_SCENARIO, feature, known: false };
+  }
+
+  // demo/snippets.ts
+  var CDN_BASE = "https://assets.thestreamplatform.com/scarlett-player/latest";
+  function tsString(value) {
+    const escaped = value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    return `'${escaped}'`;
+  }
+  function htmlAttr(value) {
+    return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function num(value) {
+    return String(Math.round(value * 1e3) / 1e3);
+  }
+  function chapterLiterals(chapters, indent) {
+    return chapters.map((chapter) => {
+      const fields = [`time: ${num(chapter.time)}`, `label: ${tsString(chapter.label)}`];
+      if (chapter.subtitle) fields.push(`subtitle: ${tsString(String(chapter.subtitle))}`);
+      if (chapter.endTime !== void 0) fields.push(`endTime: ${num(chapter.endTime)}`);
+      return `${indent}{ ${fields.join(", ")} },`;
+    }).join("\n");
+  }
+  function pluginBlocks(config, indent) {
+    const imports = [];
+    const plugins = [];
+    const inner = `${indent}  `;
+    if (config.media === "audio" || config.media === "audio-mini") {
+      imports.push("import { createNativePlugin } from '@scarlett-player/native';");
+      imports.push("import { createAudioUIPlugin } from '@scarlett-player/audio-ui';");
+      plugins.push(`${indent}createNativePlugin(),`);
+      const layout = config.media === "audio" ? "full" : "mini";
+      const lines = [`${indent}createAudioUIPlugin({`, `${inner}layout: '${layout}',`];
+      if (config.media === "audio-mini") {
+        lines.push(`${inner}showArtwork: false,`, `${inner}showNavigation: false,`);
+      }
+      lines.push(
+        `${inner}theme: { primary: ${tsString(config.accent)}, progressFill: ${tsString(config.accent)} },`,
+        `${indent}}),`
+      );
+      plugins.push(...lines);
+      if (config.media === "audio") {
+        imports.push("import { createPlaylistPlugin } from '@scarlett-player/playlist';");
+        imports.push("import { createMediaSessionPlugin } from '@scarlett-player/media-session';");
+        plugins.push(`${indent}createPlaylistPlugin({ autoAdvance: true }),`);
+        plugins.push(`${indent}createMediaSessionPlugin({ seekOffset: 10 }),`);
+      }
+      return { imports, plugins };
+    }
+    if (config.media === "whep") {
+      imports.push("import { createWHEPPlugin } from '@scarlett-player/whep';");
+      plugins.push(`${indent}createWHEPPlugin(),`);
+    } else {
+      imports.push("import { createHLSPlugin } from '@scarlett-player/hls';");
+      imports.push("import { createNativePlugin } from '@scarlett-player/native';");
+      plugins.push(`${indent}createHLSPlugin(),`);
+      plugins.push(`${indent}createNativePlugin(),`);
+    }
+    imports.push("import { uiPlugin } from '@scarlett-player/ui';");
+    const uiLines = [`${indent}uiPlugin({`, `${inner}theme: { accentColor: ${tsString(config.accent)} },`];
+    if (config.chapters || config.clips) {
+      const slots = [
+        "play",
+        "skip-backward",
+        "skip-forward",
+        "volume",
+        "time",
+        "live-indicator",
+        "bandwidth-indicator",
+        "spacer",
+        ...config.clips ? ["clip"] : [],
+        ...config.chapters ? ["chapters"] : [],
+        "settings",
+        "captions",
+        "chromecast",
+        "airplay",
+        "pip",
+        "fullscreen"
+      ];
+      uiLines.push(`${inner}// The clip and chapter buttons are opt-in slots.`);
+      uiLines.push(`${inner}controls: [${slots.map((s) => `'${s}'`).join(", ")}],`);
+    }
+    uiLines.push(`${indent}}),`);
+    plugins.push(...uiLines);
+    if (config.watermark) {
+      imports.push("import { createWatermarkPlugin } from '@scarlett-player/watermark';");
+      const w = config.watermark;
+      const lines = [`${indent}createWatermarkPlugin({`];
+      if (w.kind === "image") {
+        lines.push(`${inner}imageUrl: ${tsString(w.imageUrl)},`, `${inner}imageHeight: ${num(w.imageHeight)},`);
+      } else {
+        lines.push(`${inner}text: ${tsString(w.text)},`);
+      }
+      lines.push(
+        `${inner}position: '${w.position}',`,
+        `${inner}opacity: ${num(w.opacity)},`,
+        `${inner}padding: ${num(w.padding)},`,
+        `${indent}}),`
+      );
+      plugins.push(...lines);
+    }
+    if (config.captions && config.captions.length > 0) {
+      imports.push("import { createCaptionsPlugin } from '@scarlett-player/captions';");
+      const lines = [`${indent}createCaptionsPlugin({`, `${inner}sources: [`];
+      for (const track of config.captions) {
+        lines.push(
+          `${inner}  { language: ${tsString(track.language)}, label: ${tsString(track.label)}, src: ${tsString(track.src)} },`
+        );
+      }
+      lines.push(`${inner}],`, `${indent}}),`);
+      plugins.push(...lines);
+    }
+    if (config.chapters && config.chapters.length > 0) {
+      imports.push("import { createChaptersPlugin } from '@scarlett-player/chapters';");
+      plugins.push(
+        `${indent}createChaptersPlugin({`,
+        `${inner}chapters: [`,
+        chapterLiterals(config.chapters, `${inner}  `),
+        `${inner}],`,
+        `${indent}}),`
+      );
+    }
+    if (config.clips) {
+      imports.push("import { createClipsPlugin } from '@scarlett-player/clips';");
+      const c = config.clips;
+      plugins.push(
+        `${indent}// The plugin POSTs the captured range as JSON to your server.`,
+        `${indent}createClipsPlugin({`,
+        `${inner}mediaId: 'video-42',`,
+        `${inner}endpoint: { url: '/api/clips' },`,
+        `${inner}minDuration: ${num(c.minDuration)},`,
+        `${inner}maxDuration: ${num(c.maxDuration)},`,
+        `${inner}defaultDuration: ${num(c.defaultDuration)},`,
+        `${inner}step: ${num(c.step)},`,
+        `${indent}}),`
+      );
+    }
+    return { imports, plugins };
+  }
+  function packagesOf(imports) {
+    const names = [];
+    for (const line of imports) {
+      const match = /from '(@scarlett-player\/[a-z-]+)'/.exec(line);
+      if (match?.[1] && !names.includes(match[1])) names.push(match[1]);
+    }
+    return names;
+  }
+  function srcLine(config, indent) {
+    if (config.src === null) {
+      return `${indent}// No source is loaded yet; this is where yours goes.
+${indent}src: ${tsString(config.srcPlaceholder)},`;
+    }
+    if (config.userSupplied) {
+      return `${indent}// Your URL, exactly as you entered it.
+${indent}src: ${tsString(config.src)},`;
+    }
+    return `${indent}src: ${tsString(config.src)},`;
+  }
+  function typescriptSnippet(config) {
+    const { imports, plugins } = pluginBlocks(config, "    ");
+    const playlist = config.media === "audio" ? config.audio : null;
+    if (playlist) imports.push("import type { IPlaylistPlugin } from '@scarlett-player/playlist';");
+    const lines = [
+      "import { createPlayer } from '@scarlett-player/core';",
+      ...imports,
+      "",
+      "const player = await createPlayer({",
+      "  container: document.querySelector('#player'),",
+      srcLine(config, "  ")
+    ];
+    if (config.poster) lines.push(`  poster: ${tsString(config.poster)},`);
+    lines.push("  plugins: [", ...plugins, "  ],", "});");
+    if (playlist) {
+      lines.push(
+        "",
+        "// The playlist plugin loads the track and hands its title and artwork to the UI.",
+        "const playlist = player.getPlugin<IPlaylistPlugin>('playlist');",
+        "playlist?.add([",
+        `  { id: 'track-1', src: ${tsString(config.src ?? config.srcPlaceholder)}, title: ${tsString(playlist.title)}, artist: ${tsString(playlist.artist)}${playlist.artwork ? `, artwork: ${tsString(playlist.artwork)}` : ""} },`,
+        "]);",
+        "playlist?.play(0);"
+      );
+    }
+    lines.push("", "// When the player leaves the page:", "await player.destroy();");
+    const packages = packagesOf(["import { createPlayer } from '@scarlett-player/core';", ...imports]);
+    return {
+      kind: "typescript",
+      label: "TypeScript",
+      description: config.media === "whep" ? "The full configuration: the WHEP provider, the UI and your accent." : "The full configuration: every plugin this preview is running, with your settings.",
+      install: `npm install ${packages.join(" ")}`,
+      code: lines.join("\n"),
+      omitted: [],
+      disabled: null
+    };
+  }
+  function embedSnippet(config) {
+    if (config.media === "whep") {
+      return {
+        kind: "embed",
+        label: "Embed",
+        description: "The embed builds register the HLS and native providers only.",
+        install: "",
+        code: "",
+        omitted: [],
+        disabled: "The embed builds do not ship the WHEP provider. Use the TypeScript or Vue integration for a live monitor."
+      };
+    }
+    const isAudio = config.media === "audio" || config.media === "audio-mini";
+    const attrs = ["data-scarlett-player"];
+    const src = config.src ?? config.srcPlaceholder;
+    attrs.push(`data-src="${htmlAttr(src)}"`);
+    if (config.media === "audio") attrs.push('data-type="audio"');
+    if (config.media === "audio-mini") attrs.push('data-type="audio-mini"');
+    if (isAudio && config.audio) {
+      attrs.push(`data-title="${htmlAttr(config.audio.title)}"`);
+      attrs.push(`data-artist="${htmlAttr(config.audio.artist)}"`);
+      if (config.audio.artwork) attrs.push(`data-artwork="${htmlAttr(config.audio.artwork)}"`);
+    }
+    if (!isAudio && config.poster) attrs.push(`data-poster="${htmlAttr(config.poster)}"`);
+    attrs.push(`data-brand-color="${htmlAttr(config.accent)}"`);
+    if (!isAudio) attrs.push('data-aspect-ratio="16:9"');
+    const build = isAudio ? "embed.audio.umd.cjs" : "embed.video.umd.cjs";
+    const lines = [];
+    if (config.src === null) lines.push("<!-- No source is loaded yet; data-src is where yours goes. -->");
+    else if (config.userSupplied) lines.push("<!-- data-src is your URL, exactly as you entered it. -->");
+    lines.push("<div", ...attrs.map((a) => `  ${a}`), "></div>", `<script src="${CDN_BASE}/${build}"><\/script>`);
+    const omitted = [];
+    if (config.watermark) omitted.push("the watermark");
+    if (config.captions && config.captions.length > 0) omitted.push("the caption tracks");
+    if (config.chapters && config.chapters.length > 0) omitted.push("the chapter list");
+    if (config.clips) omitted.push("the clip selector");
+    return {
+      kind: "embed",
+      label: "Embed",
+      description: isAudio ? "One element and one script from the CDN. The audio build carries the playlist and media-session plugins." : "One element and one script from the CDN. Attributes as documented in the embed README.",
+      install: "No install: the script tag loads the build from the CDN.",
+      code: lines.join("\n"),
+      omitted: omitted.length ? [`The embed attributes do not cover ${omitted.join(", ")}. Those settings need the TypeScript or Vue integration.`] : [],
+      disabled: null
+    };
+  }
+  function vueSnippet(config) {
+    const { imports, plugins } = pluginBlocks(config, "  ");
+    const playlist = config.media === "audio" ? config.audio : null;
+    if (playlist) imports.push("import type { IPlaylistPlugin } from '@scarlett-player/playlist';");
+    const src = config.src ?? config.srcPlaceholder;
+    const templateAttrs = [':src="src"', ':plugins="plugins"'];
+    if (config.poster && config.media !== "audio" && config.media !== "audio-mini") {
+      templateAttrs.push(`poster="${htmlAttr(config.poster)}"`);
+    }
+    const lines = [
+      "<template>",
+      "  <ScarlettPlayer",
+      ...templateAttrs.map((a) => `    ${a}`),
+      '    @ready="onReady"',
+      "  />",
+      "</template>",
+      "",
+      '<script setup lang="ts">',
+      "import { ref } from 'vue';",
+      "import { ScarlettPlayerComponent as ScarlettPlayer } from '@scarlett-player/vue';",
+      "import type { ScarlettPlayer as Player } from '@scarlett-player/core';",
+      ...imports,
+      ""
+    ];
+    if (config.src === null) lines.push("// No source is loaded yet; this is where yours goes.");
+    else if (config.userSupplied) lines.push("// Your URL, exactly as you entered it.");
+    lines.push(`const src = ref(${tsString(src)});`, "", "const plugins = [", ...plugins, "];", "");
+    if (playlist) {
+      lines.push(
+        "function onReady(player: Player) {",
+        "  // The playlist plugin loads the track and hands its title and artwork to the UI.",
+        "  const list = player.getPlugin<IPlaylistPlugin>('playlist');",
+        "  list?.add([",
+        `    { id: 'track-1', src: src.value, title: ${tsString(playlist.title)}, artist: ${tsString(playlist.artist)}${playlist.artwork ? `, artwork: ${tsString(playlist.artwork)}` : ""} },`,
+        "  ]);",
+        "  list?.play(0);",
+        "}"
+      );
+    } else {
+      lines.push("function onReady(player: Player) {", "  console.log('ready', player.getState().source);", "}");
+    }
+    lines.push("<\/script>");
+    const packages = ["@scarlett-player/vue", "@scarlett-player/core", ...packagesOf(imports)];
+    return {
+      kind: "vue",
+      label: "Vue",
+      description: "The ScarlettPlayerComponent from @scarlett-player/vue, with the same plugins through its plugins prop. The component destroys the player when it unmounts.",
+      install: `npm install ${packages.join(" ")}`,
+      code: lines.join("\n"),
+      omitted: [],
+      disabled: null
+    };
+  }
+  function generateSnippet(kind, config) {
+    switch (kind) {
+      case "typescript":
+        return typescriptSnippet(config);
+      case "embed":
+        return embedSnippet(config);
+      case "vue":
+        return vueSnippet(config);
+    }
+  }
+
+  // demo/site-controller.ts
+  var DEFAULT_ACCENT = "#e50914";
+  var LOG_LIMIT = 200;
+  var ANALYTICS_LOG_LIMIT = 50;
+  var CLIP_LOG_LIMIT = 30;
+  var DEFAULT_WATERMARK_IMAGE = "assets/brand/signal-icon-on-dark.svg";
+  var ANALYTICS_DETAIL_KEYS = [
+    "startupTime",
+    "currentTime",
+    "seekTo",
+    "duration",
+    "bitrate",
+    "height",
+    "watchTime",
+    "playTime",
+    "qoeScore",
+    "rebufferCount",
+    "errorMessage",
+    "exitType",
+    "completionRate"
+  ];
+  function req(id) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`Playground: missing #${id}`);
+    return el;
+  }
+  function formatTime2(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  }
+  function titleFromUrl(url) {
+    try {
+      const name = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+      const bare = decodeURIComponent(name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ")).trim();
+      return bare || "Your stream";
+    } catch {
+      return "Your stream";
+    }
+  }
+  function formatBeaconDetail(payload) {
+    const parts = [];
+    for (const key of ANALYTICS_DETAIL_KEYS) {
+      if (parts.length >= 3) break;
+      const value = payload[key];
+      if (value === void 0 || value === null || value === "") continue;
+      parts.push(`${key}=${typeof value === "number" ? Math.round(value * 10) / 10 : String(value)}`);
+    }
+    return parts.join("  ");
+  }
+  function loadErrorMessage(error) {
+    const message = typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error);
+    return message || "The player could not load that source.";
+  }
+  function isLoopback(url) {
+    const host = url.hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+  }
+  function validateUrl(raw, kind, whep) {
+    const value = raw.trim();
+    if (!value) return { ok: false, message: kind === "whep" ? "Enter a WHEP endpoint." : "Enter a media URL." };
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return { ok: false, message: "That does not look like a URL. Include the scheme, for example https://." };
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { ok: false, message: "Only http:// and https:// sources are supported here." };
+    }
+    if (url.protocol === "http:" && window.location.protocol === "https:" && !isLoopback(url)) {
+      return {
+        ok: false,
+        message: "This page is served over HTTPS, so the browser will block an http:// source as mixed content. Use https://, or an http://localhost endpoint, which browsers allow."
+      };
+    }
+    if (kind === "whep" && !whep.canPlay(value)) {
+      return {
+        ok: false,
+        message: 'The WHEP provider claims a URL by a "whep" path segment or a trailing "whep.stream" (Tmesis /whep/v1/streams/<id>, MediaMTX /<path>/whep, Nimble /<app>/<stream>/whep.stream). This one has neither.'
+      };
+    }
+    return { ok: true, url: value };
+  }
+  function selectContents(el) {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  function wireTabs(list, onSelect) {
+    const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
+    const select = (tab, focus) => {
+      if (tab.disabled) return;
+      for (const other of tabs) {
+        const selected = other === tab;
+        other.setAttribute("aria-selected", String(selected));
+        other.tabIndex = selected ? 0 : -1;
+      }
+      if (focus) tab.focus();
+      onSelect(tab);
+    };
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => select(tab, false));
+      tab.addEventListener("keydown", (event) => {
+        const enabled = tabs.filter((t) => !t.disabled);
+        const index = enabled.indexOf(tab);
+        if (index === -1) return;
+        let next;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") next = enabled[(index + 1) % enabled.length];
+        else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = enabled[(index - 1 + enabled.length) % enabled.length];
+        else if (event.key === "Home") next = enabled[0];
+        else if (event.key === "End") next = enabled[enabled.length - 1];
+        if (!next) return;
+        event.preventDefault();
+        select(next, true);
+      });
+    }
+  }
+  function createSiteController(deps) {
+    const navLinks = Array.from(document.querySelectorAll("#scenario-nav a[data-scenario]"));
+    const stageVideo = req("stage-video");
+    const posterLayer = req("poster-layer");
+    const qualityBadge = req("quality-badge");
+    const stageAudio = req("stage-audio");
+    const audioFrameFull = req("audio-frame-full");
+    const audioFrameMini = req("audio-frame-mini");
+    const stageWhep = req("stage-whep");
+    const whepForm = req("whep-form");
+    const whepUrl = req("whep-url");
+    const whepConnect = req("whep-connect");
+    const whepError = req("whep-error");
+    const stageCustom = req("stage-custom");
+    const customForm = req("custom-form");
+    const customUrl = req("custom-url");
+    const customLoad = req("custom-load");
+    const customError = req("custom-error");
+    const sampleTitle = req("sample-title");
+    const sampleDetail = req("sample-detail");
+    const stageStatus = req("stage-status");
+    const featureButtons = Array.from(document.querySelectorAll("#feature-actions button[data-feature]"));
+    const chapterPanel = req("chapter-panel");
+    const chapterCurrent = req("chapter-current");
+    const chapterList = req("chapter-list");
+    const clipPanel = req("clip-panel");
+    const clipRangeEl = req("clip-range");
+    const clipOpenBtn = req("clip-open-btn");
+    const clipCloseBtn = req("clip-close-btn");
+    const clipError2 = req("clip-error");
+    const diagnostics = req("diagnostics");
+    const diagnosticsSummary = req("diagnostics-summary");
+    const diagLive = req("diag-live");
+    const diagWhep = req("diag-whep");
+    const diagAnalytics = req("diag-analytics");
+    const diagClips = req("diag-clips");
+    const analyticsLog = req("analytics-log");
+    const clipLog = req("clip-log");
+    const consoleLog = req("console");
+    const customizePanel = req("customize-panel");
+    const codePanel = req("code-panel");
+    const settingGroups = Array.from(customizePanel.querySelectorAll(".setting-group[data-for]"));
+    const swatches = Array.from(document.querySelectorAll(".swatches [data-color]"));
+    const accentInput = req("accent");
+    const accentHex = req("accent-hex");
+    const formatSelect = req("format");
+    const layoutSelect = req("audio-layout");
+    const watermarkToggle = req("watermark-toggle");
+    const watermarkFields = req("watermark-fields");
+    const watermarkKinds = Array.from(document.querySelectorAll('input[name="watermark-kind"]'));
+    const watermarkText = req("watermark-text");
+    const watermarkTextLabel = req("watermark-text-label");
+    const watermarkImage = req("watermark-image");
+    const watermarkImageLabel = req("watermark-image-label");
+    const watermarkPosition = req("watermark-position");
+    const watermarkOpacity = req("watermark-opacity");
+    const watermarkSizeRow = req("watermark-size-row");
+    const watermarkHeight = req("watermark-imageheight");
+    const watermarkPadding = req("watermark-padding");
+    const captionToggle = req("caption-toggle");
+    const captionLanguage = req("caption-language");
+    const whepStateBadge = req("whep-state-badge");
+    const whepStateList = req("whep-state-list");
+    const whepStateUrl = req("whep-state-url");
+    const whepStateValue = req("whep-state-value");
+    const whepDisconnect = req("whep-disconnect");
+    const customStateBadge = req("custom-state-badge");
+    const customStateList = req("custom-state-list");
+    const customStateUrl = req("custom-state-url");
+    const customStateKind = req("custom-state-kind");
+    const customChange = req("custom-change");
+    const codeDescription = req("code-description");
+    const codeInstall = req("code-install");
+    const codeEl = req("playground-code");
+    const codeOmitted = req("code-omitted");
+    const copyButton = req("copy-example");
+    const toast = req("toast");
+    let current = null;
+    let generation = 0;
+    const memory = { cinema: "hls", audio: "audio" };
+    const alive = { video: true, audio: true, mini: true };
+    const expected = { video: deps.initialVideoSrc, audio: null, mini: null };
+    const logs = { video: [], audio: [], mini: [] };
+    let accent = DEFAULT_ACCENT;
+    const watermark = {
+      enabled: false,
+      kind: "text",
+      text: "YOUR BRAND",
+      imageUrl: DEFAULT_WATERMARK_IMAGE,
+      position: "bottom-right",
+      opacity: 0.5,
+      imageHeight: 64,
+      padding: 10
+    };
+    const clipLimits = { minDuration: 5, maxDuration: 60, defaultDuration: 30, step: 1 };
+    const live = {
+      url: null,
+      status: "idle",
+      error: "",
+      reconnecting: false,
+      reconnect: "\u2014"
+    };
+    const custom = {
+      url: null,
+      kind: "video",
+      status: "idle",
+      error: ""
+    };
+    let snippetKind = "typescript";
+    let posterDismissed = false;
+    let toastTimer = 0;
+    const scenario = () => SCENARIOS[current ?? "hls"];
+    const stateOf = (role) => {
+      if (!alive[role]) return null;
+      try {
+        return deps.players[role].getState();
+      } catch {
+        return null;
+      }
+    };
+    const sourceOf = (role) => stateOf(role)?.source?.src ?? expected[role];
+    const safePause = (role) => {
+      const state = stateOf(role);
+      if (!state || !state.playing) return;
+      try {
+        deps.players[role].pause();
+      } catch {
+      }
+    };
+    const hasFailed = (state) => state !== null && (state.playbackState === "error" || state.error !== null);
+    const activeRole = () => {
+      const s = scenario();
+      if (s.group === "live") return live.status === "connected" ? "video" : null;
+      if (s.group === "custom") return custom.status === "loaded" ? custom.kind === "audio" ? "audio" : "video" : null;
+      return s.player;
+    };
+    const videoElement = () => req("player").querySelector("video");
+    const notify = (message) => {
+      toast.textContent = message;
+      toast.classList.add("visible");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 3500);
+    };
+    const setStatus = (text, tone = "") => {
+      stageStatus.textContent = text;
+      if (tone) stageStatus.dataset.tone = tone;
+      else delete stageStatus.dataset.tone;
+    };
+    const renderLogRow = (entry) => {
+      const row = document.createElement("div");
+      row.className = "diag-row";
+      row.dataset.level = entry.level;
+      const time = document.createElement("time");
+      time.textContent = new Date(entry.at).toLocaleTimeString();
+      const event = document.createElement("span");
+      event.className = "diag-event";
+      event.textContent = entry.event;
+      const detail = document.createElement("span");
+      detail.className = "diag-detail";
+      detail.textContent = entry.detail;
+      row.append(time, event, detail);
+      if (entry.json !== void 0) {
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(entry.json, null, 2);
+        row.append(pre);
+      }
+      return row;
+    };
+    const renderConsole = () => {
+      consoleLog.replaceChildren();
+      const role = activeRole();
+      if (!role) return;
+      for (const entry of logs[role]) consoleLog.append(renderLogRow(entry));
+    };
+    const renderSummary = () => {
+      const role = activeRole();
+      const errors = role ? logs[role].filter((e) => e.level === "error").length : 0;
+      diagnosticsSummary.textContent = errors ? `${errors} error${errors === 1 ? "" : "s"}` : "";
+      diagnosticsSummary.classList.toggle("diag-count", errors > 0);
+    };
+    const log = (role, level, event, detail = "", json) => {
+      const entries = logs[role];
+      entries.unshift({ at: Date.now(), level, event, detail, json });
+      while (entries.length > LOG_LIMIT) entries.pop();
+      if (role === activeRole()) {
+        if (diagnostics.open) {
+          consoleLog.prepend(renderLogRow(entries[0]));
+          while (consoleLog.childElementCount > LOG_LIMIT) consoleLog.lastElementChild?.remove();
+        }
+        renderSummary();
+      }
+    };
+    const logBeacon = (payload) => {
+      const row = document.createElement("div");
+      row.className = "diag-row";
+      const time = document.createElement("time");
+      time.textContent = new Date(payload.timestamp).toLocaleTimeString();
+      const event = document.createElement("span");
+      event.className = "diag-event";
+      event.textContent = String(payload.event);
+      const detail = document.createElement("span");
+      detail.className = "diag-detail";
+      detail.textContent = formatBeaconDetail(payload);
+      row.append(time, event, detail);
+      analyticsLog.prepend(row);
+      while (analyticsLog.childElementCount > ANALYTICS_LOG_LIMIT) analyticsLog.lastElementChild?.remove();
+    };
+    const logClip = (event, detail, json) => {
+      clipLog.prepend(renderLogRow({ at: Date.now(), level: "info", event, detail, json }));
+      while (clipLog.childElementCount > CLIP_LOG_LIMIT) clipLog.lastElementChild?.remove();
+    };
+    const wirePlayer = (role) => {
+      const player = deps.players[role];
+      player.on("player:destroy", () => {
+        alive[role] = false;
+        log(role, "warn", "player:destroy");
+      });
+      player.on("playback:play", () => {
+        log(role, "info", "play");
+        if (role === "video" && !posterDismissed) {
+          posterDismissed = true;
+          renderPoster();
+        }
+      });
+      player.on("playback:pause", () => log(role, "info", "pause"));
+      player.on("playback:seeking", ({ time }) => {
+        if (role === "video" && !posterDismissed) {
+          posterDismissed = true;
+          renderPoster();
+        }
+        log(role, "info", "seek", `${time.toFixed(1)}s`);
+      });
+      player.on("media:loaded", ({ src, type }) => {
+        log(role, "info", "media:loaded", `${type}  ${src}`);
+        if (role === activeRole()) setStatus("");
+        renderMeta();
+        renderSnippet();
+      });
+      player.on("media:loadedmetadata", ({ duration }) => log(role, "info", "metadata", `duration ${formatTime2(duration)}`));
+      player.on("quality:levels", ({ levels }) => log(role, "info", "quality:levels", levels.map((l) => l.label).join(", ")));
+      player.on("quality:change", ({ quality, auto }) => log(role, "info", "quality:change", `${quality}${auto ? " (auto)" : ""}`));
+      player.on("track:text", ({ trackId }) => log(role, "info", "captions", trackId ?? "off"));
+      player.on("error", (error) => {
+        const code = "code" in error ? String(error.code) : "Error";
+        log(role, "error", code, error.message);
+        if (role === activeRole()) setStatus("Playback error", "error");
+        onSourceError(role, error.message);
+      });
+      player.on("error:reconnecting", ({ attempt, delayMs }) => {
+        log(role, "warn", "reconnecting", `attempt ${attempt} in ${(delayMs / 1e3).toFixed(1)}s`);
+        if (role === "video" && stateOf("video")?.source?.type === "application/sdp") {
+          live.reconnecting = true;
+          live.reconnect = `attempt ${attempt} in ${(delayMs / 1e3).toFixed(1)}s`;
+        }
+      });
+      player.on("error:recovered", (detail) => {
+        log(role, "info", "recovered", detail ? `on attempt ${detail.attempt}` : "");
+        live.reconnecting = false;
+        if (role === "video") live.reconnect = detail ? `recovered on attempt ${detail.attempt}` : "recovered";
+      });
+      player.on("error:reconnect-exhausted", ({ attempts }) => {
+        log(role, "error", "reconnect exhausted", `gave up after ${attempts} attempts`);
+        live.reconnecting = false;
+        if (role === "video") live.reconnect = `gave up after ${attempts} attempts`;
+      });
+      if (role === "video") {
+        player.on("chapter:change", ({ chapter }) => {
+          log(role, "info", "chapter", chapter?.label ?? "none");
+          renderChapters();
+        });
+        player.on("chapter:loaded", () => renderChapters());
+        player.on("clip:opened", ({ start: start2, end }) => {
+          log(role, "info", "clip:opened", `${start2.toFixed(1)}s \u2013 ${end.toFixed(1)}s`);
+          renderClip();
+        });
+        player.on("clip:changed", ({ start: start2, end, reason }) => {
+          log(role, "info", "clip:changed", `${start2.toFixed(1)}s \u2013 ${end.toFixed(1)}s (${reason})`);
+          renderClip();
+        });
+        player.on("clip:created", ({ range }) => {
+          log(role, "info", "clip:created", `${range.startTime.toFixed(1)}s \u2013 ${range.endTime.toFixed(1)}s`);
+          renderClip();
+        });
+        player.on("clip:cancelled", ({ reason }) => {
+          log(role, "info", "clip:cancelled", reason);
+          renderClip();
+        });
+        player.on("clip:error", ({ error }) => {
+          log(role, "warn", "clip:error", error.message);
+          clipError2.textContent = error.message;
+        });
+      }
+      if (role === "audio") {
+        player.on("playlist:change", ({ track }) => log(role, "info", "playlist:change", track ? String(track.title ?? track.src) : "none"));
+      }
+    };
+    const onSourceError = (role, message) => {
+      const s = scenario();
+      if (s.group === "live" && role === "video" && live.status === "connecting") {
+        live.status = "error";
+        live.error = message;
+        whepError.textContent = `${message} The player keeps retrying; use Retry to start over or change the endpoint.`;
+        whepConnect.disabled = false;
+        whepConnect.textContent = "Retry";
+        showStage("video");
+        renderAll();
+        return;
+      }
+      const customRole = custom.kind === "audio" ? "audio" : "video";
+      if (s.group === "custom" && role === customRole && custom.status === "loading") {
+        custom.status = "error";
+        custom.error = message;
+        customError.textContent = `${message} Check the URL and try again.`;
+        customLoad.disabled = false;
+        customLoad.textContent = "Retry";
+        showStage(role === "audio" ? "audio-full" : "video");
+        renderAll();
+        return;
+      }
+      if (s.group === "custom" || s.group === "live") renderSettings();
+    };
+    const renderNav = () => {
+      const group = scenario().group;
+      for (const link of navLinks) {
+        const linkGroup = link.dataset.scenario;
+        if (linkGroup === "cinema") link.hash = `#${memory.cinema}`;
+        if (linkGroup === "audio") link.hash = `#${memory.audio}`;
+        if (linkGroup === group) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      }
+    };
+    const showStage = (choice) => {
+      stageVideo.hidden = choice !== "video";
+      stageAudio.hidden = choice !== "audio-full" && choice !== "audio-mini";
+      audioFrameFull.hidden = choice !== "audio-full";
+      audioFrameMini.hidden = choice !== "audio-mini";
+      stageWhep.hidden = choice !== "whep";
+      stageCustom.hidden = choice !== "custom";
+      renderPoster();
+    };
+    const renderPoster = () => {
+      posterLayer.hidden = posterDismissed || scenario().group !== "cinema";
+    };
+    const renderMeta = () => {
+      const s = scenario();
+      let title = s.title;
+      let detail = s.detail;
+      if (s.group === "live") {
+        if (live.status === "connected" && live.url) {
+          title = "Live monitor";
+          const isLive = stateOf("video")?.live;
+          detail = isLive ? "Your endpoint \xB7 WebRTC over WHEP \xB7 live" : "Your endpoint \xB7 WebRTC over WHEP";
+        }
+      } else if (s.group === "custom") {
+        if (custom.status === "loaded" && custom.url) {
+          title = titleFromUrl(custom.url);
+          const role = custom.kind === "audio" ? "audio" : "video";
+          const state = stateOf(role);
+          const kind = custom.kind === "audio" ? "Audio" : "Video";
+          const type = state?.source?.type ? ` \xB7 ${state.source.type}` : "";
+          const liveNote = state?.live ? " \xB7 live" : "";
+          detail = `Your source \xB7 ${kind}${type}${liveNote}`;
+        }
+      }
+      sampleTitle.textContent = title;
+      sampleDetail.textContent = detail;
+      if (s.badge) {
+        qualityBadge.replaceChildren();
+        const [quality, format2] = s.badge.split(" \xB7 ");
+        qualityBadge.append(document.createTextNode(`${quality} `));
+        const dot = document.createElement("span");
+        dot.textContent = "\xB7";
+        qualityBadge.append(dot, document.createTextNode(` ${format2}`));
+      }
+    };
+    const settingsContext = () => {
+      const s = scenario();
+      const keys = /* @__PURE__ */ new Set([s.group]);
+      if (s.group === "custom" && custom.status === "loaded" && custom.kind === "video") keys.add("custom-video");
+      return keys;
+    };
+    const renderSettings = () => {
+      const keys = settingsContext();
+      for (const group of settingGroups) {
+        const wanted = (group.dataset.for ?? "").split(/\s+/).filter(Boolean);
+        group.hidden = !wanted.some((k) => keys.has(k));
+      }
+      if (current === "hls" || current === "mp4") formatSelect.value = current;
+      if (current === "audio" || current === "audio-mini") layoutSelect.value = current;
+      whepStateList.hidden = live.status === "idle";
+      whepDisconnect.hidden = live.status !== "connected" && live.status !== "error";
+      whepStateUrl.textContent = live.url ?? "\u2014";
+      const liveLabel = {
+        idle: "Not connected",
+        connecting: "Connecting",
+        connected: "Connected",
+        error: "Failed"
+      };
+      const liveFailed = live.status === "connected" && hasFailed(stateOf("video"));
+      whepStateBadge.textContent = liveFailed ? "Playback error" : liveLabel[live.status];
+      whepStateBadge.dataset.on = String(live.status === "connected" && !liveFailed);
+      whepStateValue.textContent = live.status === "error" ? `${live.error || "failed"} (retrying)` : liveLabel[live.status].toLowerCase();
+      customStateList.hidden = custom.status === "idle";
+      customChange.hidden = custom.status !== "loaded";
+      customStateUrl.textContent = custom.url ?? "\u2014";
+      customStateKind.textContent = custom.kind === "audio" ? "audio" : "video";
+      const customLabel = {
+        idle: "No source",
+        loading: "Loading",
+        loaded: "Loaded",
+        error: "Failed"
+      };
+      const customPlayer = stateOf(custom.kind === "audio" ? "audio" : "video");
+      const customFailed = custom.status === "loaded" && hasFailed(customPlayer);
+      customStateBadge.textContent = customFailed ? "Playback error" : customLabel[custom.status];
+      customStateBadge.dataset.on = String(custom.status === "loaded" && !customFailed);
+    };
+    const renderFeatureActions = () => {
+      const caps = scenario().capabilities;
+      const videoCustom = scenario().group === "custom" && custom.status === "loaded" && custom.kind === "video";
+      for (const button of featureButtons) {
+        const feature = button.dataset.feature ?? "";
+        const available = feature === "watermark" ? caps.watermark || videoCustom : Boolean(caps[feature]);
+        button.hidden = !available;
+      }
+      const anyVisible = featureButtons.some((b) => !b.hidden);
+      req("feature-actions").hidden = !anyVisible;
+      if (!caps.chapters) closePanel(chapterPanel, "chapters");
+      if (!caps.clips) closePanel(clipPanel, "clips");
+    };
+    const renderDiagnosticsSections = () => {
+      const role = activeRole();
+      const s = scenario();
+      const videoState = stateOf("video");
+      const isWhep = videoState?.source?.type === "application/sdp";
+      diagLive.hidden = !(role && stateOf(role)?.live);
+      diagWhep.hidden = !(s.group === "live" || role === "video" && isWhep);
+      diagAnalytics.hidden = role !== "video";
+      diagClips.hidden = !(role === "video" && s.capabilities.clips);
+    };
+    const featureButton = (feature) => featureButtons.find((b) => b.dataset.feature === feature);
+    const closePanel = (panel, feature) => {
+      panel.hidden = true;
+      featureButton(feature)?.setAttribute("aria-expanded", "false");
+    };
+    const openPanel = (panel, feature) => {
+      panel.hidden = false;
+      featureButton(feature)?.setAttribute("aria-expanded", "true");
+    };
+    const renderChapters = () => {
+      if (chapterPanel.hidden) return;
+      const chapters = deps.chapters.getChapters();
+      const state = stateOf("video");
+      const active = state?.currentChapter ?? null;
+      chapterCurrent.textContent = active ? active.label : "\u2014";
+      chapterList.replaceChildren();
+      chapters.forEach((chapter, index) => {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        const isActive = active !== null && active.time === chapter.time;
+        if (isActive) button.setAttribute("aria-current", "true");
+        const label = document.createElement("b");
+        label.textContent = chapter.label;
+        if (chapter.subtitle) {
+          const sub = document.createElement("span");
+          sub.textContent = String(chapter.subtitle);
+          label.append(sub);
+        }
+        const time = document.createElement("small");
+        time.textContent = formatTime2(chapter.time);
+        button.append(label, time);
+        button.addEventListener("click", () => {
+          deps.chapters.seekToChapter(index);
+          log("video", "info", "chapter:select", chapter.label);
+        });
+        item.append(button);
+        chapterList.append(item);
+      });
+    };
+    const renderClip = () => {
+      let range = null;
+      let open = false;
+      try {
+        range = deps.clips.getRange();
+        open = deps.clips.isOpen();
+      } catch {
+      }
+      clipRangeEl.textContent = range ? `${formatTime2(range.startTime)} \u2014 ${formatTime2(range.endTime)}` : "no selection";
+      clipOpenBtn.hidden = open;
+      clipCloseBtn.hidden = !open;
+      if (open) clipError2.textContent = "";
+    };
+    const applyClipLimits = () => {
+      const raw = {
+        minDuration: Number(req("clip-min").value),
+        maxDuration: Number(req("clip-max").value),
+        defaultDuration: Number(req("clip-preroll").value),
+        step: Number(req("clip-step").value)
+      };
+      const maxDuration = raw.maxDuration;
+      const minDuration = Math.min(raw.minDuration, maxDuration);
+      clipLimits.minDuration = minDuration;
+      clipLimits.maxDuration = maxDuration;
+      clipLimits.defaultDuration = Math.min(Math.max(raw.defaultDuration, minDuration), maxDuration);
+      clipLimits.step = raw.step;
+      req("clip-min-value").textContent = `${clipLimits.minDuration}s`;
+      req("clip-max-value").textContent = `${clipLimits.maxDuration}s`;
+      req("clip-preroll-value").textContent = `${clipLimits.defaultDuration}s`;
+      req("clip-step-value").textContent = `${clipLimits.step}s`;
+      deps.clips.configure({ ...clipLimits });
+      renderSnippet();
+    };
+    const openClipPanel = () => {
+      openPanel(clipPanel, "clips");
+      renderClip();
+    };
+    const applyCaptions = (on) => {
+      const video = videoElement();
+      if (!video) return;
+      const wanted = captionLanguage.value;
+      const tracks = Array.from(video.textTracks).filter((t) => t.kind === "subtitles" || t.kind === "captions");
+      if (tracks.length === 0) {
+        notify("Captions arrive with the media; press Play first.");
+        return;
+      }
+      const target = tracks.find((t) => t.language === wanted) ?? tracks[0] ?? null;
+      for (const track of tracks) track.mode = on && track === target ? "showing" : "disabled";
+      captionToggle.checked = on;
+      featureButton("captions")?.setAttribute("aria-pressed", String(on));
+      if (on) {
+        const state = stateOf("video");
+        if (state && state.currentTime < 3 && state.duration > 14) {
+          try {
+            deps.players.video.seek(14);
+          } catch {
+          }
+        }
+        notify(`Captions on (${target?.label ?? wanted})`);
+      }
+    };
+    const syncCaptionControls = () => {
+      const state = stateOf("video");
+      const active = state?.currentTextTrack ?? null;
+      const on = active !== null;
+      captionToggle.checked = on;
+      featureButton("captions")?.setAttribute("aria-pressed", String(on));
+      if (active?.language && captionLanguage.value !== active.language) {
+        const option = Array.from(captionLanguage.options).find((o) => o.value === active.language);
+        if (option) captionLanguage.value = active.language;
+      }
+    };
+    const applyWatermark = () => {
+      const w = deps.watermark;
+      if (!watermark.enabled) {
+        w.setText("");
+      } else if (watermark.kind === "image") {
+        w.setImage(watermark.imageUrl);
+      } else {
+        w.setText(watermark.text);
+      }
+      w.setPosition(watermark.position);
+      w.setOpacity(watermark.opacity);
+      w.setImageHeight(watermark.imageHeight);
+      w.setPadding(watermark.padding);
+    };
+    const renderWatermark = () => {
+      watermarkToggle.checked = watermark.enabled;
+      watermarkFields.hidden = !watermark.enabled;
+      featureButton("watermark")?.setAttribute("aria-pressed", String(watermark.enabled));
+      for (const radio of watermarkKinds) radio.checked = radio.value === watermark.kind;
+      const image = watermark.kind === "image";
+      watermarkText.hidden = image;
+      watermarkTextLabel.hidden = image;
+      watermarkImage.hidden = !image;
+      watermarkImageLabel.hidden = !image;
+      watermarkSizeRow.hidden = !image;
+      req("opacity-value").textContent = watermark.opacity.toFixed(1);
+      req("imageheight-value").textContent = `${watermark.imageHeight}px`;
+      req("padding-value").textContent = `${watermark.padding}px`;
+    };
+    const setWatermarkEnabled = (enabled) => {
+      watermark.enabled = enabled;
+      applyWatermark();
+      renderWatermark();
+      renderSnippet();
+      if (enabled) {
+        const mark = req("player").querySelector(".sp-watermark");
+        const visible = mark ? getComputedStyle(mark).visibility === "visible" : false;
+        notify(visible ? "Watermark on." : "Watermark on. It shows once playback starts.");
+      }
+    };
+    const applyAccent = (color) => {
+      accent = color;
+      document.documentElement.style.setProperty("--player-accent", color);
+      deps.ui.setTheme({ accentColor: color });
+      deps.audioUI.setTheme({ primary: color, progressFill: color });
+      deps.miniUI.setTheme({ primary: color, progressFill: color });
+      accentHex.textContent = color.toUpperCase();
+      accentInput.value = color;
+      for (const swatch of swatches) swatch.setAttribute("aria-pressed", String(swatch.dataset.color === color));
+      renderSnippet();
+    };
+    const buildConfig = () => {
+      const s = scenario();
+      const watermarkConfig = watermark.enabled ? {
+        kind: watermark.kind,
+        text: watermark.text,
+        imageUrl: watermark.imageUrl,
+        position: watermark.position,
+        opacity: watermark.opacity,
+        imageHeight: watermark.imageHeight,
+        padding: watermark.padding
+      } : null;
+      if (s.group === "cinema") {
+        return {
+          media: "video",
+          src: s.src,
+          srcPlaceholder: SAMPLE.hls,
+          userSupplied: false,
+          poster: SAMPLE.poster,
+          accent,
+          watermark: watermarkConfig,
+          captions: deps.captions,
+          chapters: deps.chapterList,
+          clips: { ...clipLimits },
+          audio: null
+        };
+      }
+      if (s.group === "audio") {
+        return {
+          media: s.id === "audio" ? "audio" : "audio-mini",
+          src: SAMPLE.audio,
+          srcPlaceholder: SAMPLE.audio,
+          userSupplied: false,
+          poster: null,
+          accent,
+          watermark: null,
+          captions: null,
+          chapters: null,
+          clips: null,
+          audio: { title: SAMPLE.audioTitle, artist: SAMPLE.audioArtist, artwork: SAMPLE.artwork }
+        };
+      }
+      if (s.group === "live") {
+        return {
+          media: "whep",
+          src: live.status === "connected" ? live.url : null,
+          srcPlaceholder: "https://your-domain.com/live/whep",
+          userSupplied: true,
+          poster: null,
+          accent,
+          watermark: null,
+          captions: null,
+          chapters: null,
+          clips: null,
+          audio: null
+        };
+      }
+      const loaded = custom.status === "loaded" && custom.url ? custom.url : null;
+      if (custom.kind === "audio") {
+        return {
+          media: "audio",
+          src: loaded,
+          srcPlaceholder: "https://your-domain.com/episode.mp3",
+          userSupplied: true,
+          poster: null,
+          accent,
+          watermark: null,
+          captions: null,
+          chapters: null,
+          clips: null,
+          audio: { title: loaded ? titleFromUrl(loaded) : "Your track", artist: "Your stream", artwork: null }
+        };
+      }
+      return {
+        media: "video",
+        src: loaded,
+        srcPlaceholder: "https://your-domain.com/film.m3u8",
+        userSupplied: true,
+        poster: null,
+        accent,
+        watermark: watermarkConfig,
+        captions: null,
+        chapters: null,
+        clips: null,
+        audio: null
+      };
+    };
+    const snippetTabs = Array.from(codePanel.querySelectorAll('.code-tabs [role="tab"]'));
+    const renderSnippet = () => {
+      if (current === null) return;
+      const config = buildConfig();
+      for (const tab of snippetTabs) {
+        const kind = tab.dataset.snippet;
+        const preview = generateSnippet(kind, config);
+        tab.disabled = preview.disabled !== null;
+        tab.title = preview.disabled ?? "";
+      }
+      const active = snippetTabs.find((t) => t.dataset.snippet === snippetKind);
+      if (active?.disabled) {
+        const fallback = snippetTabs.find((t) => !t.disabled);
+        if (fallback) {
+          snippetKind = fallback.dataset.snippet;
+          for (const tab of snippetTabs) {
+            const selected = tab === fallback;
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+          }
+        }
+      }
+      const snippet = generateSnippet(snippetKind, config);
+      codeEl.setAttribute("aria-labelledby", `snippet-${snippetKind}`);
+      codeDescription.textContent = snippet.description;
+      codeInstall.textContent = snippet.install;
+      codeEl.textContent = snippet.code;
+      const notes = [...snippet.omitted];
+      const disabledTabs = snippetTabs.filter((t) => t.disabled).map((t) => `${t.textContent?.trim()}: ${t.title}`);
+      codeOmitted.textContent = [...notes, ...disabledTabs].join(" ");
+      copyButton.disabled = snippet.code.length === 0;
+    };
+    const copyExample = async () => {
+      const text = codeEl.textContent ?? "";
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        notify("Example copied.");
+      } catch {
+        selectContents(codeEl);
+        codeEl.focus();
+        notify("Copy was blocked here. The example is selected: press Ctrl+C or \u2318C.");
+      }
+    };
+    const ensureSource = async (role, src, gen) => {
+      if (sourceOf(role) === src) return;
+      expected[role] = src;
+      setStatus("Loading\u2026");
+      await deps.ready[role];
+      if (gen !== generation) return;
+      try {
+        if (role === "audio") {
+          await deps.loadAudioTrack({
+            id: "sample",
+            src,
+            title: SAMPLE.audioTitle,
+            artist: SAMPLE.audioArtist,
+            artwork: SAMPLE.artwork
+          });
+        } else {
+          await deps.players[role].load(src);
+        }
+      } catch (error) {
+        if (gen !== generation) return;
+        setStatus("Could not load", "error");
+        log(role, "error", "load failed", loadErrorMessage(error));
+        return;
+      }
+      if (gen !== generation) return;
+      setStatus("");
+    };
+    const pauseAllBut = (keep) => {
+      for (const role of ["video", "audio", "mini"]) {
+        if (role !== keep) safePause(role);
+      }
+    };
+    const settle = async (gen) => {
+      const s = scenario();
+      if (s.group === "cinema") {
+        showStage("video");
+        if (stateOf("video")?.poster !== SAMPLE.poster) {
+          try {
+            deps.players.video.setPoster(SAMPLE.poster);
+          } catch {
+          }
+        }
+        deps.chapters.setChapters(deps.chapterList);
+        await ensureSource("video", s.src, gen);
+        return;
+      }
+      if (s.group === "audio") {
+        showStage(s.id === "audio" ? "audio-full" : "audio-mini");
+        await ensureSource(s.player, s.src, gen);
+        return;
+      }
+      if (s.group === "live") {
+        if (live.status === "connected" && live.url && sourceOf("video") === live.url) showStage("video");
+        else {
+          if (live.status === "connected") live.status = "idle";
+          showStage("whep");
+        }
+        return;
+      }
+      const role = custom.kind === "audio" ? "audio" : "video";
+      if (custom.status === "loaded" && custom.url && sourceOf(role) === custom.url) {
+        showStage(role === "audio" ? "audio-full" : "video");
+      } else {
+        if (custom.status === "loaded") custom.status = "idle";
+        showStage("custom");
+      }
+    };
+    const renderAll = () => {
+      renderNav();
+      renderMeta();
+      renderSettings();
+      renderFeatureActions();
+      renderDiagnosticsSections();
+      renderConsole();
+      renderSummary();
+      renderSnippet();
+    };
+    const activate = async (id, feature) => {
+      const s = SCENARIOS[id];
+      if (id !== current) {
+        current = id;
+        if (s.group === "cinema" || s.group === "audio") memory[s.group] = id;
+        const gen = ++generation;
+        pauseAllBut(s.src ? s.player : null);
+        closePanel(chapterPanel, "chapters");
+        closePanel(clipPanel, "clips");
+        if (live.status === "connecting") live.status = "error";
+        if (custom.status === "loading") custom.status = "error";
+        whepConnect.disabled = false;
+        whepConnect.textContent = live.status === "error" ? "Retry" : "Connect";
+        customLoad.disabled = false;
+        customLoad.textContent = custom.status === "error" ? "Retry" : "Load";
+        renderAll();
+        setStatus("");
+        await settle(gen);
+        if (gen !== generation) return;
+        renderAll();
+      }
+      if (feature === "clips" && s.capabilities.clips) openClipPanel();
+    };
+    const route = () => {
+      const parsed = parseLocation(window.location.hash, window.location.search);
+      if (!parsed.known) {
+        history.replaceState(null, "", `${window.location.pathname}${window.location.search}#hls`);
+      }
+      void activate(parsed.id, parsed.feature);
+    };
+    const connectWhep = async () => {
+      const check = validateUrl(whepUrl.value, "whep", deps.whep);
+      if (!check.ok) {
+        whepError.textContent = check.message;
+        whepUrl.focus();
+        return;
+      }
+      whepError.textContent = "";
+      const gen = ++generation;
+      live.url = check.url;
+      live.status = "connecting";
+      live.error = "";
+      live.reconnecting = false;
+      live.reconnect = "\u2014";
+      whepConnect.disabled = true;
+      whepConnect.textContent = "Connecting\u2026";
+      pauseAllBut(null);
+      expected.video = check.url;
+      renderSettings();
+      try {
+        await deps.ready.video;
+        if (gen !== generation) return;
+        deps.players.video.setPoster("");
+        await deps.players.video.load(check.url);
+      } catch (error) {
+        if (gen === generation) {
+          live.status = "error";
+          live.error = loadErrorMessage(error);
+          whepError.textContent = `${live.error} Check the endpoint and try again.`;
+          whepConnect.disabled = false;
+          whepConnect.textContent = "Retry";
+          renderAll();
+        }
+        return;
+      }
+      if (gen !== generation) return;
+      whepConnect.disabled = false;
+      whepConnect.textContent = "Connect";
+      whepError.textContent = "";
+      live.status = "connected";
+      posterDismissed = true;
+      showStage("video");
+      renderAll();
+      log("video", "info", "whep", "connected");
+      notify("Connected. Press Play to watch your stream.");
+    };
+    const disconnectWhep = () => {
+      safePause("video");
+      live.status = "idle";
+      showStage("whep");
+      renderAll();
+      whepUrl.focus();
+    };
+    const loadCustom = async () => {
+      const check = validateUrl(customUrl.value, "media", deps.whep);
+      if (!check.ok) {
+        customError.textContent = check.message;
+        customUrl.focus();
+        return;
+      }
+      customError.textContent = "";
+      const kindInput = customForm.querySelector('input[name="custom-kind"]:checked');
+      const kind = kindInput?.value === "audio" ? "audio" : "video";
+      const role = kind === "audio" ? "audio" : "video";
+      const gen = ++generation;
+      custom.url = check.url;
+      custom.kind = kind;
+      custom.status = "loading";
+      custom.error = "";
+      customLoad.disabled = true;
+      customLoad.textContent = "Loading\u2026";
+      pauseAllBut(null);
+      expected[role] = check.url;
+      renderSettings();
+      try {
+        await deps.ready[role];
+        if (gen !== generation) return;
+        if (role === "audio") {
+          await deps.loadAudioTrack({ id: "custom", src: check.url, title: titleFromUrl(check.url), artist: "Your stream" });
+        } else {
+          deps.players.video.setPoster("");
+          deps.chapters.setChapters([]);
+          await deps.players.video.load(check.url);
+        }
+      } catch (error) {
+        if (gen === generation) {
+          custom.status = "error";
+          custom.error = loadErrorMessage(error);
+          customError.textContent = `${custom.error} Check the URL and try again.`;
+          customLoad.disabled = false;
+          customLoad.textContent = "Retry";
+          renderAll();
+        }
+        return;
+      }
+      if (gen !== generation) return;
+      customLoad.disabled = false;
+      customLoad.textContent = "Load";
+      customError.textContent = "";
+      custom.status = "loaded";
+      posterDismissed = true;
+      showStage(role === "audio" ? "audio-full" : "video");
+      renderAll();
+      log(role, "info", "custom source", "loaded");
+    };
+    const changeCustom = () => {
+      pauseAllBut(null);
+      custom.status = "idle";
+      showStage("custom");
+      renderAll();
+      customUrl.focus();
+    };
+    const renderStats = () => {
+      const role = activeRole();
+      const state = role ? stateOf(role) : null;
+      const stateEl = req("state");
+      if (!state) {
+        stateEl.textContent = role ? "Unavailable" : "No source";
+        req("time").textContent = "0:00 / 0:00";
+        req("quality").textContent = "\u2014";
+        req("buffered").textContent = "\u2014";
+        req("diag-source").textContent = "\u2014";
+        diagLive.hidden = true;
+        return;
+      }
+      stateEl.textContent = state.playing ? "Playing" : state.buffering ? "Buffering" : state.playbackState === "error" ? "Error" : state.paused ? "Paused" : state.playbackState;
+      req("time").textContent = `${formatTime2(state.currentTime)} / ${formatTime2(state.duration)}`;
+      req("quality").textContent = state.currentQuality?.label ?? (role === "video" ? "Auto" : "Audio");
+      req("buffered").textContent = `${Math.round((state.bufferedAmount || 0) * 10) / 10}s ahead`;
+      req("diag-source").textContent = state.source ? `${state.source.type ?? "?"} \xB7 ${state.source.src.replace(/^https?:\/\//, "")}` : "\u2014";
+      diagLive.hidden = !state.live;
+      if (state.live) {
+        const isWhep = state.source?.type === "application/sdp";
+        const lowLatency = Boolean(state.lowLatencyMode);
+        let target = null;
+        if (!isWhep && role) {
+          try {
+            const provider = deps.players[role].getPlugin("hls-provider");
+            target = provider?.getLiveInfo?.()?.targetLatency ?? null;
+          } catch {
+            target = null;
+          }
+        }
+        const badge = req("live-ll-badge");
+        badge.textContent = isWhep ? "WebRTC (WHEP)" : lowLatency ? "LL-HLS active" : "LL-HLS off";
+        badge.dataset.on = String(lowLatency || isWhep);
+        req("live-kind").textContent = isWhep ? "Live (WebRTC)" : lowLatency ? "Live (low latency)" : "Live";
+        req("live-latency").textContent = `${state.liveLatency.toFixed(2)}s`;
+        req("live-target").textContent = target !== null ? `${target.toFixed(2)}s` : "\u2014";
+        req("live-edge").textContent = state.liveEdge ? "At edge" : "Behind";
+        req("live-golive").disabled = isWhep;
+      }
+      if (!diagWhep.hidden) {
+        const isWhep = state.source?.type === "application/sdp";
+        const session = isWhep ? deps.whep.getSessionUrl() : null;
+        const sessionEl = req("whep-session");
+        sessionEl.textContent = session ? session.replace(/^https?:\/\/[^/]+/, "") : "\u2014";
+        sessionEl.title = session ?? "";
+        req("whep-latency").textContent = isWhep && state.live ? `${state.liveLatency.toFixed(3)}s` : "\u2014";
+        req("whep-reconnect").textContent = live.reconnect;
+        const badge = req("whep-badge");
+        let text = "Not joined";
+        let on = false;
+        if (isWhep && live.reconnecting) text = "Reconnecting";
+        else if (isWhep && state.playbackState === "playing") {
+          text = "Playing";
+          on = true;
+        } else if (isWhep && state.playbackState === "ready") {
+          text = "Joined";
+          on = true;
+        } else if (isWhep && state.playbackState === "error") text = "Error";
+        badge.textContent = text;
+        badge.dataset.on = String(on);
+      }
+      req("cast-airplay").textContent = state.airplayAvailable ? state.airplayActive ? "Casting" : "Device available" : "Not offered by this browser";
+      req("cast-chromecast").textContent = state.chromecastAvailable ? state.chromecastActive ? "Casting" : "Device available" : "Not offered by this browser";
+      req("cast-pip").textContent = state.pip ? "Active" : document.pictureInPictureEnabled ? "Supported" : "Not supported here";
+    };
+    let lastPlaybackState = null;
+    const tick = () => {
+      const s = scenario();
+      const role = activeRole();
+      const state = role ? stateOf(role) : null;
+      const playbackState = state ? `${state.playbackState}/${state.error ? "error" : "ok"}` : null;
+      if (playbackState !== lastPlaybackState) {
+        lastPlaybackState = playbackState;
+        if (s.group === "custom" || s.group === "live") renderSettings();
+      }
+      if (state) {
+        if (hasFailed(state)) setStatus("Playback error", "error");
+        else if (state.live) setStatus("LIVE", "live");
+        else if (stageStatus.dataset.tone) setStatus("");
+      }
+      if (s.group === "cinema") syncCaptionControls();
+      if (diagnostics.open) renderStats();
+    };
+    const wireUi = () => {
+      window.addEventListener("hashchange", route);
+      formatSelect.addEventListener("change", () => {
+        window.location.hash = `#${formatSelect.value}`;
+      });
+      layoutSelect.addEventListener("change", () => {
+        window.location.hash = `#${layoutSelect.value}`;
+      });
+      wireTabs(req("tab-customize").parentElement, (tab) => {
+        const showCode = tab.id === "tab-code";
+        customizePanel.hidden = showCode;
+        codePanel.hidden = !showCode;
+        if (showCode) renderSnippet();
+      });
+      wireTabs(codePanel.querySelector(".code-tabs"), (tab) => {
+        snippetKind = tab.dataset.snippet;
+        renderSnippet();
+      });
+      copyButton.addEventListener("click", () => void copyExample());
+      for (const swatch of swatches) {
+        swatch.addEventListener("click", () => applyAccent(swatch.dataset.color ?? DEFAULT_ACCENT));
+      }
+      accentInput.addEventListener("input", () => applyAccent(accentInput.value));
+      req("accent-reset").addEventListener("click", () => applyAccent(DEFAULT_ACCENT));
+      watermarkToggle.addEventListener("change", () => setWatermarkEnabled(watermarkToggle.checked));
+      for (const radio of watermarkKinds) {
+        radio.addEventListener("change", () => {
+          if (!radio.checked) return;
+          watermark.kind = radio.value === "image" ? "image" : "text";
+          applyWatermark();
+          renderWatermark();
+          renderSnippet();
+        });
+      }
+      watermarkText.addEventListener("input", () => {
+        watermark.text = watermarkText.value;
+        applyWatermark();
+        renderSnippet();
+      });
+      watermarkImage.addEventListener("change", () => {
+        const value = watermarkImage.value.trim();
+        if (!value) return;
+        watermark.imageUrl = value;
+        applyWatermark();
+        renderSnippet();
+      });
+      watermarkPosition.addEventListener("change", () => {
+        watermark.position = watermarkPosition.value;
+        applyWatermark();
+        renderSnippet();
+      });
+      watermarkOpacity.addEventListener("input", () => {
+        watermark.opacity = Number(watermarkOpacity.value);
+        applyWatermark();
+        renderWatermark();
+        renderSnippet();
+      });
+      watermarkHeight.addEventListener("input", () => {
+        watermark.imageHeight = Number(watermarkHeight.value);
+        applyWatermark();
+        renderWatermark();
+        renderSnippet();
+      });
+      watermarkPadding.addEventListener("input", () => {
+        watermark.padding = Number(watermarkPadding.value);
+        applyWatermark();
+        renderWatermark();
+        renderSnippet();
+      });
+      captionToggle.addEventListener("change", () => applyCaptions(captionToggle.checked));
+      captionLanguage.addEventListener("change", () => {
+        if (captionToggle.checked) applyCaptions(true);
+      });
+      for (const button of featureButtons) {
+        button.addEventListener("click", () => {
+          const feature = button.dataset.feature;
+          if (feature === "captions") {
+            applyCaptions(button.getAttribute("aria-pressed") !== "true");
+          } else if (feature === "chapters") {
+            if (chapterPanel.hidden) {
+              openPanel(chapterPanel, "chapters");
+              renderChapters();
+            } else closePanel(chapterPanel, "chapters");
+          } else if (feature === "clips") {
+            if (clipPanel.hidden) openClipPanel();
+            else closePanel(clipPanel, "clips");
+          } else if (feature === "watermark") {
+            setWatermarkEnabled(!watermark.enabled);
+            if (watermark.enabled) req("tab-customize").click();
+          }
+        });
+      }
+      clipOpenBtn.addEventListener("click", () => {
+        clipError2.textContent = "";
+        deps.clips.open();
+        renderClip();
+      });
+      clipCloseBtn.addEventListener("click", () => {
+        deps.clips.close();
+        renderClip();
+      });
+      for (const id of ["clip-min", "clip-max", "clip-preroll", "clip-step"]) {
+        req(id).addEventListener("input", applyClipLimits);
+      }
+      whepForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!whepConnect.disabled) void connectWhep();
+      });
+      whepUrl.addEventListener("input", () => {
+        whepError.textContent = "";
+      });
+      whepDisconnect.addEventListener("click", disconnectWhep);
+      customForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!customLoad.disabled) void loadCustom();
+      });
+      customUrl.addEventListener("input", () => {
+        customError.textContent = "";
+      });
+      customChange.addEventListener("click", changeCustom);
+      diagnostics.addEventListener("toggle", () => {
+        if (diagnostics.open) {
+          renderDiagnosticsSections();
+          renderConsole();
+          renderStats();
+        }
+      });
+      req("live-golive").addEventListener("click", () => {
+        const role = activeRole();
+        if (!role || !alive[role]) return;
+        try {
+          deps.players[role].seekToLive();
+        } catch {
+        }
+      });
+      req("analytics-clear").addEventListener("click", () => analyticsLog.replaceChildren());
+      req("clip-clear").addEventListener("click", () => clipLog.replaceChildren());
+      req("console-clear").addEventListener("click", () => {
+        const role = activeRole();
+        if (role) logs[role].length = 0;
+        consoleLog.replaceChildren();
+        renderSummary();
+      });
+    };
+    const start = () => {
+      req("version").textContent = `v${deps.version}`;
+      for (const role of ["video", "audio", "mini"]) wirePlayer(role);
+      wireUi();
+      renderWatermark();
+      applyAccent(DEFAULT_ACCENT);
+      applyClipLimits();
+      if (expected.video && !stateOf("video")?.source) setStatus("Loading\u2026");
+      route();
+      window.setInterval(tick, 250);
+    };
+    return { start, logBeacon, logClip, notify };
+  }
+
   // demo/demo.ts
   var VERSION = true ? "1.15.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
-  var VIDEO_URL = "https://vod.thestreamplatform.com/demo/bbb-2160p-stereo/playlist.m3u8";
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT
 
@@ -52668,125 +54463,79 @@ Cada trampa se prueba una sola vez.
     { time: 340, label: "Payback", subtitle: "One trap at a time" },
     { time: 520, label: "Credits", subtitle: "Peach open movie", endTime: VIDEO_DURATION_SECONDS }
   ];
-  var ANALYTICS_LOG_LIMIT = 50;
-  var ANALYTICS_DETAIL_KEYS = [
-    "startupTime",
-    "currentTime",
-    "seekTo",
-    "duration",
-    "bitrate",
-    "height",
-    "watchTime",
-    "playTime",
-    "qoeScore",
-    "rebufferCount",
-    "errorMessage",
-    "exitType",
-    "completionRate"
+  var SNIPPET_CAPTIONS = [
+    { language: "en", label: "English", src: "captions/en.vtt" },
+    { language: "es", label: "Spanish", src: "captions/es.vtt" }
   ];
-  function formatBeaconDetail(payload) {
-    const parts = [];
-    for (const key of ANALYTICS_DETAIL_KEYS) {
-      if (parts.length >= 3) break;
-      const value = payload[key];
-      if (value === void 0 || value === null || value === "") continue;
-      parts.push(`${key}=${typeof value === "number" ? Math.round(value * 10) / 10 : String(value)}`);
-    }
-    return parts.join("  ");
-  }
-  function appendAnalyticsRow(payload) {
-    const log = document.getElementById("analytics-log");
-    if (!log) return;
-    log.querySelector(".analytics-empty")?.remove();
-    const row = document.createElement("div");
-    row.className = "analytics-row";
-    const time = document.createElement("span");
-    time.className = "analytics-time";
-    time.textContent = new Date(payload.timestamp).toLocaleTimeString();
-    const event = document.createElement("span");
-    event.className = "analytics-event";
-    event.textContent = String(payload.event);
-    const detail = document.createElement("span");
-    detail.className = "analytics-detail";
-    detail.textContent = formatBeaconDetail(payload);
-    row.append(time, event, detail);
-    log.prepend(row);
-    while (log.childElementCount > ANALYTICS_LOG_LIMIT) {
-      log.lastElementChild?.remove();
-    }
-  }
-  function clearAnalyticsLog() {
-    const log = document.getElementById("analytics-log");
-    if (!log) return;
-    log.innerHTML = '<div class="analytics-empty">Beacons will appear here as you play the video...</div>';
-  }
-  var CLIP_LOG_LIMIT = 30;
-  function appendClipRow(event, detail, json) {
-    const log = document.getElementById("clip-log");
-    if (!log) return;
-    log.querySelector(".clip-log-empty")?.remove();
-    const row = document.createElement("div");
-    row.className = "clip-row";
-    const head = document.createElement("div");
-    head.className = "clip-row-head";
-    const time = document.createElement("span");
-    time.className = "clip-time";
-    time.textContent = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-    const eventName = document.createElement("span");
-    eventName.className = "clip-event";
-    eventName.textContent = event;
-    const detailEl = document.createElement("span");
-    detailEl.className = "clip-detail";
-    detailEl.textContent = detail;
-    head.append(time, eventName, detailEl);
-    row.append(head);
-    if (json !== void 0) {
-      const pre = document.createElement("pre");
-      pre.className = "clip-json";
-      pre.textContent = JSON.stringify(json, null, 2);
-      row.append(pre);
-    }
-    log.prepend(row);
-    while (log.childElementCount > CLIP_LOG_LIMIT) {
-      log.lastElementChild?.remove();
-    }
-  }
-  function clearClipLog() {
-    const log = document.getElementById("clip-log");
-    if (!log) return;
-    log.innerHTML = '<div class="clip-log-empty">Clips you create will appear here...</div>';
-  }
-  function fakeClipCreation(range) {
-    const uuid2 = crypto.randomUUID();
-    const clipUrl = `https://example.com/clips/${uuid2}`;
-    const captures = window.__clipCaptures ?? (window.__clipCaptures = []);
-    captures.push(range);
-    appendClipRow("clip:requested", `POST /api/clips (simulated)`, range);
-    window.setTimeout(() => appendClipRow("status", "rendering"), 2e3);
-    window.setTimeout(() => appendClipRow("status", `ready  url=${clipUrl}`), 4e3);
-    return Promise.resolve({ uuid: uuid2, status_url: clipUrl });
-  }
   document.addEventListener("DOMContentLoaded", async () => {
     const container = document.getElementById("player");
-    if (!container) {
-      console.error("Player container not found");
+    const audioContainer = document.getElementById("audio-player");
+    const miniContainer = document.getElementById("mini-player");
+    if (!container || !audioContainer || !miniContainer) {
+      console.error("Player containers not found");
       return;
     }
+    const initial = parseLocation(window.location.hash, window.location.search);
+    const initialScenario = SCENARIOS[initial.id];
+    const initialVideoSrc = initialScenario.group === "cinema" ? initialScenario.src : null;
+    let controller = null;
+    const fakeClipCreation = (range) => {
+      const uuid2 = crypto.randomUUID();
+      const clipUrl = `https://example.com/clips/${uuid2}`;
+      const captures = window.__clipCaptures ?? (window.__clipCaptures = []);
+      captures.push(range);
+      controller?.logClip("clip:requested", "POST /api/clips (simulated)", range);
+      window.setTimeout(() => controller?.logClip("status", "rendering (simulated)"), 2e3);
+      window.setTimeout(() => controller?.logClip("status", `ready (simulated)  url=${clipUrl}`), 4e3);
+      return Promise.resolve({ uuid: uuid2, status_url: clipUrl });
+    };
     const clipsPlugin = createClipsPlugin({
       mediaId: "demo-bbb",
       onCreate: fakeClipCreation
     });
     const watermarkPlugin = createWatermarkPlugin({
-      imageUrl: "https://thestreamplatform.com/img/the-stream-platform-logo-with-text.png",
       position: "bottom-right",
       opacity: 0.5,
       imageHeight: 64
     });
     const whepPlugin = createWHEPPlugin();
-    const player = await createPlayer({
+    const videoUI = uiPlugin({
+      hideDelay: 3e3,
+      theme: {
+        accentColor: "#e50914"
+      },
+      // Spelled out because 'share', 'chapters' and 'clip' are not in the
+      // default layout - those plugins register their controls, but a layout
+      // has to ask for them. This is the default order with 'chapters'
+      // inserted before the settings menu, 'clip' before it too, and 'share'
+      // before the cast buttons.
+      controls: [
+        "play",
+        "skip-backward",
+        "skip-forward",
+        "volume",
+        "time",
+        "live-indicator",
+        "bandwidth-indicator",
+        "spacer",
+        "clip",
+        "chapters",
+        "settings",
+        "captions",
+        "share",
+        "chromecast",
+        "airplay",
+        "pip",
+        "fullscreen"
+      ]
+    });
+    const chaptersPlugin = createChaptersPlugin({
+      chapters: VIDEO_CHAPTERS
+    });
+    const player = new ScarlettPlayer({
       container,
-      src: VIDEO_URL,
-      poster: "https://vod.thestreamplatform.com/demo/scarlett-player-169-thumb-web.jpg",
+      src: initialVideoSrc ?? void 0,
+      poster: SAMPLE.poster,
       logLevel: "debug",
       plugins: [
         // lowLatencyMode is opt-in for consumers and off by default; the demo
@@ -52798,40 +54547,10 @@ Cada trampa se prueba una sola vez.
         createNativePlugin(),
         // Native formats (MP4, WebM, MOV, MKV)
         // WebRTC over WHEP, claimed by a `whep` path segment. There is no
-        // public WHEP stream to preload, so the WHEP Monitor panel is a URL
-        // box; the instance is kept in scope so the panel can read the
-        // session URL the server handed back.
+        // public WHEP stream to preload; the Live monitor scenario takes an
+        // endpoint from the visitor.
         whepPlugin,
-        uiPlugin({
-          hideDelay: 3e3,
-          theme: {
-            accentColor: "#e50914"
-          },
-          // Spelled out because 'share', 'chapters' and 'clip' are not in the
-          // default layout - those plugins register their controls, but a layout
-          // has to ask for them. This is the default order with 'chapters'
-          // inserted before the settings menu, 'clip' before it too, and 'share'
-          // before the cast buttons.
-          controls: [
-            "play",
-            "skip-backward",
-            "skip-forward",
-            "volume",
-            "time",
-            "live-indicator",
-            "bandwidth-indicator",
-            "spacer",
-            "clip",
-            "chapters",
-            "settings",
-            "captions",
-            "share",
-            "chromecast",
-            "airplay",
-            "pip",
-            "fullscreen"
-          ]
-        }),
+        videoUI,
         airplayPlugin(),
         chromecastPlugin(),
         watermarkPlugin,
@@ -52864,15 +54583,12 @@ Cada trampa se prueba una sola vez.
         // An inline list, so no chapters file is fetched. The plugin writes
         // `chapters` state (the progress bar paints a marker per boundary) and
         // registers the 'chapters' control listed above.
-        createChaptersPlugin({
-          chapters: VIDEO_CHAPTERS
-        }),
+        chaptersPlugin,
         // Viewer-created clips: the button above (in the 'clip' slot) opens a
         // two-handle selector that loops the selection, and Confirm hands the
         // captured range to fakeClipCreation - the stand-in for the highlights
         // server. Video-only, so this plugin is deliberately absent from the
-        // audio player. The instance lives outside the array so the Clip
-        // Controls panel can reconfigure and open it.
+        // audio player.
         clipsPlugin,
         // Nothing leaves the page: `customBeacon` replaces the transport, so the
         // plugin never calls navigator.sendBeacon or fetch, and `beaconUrl` -
@@ -52888,277 +54604,113 @@ Cada trampa se prueba una sola vez.
           // Faster than the 10s default so the demo panel fills while someone is
           // still looking at it.
           heartbeatInterval: 5e3,
-          customBeacon: (_url, payload) => appendAnalyticsRow(payload)
+          customBeacon: (_url, payload) => controller?.logBeacon(payload)
         })
-      ].filter(Boolean)
+      ]
     });
-    document.getElementById("analytics-clear")?.addEventListener("click", clearAnalyticsLog);
-    document.getElementById("clip-clear")?.addEventListener("click", clearClipLog);
-    const clipLimitInputs = {
-      minDuration: document.getElementById("clip-min"),
-      maxDuration: document.getElementById("clip-max"),
-      defaultDuration: document.getElementById("clip-preroll"),
-      step: document.getElementById("clip-step")
+    const audioUI = createAudioUIPlugin({
+      layout: "full",
+      showShuffle: true,
+      showRepeat: true,
+      theme: {
+        primary: "#e50914",
+        progressFill: "#e50914",
+        background: "#14161c"
+      }
+    });
+    const audioPlayer = new ScarlettPlayer({
+      container: audioContainer,
+      logLevel: "debug",
+      plugins: [
+        createNativePlugin(),
+        // Native audio support
+        createPlaylistPlugin({
+          autoAdvance: true,
+          autoLoad: false,
+          persist: false
+        }),
+        createMediaSessionPlugin({
+          seekOffset: 10
+        }),
+        audioUI
+      ]
+    });
+    const miniUI = createAudioUIPlugin({
+      layout: "mini",
+      showArtwork: false,
+      showArtist: false,
+      showTime: false,
+      showVolume: false,
+      showShuffle: false,
+      showRepeat: false,
+      showNavigation: false,
+      theme: {
+        primary: "#e50914",
+        progressFill: "#e50914",
+        background: "#14161c"
+      }
+    });
+    const miniPlayer = new ScarlettPlayer({
+      container: miniContainer,
+      logLevel: "debug",
+      plugins: [createNativePlugin(), miniUI]
+    });
+    const playlist = audioPlayer.getPlugin("playlist");
+    let pendingAudioLoad = Promise.resolve();
+    audioPlayer.on("playlist:change", (e) => {
+      if (!e.track?.src) return;
+      console.log("\u{1F3B5} Loading track:", e.track.title);
+      const load = audioPlayer.load(e.track.src);
+      load.catch((err) => console.error("Failed to load track:", err));
+      pendingAudioLoad = load;
+    });
+    const loadAudioTrack = async (track) => {
+      if (!playlist) {
+        await audioPlayer.load(track.src);
+        return;
+      }
+      playlist.clear();
+      playlist.add([{ ...track, artwork: track.artwork ?? SAMPLE.artwork }]);
+      playlist.play(track.id);
+      await pendingAudioLoad;
     };
-    const clipLimitLabels = {
-      minDuration: document.getElementById("clip-min-value"),
-      maxDuration: document.getElementById("clip-max-value"),
-      defaultDuration: document.getElementById("clip-preroll-value"),
-      step: document.getElementById("clip-step-value")
-    };
-    function applyClipLimits() {
-      const raw = {
-        minDuration: Number(clipLimitInputs.minDuration?.value ?? 5),
-        maxDuration: Number(clipLimitInputs.maxDuration?.value ?? 60),
-        defaultDuration: Number(clipLimitInputs.defaultDuration?.value ?? 30),
-        step: Number(clipLimitInputs.step?.value ?? 1)
-      };
-      const maxDuration = raw.maxDuration;
-      const minDuration = Math.min(raw.minDuration, maxDuration);
-      const values = {
-        minDuration,
-        maxDuration,
-        defaultDuration: Math.min(Math.max(raw.defaultDuration, minDuration), maxDuration),
-        step: raw.step
-      };
-      for (const key of Object.keys(values)) {
-        const label = clipLimitLabels[key];
-        if (label) label.textContent = String(values[key]);
-      }
-      clipsPlugin.configure(values);
-    }
-    for (const input of Object.values(clipLimitInputs)) {
-      input?.addEventListener("input", applyClipLimits);
-    }
-    document.getElementById("clip-open-btn")?.addEventListener("click", () => clipsPlugin.open());
-    const watermarkImageInput = document.getElementById("watermark-image-input");
-    document.getElementById("watermark-image-btn")?.addEventListener("click", () => {
-      const url = watermarkImageInput?.value.trim();
-      if (url) watermarkPlugin.setImage(url);
-    });
-    const watermarkTextInput = document.getElementById("watermark-text-input");
-    document.getElementById("watermark-text-btn")?.addEventListener("click", () => {
-      const text = watermarkTextInput?.value.trim();
-      if (text) watermarkPlugin.setText(text);
-    });
-    const positionButtons = document.querySelectorAll(".position-btn[data-pos]");
-    positionButtons.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const pos = btn.dataset.pos;
-        if (pos) watermarkPlugin.setPosition(pos);
-        positionButtons.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-      });
-    });
-    const opacityInput = document.getElementById("watermark-opacity");
-    opacityInput?.addEventListener("input", () => {
-      const value = parseFloat(opacityInput.value);
-      const label = document.getElementById("opacity-value");
-      if (label) label.textContent = value.toFixed(1);
-      watermarkPlugin.setOpacity(value);
-    });
-    const imageHeightInput = document.getElementById("watermark-imageheight");
-    imageHeightInput?.addEventListener("input", () => {
-      const value = parseInt(imageHeightInput.value, 10);
-      const label = document.getElementById("imageheight-value");
-      if (label) label.textContent = String(value);
-      watermarkPlugin.setImageHeight(value);
-    });
-    const paddingInput = document.getElementById("watermark-padding");
-    paddingInput?.addEventListener("input", () => {
-      const value = parseInt(paddingInput.value, 10);
-      const label = document.getElementById("padding-value");
-      if (label) label.textContent = String(value);
-      watermarkPlugin.setPadding(value);
-    });
-    document.getElementById("watermark-show-btn")?.addEventListener("click", () => watermarkPlugin.show());
-    document.getElementById("watermark-hide-btn")?.addEventListener("click", () => watermarkPlugin.hide());
-    const whepUrlInput = document.getElementById("whep-url-input");
-    const whepJoinBtn = document.getElementById("whep-join-btn");
-    const whepBadge = document.getElementById("whep-badge");
-    const whepSession = document.getElementById("whep-session");
-    const whepLatency = document.getElementById("whep-latency");
-    const whepReconnect = document.getElementById("whep-reconnect");
-    const WHEP_URL_KEY = "scarlett-demo-whep-url";
-    try {
-      const remembered = window.localStorage.getItem(WHEP_URL_KEY);
-      if (remembered && whepUrlInput) whepUrlInput.value = remembered;
-    } catch {
-    }
-    const isWhepSource = () => player.getState().source?.type === "application/sdp";
-    let whepReconnecting = false;
-    const setWhepBadge = (text, on) => {
-      if (!whepBadge) return;
-      whepBadge.textContent = text;
-      whepBadge.classList.toggle("live-badge--on", on);
-    };
-    const joinWhep = async () => {
-      const url = whepUrlInput?.value.trim();
-      if (!url || !whepJoinBtn) return;
-      try {
-        window.localStorage.setItem(WHEP_URL_KEY, url);
-      } catch {
-      }
-      whepJoinBtn.disabled = true;
-      whepJoinBtn.textContent = "Joining...";
-      whepReconnecting = false;
-      setWhepBadge("Joining", false);
-      if (whepReconnect) whepReconnect.textContent = "\u2014";
-      try {
-        await player.load(url);
-        console.log("WHEP joined:", url);
-      } catch (e) {
-        console.error("WHEP join failed:", e.message);
-      } finally {
-        whepJoinBtn.disabled = false;
-        whepJoinBtn.textContent = "Join";
-      }
-    };
-    whepJoinBtn?.addEventListener("click", () => void joinWhep());
-    whepUrlInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") void joinWhep();
-    });
-    player.on("error:reconnecting", (e) => {
-      if (!isWhepSource() || !whepReconnect) return;
-      const delay = (e.delayMs / 1e3).toFixed(1);
-      whepReconnect.textContent = `attempt ${e.attempt} in ${delay}s`;
-      whepReconnecting = true;
-      setWhepBadge("Reconnecting", false);
-      console.warn(`WHEP reconnect: attempt ${e.attempt} in ${e.delayMs}ms`);
-    });
-    player.on("error:recovered", (e) => {
-      if (!isWhepSource() || !whepReconnect) return;
-      whepReconnect.textContent = e ? `recovered on attempt ${e.attempt}` : "recovered";
-      whepReconnecting = false;
-      console.log("WHEP recovered");
-    });
-    player.on("error:reconnect-exhausted", (e) => {
-      if (!isWhepSource() || !whepReconnect) return;
-      whepReconnect.textContent = `gave up after ${e.attempts} attempts`;
-      whepReconnecting = false;
-      setWhepBadge("Gave up", false);
-    });
-    const whepReadout = window.setInterval(() => {
-      const state = player.getState();
-      const whep = isWhepSource();
-      const session = whep ? whepPlugin.getSessionUrl() : null;
-      if (whepSession) {
-        whepSession.textContent = session ? session.replace(/^https?:\/\/[^/]+/, "") : "\u2014";
-        whepSession.title = session ?? "";
-      }
-      if (whepLatency) {
-        whepLatency.textContent = whep && state.live ? `${state.liveLatency.toFixed(3)}s` : "\u2014";
-      }
-      if (whep && whepReconnecting) setWhepBadge("Reconnecting", false);
-      else if (whep && state.playbackState === "playing") setWhepBadge("Playing", true);
-      else if (whep && state.playbackState === "ready") setWhepBadge("Joined", true);
-      else if (whep && state.playbackState === "error") setWhepBadge("Error", false);
-      else if (!whep) setWhepBadge("Not joined", false);
-    }, 500);
-    player.on("player:destroy", () => window.clearInterval(whepReadout));
     player.on("playback:play", () => console.log("\u25B6\uFE0F Playing"));
     player.on("playback:pause", () => console.log("\u23F8\uFE0F Paused"));
     player.on("media:loaded", (e) => console.log("\u{1F4FA} Media loaded:", e));
-    player.on("media:loadedmetadata", (e) => console.log("\u{1F4CA} Metadata:", e));
-    player.on("quality:levels", (e) => console.log("\u{1F3AF} Quality levels:", e));
-    player.on("chapter:change", (e) => console.log("\u{1F516} Chapter:", e.chapter?.label ?? "none"));
-    player.on("track:text", (e) => console.log("\u{1F4AC} Text track:", e.trackId ?? "off"));
     player.on("error", (e) => console.error("\u274C Error:", e));
-    player.on("clip:opened", (e) => console.log(`\u{1F3AC} Clip opened: ${e.start}s \u2013 ${e.end}s`));
-    player.on("clip:changed", (e) => console.log(`\u2702\uFE0F Clip range: ${e.start}s \u2013 ${e.end}s (${e.reason})`));
-    player.on("clip:created", (e) => console.log("\u2702\uFE0F Clip created:", e.result));
-    player.on("clip:cancelled", (e) => console.log(`\u{1F6AB} Clip cancelled (${e.reason})`));
-    player.on("clip:error", (e) => console.error("\u274C Clip error:", e.error?.message ?? e.error));
+    audioPlayer.on("playback:play", () => console.log("\u{1F3B5} Audio Playing"));
+    audioPlayer.on("playback:pause", () => console.log("\u{1F3B5} Audio Paused"));
     window.player = player;
     window.watermarkPlugin = watermarkPlugin;
     window.clipsPlugin = clipsPlugin;
     window.whepPlugin = whepPlugin;
-    console.log(`\u{1F3AC} Scarlett Player v${VERSION} Demo Ready`);
-    console.log("Access player via window.player");
-    const audioContainer = document.getElementById("audio-player");
-    if (audioContainer) {
-      const audioTracks = [
-        {
-          id: "llama",
-          src: "https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3",
-          title: "Winamp - It Really Whips the Llama's Ass",
-          artist: "Winamp",
-          artwork: "https://vod.thestreamplatform.com/demo/scarlett-player-sq-thumb.jpg"
-        }
-      ];
-      const audioPlayer = await createPlayer({
-        container: audioContainer,
-        logLevel: "debug",
-        plugins: [
-          createNativePlugin(),
-          // Native audio support
-          createPlaylistPlugin({
-            autoAdvance: true,
-            autoLoad: false,
-            persist: false
-          }),
-          createMediaSessionPlugin({
-            seekOffset: 10
-          }),
-          createAudioUIPlugin({
-            layout: "full",
-            showShuffle: true,
-            showRepeat: true,
-            theme: {
-              primary: "#6366f1",
-              background: "#18181b"
-            }
-          })
-        ].filter(Boolean)
-      });
-      const playlist = audioPlayer.getPlugin("playlist");
-      audioPlayer.on("playlist:change", async (e) => {
-        if (e?.track?.src) {
-          console.log("\u{1F3B5} Loading track:", e.track.title);
-          try {
-            await audioPlayer.load(e.track.src);
-          } catch (err) {
-            console.error("Failed to load track:", err);
-          }
-        }
-      });
-      if (playlist) {
-        playlist.add(audioTracks);
-        playlist.play(0);
-      }
-      audioPlayer.on("playback:play", () => console.log("\u{1F3B5} Audio Playing"));
-      audioPlayer.on("playback:pause", () => console.log("\u{1F3B5} Audio Paused"));
-      window.audioPlayer = audioPlayer;
-      console.log("\u{1F3B5} Audio Player Demo Ready");
-      console.log("Access audio player via window.audioPlayer");
-    }
-    const miniContainer = document.getElementById("mini-player");
-    if (miniContainer) {
-      const miniPlayer = await createPlayer({
-        container: miniContainer,
-        logLevel: "debug",
-        plugins: [
-          createNativePlugin(),
-          createAudioUIPlugin({
-            layout: "mini",
-            showArtwork: false,
-            showArtist: false,
-            showTime: false,
-            showVolume: false,
-            showShuffle: false,
-            showRepeat: false,
-            showNavigation: false,
-            theme: {
-              primary: "#e50914",
-              background: "#1f2937"
-            }
-          })
-        ].filter(Boolean)
-      });
-      await miniPlayer.load("https://vod.thestreamplatform.com/demo/winamp-it-really-whips-the-llamas-ass.mp3");
-      window.miniPlayer = miniPlayer;
-      console.log("\u{1F3B5} Mini Player Demo Ready");
-    }
+    window.audioPlayer = audioPlayer;
+    window.miniPlayer = miniPlayer;
+    const ready = {
+      video: player.init().catch((err) => console.error("Player init failed:", err)),
+      audio: audioPlayer.init().catch((err) => console.error("Audio player init failed:", err)),
+      mini: miniPlayer.init().catch((err) => console.error("Mini player init failed:", err))
+    };
+    controller = createSiteController({
+      version: VERSION,
+      players: { video: player, audio: audioPlayer, mini: miniPlayer },
+      ui: videoUI,
+      audioUI,
+      miniUI,
+      clips: clipsPlugin,
+      watermark: watermarkPlugin,
+      whep: whepPlugin,
+      chapters: chaptersPlugin,
+      captions: SNIPPET_CAPTIONS,
+      chapterList: VIDEO_CHAPTERS,
+      initialVideoSrc,
+      ready,
+      loadAudioTrack
+    });
+    controller.start();
+    await Promise.all(Object.values(ready));
+    console.log(`\u{1F3AC} Scarlett Player v${VERSION} Playground Ready`);
+    console.log("Access the players via window.player, window.audioPlayer and window.miniPlayer");
   });
 })();
 //# sourceMappingURL=demo.bundle.js.map

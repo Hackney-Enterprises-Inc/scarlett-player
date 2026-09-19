@@ -144,6 +144,14 @@ jobs:
         if: github.event_name == 'push'
         run: node scripts/hls-fixture.mjs
 
+      # Two harnesses against the same server and the same build. The site
+      # harness (scripts/verify-site.mjs) drives the homepage and both demo
+      # routes through every scenario hash at seven viewport widths and
+      # fetches every asset the pages reference from the local tree, so a
+      # stylesheet or poster that resolves to the wrong sibling path, or an
+      # image left on a hosted origin, fails here rather than on
+      # scarlettplayer.com. Same push-only gating as the playback harness:
+      # it needs the Chromium install above, and runs on merge.
       - name: Run headless browser verification
         if: github.event_name == 'push'
         run: |
@@ -151,19 +159,28 @@ jobs:
           python3 -m http.server 8899 --bind 127.0.0.1 &
           echo $! > /tmp/http.pid
           node scripts/verify-browser.mjs
+          node scripts/verify-site.mjs
           kill "$(cat /tmp/http.pid)"
 
-      # The harness needs a built demo, and CI's demo commit belongs to
+      # The harnesses need a built demo, and CI's demo commit belongs to
       # release.yml alone. Leaving the rebuild in the working tree here would
-      # let a later step pick it up. Covers every TRACKED file build.cjs
-      # writes: the two bundles, the version stamp on demo/index.html, and the
-      # generated docs/demo/index.html. The .map files are gitignored, and
-      # naming an untracked path here would make git checkout reject the whole
-      # pathspec list and restore nothing.
+      # let a later step pick it up. Covers every TRACKED path build.cjs
+      # writes: the two bundles, the version stamps on demo/index.html and
+      # docs/index.html, the generated docs/demo/index.html, the site.css and
+      # assets/ mirrors beside each generated page, and the homepage entry
+      # under docs/site/. The .map files are gitignored, and naming an
+      # untracked path in a single `git checkout` would make it reject the
+      # whole pathspec list and restore nothing - hence one call per path,
+      # each allowed to fail on its own. `git clean` then removes what the
+      # build created rather than rewrote: a hashed chunk under docs/site/
+      # whose name changed, or an asset mirrored for the first time.
       - name: Discard the rebuilt demo
         if: always() && github.event_name == 'push'
         run: |
-          git checkout -- \
-            demo/demo.bundle.js demo/index.html \
-            docs/demo/demo.bundle.js docs/demo/index.html \
-            || true
+          for path in \
+            demo/demo.bundle.js demo/index.html demo/site.css demo/assets \
+            docs/demo/demo.bundle.js docs/demo/index.html docs/demo/site.css docs/demo/assets \
+            docs/index.html docs/site; do
+            git checkout -- "$path" 2>/dev/null || true
+          done
+          git clean -fdq -- demo/assets docs/demo/assets docs/site || true

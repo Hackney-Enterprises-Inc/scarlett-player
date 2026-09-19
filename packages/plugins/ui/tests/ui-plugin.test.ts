@@ -1089,6 +1089,10 @@ describe('UI Plugin', () => {
         return { render: () => el, update: () => {}, destroy: () => el.remove() };
       });
 
+      // The rebuild is coalesced onto the microtask queue; the fit itself
+      // then runs inline inside it, so nothing else needs flushing.
+      await Promise.resolve();
+
       // Rebuilt from scratch, so the tray is a new instance and every cached
       // width describes an element that no longer exists.
       expect(api.container.querySelector('.sp-example')).not.toBeNull();
