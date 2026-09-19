@@ -52743,10 +52743,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return { id: DEFAULT_SCENARIO, feature, known: true };
     }
     const lower = name.toLowerCase();
-    if (lower in SCENARIOS) {
+    if (Object.prototype.hasOwnProperty.call(SCENARIOS, lower)) {
       return { id: lower, feature, known: true };
     }
-    const alias = ALIASES[lower];
+    const alias = Object.prototype.hasOwnProperty.call(ALIASES, lower) ? ALIASES[lower] : void 0;
     if (alias) {
       if (lower === "clips") feature = "clips";
       return { id: alias, feature, known: true };

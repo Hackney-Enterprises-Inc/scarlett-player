@@ -241,12 +241,14 @@ export function parseLocation(hash: string, search = ''): ParsedLocation {
     return { id: DEFAULT_SCENARIO, feature, known: true };
   }
 
+  // Own properties only: `in` and a bare index also see Object.prototype, so
+  // `#toString` or `#constructor` would otherwise resolve to a "scenario".
   const lower = name.toLowerCase();
-  if (lower in SCENARIOS) {
+  if (Object.prototype.hasOwnProperty.call(SCENARIOS, lower)) {
     return { id: lower as ScenarioId, feature, known: true };
   }
 
-  const alias = ALIASES[lower];
+  const alias = Object.prototype.hasOwnProperty.call(ALIASES, lower) ? ALIASES[lower] : undefined;
   if (alias) {
     if (lower === 'clips') feature = 'clips';
     return { id: alias, feature, known: true };
