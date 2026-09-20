@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/whep",
-  "version": "1.15.1",
+  "version": "1.15.2",
   "description": "WHEP (WebRTC-HTTP Egress Protocol) provider plugin for Scarlett Player: sub-second live monitoring of a Tmesis preview or any WHEP server that answers offers",
   "type": "module",
   "main": "./dist/index.cjs",
