@@ -1,5 +1,11 @@
 # @scarlett-player/chromecast
 
+## 1.15.3
+
+### Patch Changes
+
+- [#106](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/106) [`9e652ee`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/9e652eeeeab070ad29c94b525f8240d56374d446) Thanks [@alexhackney](https://github.com/alexhackney)! - `endSession()` no longer throws when the cast session has already gone. A viewer who pressed Stop casting after the transport dropped got an uncaught error from the Cast SDK's synchronous throw (TSP-WEB-2E7); the call is now guarded the way `destroy()` already was, logged at debug, and the session-ended handler restores state as before.
+
 ## 1.15.2
 
 ## 1.15.1
