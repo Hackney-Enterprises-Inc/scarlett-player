@@ -44258,8 +44258,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         await castContext.requestSession();
       },
       endSession() {
-        if (currentSession) {
+        if (!currentSession) return;
+        try {
           currentSession.endSession(true);
+        } catch (error) {
+          api?.logger.debug("Cast session was already gone when ending it", { error });
         }
       },
       isAvailable() {
@@ -54373,7 +54376,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.15.2" : "dev";
+  var VERSION = true ? "1.15.3" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT
