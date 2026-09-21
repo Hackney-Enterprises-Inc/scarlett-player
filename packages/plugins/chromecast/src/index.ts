@@ -428,8 +428,19 @@ export function chromecastPlugin(): IChromecastPlugin {
     },
 
     endSession(): void {
-      if (currentSession) {
+      if (!currentSession) return;
+
+      // The SDK throws synchronously when the session it holds is already gone:
+      // a viewer who presses Stop casting after the transport dropped (receiver
+      // rebooted, network blip) gets an uncaught error from a button they were
+      // right to press (TSP-WEB-2E7, 2026-09-20). The SESSION_ENDED handler
+      // catches up with the real state either way, so the throw carries nothing
+      // worth surfacing; log it and let the handler finish the job. Mirrors the
+      // guard destroy() already has.
+      try {
         currentSession.endSession(true);
+      } catch (error) {
+        api?.logger.debug('Cast session was already gone when ending it', { error });
       }
     },
 

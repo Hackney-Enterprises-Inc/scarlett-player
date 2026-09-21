@@ -348,6 +348,41 @@ describe('Chromecast Plugin', () => {
       expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(true);
     });
 
+    it('should swallow the SDK throw when the session is already gone on endSession()', async () => {
+      // TSP-WEB-2E7: Stop casting pressed after the transport dropped. The SDK
+      // throws synchronously; the button handler must not.
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      mockSDK.sessionHandlers[0]?.({
+        sessionState: 'SESSION_STARTED',
+      });
+
+      mockSDK.mockSession.endSession.mockImplementationOnce(() => {
+        throw new Error('Session is no longer available');
+      });
+
+      expect(() => plugin.endSession()).not.toThrow();
+      expect(mockSDK.mockSession.endSession).toHaveBeenCalledWith(true);
+      expect(api.logger.debug).toHaveBeenCalledWith(
+        'Cast session was already gone when ending it',
+        expect.objectContaining({ error: expect.any(Error) })
+      );
+      expect(api.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('should be a no-op on endSession() without a session', async () => {
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+
+      expect(() => plugin.endSession()).not.toThrow();
+      expect(mockSDK.mockSession.endSession).not.toHaveBeenCalled();
+    });
+
     it('should detect media ended when mediaSession has playerState IDLE and idleReason FINISHED', async () => {
       const { api } = createMockApi();
       const plugin = chromecastPlugin();
