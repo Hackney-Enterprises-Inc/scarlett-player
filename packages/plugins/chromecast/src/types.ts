@@ -212,7 +212,13 @@ export interface IChromecastPlugin extends Plugin {
   /** Request a cast session (opens device picker) */
   requestSession(): Promise<void>;
 
-  /** End the current cast session */
+  /**
+   * End the current cast session and stop playback on the receiver.
+   *
+   * A no-op without a session. Safe to call after the transport has already
+   * dropped: the SDK's synchronous throw for a vanished session is swallowed and
+   * logged at debug, since the session-ended handler restores state either way.
+   */
   endSession(): void;
 
   /** Check if Chromecast devices are available */
