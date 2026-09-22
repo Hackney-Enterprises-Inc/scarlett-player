@@ -2,7 +2,7 @@
 
 > Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.16.1). MIT licensed.
 
-Every guide below is also a web page at the same path without `index.md`. https://scarlettplayer.com/llms-full.txt holds all of them in one file.
+Every guide and comparison below is also a web page at the same path without `index.md`. https://scarlettplayer.com/llms-full.txt holds all of them in one file.
 
 ## Docs
 
@@ -10,6 +10,12 @@ Every guide below is also a web page at the same path without `index.md`. https:
 - [Writing a plugin](https://scarlettplayer.com/plugin-authoring/index.md): Write a Scarlett Player plugin that adds its own events, state and control-bar controls without editing the core or UI packages.
 - [Embed guide](https://scarlettplayer.com/embed/index.md): How the Scarlett Player embed package is built and integrated: script tags, iframes and the JavaScript API, CDN layout, multi-tenant branding and bundle sizes.
 - [Contributing](https://scarlettplayer.com/contributing/index.md): Code standards for Scarlett Player: TypeScript and TSDoc rules, plugin guidelines, testing, the git workflow and changesets, performance, security and accessibility.
+
+## Comparisons
+
+- [Scarlett vs. Video.js](https://scarlettplayer.com/vs-videojs/index.md): Scarlett Player and Video.js v8 and v10 compared: architecture, framework bindings, HLS, DASH, DRM and WHEP support, dependencies and licensing, with a source for every claim.
+- [Scarlett vs. Mux Player](https://scarlettplayer.com/vs-mux/index.md): Scarlett Player and Mux Player compared: media sources and hosting, analytics and tracking, Web Components and theming, framework bindings and licensing, with a source for every claim.
+- [Scarlett vs. Bitmovin](https://scarlettplayer.com/vs-bitmovin/index.md): Scarlett Player and Bitmovin Player Web v8 compared: modular builds, formats, DRM, advertising, WHEP, UI, license keys and impression pricing, with a source for every claim.
 
 ## Packages
 

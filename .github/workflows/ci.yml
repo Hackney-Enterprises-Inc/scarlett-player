@@ -182,7 +182,8 @@ jobs:
       # assets/ mirrors beside each generated page, and the homepage entry
       # under docs/site/, and the documentation pages demo/docs-build.mjs
       # renders into docs/documentation/, docs/architecture/,
-      # docs/plugin-authoring/, docs/embed/ and docs/contributing/ (the
+      # docs/plugin-authoring/, docs/embed/, docs/contributing/ and the
+      # comparisons docs/vs-videojs/, docs/vs-mux/, docs/vs-bitmovin/ (the
       # directories only: the authored .md files beside them are never
       # written by the build; each directory also holds the guide's
       # generated index.md), and docs/llms.txt + docs/llms-full.txt at the
@@ -202,9 +203,11 @@ jobs:
             docs/demo/demo.bundle.js docs/demo/index.html docs/demo/site.css docs/demo/assets \
             docs/index.html docs/site \
             docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/vs-videojs/ docs/vs-mux/ docs/vs-bitmovin/ \
             docs/llms.txt docs/llms-full.txt; do
             git checkout -- "$path" 2>/dev/null || true
           done
           git clean -fdq -- demo/assets docs/demo/assets docs/site \
             docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/vs-videojs/ docs/vs-mux/ docs/vs-bitmovin/ \
             docs/llms.txt docs/llms-full.txt || true

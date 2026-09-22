@@ -297,13 +297,14 @@ jobs:
           # demo/docs-build.mjs, run from build.cjs, renders the tracked
           # Markdown guides into one index.html per directory under docs/
           # (documentation/, architecture/, plugin-authoring/, embed/,
-          # contributing/), which production serves at /<slug>/. They link
+          # contributing/, and the comparisons vs-videojs/, vs-mux/,
+          # vs-bitmovin/), which production serves at /<slug>/. They link
           # ../site.css and ../assets/ rather than mirrors, so there is
           # nothing beside them to check, but a missing or ignored page is a
           # sitemap entry and a nav link that 404. The same build writes the
           # Markdown for agents: each guide's index.md beside its page (the
           # page's rel=alternate), plus docs/llms.txt and docs/llms-full.txt
-          # at the site root. None of the six is in the sitemap, on purpose:
+          # at the site root. None of them is in the sitemap, on purpose:
           # agents find them through llms.txt and rel=alternate, and the
           # index.md copies duplicate pages that are already listed.
           #
@@ -316,8 +317,10 @@ jobs:
             docs/documentation/index.html docs/architecture/index.html \
             docs/plugin-authoring/index.html docs/embed/index.html \
             docs/contributing/index.html \
+            docs/vs-videojs/index.html docs/vs-mux/index.html docs/vs-bitmovin/index.html \
             docs/architecture/index.md docs/plugin-authoring/index.md \
             docs/embed/index.md docs/contributing/index.md \
+            docs/vs-videojs/index.md docs/vs-mux/index.md docs/vs-bitmovin/index.md \
             docs/llms.txt docs/llms-full.txt; do
             if [ ! -s "$artifact" ]; then
               echo "::error::$artifact missing or empty after build"
@@ -375,6 +378,7 @@ jobs:
           # reads as the change of meaning it is.
           if [ -z "$(git status --porcelain -- demo/ docs/demo/ docs/site/ docs/index.html \
             docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/vs-videojs/ docs/vs-mux/ docs/vs-bitmovin/ \
             docs/llms.txt docs/llms-full.txt)" ]; then
             echo "Demo site unchanged, skipping commit"
           else
@@ -387,6 +391,7 @@ jobs:
             # a superseded hashed chunk from docs/site/chunks/.
             git add demo/ docs/demo/ docs/site/ docs/index.html \
               docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+              docs/vs-videojs/ docs/vs-mux/ docs/vs-bitmovin/ \
               docs/llms.txt docs/llms-full.txt
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             git push
