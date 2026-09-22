@@ -10,6 +10,13 @@
  *   docs/embed/index.html             /embed/              docs/embed-implementation.md
  *   docs/contributing/index.html      /contributing/       docs/contributing.md
  *
+ * and the three comparison pages the same way (COMPARISONS), which have their
+ * own section on the index and their own previous/next chain:
+ *
+ *   docs/vs-videojs/index.html        /vs-videojs/         docs/scarlett-vs-videojs.md
+ *   docs/vs-mux/index.html            /vs-mux/             docs/scarlett-vs-mux.md
+ *   docs/vs-bitmovin/index.html       /vs-bitmovin/        docs/scarlett-vs-bitmovin.md
+ *
  * The Markdown stays authoritative: these pages are generated, never
  * hand-edited, and TRACKED for the same reason docs/demo/ is (Forge deploys
  * the committed tree and runs no build). Each directory is replaced wholesale
@@ -27,7 +34,7 @@
  *
  * Link policy, enforced at build time (the build throws rather than ship a
  * broken link):
- *   - a link to another guide's .md becomes that guide's route, `../<slug>/`
+ *   - a link to another guide's or comparison's .md becomes its route, `../<slug>/`
  *   - a link to any other file or directory in the repository becomes its
  *     GitHub URL on main; the target must exist
  *   - http(s), mailto and in-page `#` links are left alone
@@ -99,8 +106,43 @@ export const GUIDES = [
   },
 ];
 
+/**
+ * The comparison pages, in index and previous/next order. Kept apart from
+ * GUIDES: they are not part of the guides' reading order, and every
+ * competitor fact in them carries its own source and check date.
+ */
+export const COMPARISONS = [
+  {
+    slug: 'vs-videojs',
+    file: 'scarlett-vs-videojs.md',
+    nav: 'Scarlett vs. Video.js',
+    title: 'Scarlett Player vs. Video.js | Scarlett Player',
+    description:
+      'Scarlett Player and Video.js v8 and v10 compared: architecture, framework bindings, HLS, DASH, DRM and WHEP support, dependencies and licensing, with a source for every claim.',
+  },
+  {
+    slug: 'vs-mux',
+    file: 'scarlett-vs-mux.md',
+    nav: 'Scarlett vs. Mux Player',
+    title: 'Scarlett Player vs. Mux Player | Scarlett Player',
+    description:
+      'Scarlett Player and Mux Player compared: media sources and hosting, analytics and tracking, Web Components and theming, framework bindings and licensing, with a source for every claim.',
+  },
+  {
+    slug: 'vs-bitmovin',
+    file: 'scarlett-vs-bitmovin.md',
+    nav: 'Scarlett vs. Bitmovin',
+    title: 'Scarlett Player vs. Bitmovin Player | Scarlett Player',
+    description:
+      'Scarlett Player and Bitmovin Player Web v8 compared: modular builds, formats, DRM, advertising, WHEP, UI, license keys and impression pricing, with a source for every claim.',
+  },
+];
+
+/** Every page rendered from a Markdown file: the guides, then the comparisons. */
+const PAGES = [...GUIDES, ...COMPARISONS];
+
 /** Every directory this build owns under docs/, index first. */
-export const DOC_ROUTES = [INDEX_SLUG, ...GUIDES.map((g) => g.slug)];
+export const DOC_ROUTES = [INDEX_SLUG, ...PAGES.map((g) => g.slug)];
 
 /**
  * Tags the Markdown renderer is allowed to leave in a page body. Raw HTML is
@@ -185,7 +227,7 @@ function resolveLink(href, sourceFile, guideHref = (guide, hash) => `../${guide.
   if (relative.startsWith('..') || path.isAbsolute(relative) || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
     throw new Error(`${where} points outside the repository`);
   }
-  const guide = GUIDES.find((g) => path.join(DOCS, g.file) === absolute);
+  const guide = PAGES.find((g) => path.join(DOCS, g.file) === absolute);
   if (guide) {
     return guideHref(guide, hash);
   }
@@ -417,21 +459,23 @@ ${main}
 }
 
 /**
- * The <main> content of one guide page: title, outline, body, previous/next
- * and the source link.
+ * The <main> content of one guide or comparison page: title, outline, body,
+ * previous/next within its own list, and the source link.
  *
- * @param {typeof GUIDES[number]} guide - The guide
- * @param {number} index - Its position in GUIDES
+ * @param {typeof GUIDES[number]} guide - The page
+ * @param {number} index - Its position in `list`
+ * @param {Array<typeof GUIDES[number]>} [list] - GUIDES or COMPARISONS, whose order sets previous/next
  * @returns {string} Markup
- * @throws {Error} When the guide has no H1
+ * @throws {Error} When the page has no H1
  */
-function guideMain(guide, index) {
+function guideMain(guide, index, list = GUIDES) {
   const source = path.join(DOCS, guide.file);
   const { html, h1, toc } = renderMarkdown(fs.readFileSync(source, 'utf8'), source);
   if (!h1) throw new Error(`docs/${guide.file}: no H1 to title the page`);
 
-  const prev = GUIDES[index - 1];
-  const next = GUIDES[index + 1];
+  const comparison = list === COMPARISONS;
+  const prev = list[index - 1];
+  const next = list[index + 1];
   const outline = toc.length
     ? `    <nav class="docs-toc" aria-labelledby="toc-heading">
       <h2 id="toc-heading">On this page</h2>
@@ -450,16 +494,20 @@ ${toc.map((e) => `        <li><a href="#${e.id}">${e.html.replace(/<\/?a\b[^>]*>
       : `      <a class="next" href="../${INDEX_SLUG}/"><span>Next</span>All documentation</a>`,
   ].join('\n');
 
-  return `    <p class="eyebrow"><a href="../${INDEX_SLUG}/">DOCUMENTATION</a></p>
+  const eyebrow = comparison
+    ? `<a href="../${INDEX_SLUG}/#comparisons-heading">COMPARISONS</a>`
+    : `<a href="../${INDEX_SLUG}/">DOCUMENTATION</a>`;
+
+  return `    <p class="eyebrow">${eyebrow}</p>
     <h1 class="docs-title">${h1}</h1>
     <div class="docs-layout">
 ${outline}    <article class="prose">
 ${html}    </article>
     </div>
-    <nav class="docs-pager" aria-label="Previous and next guide">
+    <nav class="docs-pager" aria-label="Previous and next ${comparison ? 'comparison' : 'guide'}">
 ${pager}
     </nav>
-    <p class="docs-source"><a href="${REPO_URL}/blob/main/docs/${guide.file}">Improve this guide <span aria-hidden="true">↗</span></a></p>`;
+    <p class="docs-source"><a href="${REPO_URL}/blob/main/docs/${guide.file}">Improve this ${comparison ? 'page' : 'guide'} <span aria-hidden="true">↗</span></a></p>`;
 }
 
 /**
@@ -514,6 +562,14 @@ function indexMain() {
         <span class="text-link">Read the guide <span aria-hidden="true">↗</span></span>
       </a>`
   ).join('\n');
+  const comparisons = COMPARISONS.map(
+    (c, i) => `      <a class="docs-card" href="../${c.slug}/">
+        <span class="story-number">${String(i + 1).padStart(2, '0')} / COMPARISON</span>
+        <h2>${escapeHtml(c.nav)}</h2>
+        <p>${escapeHtml(c.description)}</p>
+        <span class="text-link">Read the comparison <span aria-hidden="true">↗</span></span>
+      </a>`
+  ).join('\n');
 
   return `    <p class="eyebrow">DOCUMENTATION</p>
     <h1 class="docs-title">Build with Scarlett Player.</h1>
@@ -521,6 +577,13 @@ function indexMain() {
     <div class="docs-cards">
 ${cards}
     </div>
+    <section class="docs-packages" aria-labelledby="comparisons-heading">
+      <h2 id="comparisons-heading">Comparisons</h2>
+      <p>How Scarlett Player differs from other web players, with a source and a check date for every claim about them.</p>
+      <div class="docs-cards">
+${comparisons}
+      </div>
+    </section>
     <section class="docs-packages" aria-labelledby="packages-heading">
       <h2 id="packages-heading">Packages</h2>
       <p>Every package ships at the same version. Install the core and the plugins you need.</p>
@@ -620,11 +683,15 @@ function llmsTxt(version) {
 
 > Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently ${version}). MIT licensed.
 
-Every guide below is also a web page at the same path without \`index.md\`. ${SITE_ORIGIN}/llms-full.txt holds all of them in one file.
+Every guide and comparison below is also a web page at the same path without \`index.md\`. ${SITE_ORIGIN}/llms-full.txt holds all of them in one file.
 
 ## Docs
 
 ${GUIDES.map((g) => `- [${g.nav}](${guideMarkdownUrl(g)}): ${g.description}`).join('\n')}
+
+## Comparisons
+
+${COMPARISONS.map((c) => `- [${c.nav}](${guideMarkdownUrl(c)}): ${c.description}`).join('\n')}
 
 ## Packages
 
@@ -640,15 +707,15 @@ ${packageList()}
 
 /**
  * /llms-full.txt: llms.txt's heading and summary, then every guide's
- * Markdown copy in reading order.
+ * Markdown copy in reading order, then the comparisons.
  *
  * @param {string} version - Current player version
- * @param {string[]} guides - Markdown copies, in GUIDES order
+ * @param {string[]} guides - Markdown copies, in GUIDES then COMPARISONS order
  * @returns {string} Markdown
  */
 function llmsFullTxt(version, guides) {
   // The H1 and summary only: llms.txt's line pointing here would be circular.
-  const head = llmsTxt(version).split('\n\nEvery guide below')[0];
+  const head = llmsTxt(version).split('\n\nEvery guide and comparison below')[0];
   return `${head}\n\n${guides.map((md) => md.trimEnd()).join('\n\n---\n\n')}\n`;
 }
 
@@ -669,7 +736,7 @@ export function buildDocs({ version, cssVersion, dryRun = false }) {
       slug: INDEX_SLUG,
       title: 'Documentation | Scarlett Player',
       description:
-        'Scarlett Player documentation: architecture, writing plugins, embedding the player and contributing, plus every package in the workspace.',
+        'Scarlett Player documentation: architecture, writing plugins, embedding the player and contributing, comparisons with Video.js, Mux Player and Bitmovin, plus every package in the workspace.',
       main: indexMain(),
       // The index has no Markdown source of its own; llms.txt is its
       // Markdown equivalent (the guide list and the package list).
@@ -682,6 +749,14 @@ export function buildDocs({ version, cssVersion, dryRun = false }) {
       main: guideMain(g, i),
       alternate: 'index.md',
       markdown: guideMarkdown(g),
+    })),
+    ...COMPARISONS.map((c, i) => ({
+      slug: c.slug,
+      title: c.title,
+      description: c.description,
+      main: guideMain(c, i, COMPARISONS),
+      alternate: 'index.md',
+      markdown: guideMarkdown(c),
     })),
   ];
 
