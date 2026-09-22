@@ -220,25 +220,85 @@ export function createAnalyticsPlugin(
     }
 
     const body = safeStringify(payload);
-    const shouldAttachApiKey = Boolean(
-      mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-    );
 
-    // Primary transport: fetch with keepalive. Unlike sendBeacon, fetch
-    // supports custom headers (X-API-Key), which is how the backend
-    // authenticates beacons. 100% of sendBeacon-based beacons arrived
-    // without the header — sendBeacon cannot attach custom headers at all.
-    fetch(mergedConfig.beaconUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
-      },
-      body,
-      keepalive: true,
-    }).catch(() => {
-      // Silently fail - don't disrupt playback
-    });
+    /** Post `body` with the base headers plus whatever `headers` resolved to. */
+    const post = (extra: Record<string, string>): void => {
+      // Primary transport: fetch with keepalive. Unlike sendBeacon, fetch
+      // supports custom headers (X-API-Key), which is how the backend
+      // authenticates beacons. 100% of sendBeacon-based beacons arrived
+      // without the header — sendBeacon cannot attach custom headers at all.
+      fetch(mergedConfig.beaconUrl, {
+        method: 'POST',
+        headers: beaconHeaders(extra),
+        body,
+        keepalive: true,
+      }).catch(() => {
+        // Silently fail - don't disrupt playback
+      });
+    };
+
+    const configured = mergedConfig.headers;
+
+    if (typeof configured !== 'function') {
+      // Static (or absent) headers keep this path synchronous, which is what
+      // a beacon sent from a visibilitychange handler needs.
+      post(configured ?? {});
+      return;
+    }
+
+    // A function is resolved per request, so a rotating CSRF or Bearer token
+    // is current. A rejection must not cost the beacon: analytics is not worth
+    // losing over a token the server will simply refuse.
+    //
+    // Called from inside the chain rather than before it, so a headers()
+    // that throws synchronously - reading a cookie that is not there, say -
+    // lands in the same catch as one that rejects. Called directly, the throw
+    // would escape sendBeacon() into whichever player event handler triggered
+    // the beacon, and the beacon itself would never be sent.
+    Promise.resolve()
+      .then(() => configured())
+      .then(post)
+      .catch((error) => {
+        api?.logger.debug('Analytics headers() failed; sending without them', { error });
+        post({});
+      });
+  }
+
+  /**
+   * Headers every fetch-transport beacon carries.
+   *
+   * The API key rides here rather than on the URL whenever the transport can
+   * hold it; see `sendUnloadBeacon` for the one path that cannot.
+   */
+  function baseHeaders(): Record<string, string> {
+    const shouldAttachApiKey = Boolean(mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl));
+
+    return {
+      'Content-Type': 'application/json',
+      ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
+    };
+  }
+
+  /**
+   * The base headers with `extra` applied on top, as a `Headers`.
+   *
+   * `Headers.set` matches field names case-insensitively, so a host that
+   * configures `content-type` replaces ours instead of sitting beside it.
+   * Spreading into a plain object cannot do that: both spellings survive into
+   * the request, where the `Headers` constructor APPENDS rather than replaces
+   * and the beacon goes out with the two values comma-joined.
+   *
+   * @param extra - Resolved `headers` entries, which win over the base ones
+   * @returns Headers for the beacon request
+   */
+  function beaconHeaders(extra: Record<string, string>): Headers {
+    const headers = new Headers(baseHeaders());
+
+    for (const [name, value] of Object.entries(extra)) {
+      headers.set(name, value);
+    }
+
+    return headers;
   }
 
   /**
@@ -314,16 +374,19 @@ export function createAnalyticsPlugin(
       if (sent) return;
     }
 
-    // Fallback to fetch with keepalive when sendBeacon is unavailable or returns false
-    const shouldAttachApiKey = Boolean(
-      mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-    );
+    // Fallback to fetch with keepalive when sendBeacon is unavailable or returns false.
+    //
+    // Static `headers` are merged; a `headers()` function is NOT called here.
+    // This runs inside pagehide, where the page can be torn down before a
+    // promise resolves, and a beacon that waits for a token is a beacon that
+    // never leaves. A host that needs authenticated unload beacons uses the
+    // `api_key` query parameter above, which is the only thing sendBeacon can
+    // carry anyway.
+    const staticHeaders = typeof mergedConfig.headers === 'function' ? {} : mergedConfig.headers;
+
     fetch(mergedConfig.beaconUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
-      },
+      headers: beaconHeaders(staticHeaders ?? {}),
       body,
       keepalive: true,
     }).catch(() => {

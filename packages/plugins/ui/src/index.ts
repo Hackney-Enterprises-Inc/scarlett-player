@@ -77,6 +77,7 @@ export type {
 } from './timeline-registry';
 export { icons } from './icons';
 export { styles } from './styles';
+export { accentTextTone } from './contrast';
 export { formatTime, formatLiveTime } from './utils';
 export { DEFAULT_PRIORITY, assertFitLayout, planFit, resolveFitItems } from './fit';
 export type {
@@ -1519,6 +1520,13 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       }
       if (theme.accentColor) {
         root.style.setProperty('--sp-accent', theme.accentColor);
+      }
+      // Accent TEXT is a separate token because the same colour answers to
+      // 4.5:1 there and 3:1 as a fill; it falls back to --sp-accent, so a
+      // theme that sets only accentColor behaves exactly as it did. Pass
+      // accentTextTone(accentColor) for a derived readable tone.
+      if (theme.accentTextColor) {
+        root.style.setProperty('--sp-accent-text', theme.accentTextColor);
       }
       if (theme.backgroundColor) {
         root.style.setProperty('--sp-bg', theme.backgroundColor);

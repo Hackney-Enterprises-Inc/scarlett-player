@@ -122,6 +122,11 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     config.brandColor = brandColor;
   }
 
+  const brandTextColor = getAttr(element, 'data-brand-text-color', 'brand-text-color');
+  if (brandTextColor) {
+    config.brandTextColor = brandTextColor;
+  }
+
   const primaryColor = element.getAttribute('data-primary-color');
   if (primaryColor) {
     config.primaryColor = primaryColor;

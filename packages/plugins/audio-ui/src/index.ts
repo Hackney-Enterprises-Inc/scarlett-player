@@ -59,7 +59,6 @@ const DEFAULT_CONFIG: AudioUIPluginConfig = {
   showRepeat: true,
   showNavigation: true,
   classPrefix: 'scarlett-audio',
-  autoHide: 0,
   theme: DEFAULT_THEME,
 };
 

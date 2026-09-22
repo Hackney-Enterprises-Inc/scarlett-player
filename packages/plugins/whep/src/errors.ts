@@ -199,6 +199,22 @@ export function classifyResponse(
         detail,
       };
 
+    case 501:
+    case 505:
+      // Permanent by definition, unlike the rest of 5xx: 501 is "this server
+      // does not implement the method", which is what a plain HTTP server
+      // answers a WHEP POST, and 505 is a version it will never speak. Left in
+      // the recoverable 5xx bucket, a URL that is simply not a WHEP endpoint
+      // reconnected for the whole window - five minutes by default - with
+      // `load()` pending throughout, instead of failing in seconds.
+      return {
+        code: ErrorCode.SOURCE_LOAD_FAILED,
+        message: `WHEP endpoint does not speak WHEP (${status})${said}`,
+        recoverable: false,
+        serverCode: envelope.code,
+        detail,
+      };
+
     default:
       if (status >= 500) {
         return {

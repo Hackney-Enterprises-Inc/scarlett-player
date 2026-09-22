@@ -16,7 +16,7 @@
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
-import { uiPlugin } from '@scarlett-player/ui';
+import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
 import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
 import { createPlaylistPlugin } from '@scarlett-player/playlist';
@@ -46,6 +46,7 @@ const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
   native: createNativePlugin,
   videoUI: uiPlugin,
+  accentTextTone,
   audioUI: createAudioUIPlugin,
   analytics: createAnalyticsPlugin,
   playlist: createPlaylistPlugin,

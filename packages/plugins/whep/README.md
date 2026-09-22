@@ -136,12 +136,39 @@ down.
 | `409` `not_live` | the publisher is not there yet, or the tap has not delivered its init | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (5 s), doubling |
 | `503` `max_monitors` | the stream is at its monitor cap | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (30 s) |
 | `503` `preview_disabled` | the preview is off for this stream | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (30 s) |
+| `501`, `505` | the endpoint does not speak WHEP at all - a plain HTTP server answers a WHEP POST this way | `SOURCE_LOAD_FAILED` | no |
 | other `5xx` | the server failed | `MEDIA_NETWORK_ERROR` | yes, from `reconnectBaseDelayMs` |
 | the request failed (offline, DNS, CORS) | | `MEDIA_NETWORK_ERROR` | yes |
 | the answer could not be applied | | `MEDIA_NETWORK_ERROR` (`detail.type: 'media'`) | yes |
 | the connection `failed`, or stayed `disconnected` past 5 s | | `MEDIA_NETWORK_ERROR` | yes |
 | a join did not connect inside `loadTimeoutMs` | | `MEDIA_NETWORK_ERROR` | yes |
 | the video element reported an error | | `MEDIA_DECODE_ERROR` | yes |
+
+### What `load()` promises
+
+`player.load(url)` resolves once the stream is playable, and **stays pending
+while the reconnect scheduler is working** - up to `reconnectWindowMs`, five
+minutes by default. A stream that is not live yet (`409`) or at its monitor cap
+(`503`) is a wait, not a failure, and an `await load()` that rejected on the
+first one would turn every such wait into a host-visible error with a reconnect
+still running behind it.
+
+So do not use the promise as the progress channel. Listen instead:
+
+```ts
+player.on('error:reconnecting', ({ attempt, delayMs }) => showWaiting(attempt, delayMs));
+player.on('error:recovered', () => hideWaiting());
+player.on('error', (err) => { if (err.fatal) showError(err); });
+```
+
+A terminal failure - a refused token, a stream that does not exist, an endpoint
+that does not speak WHEP - is never scheduled for reconnect, so it is reported
+in seconds rather than at the end of the window. It is reported through the
+fatal `error` event and the player's `error` state, not through the promise:
+`ScarlettPlayer.load()` catches what a provider throws and routes it to the
+error handler, so the promise it returns resolves either way. If a host needs a
+hard bound on the wait it owns the timeout: race the promise yourself, or set a
+shorter `reconnectWindowMs`.
 
 The reconnect delay doubles from the server's `Retry-After` when the failure
 carried one (a `409` polls at 5, 10, 20, 30, 30 s) and from
@@ -154,8 +181,9 @@ the dead session first.
 join needed (so a monitor opened before the producer starts plays as soon as
 the stream goes live; on Tmesis, which answers `409` until then. MediaMTX
 answers `404`, which is terminal on a first join, so open a MediaMTX monitor
-after the publisher), and rejects when the failure is terminal, the window
-closes, or a newer load or `destroy()` supersedes it.
+after the publisher), and returns on a terminal failure, on the window closing,
+or when a newer load or `destroy()` supersedes it - the first two leaving a
+fatal `error` behind them.
 
 ### Not in v1
 
@@ -210,7 +238,7 @@ connection fails, the attempts that follow get MediaMTX's `404` (recoverable
 once the source has played), and the stream recovers when ffmpeg is
 restarted inside `reconnectWindowMs` (five minutes by default). Past that
 the scheduler gives up (`error:reconnect-exhausted`, a final fatal `error`,
-and `load()` rejects), so restart ffmpeg and press Join again.
+and `load()` returns), so restart ffmpeg and press Join again.
 
 ## License
 

@@ -68,6 +68,15 @@ export interface EmbedConfig {
   embedBaseUrl?: string;
   /** Brand/accent color for the player UI */
   brandColor?: string;
+  /**
+   * Accent colour for TEXT and active-state glyphs - the LIVE label, the
+   * active rows in the settings and quality menus.
+   *
+   * Defaults to a readable tone derived from {@link EmbedConfig.brandColor},
+   * because text answers to 4.5:1 where a fill answers to 3:1 and an iframe
+   * host has no CSS of its own inside the player. Set it to take that over.
+   */
+  brandTextColor?: string;
   /** Primary color for UI elements */
   primaryColor?: string;
   /** Background color for controls */

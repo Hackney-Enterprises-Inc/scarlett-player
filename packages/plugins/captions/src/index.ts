@@ -97,6 +97,13 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   let api: IPluginAPI | null = null;
   let video: HTMLVideoElement | null = null;
   let addedTrackElements: HTMLTrackElement[] = [];
+  /**
+   * The `<track>` element added for the source the host marked `default`.
+   *
+   * Held so selection can find that source through its own TextTrack object
+   * instead of by language and label, which do not identify it.
+   */
+  let defaultTrackElement: HTMLTrackElement | null = null;
   let hlsSubtitleHandler: ((...args: unknown[]) => void) | null = null;
   let hlsSubtitleSwitchHandler: ((...args: unknown[]) => void) | null = null;
   let observedTextTracks: TextTrackList | null = null;
@@ -107,6 +114,13 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   const extractFromHLS = config.extractFromHLS !== false;
   const autoSelect = config.autoSelect ?? false;
   const defaultLanguage = config.defaultLanguage ?? 'en';
+  /**
+   * The configured source the host marked `default`, if any.
+   *
+   * Read once: `config.sources` is fixed for the life of the plugin, and the
+   * track it names may not exist in the element's TextTrackList yet.
+   */
+  const defaultSource = config.sources?.find((source) => source.default) ?? null;
 
   /**
    * Get video element from container.
@@ -129,6 +143,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       trackEl.parentNode?.removeChild(trackEl);
     }
     addedTrackElements = [];
+    defaultTrackElement = null;
 
     // Reset state
     api?.setState('textTracks', []);
@@ -152,7 +167,11 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     trackEl.label = source.label;
     trackEl.srclang = source.language;
     trackEl.src = source.src;
-    trackEl.default = false; // We manage selection ourselves
+    // Selection is managed here, not by the element: `default` on a <track>
+    // makes the browser show it before the plugin has synced any state, and a
+    // second source with the flag would then fight the first. A source's own
+    // `default` is honoured in maybeAutoSelect() instead.
+    trackEl.default = false;
 
     videoEl.appendChild(trackEl);
     addedTrackElements.push(trackEl);
@@ -229,15 +248,58 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   };
 
   /**
-   * Auto-select a track matching the default language, at most once per media.
+   * The state track for the source the host marked `default`.
+   *
+   * Resolved through the TextTrack object of the `<track>` element we added,
+   * because language and label do not identify that source: a native rendition
+   * carrying the same pair can sit ABOVE ours in the TextTrackList - the shape
+   * native HLS produces when the manifest already offers the subtitle the host
+   * also configured - and a value match would select that one instead.
+   *
+   * Falls back to the value match when the element has no TextTrack to compare
+   * (nothing has created one yet), which keeps the marked source reachable
+   * rather than unselectable.
+   *
+   * @param tracks - The synced `textTracks` state
+   * @returns The marked source's state track, or undefined when none matches
+   */
+  const markedTrack = (tracks: ScarlettTextTrack[]): ScarlettTextTrack | undefined => {
+    if (!defaultSource) return undefined;
+
+    const videoEl = getVideo();
+    const textTrack = defaultTrackElement?.track;
+
+    if (videoEl && textTrack) {
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        if (videoEl.textTracks[i] !== textTrack) continue;
+
+        const own = tracks.find((t) => t.id === `track-${i}`);
+        if (own) return own;
+      }
+    }
+
+    return tracks.find(
+      (t) =>
+        t.language === defaultSource.language &&
+        (!defaultSource.label || t.label === defaultSource.label)
+    );
+  };
+
+  /**
+   * Select a track on load, at most once per media.
+   *
+   * Two things can ask for one: a source the host marked `default`, and
+   * `autoSelect` with `defaultLanguage`. The marked source wins, and is
+   * honoured even when `autoSelect` is off - the flag is the host naming a
+   * track, not a preference to be weighed.
    *
    * A track that is already showing counts as the selection for this media -
    * whether the browser restored it or the viewer picked it from Safari's own
    * subtitle menu, neither of which routes through selectTrack. Standing down
-   * keeps a later re-sync from replacing that pick with defaultLanguage.
+   * keeps a later re-sync from replacing that pick.
    */
   const maybeAutoSelect = (): void => {
-    if (!autoSelect || hasAutoSelected) return;
+    if ((!autoSelect && !defaultSource) || hasAutoSelected) return;
 
     if (api?.getState('currentTextTrack')) {
       hasAutoSelected = true;
@@ -245,11 +307,17 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     }
 
     const tracks = api?.getState('textTracks') || [];
-    const match = tracks.find(t => t.language === defaultLanguage);
+
+    const marked = markedTrack(tracks);
+    const match = marked ?? (autoSelect ? tracks.find(t => t.language === defaultLanguage) : undefined);
     if (!match) return;
 
     selectTrack(match.id);
-    api?.logger.debug('Auto-selected caption track', { language: defaultLanguage, id: match.id });
+    api?.logger.debug('Selected caption track on load', {
+      language: match.language,
+      id: match.id,
+      reason: marked ? 'source default' : 'defaultLanguage',
+    });
   };
 
   /**
@@ -413,7 +481,8 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     if (!config.sources?.length) return;
 
     for (const source of config.sources) {
-      addTrackElement(source);
+      const trackEl = addTrackElement(source);
+      if (source === defaultSource) defaultTrackElement = trackEl;
     }
   };
 

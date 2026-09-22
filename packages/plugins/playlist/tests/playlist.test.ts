@@ -1,7 +1,7 @@
 /**
  * Tests for Playlist Plugin
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
 import { createPlaylistPlugin, type PlaylistTrack, type IPlaylistPlugin } from '../src/index';
 import { PKG_VERSION } from '../src/version';
@@ -33,6 +33,12 @@ interface MockPluginAPI extends IPluginAPI {
   subscribeToState: Mock;
 }
 
+
+// jsdom does not implement HTMLMediaElement.load() and reports "Not
+// implemented" to the virtual console on every call. clearPreload() calls it
+// to end an in-flight fetch, which is the whole point of releasing the
+// element, so the method is stubbed here rather than the call avoided.
+HTMLMediaElement.prototype.load = (): void => {};
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -499,6 +505,165 @@ describe('next and previous', () => {
     plugin.previous();
 
     expect(mockApi.logger.info).toHaveBeenCalledWith('No previous track');
+  });
+});
+
+describe('preloadNext', () => {
+  let mockApi: ReturnType<typeof createMockApi>;
+  let media: HTMLMediaElement[];
+  /** Only the restore is needed out here; the spy's own generics are not. */
+  let restoreCreateElement: () => void;
+
+  /** The preload element is detached, so it is caught at creation instead. */
+  beforeEach(() => {
+    localStorageMock.clear();
+    media = [];
+    const original = document.createElement.bind(document);
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = original(tag);
+      if (tag === 'audio' || tag === 'video') media.push(el as HTMLMediaElement);
+      return el;
+    }) as typeof document.createElement);
+    restoreCreateElement = () => spy.mockRestore();
+  });
+
+  afterEach(() => {
+    restoreCreateElement();
+  });
+
+  const start = async (config: Parameters<typeof createPlaylistPlugin>[0]) => {
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, ...config });
+    mockApi = createMockApi();
+    await plugin.init(mockApi);
+    return plugin;
+  };
+
+  it('warms the track that plays next', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+
+    expect(media).toHaveLength(1);
+    expect(media[0].src).toContain('track2.mp3');
+    // Metadata only: the current track still needs the bandwidth.
+    expect(media[0].preload).toBe('metadata');
+  });
+
+  it('follows the playlist forward', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+    plugin.next();
+
+    expect(media[0].src).toContain('track3.mp3');
+    // One element, reused - a warm-up per track change would leak them.
+    expect(media).toHaveLength(1);
+  });
+
+  it('stays off when preloadNext is false', async () => {
+    const plugin = await start({ preloadNext: false });
+
+    plugin.play(0);
+
+    expect(media).toHaveLength(0);
+  });
+
+  it('warms nothing at the end of a playlist that does not repeat', async () => {
+    const plugin = await start({});
+
+    plugin.play(sampleTracks.length - 1);
+
+    expect(media).toHaveLength(0);
+  });
+
+  it('warms nothing when repeat is one', async () => {
+    const plugin = await start({ repeat: 'one' });
+
+    plugin.play(0);
+
+    // The next track IS the current one, already loaded by the provider.
+    expect(media).toHaveLength(0);
+  });
+
+  it('wraps to the first track when repeat is all', async () => {
+    const plugin = await start({ repeat: 'all' });
+
+    plugin.play(sampleTracks.length - 1);
+
+    expect(media[0].src).toContain('track1.mp3');
+  });
+
+  /**
+   * Play the track sitting at the END of the shuffle order - the wrap.
+   *
+   * Under shuffle the last track by array index is wherever the draw put it,
+   * so the wrap has to be found through the order rather than assumed.
+   */
+  const playShuffleWrap = (plugin: IPlaylistPlugin): number[] => {
+    const order = [...(plugin.getState().shuffleOrder ?? [])];
+    plugin.play(order[order.length - 1]);
+    return order;
+  };
+
+  it('does not redraw the shuffle order just to look ahead', async () => {
+    const plugin = await start({ shuffle: true, repeat: 'all' });
+    plugin.play(0);
+
+    // The wrap track STARTING must not draw the next order: that belongs to
+    // next(), and previous() and any UI reading shuffleOrder would otherwise
+    // see the new order early.
+    const orderBefore = playShuffleWrap(plugin);
+
+    expect(plugin.getState().shuffleOrder).toEqual(orderBefore);
+  });
+
+  it('warms nothing at a shuffled wrap, where the next track is undrawn', async () => {
+    const plugin = await start({ shuffle: true, repeat: 'all' });
+    plugin.play(0);
+
+    const warmed = media.length;
+    playShuffleWrap(plugin);
+
+    // Which track follows the wrap does not exist until the order is drawn,
+    // and drawing it here is exactly what the test above forbids. The element
+    // already warming the previous next track is released rather than left
+    // fetching one the viewer has moved past.
+    expect(media).toHaveLength(warmed);
+    expect(media.map((el) => el.getAttribute('src'))).toEqual(media.map(() => null));
+  });
+
+  it('releases the warmed track when there is no next one left', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+    expect(media[0].getAttribute('src')).toContain('track2.mp3');
+
+    plugin.play(sampleTracks.length - 1);
+
+    // The end of a playlist that does not repeat. Returning early without
+    // clearing left this element fetching track2 for the rest of the session.
+    expect(media[0].getAttribute('src')).toBeNull();
+  });
+
+  it('releases the warmed track when the playlist is cleared', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+    expect(media[0].getAttribute('src')).toContain('track2.mp3');
+
+    plugin.clear();
+
+    expect(media[0].getAttribute('src')).toBeNull();
+  });
+
+  it('releases the element on destroy', async () => {
+    const plugin = await start({});
+    plugin.play(0);
+
+    await plugin.destroy();
+
+    // The attribute going is what ends the fetch; the element itself is dropped.
+    expect(media[0].getAttribute('src')).toBeNull();
   });
 });
 

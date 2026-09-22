@@ -214,6 +214,19 @@ error state is already populated (a provider that emitted a structured fatal
 error of its own) the catch only logs, so a specific code is not overwritten by
 a generic one.
 
+**When the returned promise settles.** `load()` awaits the provider's
+`loadSource()`, so on the two providers that reconnect - HLS and WHEP - it
+stays pending for as long as their scheduler keeps trying, up to
+`reconnectWindowMs` (five minutes by default). That is deliberate: a live
+stream that has not started yet, or is at its monitor cap, is a wait rather
+than a failure, and settling early would report an error while a reconnect is
+still running behind it. Hosts that need progress listen to
+`error:reconnecting`, `error:recovered` and fatal `error` rather than awaiting
+the promise; hosts that need a hard bound set a shorter `reconnectWindowMs` or
+race the promise themselves. Terminal failures - a refused token, a missing
+stream, an endpoint that does not speak the protocol - are not scheduled for
+reconnect and settle in seconds.
+
 ### Destruction
 
 `destroy()` increments `loadGeneration` so in-flight loads self-cancel through

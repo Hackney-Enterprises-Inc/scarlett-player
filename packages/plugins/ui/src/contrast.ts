@@ -1,13 +1,15 @@
 /**
- * Accent tone helper for the demo pages.
+ * Readable accent tones.
  *
- * The UI plugin splits its accent in two: `--sp-accent` colours fills, rings
+ * The stylesheet splits the accent in two: `--sp-accent` colours fills, rings
  * and the big play button (non-text, 3:1), while `--sp-accent-text` colours
  * the LIVE label and the active rows in the settings and quality menus (text,
- * 4.5:1). `--sp-accent-text` falls back to `--sp-accent`, so a page that
- * themes the player - as both demo pages do, and as the playground's accent
- * picker does on every input event - has to supply the readable tone itself or
- * it gets the dark accent back on 11-13px labels.
+ * 4.5:1). `--sp-accent-text` falls back to `--sp-accent`, so a host that
+ * themes the player gets its own accent on those labels - readable or not.
+ *
+ * This is how a host, the embed or a demo page derives the readable tone of an
+ * accent without shipping the WCAG maths itself. Nothing here runs unless
+ * someone asks: the stylesheet's own default already clears AA.
  */
 
 /**
@@ -85,6 +87,11 @@ function hex(color: [number, number, number]): string {
  * @param color - Accent as `#rgb` or `#rrggbb`
  * @returns A `#rrggbb` tone clearing AA on the menus, or the input unchanged
  *          when it cannot be parsed (a named colour, a gradient, a var())
+ *
+ * @example
+ * ```ts
+ * uiPlugin({ theme: { accentColor: brand, accentTextColor: accentTextTone(brand) } });
+ * ```
  */
 export function accentTextTone(color: string): string {
   const parsed = channels(color);

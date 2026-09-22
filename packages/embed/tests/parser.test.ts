@@ -184,6 +184,20 @@ describe('parseDataAttributes', () => {
       expect(config.brandColor).toBe('#00ff00');
     });
 
+    it('should parse brand-text-color attribute', () => {
+      element.setAttribute('data-brand-text-color', '#ff8a90');
+      const config = parseDataAttributes(element);
+      expect(config.brandTextColor).toBe('#ff8a90');
+    });
+
+    it('should leave brandTextColor unset when the attribute is absent', () => {
+      element.setAttribute('data-brand-color', '#00008b');
+      const config = parseDataAttributes(element);
+      // Absent is meaningful: the embed derives a readable tone from the brand
+      // colour, and a key present as undefined would look like a host choice.
+      expect(config.brandTextColor).toBeUndefined();
+    });
+
     it('should parse primary-color attribute', () => {
       element.setAttribute('data-primary-color', '#ffffff');
       const config = parseDataAttributes(element);

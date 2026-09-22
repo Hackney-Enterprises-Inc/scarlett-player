@@ -67,6 +67,18 @@ export interface ThemeConfig {
   primaryColor?: string;
   /** Accent color for active states (default: '#e50914') */
   accentColor?: string;
+  /**
+   * Accent color for TEXT and active-state glyphs - the LIVE label, the
+   * active rows in the settings and quality menus, the active captions and
+   * cast buttons (default: a lighter tone of the accent, `#ff4d57`).
+   *
+   * Split from `accentColor` because text answers to 4.5:1 where a fill
+   * answers to 3:1: the brand red is 4.38:1 on black and fails as a label
+   * while passing as a progress bar. Unset, it follows `accentColor`, so a
+   * dark brand accent needs this set - `accentTextTone(accentColor)` derives
+   * one that clears AA on the menus.
+   */
+  accentTextColor?: string;
   /** Control bar background (default: 'rgba(0,0,0,0.7)') */
   backgroundColor?: string;
   /** Control bar height in px (default: 48) */
