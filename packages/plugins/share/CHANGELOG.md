@@ -1,5 +1,7 @@
 # @scarlett-player/share
 
+## 1.16.0
+
 ## 1.15.4
 
 ## 1.15.3
