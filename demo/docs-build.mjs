@@ -173,7 +173,12 @@ function resolveLink(href, sourceFile, guideHref = (guide, hash) => `../${guide.
   }
   const [target, fragment = ''] = href.split('#');
   const hash = fragment ? `#${fragment}` : '';
-  const absolute = path.resolve(path.dirname(sourceFile), decodeURIComponent(target));
+  // A leading slash means the repository root, as GitHub reads it, not the
+  // filesystem root. The boundary check below still applies to both forms.
+  const decoded = decodeURIComponent(target);
+  const absolute = decoded.startsWith('/')
+    ? path.join(REPO_ROOT, decoded.replace(/^\/+/, ''))
+    : path.resolve(path.dirname(sourceFile), decoded);
   const relative = path.relative(REPO_ROOT, absolute);
   const where = `${path.relative(REPO_ROOT, sourceFile)}: link "${href}"`;
 
@@ -319,6 +324,11 @@ function siteChrome(version) {
   const home = fs.readFileSync(path.join(DOCS, 'index.html'), 'utf8');
   const header = home.match(/<header class="header wrap">[\s\S]*?<\/header>/)?.[0];
   const footer = home.match(/<footer class="footer wrap">[\s\S]*?<\/footer>/)?.[0];
+  // Every docs page copies this markup, so an unresolved merge in the
+  // homepage would ship its conflict markers five more times.
+  if (/^(<{7}|={7}|>{7})( |$)/m.test(home)) {
+    throw new Error('docs/index.html has unresolved merge conflict markers');
+  }
   if (!header || !footer || !header.includes('href="documentation/"')) {
     throw new Error('docs/index.html: header, footer or the Docs nav link (href="documentation/") not found');
   }
