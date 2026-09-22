@@ -307,8 +307,9 @@ function rebase(html) {
 /**
  * Lift the header and footer from the homepage, so the docs pages share its
  * chrome without a second copy to drift: hrefs rebased one level down, the
- * version badge and release link set to `version`, the Docs nav link marked
- * as the current section, and the homepage-only sample-video credit dropped.
+ * version badge and release link set to `version`, and the homepage-only
+ * sample-video credit dropped. documentHtml() marks the Docs nav link
+ * current, per page.
  *
  * @param {string} version - Current player version, without the `v`
  * @returns {{header: string, footer: string}} Markup for the page template
@@ -326,10 +327,7 @@ function siteChrome(version) {
       .replace(/(<span class="version-badge" id="version">)v[^<]*(<\/span>)/, `$1v${version}$2`)
       .replace(/(\/releases\/tag\/)v[^"]*(">)v[^<]*(<\/a>)/, `$1v${version}$2v${version}$3`);
   return {
-    header: stamp(rebase(header)).replace(
-      '<a href="../documentation/">',
-      '<a href="../documentation/" aria-current="page">'
-    ),
+    header: stamp(rebase(header)),
     footer: stamp(rebase(footer)).replace(/\n\s*<a href="https:\/\/peach\.blender\.org\/"[^>]*>[^<]*<\/a>/, ''),
   };
 }
@@ -349,6 +347,13 @@ function siteChrome(version) {
  */
 function documentHtml({ slug, title, description, main, alternate }, chrome, cssVersion) {
   const url = `${SITE_ORIGIN}/${slug}/`;
+  // The Docs link IS this page on the index; on a guide it is the section
+  // the page belongs to, which aria-current="true" says without claiming
+  // the link points here.
+  const header = chrome.header.replace(
+    '<a href="../documentation/">',
+    `<a href="../documentation/" aria-current="${slug === INDEX_SLUG ? 'page' : 'true'}">`
+  );
   const t = escapeHtml(title);
   const d = escapeHtml(description);
   return `<!DOCTYPE html>
@@ -389,7 +394,7 @@ function documentHtml({ slug, title, description, main, alternate }, chrome, css
 <body>
   <a class="skip" href="#main">Skip to content</a>
 
-  ${chrome.header}
+  ${header}
 
   <main id="main" class="docs wrap">
 ${main}
@@ -643,10 +648,11 @@ function llmsFullTxt(version, guides) {
  * @param {object} options
  * @param {string} options.version - Player version for the header badge and release link
  * @param {string} options.cssVersion - Digest of docs/site.css for the stylesheet's ?v= query
- * @returns {string[]} Repo-relative paths written: each page, each guide's index.md, llms.txt and llms-full.txt
+ * @param {boolean} [options.dryRun] - Render and validate everything but write nothing (the pull-request check)
+ * @returns {string[]} Repo-relative paths written, or that would be: each page, each guide's index.md, llms.txt and llms-full.txt
  * @throws {Error} On any link, markup or README violation; nothing is written when any page fails
  */
-export function buildDocs({ version, cssVersion }) {
+export function buildDocs({ version, cssVersion, dryRun = false }) {
   const chrome = siteChrome(version);
   const pages = [
     {
@@ -678,6 +684,13 @@ export function buildDocs({ version, cssVersion }) {
     'llms-full.txt': llmsFullTxt(version, guideCopies),
   };
 
+  if (dryRun) {
+    return [
+      ...rendered.flatMap((p) => [`docs/${p.slug}/index.html`, ...(p.markdown ? [`docs/${p.slug}/index.md`] : [])]),
+      ...Object.keys(rootFiles).map((name) => `docs/${name}`),
+    ];
+  }
+
   const written = [];
   for (const { slug, html, markdown } of rendered) {
     const dir = path.join(DOCS, slug);
@@ -695,4 +708,23 @@ export function buildDocs({ version, cssVersion }) {
     written.push(`docs/${name}`);
   }
   return written;
+}
+
+// `node demo/docs-build.mjs --check`: render and validate every page without
+// writing, for pull-request CI. build.cjs, which writes the pages, runs only
+// on pushes to main, so without this a broken guide link or a malformed
+// README package table would pass review and fail after merge.
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  if (!process.argv.includes('--check')) {
+    console.error('Usage: node demo/docs-build.mjs --check   (demo/build.cjs writes the pages)');
+    process.exit(2);
+  }
+  const { version } = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'packages/core/package.json'), 'utf8'));
+  try {
+    const files = buildDocs({ version, cssVersion: 'check', dryRun: true });
+    console.log(`Documentation OK: ${files.length} files render (nothing written)`);
+  } catch (error) {
+    console.error(`Documentation build failed: ${error.message}`);
+    process.exit(1);
+  }
 }

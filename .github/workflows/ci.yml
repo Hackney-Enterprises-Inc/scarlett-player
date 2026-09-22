@@ -99,6 +99,15 @@ jobs:
         env:
           NODE_OPTIONS: --no-experimental-require-module
 
+      # Renders every documentation page and agent file in memory and writes
+      # nothing. The build that writes them (demo/build.cjs) runs only on
+      # push, below, so without this a guide link to a missing file, raw HTML
+      # the renderer refuses, or a malformed README "## Packages" table would
+      # pass review and first fail on main. Cheap (no browser), so it runs
+      # on pull requests too.
+      - name: Check documentation build
+        run: node demo/docs-build.mjs --check
+
       # ---- Real-browser verification: push to main only ----
       #
       # jsdom has no layout engine and no MSE, so three classes of defect are
