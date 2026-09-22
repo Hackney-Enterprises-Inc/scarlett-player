@@ -2,6 +2,8 @@
 
 Chapter markers, a chapter list and seek-to-chapter for [Scarlett Player](https://scarlettplayer.com). Chapters come from an inline list or a WebVTT chapters file, and the plugin keeps the `chapters` and `currentChapter` state keys and the `chapter:*` events that core already defines, so anything reading those keys (the progress bar markers in the UI package, for example) works with no extra wiring.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

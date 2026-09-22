@@ -2,6 +2,8 @@
 
 Native video playback plugin for Scarlett Player. Supports MP4, WebM, MOV, MKV, and OGV formats.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

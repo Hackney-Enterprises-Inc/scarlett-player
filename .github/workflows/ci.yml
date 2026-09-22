@@ -175,7 +175,9 @@ jobs:
       # renders into docs/documentation/, docs/architecture/,
       # docs/plugin-authoring/, docs/embed/ and docs/contributing/ (the
       # directories only: the authored .md files beside them are never
-      # written by the build). The .map files are gitignored, and naming an
+      # written by the build; each directory also holds the guide's
+      # generated index.md), and docs/llms.txt + docs/llms-full.txt at the
+      # site root. The .map files are gitignored, and naming an
       # untracked path in a single `git checkout` would make it reject the
       # whole pathspec list and restore nothing - hence one call per path,
       # each allowed to fail on its own. `git clean` then removes what the
@@ -190,8 +192,10 @@ jobs:
             demo/demo.bundle.js demo/index.html demo/site.css demo/assets \
             docs/demo/demo.bundle.js docs/demo/index.html docs/demo/site.css docs/demo/assets \
             docs/index.html docs/site \
-            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/; do
+            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/llms.txt docs/llms-full.txt; do
             git checkout -- "$path" 2>/dev/null || true
           done
           git clean -fdq -- demo/assets docs/demo/assets docs/site \
-            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ || true
+            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/llms.txt docs/llms-full.txt || true

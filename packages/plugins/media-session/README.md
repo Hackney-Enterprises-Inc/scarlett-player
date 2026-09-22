@@ -2,6 +2,8 @@
 
 Media Session plugin for [Scarlett Player](https://scarlettplayer.com). Wires the player into the browser's Media Session API so playback can be controlled from the lock screen, the notification shade, hardware media keys and the system media UI, with track title, artist, album, artwork and a live seek bar. Where the API is missing the plugin logs a notice and does nothing, so it is safe to include everywhere.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

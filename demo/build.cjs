@@ -254,7 +254,7 @@ async function build() {
     // dynamic import from this CommonJS script.
     const { buildDocs } = await import('./docs-build.mjs');
     const docsPages = buildDocs({ version: VERSION, cssVersion: siteCssDigest() });
-    console.log(`📚 Documentation rendered: ${docsPages.length} pages`);
+    console.log(`📚 Documentation rendered: ${docsPages.length} files (pages, Markdown copies, llms.txt)`);
 
     // Publish to docs/demo/ (served by Forge at scarlettplayer.com).
     //

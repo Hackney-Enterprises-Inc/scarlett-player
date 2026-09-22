@@ -36,6 +36,14 @@
  *
  * Raw HTML in the Markdown is escaped, never passed through, and the rendered
  * body is checked against an allowlist of the tags the renderer itself emits.
+ *
+ * For agents, each guide is also published as Markdown beside its page
+ * (docs/<slug>/index.md, linked from the page as rel=alternate), and two
+ * files go at the site root: docs/llms.txt (an llmstxt.org index of the
+ * guides and packages) and docs/llms-full.txt (every guide in one file).
+ * The copies keep the source text and rewrite only link targets, to
+ * absolute URLs, since they are read out of context. Generated and tracked
+ * like the pages.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -155,10 +163,11 @@ function githubSlug(text) {
  *
  * @param {string} href - The link as written in the Markdown
  * @param {string} sourceFile - Absolute path of the Markdown file holding it
+ * @param {(guide: typeof GUIDES[number], hash: string) => string} [guideHref] - URL for a link to another guide; the HTML pages use the relative route, the Markdown copies an absolute .md URL
  * @returns {string} Published URL
  * @throws {Error} When a relative target is not a guide and not a file in the repository
  */
-function resolveLink(href, sourceFile) {
+function resolveLink(href, sourceFile, guideHref = (guide, hash) => `../${guide.slug}/${hash}`) {
   if (/^(https?:|mailto:)/i.test(href) || href.startsWith('#')) {
     return href;
   }
@@ -173,7 +182,7 @@ function resolveLink(href, sourceFile) {
   }
   const guide = GUIDES.find((g) => path.join(DOCS, g.file) === absolute);
   if (guide) {
-    return `../${guide.slug}/${hash}`;
+    return guideHref(guide, hash);
   }
   if (!fs.existsSync(absolute)) {
     throw new Error(`${where} names ${relative}, which does not exist`);
@@ -333,11 +342,12 @@ function siteChrome(version) {
  * @param {string} page.title - <title> and og:title
  * @param {string} page.description - Meta and og description
  * @param {string} page.main - Markup inside <main>
+ * @param {string} page.alternate - Relative URL of the page's Markdown twin (a guide's index.md, or llms.txt for the index)
  * @param {{header: string, footer: string}} chrome - From siteChrome()
  * @param {string} cssVersion - Stylesheet digest for the ?v= query
  * @returns {string} The document
  */
-function documentHtml({ slug, title, description, main }, chrome, cssVersion) {
+function documentHtml({ slug, title, description, main, alternate }, chrome, cssVersion) {
   const url = `${SITE_ORIGIN}/${slug}/`;
   const t = escapeHtml(title);
   const d = escapeHtml(description);
@@ -350,6 +360,7 @@ function documentHtml({ slug, title, description, main }, chrome, cssVersion) {
   <title>${t}</title>
   <meta name="description" content="${d}">
   <link rel="canonical" href="${url}">
+  <link rel="alternate" type="text/markdown" href="${alternate}" title="Markdown">
   <meta name="theme-color" content="#0b0c10">
   <link rel="icon" href="../assets/favicon.ico" sizes="16x16 32x32 48x48">
   <link rel="icon" href="../assets/brand/signal-icon-on-dark.svg" type="image/svg+xml">
@@ -505,13 +516,135 @@ ${packageTable()}      </div>
 }
 
 /**
+ * Absolute URL of a guide's Markdown copy.
+ *
+ * @param {typeof GUIDES[number]} guide - The guide
+ * @param {string} [hash] - Optional `#fragment`
+ * @returns {string} URL
+ */
+function guideMarkdownUrl(guide, hash = '') {
+  return `${SITE_ORIGIN}/${guide.slug}/index.md${hash}`;
+}
+
+/**
+ * A guide's Markdown as published beside its page, for agents and anything
+ * else that reads Markdown more easily than HTML.
+ *
+ * The source text is kept byte for byte except for its link targets, which
+ * go through the same policy as the HTML pages but come out absolute, since
+ * the copy is also concatenated into llms-full.txt and read out of context:
+ * another guide becomes its absolute .md URL, a repo path its GitHub URL on
+ * main. A line under the H1 names the HTML page and the source file.
+ *
+ * Only inline links are rewritten, found through marked's own lexer so a
+ * `[x](y)` inside a code block is never touched. Reference-style link
+ * definitions are refused rather than silently left relative.
+ *
+ * @param {typeof GUIDES[number]} guide - The guide
+ * @returns {string} Markdown
+ * @throws {Error} On a link the policy rejects, a reference-style definition or a missing H1
+ */
+function guideMarkdown(guide) {
+  const source = path.join(DOCS, guide.file);
+  const md = new Marked({ gfm: true });
+  const tokens = md.lexer(fs.readFileSync(source, 'utf8'));
+  if (Object.keys(tokens.links ?? {}).length) {
+    throw new Error(`docs/${guide.file}: reference-style link definitions are not supported; use inline links`);
+  }
+
+  const out = tokens.map((token) => {
+    if (token.type === 'code') return token.raw;
+    let raw = token.raw;
+    md.walkTokens([token], (t) => {
+      if (t.type !== 'link' && t.type !== 'image') return;
+      const url = resolveLink(t.href, source, (g, hash) => guideMarkdownUrl(g, hash));
+      if (url !== t.href) raw = raw.split(`](${t.href}`).join(`](${url}`);
+    });
+    return raw;
+  });
+
+  const h1 = out.findIndex((raw, i) => tokens[i].type === 'heading' && tokens[i].depth === 1);
+  if (h1 === -1) throw new Error(`docs/${guide.file}: no H1 to title the page`);
+  // The line breaks after the H1 belong to the next (space) token, so the
+  // note ends without one and inherits them.
+  out[h1] = `${out[h1].trimEnd()}\n\n> Rendered at ${SITE_ORIGIN}/${guide.slug}/ · Source: ${REPO_URL}/blob/main/docs/${guide.file}`;
+  return out.join('');
+}
+
+/**
+ * The README's package rows as `[name](GitHub URL): description` list items,
+ * for llms.txt. Same parse and validation as the index page's table.
+ *
+ * @returns {string} Markdown list
+ */
+function packageList() {
+  const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
+  const rows = readme.match(/^## Packages\n([\s\S]*?)(?=^## )/m)[1].trim().split('\n').slice(2);
+  return rows
+    .map((row) => {
+      const [, name, description] = row.match(/^\|\s*`(@scarlett-player\/[a-z0-9-]+)`\s*\|\s*(.*?)\s*\|$/);
+      const short = name.split('/')[1];
+      const dir = fs.existsSync(path.join(REPO_ROOT, 'packages', short, 'package.json'))
+        ? `packages/${short}`
+        : `packages/plugins/${short}`;
+      return `- [${name}](${REPO_URL}/tree/main/${dir}): ${description}`;
+    })
+    .join('\n');
+}
+
+/**
+ * /llms.txt, following the llmstxt.org shape: an H1, a one-paragraph
+ * summary, then H2 sections of annotated links. Points at the Markdown
+ * copies, not the HTML.
+ *
+ * @param {string} version - Current player version
+ * @returns {string} Markdown
+ */
+function llmsTxt(version) {
+  return `# Scarlett Player
+
+> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently ${version}). MIT licensed.
+
+Every guide below is also a web page at the same path without \`index.md\`. ${SITE_ORIGIN}/llms-full.txt holds all of them in one file.
+
+## Docs
+
+${GUIDES.map((g) => `- [${g.nav}](${guideMarkdownUrl(g)}): ${g.description}`).join('\n')}
+
+## Packages
+
+${packageList()}
+
+## Optional
+
+- [README](${REPO_URL}/blob/main/README.md): installation, quick starts, theming and keyboard shortcuts
+- [Playground](${SITE_ORIGIN}/demo/): every scenario and option, with generated integration code
+- [Source](${REPO_URL}): the pnpm monorepo
+`;
+}
+
+/**
+ * /llms-full.txt: llms.txt's heading and summary, then every guide's
+ * Markdown copy in reading order.
+ *
+ * @param {string} version - Current player version
+ * @param {string[]} guides - Markdown copies, in GUIDES order
+ * @returns {string} Markdown
+ */
+function llmsFullTxt(version, guides) {
+  // The H1 and summary only: llms.txt's line pointing here would be circular.
+  const head = llmsTxt(version).split('\n\nEvery guide below')[0];
+  return `${head}\n\n${guides.map((md) => md.trimEnd()).join('\n\n---\n\n')}\n`;
+}
+
+/**
  * Write the documentation pages, replacing each owned directory wholesale.
  *
  * @param {object} options
  * @param {string} options.version - Player version for the header badge and release link
  * @param {string} options.cssVersion - Digest of docs/site.css for the stylesheet's ?v= query
- * @returns {string[]} Repo-relative paths written
- * @throws {Error} On any link, markup or README violation; nothing is half-written for the failing page
+ * @returns {string[]} Repo-relative paths written: each page, each guide's index.md, llms.txt and llms-full.txt
+ * @throws {Error} On any link, markup or README violation; nothing is written when any page fails
  */
 export function buildDocs({ version, cssVersion }) {
   const chrome = siteChrome(version);
@@ -522,20 +655,44 @@ export function buildDocs({ version, cssVersion }) {
       description:
         'Scarlett Player documentation: architecture, writing plugins, embedding the player and contributing, plus every package in the workspace.',
       main: indexMain(),
+      // The index has no Markdown source of its own; llms.txt is its
+      // Markdown equivalent (the guide list and the package list).
+      alternate: '../llms.txt',
     },
-    ...GUIDES.map((g, i) => ({ slug: g.slug, title: g.title, description: g.description, main: guideMain(g, i) })),
+    ...GUIDES.map((g, i) => ({
+      slug: g.slug,
+      title: g.title,
+      description: g.description,
+      main: guideMain(g, i),
+      alternate: 'index.md',
+      markdown: guideMarkdown(g),
+    })),
   ];
 
   // Render everything before touching the tree, so a failure leaves the
   // previous pages in place rather than a partial set.
-  const rendered = pages.map((p) => [p.slug, documentHtml(p, chrome, cssVersion)]);
+  const rendered = pages.map((p) => ({ ...p, html: documentHtml(p, chrome, cssVersion) }));
+  const guideCopies = rendered.filter((p) => p.markdown).map((p) => p.markdown);
+  const rootFiles = {
+    'llms.txt': llmsTxt(version),
+    'llms-full.txt': llmsFullTxt(version, guideCopies),
+  };
+
   const written = [];
-  for (const [slug, html] of rendered) {
+  for (const { slug, html, markdown } of rendered) {
     const dir = path.join(DOCS, slug);
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'index.html'), html);
     written.push(`docs/${slug}/index.html`);
+    if (markdown) {
+      fs.writeFileSync(path.join(dir, 'index.md'), markdown);
+      written.push(`docs/${slug}/index.md`);
+    }
+  }
+  for (const [name, text] of Object.entries(rootFiles)) {
+    fs.writeFileSync(path.join(DOCS, name), text);
+    written.push(`docs/${name}`);
   }
   return written;
 }

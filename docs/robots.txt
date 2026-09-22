@@ -2,3 +2,7 @@ User-agent: *
 Allow: /
 
 Sitemap: https://scarlettplayer.com/sitemap.xml
+
+# Documentation for AI agents (llmstxt.org): an index at
+# https://scarlettplayer.com/llms.txt and every guide as one Markdown file at
+# https://scarlettplayer.com/llms-full.txt

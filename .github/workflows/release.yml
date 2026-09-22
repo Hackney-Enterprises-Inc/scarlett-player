@@ -300,7 +300,12 @@ jobs:
           # contributing/), which production serves at /<slug>/. They link
           # ../site.css and ../assets/ rather than mirrors, so there is
           # nothing beside them to check, but a missing or ignored page is a
-          # sitemap entry and a nav link that 404.
+          # sitemap entry and a nav link that 404. The same build writes the
+          # Markdown for agents: each guide's index.md beside its page (the
+          # page's rel=alternate), plus docs/llms.txt and docs/llms-full.txt
+          # at the site root. None of the six is in the sitemap, on purpose:
+          # agents find them through llms.txt and rel=alternate, and the
+          # index.md copies duplicate pages that are already listed.
           #
           # Fail here instead: the step is continue-on-error, and "Publish
           # results" reads steps.demo.outcome, so this reports rather than
@@ -310,7 +315,10 @@ jobs:
             demo/site.css docs/demo/site.css docs/site/home.js \
             docs/documentation/index.html docs/architecture/index.html \
             docs/plugin-authoring/index.html docs/embed/index.html \
-            docs/contributing/index.html; do
+            docs/contributing/index.html \
+            docs/architecture/index.md docs/plugin-authoring/index.md \
+            docs/embed/index.md docs/contributing/index.md \
+            docs/llms.txt docs/llms-full.txt; do
             if [ ! -s "$artifact" ]; then
               echo "::error::$artifact missing or empty after build"
               exit 1
@@ -366,7 +374,8 @@ jobs:
           # something like `docs/architecture*` (which WOULD match the .md)
           # reads as the change of meaning it is.
           if [ -z "$(git status --porcelain -- demo/ docs/demo/ docs/site/ docs/index.html \
-            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/)" ]; then
+            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/llms.txt docs/llms-full.txt)" ]; then
             echo "Demo site unchanged, skipping commit"
           else
             git config user.name "github-actions[bot]"
@@ -377,7 +386,8 @@ jobs:
             # directory pathspec also stages removals, which is what retires
             # a superseded hashed chunk from docs/site/chunks/.
             git add demo/ docs/demo/ docs/site/ docs/index.html \
-              docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/
+              docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+              docs/llms.txt docs/llms-full.txt
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             git push
             echo "- Demo site updated" >> $GITHUB_STEP_SUMMARY

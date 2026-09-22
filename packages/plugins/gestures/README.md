@@ -2,6 +2,8 @@
 
 Touch gestures for [Scarlett Player](https://scarlettplayer.com). Double-tap the right of the picture to jump forward, the left to jump back, keep tapping to go further, and single-tap to toggle the controls. Gestures are gated on `pointerType === 'touch'`, so a mouse or pen never triggers any of them and desktop behaviour is unchanged.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

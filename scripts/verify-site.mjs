@@ -47,6 +47,7 @@
  *      1440x900 the whole player is on screen without scrolling. Both are
  *      acceptance criteria of the redesign.
  *   4. Every <link rel=stylesheet>, <link rel*=icon>, <link rel=preload>,
+ *      <link rel=alternate>,
  *      <img src>/<img srcset>, <source srcset>, video poster,
  *      og:image/twitter:image, and CSS url()
  *      or @import target (from linked sheets, <style> blocks and style=""
@@ -87,7 +88,13 @@
  *      with each <loc> answering 200 through the production route map and
  *      no <lastmod> anywhere (the site rule: no fabricated dates). A page
  *      added to the build without a sitemap entry, or an entry left behind
- *      for a page that was removed, fails here.
+ *      for a page that was removed, fails here. The Markdown published for
+ *      agents is deliberately NOT in the sitemap: each guide's index.md
+ *      duplicates its HTML page, which is the one to index, and agents find
+ *      the files through /llms.txt and each page's rel=alternate instead.
+ *   8. Every agent file (AGENT_FILES: llms.txt, llms-full.txt and each
+ *      guide's index.md) answers 200 with a body. llms-full.txt is linked
+ *      from nowhere a page can reach, so this is the only check that sees it.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -191,6 +198,21 @@ const PLAYERLESS_FORBIDDEN = /\.m3u8(\?|$)|\.ts(\?|$)|\.m4s(\?|$)|\.mp4(\?|$)|de
 
 /** Link schemes check 6 has nothing to fetch for. */
 const UNFETCHABLE_LINK = /^(mailto|tel|javascript|data|blob):/i;
+
+/**
+ * The Markdown the docs build publishes for agents, as local paths. Not
+ * routes (nothing here is rendered or measured) and not sitemap entries
+ * (check 7 fails if one is listed); check 8 fetches each. Each guide page
+ * also links its index.md as rel=alternate, which check 4 fetches too.
+ */
+const AGENT_FILES = [
+  '/docs/llms.txt',
+  '/docs/llms-full.txt',
+  '/docs/architecture/index.md',
+  '/docs/plugin-authoring/index.md',
+  '/docs/embed/index.md',
+  '/docs/contributing/index.md',
+];
 
 /** Where the sitemap lives on the local server (docs/ is production's root). */
 const SITEMAP_URL = `${ORIGIN}/docs/sitemap.xml`;
@@ -471,6 +493,11 @@ const collectAssets = (page) =>
     // A preload names the same font the stylesheet does, in a second place
     // that can drift on its own: a wrong href here is a wasted request and a
     // console warning in production, never a visible failure.
+    // The docs pages point agents at their Markdown twin; a wrong href there
+    // fails silently for every reader that follows it.
+    document
+      .querySelectorAll('link[rel~="alternate"][href]')
+      .forEach((el) => add(el.getAttribute('href'), `<link rel=alternate type=${el.getAttribute('type') ?? '?'}>`));
     document
       .querySelectorAll('link[rel~="preload"][href]')
       .forEach((el) => add(el.getAttribute('href'), `<link rel=preload as=${el.getAttribute('as') ?? '?'}>`));
@@ -872,6 +899,7 @@ try {
     record('sitemap.xml lists at least one <loc>', locs.length > 0, `${locs.length} entries`);
 
     const expected = new Set(ROUTES.filter((r) => !r.sourceOnly).map((r) => `${ORIGIN}${r.path}`));
+    const agentFiles = new Set(AGENT_FILES.map((p) => `${ORIGIN}${p}`));
     const listed = new Map();
     for (const loc of locs) {
       // A <loc> has to be a production URL: a local or relative one would
@@ -890,13 +918,15 @@ try {
     }
 
     const missing = [...expected].filter((u) => !listed.has(u)).map((u) => new URL(u).pathname);
-    const extra = [...listed].filter(([u]) => !expected.has(u)).map(([, loc]) => loc);
+    const extra = [...listed].filter(([u]) => !expected.has(u) && !agentFiles.has(u)).map(([, loc]) => loc);
+    const agents = [...listed].filter(([u]) => agentFiles.has(u)).map(([, loc]) => loc);
     record(
       'sitemap.xml lists exactly the pages production serves',
-      missing.length === 0 && extra.length === 0,
+      missing.length === 0 && extra.length === 0 && agents.length === 0,
       [
         missing.length ? `missing (local routes): ${missing.join(', ')}` : '',
         extra.length ? `not a served route: ${extra.join(', ')}` : '',
+        agents.length ? `agent Markdown listed (duplicates an HTML page; agents use llms.txt): ${agents.join(', ')}` : '',
       ].filter(Boolean).join('; ') || `${listed.size} entries, one per route`
     );
 
@@ -911,6 +941,20 @@ try {
 
     const lastmods = (sitemap.text.match(/<lastmod\b/g) ?? []).length;
     record('sitemap.xml carries no <lastmod>', lastmods === 0, lastmods ? `${lastmods} found` : '');
+  }
+}
+
+// ============================================================ AGENT FILES
+// 8. The Markdown published for agents exists and has content.
+{
+  console.log('\n--- agent files ---');
+  for (const file of AGENT_FILES) {
+    const res = await fetchLocal(`${ORIGIN}${file}`);
+    record(
+      `agent file ${file} answers 200 with a body`,
+      res.status === 200 && res.length > 0,
+      `status ${res.status}, ${res.length} bytes${res.error ? ' ' + res.error : ''}`
+    );
   }
 }
 
