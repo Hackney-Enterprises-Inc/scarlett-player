@@ -36567,6 +36567,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
+  /* Opaque, and no lighter than #202020, because this is the one place accent
+     TEXT sits on the control bar rather than on a menu. The bar is a gradient
+     over the picture - rgba(0, 0, 0, 0.8) at its darkest point, so about #333
+     over a white frame - and --sp-accent-text is only ever derived against the
+     menus (see contrast.ts). A translucent chip would let the frame through
+     and drop a toned accent below 4.5:1; this one pins the surface at exactly
+     the colour the tone was measured on. */
+  background: #202020;
   cursor: pointer;
   padding: 6px 10px;
   border-radius: 4px;
@@ -36574,8 +36582,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 @media (hover: hover) {
+  /* Darkens rather than lightens: the usual rgba(255, 255, 255, 0.1) would put
+     the label on a surface lighter than the one its colour was toned for. */
   .sp-live:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: #141414;
   }
 }
 
@@ -37166,11 +37176,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
    setTheme() writes the same names onto the player's container, which still
    wins over the fallbacks.
 
-   --sp-accent-text is the one token with no setTheme() equivalent: it is the
-   accent applied to TEXT and active-state glyphs, split from --sp-accent
-   because the same colour has to clear 4.5:1 there and only 3:1 as a fill.
-   It falls back to --sp-accent, so a themed player needs it only when the
-   host's accent is too dark to read against the controls.
+   --sp-accent-text is the accent applied to TEXT and active-state glyphs,
+   split from --sp-accent because the same colour has to clear 4.5:1 there and
+   only 3:1 as a fill. It falls back to --sp-accent, so a themed player needs
+   it only when the host's accent is too dark to read against the controls;
+   setTheme({ accentTextColor }) writes it, and accentTextTone() derives one.
    ============================================ */
 `;
     }
@@ -39762,11 +39772,62 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/contrast.ts
+  function channels(hex2) {
+    const value = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex2.trim());
+    const digits = value?.[1];
+    if (!digits) return null;
+    const full = digits.length === 3 ? digits.split("").map((c) => c + c).join("") : digits;
+    return [
+      parseInt(full.slice(0, 2), 16),
+      parseInt(full.slice(2, 4), 16),
+      parseInt(full.slice(4, 6), 16)
+    ];
+  }
+  function luminance([r, g, b]) {
+    const [lr, lg, lb] = [r, g, b].map((channel) => {
+      const srgb = channel / 255;
+      return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+  }
+  function contrast(a, b) {
+    const light = Math.max(luminance(a), luminance(b));
+    const dark = Math.min(luminance(a), luminance(b));
+    return (light + 0.05) / (dark + 0.05);
+  }
+  function lighten(color, amount) {
+    return color.map((channel) => Math.round(channel + (255 - channel) * amount));
+  }
+  function hex(color) {
+    return `#${color.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+  }
+  function accentTextTone(color) {
+    const parsed = channels(color);
+    const background = channels(MENU_BACKGROUND);
+    if (!parsed || !background) return color;
+    if (contrast(parsed, background) >= AA_TEXT) return hex(parsed);
+    for (let amount = 0.04; amount <= 1; amount += 0.04) {
+      const candidate = lighten(parsed, amount);
+      if (contrast(candidate, background) >= AA_TEXT) return hex(candidate);
+    }
+    return "#ffffff";
+  }
+  var MENU_BACKGROUND, AA_TEXT;
+  var init_contrast = __esm({
+    "packages/plugins/ui/src/contrast.ts"() {
+      "use strict";
+      MENU_BACKGROUND = "#202020";
+      AA_TEXT = 4.5;
+    }
+  });
+
   // packages/plugins/ui/src/index.ts
   var src_exports = {};
   __export(src_exports, {
     DEFAULT_PRIORITY: () => DEFAULT_PRIORITY,
     UNRESOLVED_SLOT_GRACE_MS: () => UNRESOLVED_SLOT_GRACE_MS,
+    accentTextTone: () => accentTextTone,
     assertFitLayout: () => assertFitLayout,
     default: () => src_default,
     formatLiveTime: () => formatLiveTime,
@@ -40467,6 +40528,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (theme.accentColor) {
           root.style.setProperty("--sp-accent", theme.accentColor);
         }
+        if (theme.accentTextColor) {
+          root.style.setProperty("--sp-accent-text", theme.accentTextColor);
+        }
         if (theme.backgroundColor) {
           root.style.setProperty("--sp-bg", theme.backgroundColor);
         }
@@ -40497,6 +40561,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_timeline_registry();
       init_icons();
       init_styles();
+      init_contrast();
       init_utils();
       init_fit();
       DEFAULT_LAYOUT = [
@@ -42985,6 +43050,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           serverCode: envelope.code,
           detail
         };
+      case 501:
+      case 505:
+        return {
+          code: "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */,
+          message: `WHEP endpoint does not speak WHEP (${status2})${said}`,
+          recoverable: false,
+          serverCode: envelope.code,
+          detail
+        };
       default:
         if (status2 >= 500) {
           return {
@@ -44698,6 +44772,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return getActualIndex(nextLogical);
     };
+    const peekNextIndex = () => {
+      if (tracks.length === 0) return -1;
+      if (repeat === "one") return currentIndex;
+      const nextLogical = getLogicalIndex(currentIndex) + 1;
+      if (nextLogical >= tracks.length) {
+        return repeat === "all" && !shuffle ? getActualIndex(0) : -1;
+      }
+      return getActualIndex(nextLogical);
+    };
     const getPreviousIndex = () => {
       if (tracks.length === 0) return -1;
       if (repeat === "one") {
@@ -44756,6 +44839,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.emit("playlist:change", { track, index: currentIndex });
       persistPlaylist();
     };
+    let preloadEl = null;
+    let preloadedSrc = "";
+    const clearPreload = () => {
+      if (!preloadEl) return;
+      preloadEl.removeAttribute("src");
+      preloadEl.load();
+      preloadEl = null;
+      preloadedSrc = "";
+    };
+    const preloadNextTrack = () => {
+      if (mergedConfig.preloadNext === false) return;
+      if (typeof document === "undefined") return;
+      const index = peekNextIndex();
+      const next = index >= 0 && index !== currentIndex ? tracks[index] : void 0;
+      if (!next?.src) {
+        clearPreload();
+        return;
+      }
+      if (next.src === preloadedSrc) return;
+      const kind = next.type === "video" ? "video" : "audio";
+      if (!preloadEl || preloadEl.tagName.toLowerCase() !== kind) {
+        clearPreload();
+        preloadEl = document.createElement(kind);
+        preloadEl.preload = "metadata";
+        preloadEl.addEventListener("error", () => {
+          api?.logger.debug("Preload of the next track failed", { src: sanitizeUrl(preloadedSrc) });
+        });
+      }
+      preloadedSrc = next.src;
+      preloadEl.src = next.src;
+      api?.logger.debug("Preloading next track", { index, src: sanitizeUrl(next.src) });
+    };
     const setCurrentTrack = (index, options = {}) => {
       if (index < 0 || index >= tracks.length) {
         api?.logger.warn("Invalid track index", { index });
@@ -44771,6 +44886,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (mergedConfig.autoLoad !== false && track.src) {
         api?.emit("media:load-request", { src: track.src, autoplay: options.autoplay ?? true });
       }
+      preloadNextTrack();
     };
     const plugin = {
       id: "playlist",
@@ -44865,6 +44981,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         lifecycle++;
         api?.logger.info("Playlist plugin destroying");
         persistPlaylist();
+        clearPreload();
         releaseStyles?.();
         releaseStyles = null;
         releaseControls?.();
@@ -44938,6 +45055,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         tracks = [];
         currentIndex = -1;
         shuffleOrder = [];
+        clearPreload();
         api?.emit("playlist:clear", void 0);
         emitChange();
       },
@@ -45360,7 +45478,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     showRepeat: true,
     showNavigation: true,
     classPrefix: "scarlett-audio",
-    autoHide: 0,
     theme: DEFAULT_THEME
   };
   function createStyles(prefix, theme) {
@@ -47788,6 +47905,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let api = null;
     let video = null;
     let addedTrackElements = [];
+    let defaultTrackElement = null;
     let hlsSubtitleHandler = null;
     let hlsSubtitleSwitchHandler = null;
     let observedTextTracks = null;
@@ -47797,6 +47915,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const extractFromHLS = config.extractFromHLS !== false;
     const autoSelect = config.autoSelect ?? false;
     const defaultLanguage = config.defaultLanguage ?? "en";
+    const defaultSource = config.sources?.find((source) => source.default) ?? null;
     const getVideo3 = () => {
       if (video) return video;
       video = api?.container.querySelector("video") ?? null;
@@ -47807,6 +47926,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         trackEl.parentNode?.removeChild(trackEl);
       }
       addedTrackElements = [];
+      defaultTrackElement = null;
       api?.setState("textTracks", []);
       api?.setState("currentTextTrack", null);
     };
@@ -47865,17 +47985,37 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       syncTracksToState();
     };
+    const markedTrack = (tracks) => {
+      if (!defaultSource) return void 0;
+      const videoEl = getVideo3();
+      const textTrack = defaultTrackElement?.track;
+      if (videoEl && textTrack) {
+        for (let i = 0; i < videoEl.textTracks.length; i++) {
+          if (videoEl.textTracks[i] !== textTrack) continue;
+          const own = tracks.find((t) => t.id === `track-${i}`);
+          if (own) return own;
+        }
+      }
+      return tracks.find(
+        (t) => t.language === defaultSource.language && (!defaultSource.label || t.label === defaultSource.label)
+      );
+    };
     const maybeAutoSelect = () => {
-      if (!autoSelect || hasAutoSelected) return;
+      if (!autoSelect && !defaultSource || hasAutoSelected) return;
       if (api?.getState("currentTextTrack")) {
         hasAutoSelected = true;
         return;
       }
       const tracks = api?.getState("textTracks") || [];
-      const match = tracks.find((t) => t.language === defaultLanguage);
+      const marked = markedTrack(tracks);
+      const match = marked ?? (autoSelect ? tracks.find((t) => t.language === defaultLanguage) : void 0);
       if (!match) return;
       selectTrack(match.id);
-      api?.logger.debug("Auto-selected caption track", { language: defaultLanguage, id: match.id });
+      api?.logger.debug("Selected caption track on load", {
+        language: match.language,
+        id: match.id,
+        reason: marked ? "source default" : "defaultLanguage"
+      });
     };
     const handleTextTracksChanged = () => {
       syncTracksToState();
@@ -47955,7 +48095,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const initSources = () => {
       if (!config.sources?.length) return;
       for (const source of config.sources) {
-        addTrackElement(source);
+        const trackEl = addTrackElement(source);
+        if (source === defaultSource) defaultTrackElement = trackEl;
       }
     };
     return {
@@ -52232,19 +52373,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       const body = safeStringify(payload);
-      const shouldAttachApiKey = Boolean(
-        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-      );
-      fetch(mergedConfig.beaconUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
-        },
-        body,
-        keepalive: true
-      }).catch(() => {
+      const post = (extra) => {
+        fetch(mergedConfig.beaconUrl, {
+          method: "POST",
+          headers: beaconHeaders(extra),
+          body,
+          keepalive: true
+        }).catch(() => {
+        });
+      };
+      const configured = mergedConfig.headers;
+      if (typeof configured !== "function") {
+        post(configured ?? {});
+        return;
+      }
+      Promise.resolve().then(() => configured()).then(post).catch((error) => {
+        api?.logger.debug("Analytics headers() failed; sending without them", { error });
+        post({});
       });
+    }
+    function baseHeaders() {
+      const shouldAttachApiKey = Boolean(mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl));
+      return {
+        "Content-Type": "application/json",
+        ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
+      };
+    }
+    function beaconHeaders(extra) {
+      const headers = new Headers(baseHeaders());
+      for (const [name, value] of Object.entries(extra)) {
+        headers.set(name, value);
+      }
+      return headers;
     }
     function sendUnloadBeacon(eventType, data = {}) {
       if (mergedConfig.disableInDev && isDevelopment()) return;
@@ -52291,15 +52451,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const sent = navigator.sendBeacon(urlWithApiKey, blob);
         if (sent) return;
       }
-      const shouldAttachApiKey = Boolean(
-        mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)
-      );
+      const staticHeaders = typeof mergedConfig.headers === "function" ? {} : mergedConfig.headers;
       fetch(mergedConfig.beaconUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
-        },
+        headers: beaconHeaders(staticHeaders ?? {}),
         body,
         keepalive: true
       }).catch(() => {
@@ -52789,6 +52944,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return { id: DEFAULT_SCENARIO, feature, known: false };
   }
 
+  // demo/site-controller.ts
+  init_src2();
+
   // demo/snippets.ts
   var CDN_BASE = "https://assets.thestreamplatform.com/scarlett-player/latest";
   function tsString(value) {
@@ -53089,50 +53247,6 @@ ${indent}src: ${tsString(config.src)},`;
       case "vue":
         return vueSnippet(config);
     }
-  }
-
-  // demo/accent.ts
-  var MENU_BACKGROUND = "#202020";
-  var AA_TEXT = 4.5;
-  function channels(hex2) {
-    const value = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex2.trim());
-    const digits = value?.[1];
-    if (!digits) return null;
-    const full = digits.length === 3 ? digits.split("").map((c) => c + c).join("") : digits;
-    return [
-      parseInt(full.slice(0, 2), 16),
-      parseInt(full.slice(2, 4), 16),
-      parseInt(full.slice(4, 6), 16)
-    ];
-  }
-  function luminance([r, g, b]) {
-    const [lr, lg, lb] = [r, g, b].map((channel) => {
-      const srgb = channel / 255;
-      return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
-    });
-    return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
-  }
-  function contrast(a, b) {
-    const light = Math.max(luminance(a), luminance(b));
-    const dark = Math.min(luminance(a), luminance(b));
-    return (light + 0.05) / (dark + 0.05);
-  }
-  function lighten(color, amount) {
-    return color.map((channel) => Math.round(channel + (255 - channel) * amount));
-  }
-  function hex(color) {
-    return `#${color.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-  }
-  function accentTextTone(color) {
-    const parsed = channels(color);
-    const background = channels(MENU_BACKGROUND);
-    if (!parsed || !background) return color;
-    if (contrast(parsed, background) >= AA_TEXT) return hex(parsed);
-    for (let amount = 0.04; amount <= 1; amount += 0.04) {
-      const candidate = lighten(parsed, amount);
-      if (contrast(candidate, background) >= AA_TEXT) return hex(candidate);
-    }
-    return "#ffffff";
   }
 
   // demo/site-controller.ts
@@ -53852,8 +53966,7 @@ ${indent}src: ${tsString(config.src)},`;
     const applyAccent = (color) => {
       accent = color;
       document.documentElement.style.setProperty("--player-accent", color);
-      deps.ui.setTheme({ accentColor: color });
-      req("player").style.setProperty("--sp-accent-text", accentTextTone(color));
+      deps.ui.setTheme({ accentColor: color, accentTextColor: accentTextTone(color) });
       deps.audioUI.setTheme({ primary: color, progressFill: color });
       deps.miniUI.setTheme({ primary: color, progressFill: color });
       accentHex.textContent = color.toUpperCase();

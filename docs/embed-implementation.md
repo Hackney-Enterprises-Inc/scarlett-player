@@ -1,7 +1,5 @@
 # Embed Package Implementation Guide
 
-**Last Updated**: September 7, 2026 (player 1.11.1)
-
 How `@scarlett-player/embed` is built and how a host integrates it. The
 authoritative reference for every supported data attribute is
 [`packages/embed/README.md`](../packages/embed/README.md) - this document links

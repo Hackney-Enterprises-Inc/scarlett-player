@@ -1,8 +1,5 @@
 # Scarlett Player - Architecture
 
-**Version**: 1.11.1 (fixed versioning: every package in the workspace ships this number)
-**Last Updated**: September 7, 2026
-
 This describes the player as it is built, not as it was planned. Every class,
 method and event named here exists in `packages/*/src`. Where a name in an
 older revision of this document did not survive contact with the code (the
@@ -640,6 +637,6 @@ Chrome and Edge 80+, Firefox 78+, Safari 14+, iOS Safari 14+, Android Chrome
 
 ## See also
 
-- `docs/plugin-authoring.md` - writing a plugin: events, state and controls
-- `docs/contributing.md` - code standards, testing and review conventions
-- `README.md` - installation, quick starts and the package table
+- [Writing a plugin](plugin-authoring.md) - events, state and controls
+- [Contributing](contributing.md) - code standards, testing and review conventions
+- [README](../README.md) - installation, quick starts and the package table

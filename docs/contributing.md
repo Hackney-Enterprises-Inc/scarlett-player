@@ -1,9 +1,7 @@
 # Scarlett Player - Development Guidelines
 
-**Last Updated**: September 7, 2026
-
-Companion documents: `docs/architecture.md` (how the player is put together)
-and `docs/plugin-authoring.md` (writing a plugin package).
+Companion documents: [Architecture](architecture.md) (how the player is put
+together) and [Writing a plugin](plugin-authoring.md) (writing a plugin package).
 
 ## Code Standards
 
