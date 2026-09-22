@@ -48,6 +48,7 @@ import {
   type SnippetCaption,
   type SnippetKind,
 } from './snippets';
+import { accentTextTone } from './accent';
 
 /** A track handed to the full audio player's playlist. */
 export interface AudioTrackSpec {
@@ -1036,6 +1037,10 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     accent = color;
     document.documentElement.style.setProperty('--player-accent', color);
     deps.ui.setTheme({ accentColor: color });
+    // setTheme writes --sp-accent, which the menus' text would inherit; the
+    // picker offers colours too dark to read at 13px, so the readable tone
+    // goes on the container beside it. See demo/accent.ts.
+    req('player').style.setProperty('--sp-accent-text', accentTextTone(color));
     deps.audioUI.setTheme({ primary: color, progressFill: color });
     deps.miniUI.setTheme({ primary: color, progressFill: color });
     accentHex.textContent = color.toUpperCase();

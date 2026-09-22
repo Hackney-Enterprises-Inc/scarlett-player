@@ -187,6 +187,25 @@ uiPlugin({
 });
 ```
 
+`accentColor` writes `--sp-accent`, which colours the progress fill, the big
+play button and focus rings - all non-text, where WCAG asks for 3:1.
+
+Accent **text** (the LIVE label, the active row in the settings and quality
+menus, the active captions and cast glyphs) reads a second token first:
+
+```css
+.my-player {
+  --sp-accent: #e50914;       /* fills, rings */
+  --sp-accent-text: #ff4d57;  /* labels and active-state glyphs */
+}
+```
+
+`--sp-accent-text` falls back to `--sp-accent`, so theming through
+`accentColor` alone still colours that text. Set it when your accent is dark
+enough that 11-13px labels miss the 4.5:1 AA threshold on the controls: the
+brand red is 4.38:1 on black and 3.84:1 on the menus' own background, which is
+why the default here is the lighter tone rather than `--sp-accent`.
+
 ## Big Play Button
 
 ```typescript

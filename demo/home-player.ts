@@ -17,6 +17,7 @@ import { createPlayer } from '../packages/core/src/index';
 import { createHLSPlugin } from '../packages/plugins/hls/src/index';
 import { createNativePlugin } from '../packages/plugins/native/src/index';
 import { uiPlugin } from '../packages/plugins/ui/src/index';
+import { accentTextTone } from './accent';
 
 /** What the homepage needs to know to mount its showcase player. */
 export interface HomePlayerOptions {
@@ -68,6 +69,12 @@ export async function mountHomePlayer(
   container: HTMLElement,
   options: HomePlayerOptions,
 ): Promise<HomePlayerSession> {
+  const accent = options.accentColor ?? '#e50914';
+  // The accent below colours the menus' text as well as the fills, and the
+  // Scarlett red misses AA at 13px; the readable tone rides on the container.
+  // See demo/accent.ts.
+  container.style.setProperty('--sp-accent-text', accentTextTone(accent));
+
   const player = await createPlayer({
     container,
     src: options.src,
@@ -76,7 +83,7 @@ export async function mountHomePlayer(
       createHLSPlugin(),
       createNativePlugin(),
       uiPlugin({
-        theme: { accentColor: options.accentColor ?? '#e50914' },
+        theme: { accentColor: accent },
       }),
     ],
   });
