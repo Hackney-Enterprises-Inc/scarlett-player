@@ -952,5 +952,48 @@ describe('Analytics Plugin', () => {
       expect(urlUsed).toContain('existing=param');
       expect(urlUsed).toContain('api_key=key-123');
     });
+
+    it('keeps the query string intact when the endpoint is a relative URL', async () => {
+      sendBeaconMock = vi.fn().mockReturnValue(true);
+      Object.defineProperty(navigator, 'sendBeacon', {
+        value: sendBeaconMock,
+        configurable: true,
+        writable: true,
+      });
+
+      // A relative endpoint is HTTPS when the page is, which is how
+      // isHttpsUrl() reads it - so the key is attached here too, and the URL
+      // has to be built against the same base or it is not parseable at all.
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        value: new URL('https://app.example.com/watch'),
+        configurable: true,
+        writable: true,
+      });
+
+      try {
+        const plugin = createAnalyticsPlugin({
+          beaconUrl: '/analytics/beacon?tenant=42',
+          videoId: 'relative-vid',
+          apiKey: 'key-123',
+        });
+
+        await plugin.init(api);
+        sendBeaconMock.mockClear();
+
+        window.dispatchEvent(new Event('pagehide'));
+
+        const urlUsed = new URL(sendBeaconMock.mock.calls[0][0], 'https://app.example.com');
+        expect(urlUsed.pathname).toBe('/analytics/beacon');
+        expect(urlUsed.searchParams.get('tenant')).toBe('42');
+        expect(urlUsed.searchParams.get('api_key')).toBe('key-123');
+      } finally {
+        Object.defineProperty(window, 'location', {
+          value: originalLocation,
+          configurable: true,
+          writable: true,
+        });
+      }
+    });
   });
 });

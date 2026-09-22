@@ -471,6 +471,23 @@ describe('UI Plugin', () => {
 
       await plugin.destroy();
     });
+
+    it('gives the focusable container a focus-visible ring', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      // The container is a tab stop (above), so the stylesheet must draw a
+      // ring when focus lands on it from the keyboard. Suppressing the
+      // outline on :focus alone - which is what shipped - left a tab stop
+      // with no visible indicator anywhere in the player.
+      const css = document.getElementById('sp-ui-styles')?.textContent ?? '';
+      const ring = /\.sp-container:focus-visible\s*\{([^}]*)\}/.exec(css);
+
+      expect(ring).not.toBeNull();
+      expect(ring?.[1]).toMatch(/outline:\s*(?!none\b)\S/);
+
+      await plugin.destroy();
+    });
   });
 
   describe('gesture plugin coordination', () => {

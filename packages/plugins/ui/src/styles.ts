@@ -29,8 +29,20 @@ export const styles = `
   object-fit: contain;
 }
 
+/* The container is a tab stop - the plugin sets tabindex="0" on it so the
+   keyboard shortcuts have somewhere to land - so it must show where focus is.
+   A pointer press focuses it too, which is why the ring is on :focus-visible
+   and the plain :focus keeps outline:none: clicking the video should not draw
+   a box around the player. The offset is negative so the ring is painted
+   inside the player box; drawn outside it, a host page's own overflow or a
+   flush-fitting wrapper can clip it away. */
 .sp-container:focus {
   outline: none;
+}
+
+.sp-container:focus-visible {
+  outline: 3px solid var(--sp-accent, #e50914);
+  outline-offset: -3px;
 }
 
 /* ============================================

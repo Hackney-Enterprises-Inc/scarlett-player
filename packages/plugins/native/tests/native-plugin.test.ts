@@ -877,6 +877,80 @@ describe('media error classification', () => {
   });
 });
 
+describe('state after a failed load', () => {
+  let mockApi: any;
+  let state: Record<string, any>;
+
+  const videoEl = (): HTMLVideoElement =>
+    mockApi.container.querySelector('video') as HTMLVideoElement;
+
+  /** Build a fresh mock api and an initialised plugin with the given watchdog. */
+  const startPlugin = async (loadTimeoutMs: number) => {
+    state = {};
+    mockApi = {
+      container: document.createElement('div'),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      on: vi.fn(() => vi.fn()),
+      emit: vi.fn(),
+      getState: vi.fn((key: string) => state[key]),
+      setState: vi.fn((key: string, value: unknown) => {
+        state[key] = value;
+      }),
+      subscribeToState: vi.fn().mockReturnValue(vi.fn()),
+      onDestroy: vi.fn(),
+    };
+
+    const plugin = createNativePlugin({ loadTimeoutMs });
+    await plugin.init(mockApi);
+    return plugin;
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('leaves the player in error, not loading, when the element fails', async () => {
+    const plugin = await startPlugin(0);
+
+    const pending = plugin.loadSource('https://example.com/movie.mp4');
+    const result = expect(pending).rejects.toThrow(/boom/);
+
+    expect(state.playbackState).toBe('loading');
+    expect(state.buffering).toBe(true);
+
+    Object.defineProperty(videoEl(), 'error', {
+      configurable: true,
+      value: { code: 2, message: 'boom' },
+    });
+    videoEl().dispatchEvent(new Event('error'));
+
+    // A failed load fires nothing else, so a player left on 'loading' shows
+    // the error overlay over a spinner that never stops.
+    expect(state.playbackState).toBe('error');
+    expect(state.buffering).toBe(false);
+
+    await result;
+  });
+
+  it('leaves the player in error when the watchdog gives up', async () => {
+    vi.useFakeTimers();
+    const plugin = await startPlugin(5000);
+
+    const pending = plugin.loadSource('https://example.com/movie.mp4');
+    // Attached before the clock moves: an unhandled rejection fails the run.
+    const result = expect(pending).rejects.toThrow(/too long to load/);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    // The watchdog exists for a source that stalls without erroring, so the
+    // element's own error listener never runs on this path.
+    expect(state.playbackState).toBe('error');
+    expect(state.buffering).toBe(false);
+
+    await result;
+  });
+});
+
 describe('load session guard', () => {
   let plugin: ReturnType<typeof createNativePlugin>;
   let mockApi: any;
