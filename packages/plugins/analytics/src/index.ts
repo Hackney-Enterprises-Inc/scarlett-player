@@ -229,7 +229,7 @@ export function createAnalyticsPlugin(
       // without the header — sendBeacon cannot attach custom headers at all.
       fetch(mergedConfig.beaconUrl, {
         method: 'POST',
-        headers: { ...baseHeaders(), ...extra },
+        headers: beaconHeaders(extra),
         body,
         keepalive: true,
       }).catch(() => {
@@ -249,7 +249,14 @@ export function createAnalyticsPlugin(
     // A function is resolved per request, so a rotating CSRF or Bearer token
     // is current. A rejection must not cost the beacon: analytics is not worth
     // losing over a token the server will simply refuse.
-    Promise.resolve(configured())
+    //
+    // Called from inside the chain rather than before it, so a headers()
+    // that throws synchronously - reading a cookie that is not there, say -
+    // lands in the same catch as one that rejects. Called directly, the throw
+    // would escape sendBeacon() into whichever player event handler triggered
+    // the beacon, and the beacon itself would never be sent.
+    Promise.resolve()
+      .then(() => configured())
       .then(post)
       .catch((error) => {
         api?.logger.debug('Analytics headers() failed; sending without them', { error });
@@ -270,6 +277,28 @@ export function createAnalyticsPlugin(
       'Content-Type': 'application/json',
       ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
     };
+  }
+
+  /**
+   * The base headers with `extra` applied on top, as a `Headers`.
+   *
+   * `Headers.set` matches field names case-insensitively, so a host that
+   * configures `content-type` replaces ours instead of sitting beside it.
+   * Spreading into a plain object cannot do that: both spellings survive into
+   * the request, where the `Headers` constructor APPENDS rather than replaces
+   * and the beacon goes out with the two values comma-joined.
+   *
+   * @param extra - Resolved `headers` entries, which win over the base ones
+   * @returns Headers for the beacon request
+   */
+  function beaconHeaders(extra: Record<string, string>): Headers {
+    const headers = new Headers(baseHeaders());
+
+    for (const [name, value] of Object.entries(extra)) {
+      headers.set(name, value);
+    }
+
+    return headers;
   }
 
   /**
@@ -357,7 +386,7 @@ export function createAnalyticsPlugin(
 
     fetch(mergedConfig.beaconUrl, {
       method: 'POST',
-      headers: { ...baseHeaders(), ...staticHeaders },
+      headers: beaconHeaders(staticHeaders ?? {}),
       body,
       keepalive: true,
     }).catch(() => {

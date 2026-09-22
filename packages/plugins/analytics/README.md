@@ -303,9 +303,11 @@ createAnalyticsPlugin({
 });
 ```
 
-They merge over `Content-Type` and `X-API-Key`, so either can be overridden. A
-function that rejects costs the headers, not the beacon: the request still goes
-out without them rather than being dropped.
+They merge over `Content-Type` and `X-API-Key`, so either can be overridden -
+in whatever case you spell it, since header names are matched the way a server
+matches them. A function that rejects, or throws where it stands, costs the
+headers and not the beacon: the request still goes out without them rather than
+being dropped.
 
 The unload beacon is the exception, and it is the same exception as everywhere
 else here: it travels by `navigator.sendBeacon`, which carries no headers at

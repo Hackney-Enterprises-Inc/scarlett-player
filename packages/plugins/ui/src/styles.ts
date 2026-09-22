@@ -569,6 +569,14 @@ export const styles = `
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
+  /* Opaque, and no lighter than #202020, because this is the one place accent
+     TEXT sits on the control bar rather than on a menu. The bar is a gradient
+     over the picture - rgba(0, 0, 0, 0.8) at its darkest point, so about #333
+     over a white frame - and --sp-accent-text is only ever derived against the
+     menus (see contrast.ts). A translucent chip would let the frame through
+     and drop a toned accent below 4.5:1; this one pins the surface at exactly
+     the colour the tone was measured on. */
+  background: #202020;
   cursor: pointer;
   padding: 6px 10px;
   border-radius: 4px;
@@ -576,8 +584,10 @@ export const styles = `
 }
 
 @media (hover: hover) {
+  /* Darkens rather than lightens: the usual rgba(255, 255, 255, 0.1) would put
+     the label on a surface lighter than the one its colour was toned for. */
   .sp-live:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: #141414;
   }
 }
 

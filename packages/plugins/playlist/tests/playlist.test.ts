@@ -34,6 +34,12 @@ interface MockPluginAPI extends IPluginAPI {
 }
 
 
+// jsdom does not implement HTMLMediaElement.load() and reports "Not
+// implemented" to the virtual console on every call. clearPreload() calls it
+// to end an in-flight fetch, which is the whole point of releasing the
+// element, so the method is stubbed here rather than the call avoided.
+HTMLMediaElement.prototype.load = (): void => {};
+
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -615,12 +621,39 @@ describe('preloadNext', () => {
     const plugin = await start({ shuffle: true, repeat: 'all' });
     plugin.play(0);
 
-    const warmedBefore = media.map((el) => el.getAttribute('src'));
+    const warmed = media.length;
     playShuffleWrap(plugin);
 
     // Which track follows the wrap does not exist until the order is drawn,
-    // and drawing it here is exactly what the test above forbids.
-    expect(media.map((el) => el.getAttribute('src'))).toEqual(warmedBefore);
+    // and drawing it here is exactly what the test above forbids. The element
+    // already warming the previous next track is released rather than left
+    // fetching one the viewer has moved past.
+    expect(media).toHaveLength(warmed);
+    expect(media.map((el) => el.getAttribute('src'))).toEqual(media.map(() => null));
+  });
+
+  it('releases the warmed track when there is no next one left', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+    expect(media[0].getAttribute('src')).toContain('track2.mp3');
+
+    plugin.play(sampleTracks.length - 1);
+
+    // The end of a playlist that does not repeat. Returning early without
+    // clearing left this element fetching track2 for the rest of the session.
+    expect(media[0].getAttribute('src')).toBeNull();
+  });
+
+  it('releases the warmed track when the playlist is cleared', async () => {
+    const plugin = await start({});
+
+    plugin.play(0);
+    expect(media[0].getAttribute('src')).toContain('track2.mp3');
+
+    plugin.clear();
+
+    expect(media[0].getAttribute('src')).toBeNull();
   });
 
   it('releases the element on destroy', async () => {

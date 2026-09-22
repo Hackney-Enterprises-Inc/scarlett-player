@@ -767,6 +767,16 @@ describe('Analytics Plugin', () => {
     let originalFetch: any;
     let fetchMock: any;
 
+    /**
+     * One header off the nth fetch call, looked up the way a server would.
+     *
+     * The request carries a `Headers`, not a plain object, so that a host's
+     * own spelling of a field replaces ours rather than joining it; `get()` is
+     * case-insensitive and returns null for a field that was never set.
+     */
+    const sentHeader = (call: number, name: string): string | null =>
+      (fetchMock.mock.calls[call][1].headers as Headers).get(name);
+
     beforeEach(() => {
       originalSendBeacon = navigator.sendBeacon;
       originalFetch = globalThis.fetch;
@@ -799,11 +809,8 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
 
       expect(fetchMock).toHaveBeenCalled();
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers).toMatchObject({
-        'Content-Type': 'application/json',
-        'X-API-Key': 'secret-key-123',
-      });
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-API-Key')).toBe('secret-key-123');
     });
 
     it('omits X-API-Key header when beaconUrl uses HTTP', async () => {
@@ -816,11 +823,8 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
 
       expect(fetchMock).toHaveBeenCalled();
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers).toMatchObject({
-        'Content-Type': 'application/json',
-      });
-      expect(options.headers['X-API-Key']).toBeUndefined();
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-API-Key')).toBeNull();
     });
 
     it('omits X-API-Key header when apiKey is not provided', async () => {
@@ -832,11 +836,8 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
 
       expect(fetchMock).toHaveBeenCalled();
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers).toMatchObject({
-        'Content-Type': 'application/json',
-      });
-      expect(options.headers['X-API-Key']).toBeUndefined();
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-API-Key')).toBeNull();
     });
 
     it('omits X-API-Key header when beaconUrl is not a valid HTTPS URL', async () => {
@@ -849,8 +850,7 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
 
       expect(fetchMock).toHaveBeenCalled();
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers['X-API-Key']).toBeUndefined();
+      expect(sentHeader(0, 'X-API-Key')).toBeNull();
     });
 
     it('merges static headers over the defaults', async () => {
@@ -863,13 +863,26 @@ describe('Analytics Plugin', () => {
 
       await plugin.init(api);
 
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers).toMatchObject({
-        'Content-Type': 'application/json',
-        'X-API-Key': 'secret-key-123',
-        'X-CSRF-Token': 'csrf-1',
-        'X-Tenant': '42',
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-API-Key')).toBe('secret-key-123');
+      expect(sentHeader(0, 'X-CSRF-Token')).toBe('csrf-1');
+      expect(sentHeader(0, 'X-Tenant')).toBe('42');
+    });
+
+    it('lets a host override a base header whatever case it spells it in', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'case-headers-vid',
+        apiKey: 'secret-key-123',
+        headers: { 'content-type': 'application/json; charset=utf-8', 'x-api-key': 'host-key' },
       });
+
+      await plugin.init(api);
+
+      // Merged as a plain object, both spellings would reach the request and
+      // the server would read 'application/json, application/json; charset=utf-8'.
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json; charset=utf-8');
+      expect(sentHeader(0, 'X-API-Key')).toBe('host-key');
     });
 
     it('resolves a headers function per beacon', async () => {
@@ -881,16 +894,19 @@ describe('Analytics Plugin', () => {
       });
 
       await plugin.init(api);
-      // The async path costs a microtask, which a synchronous assertion here
-      // would miss - the static path above deliberately does not.
-      await Promise.resolve();
-      await Promise.resolve();
+      // The resolved path runs through a promise chain, which a synchronous
+      // assertion here would miss - the static path above deliberately does
+      // not. Draining the queue beats counting ticks: the chain's length is an
+      // implementation detail (it grew one link so that a headers() throwing
+      // synchronously lands in the same catch as one that rejects).
+      await vi.advanceTimersByTimeAsync(0);
 
       plugin.trackEvent('custom-event');
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
 
-      const tokens = fetchMock.mock.calls.map(([, options]: any) => options.headers['X-CSRF-Token']);
+      const tokens = fetchMock.mock.calls.map((_call: unknown, i: number) =>
+        sentHeader(i, 'X-CSRF-Token')
+      );
       // A rotating token is the reason the function form exists: each beacon
       // must carry the value current when it was sent.
       expect(tokens).toEqual(['csrf-1', 'csrf-2']);
@@ -904,14 +920,31 @@ describe('Analytics Plugin', () => {
       });
 
       await plugin.init(api);
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
 
       // Analytics is not worth losing over a token the server would refuse.
       expect(fetchMock).toHaveBeenCalled();
-      const [, options] = fetchMock.mock.calls[0];
-      expect(options.headers).toMatchObject({ 'Content-Type': 'application/json' });
-      expect(options.headers['X-CSRF-Token']).toBeUndefined();
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-CSRF-Token')).toBeNull();
+    });
+
+    it('still sends the beacon when headers() throws synchronously', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'throwing-headers-vid',
+        headers: () => {
+          throw new Error('no CSRF cookie');
+        },
+      });
+
+      // A throw from headers() is resolved inside the promise chain, so it
+      // never escapes into the player event handler that triggered the beacon.
+      await expect(plugin.init(api)).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(sentHeader(0, 'Content-Type')).toBe('application/json');
+      expect(sentHeader(0, 'X-CSRF-Token')).toBeNull();
     });
   });
 

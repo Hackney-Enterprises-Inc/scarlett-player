@@ -92,6 +92,65 @@ function colourDefaults(): Array<[string, string]> {
   return found;
 }
 
+/**
+ * The declarations of the rule written with exactly this selector.
+ *
+ * Deliberately not the sweep above: that one reads every rule and would
+ * happily return `.sp-live__dot` for `.sp-live`, and it flattens the media
+ * query the hover rule lives in.
+ */
+function ruleBody(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`(?:^|[{};])\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm').exec(styles);
+
+  if (!match) throw new Error(`No rule for ${selector}`);
+
+  return match[1];
+}
+
+/** The `background:` a rule declares, as written. */
+function backgroundOf(selector: string): string {
+  const declaration = /(?:^|[\s;])background:\s*([^;]+);/.exec(ruleBody(selector));
+
+  if (!declaration) throw new Error(`No background on ${selector}`);
+
+  return declaration[1].trim();
+}
+
+/** The innermost `color:` fallback of a rule - what renders unthemed. */
+function colourOf(selector: string): string {
+  const declaration = /(?:^|[\s;])color:\s*([^;]+);/.exec(ruleBody(selector));
+  const hexes = declaration?.[1].match(/#[0-9a-fA-F]{3,8}\b/g);
+
+  if (!hexes) throw new Error(`No hex colour on ${selector}`);
+
+  return hexes[hexes.length - 1];
+}
+
+describe('the LIVE label', () => {
+  /**
+   * The only accent TEXT outside the menus: it sits on the control bar, whose
+   * gradient bottoms out at rgba(0, 0, 0, 0.8) and so reaches about #333 over
+   * a white frame - lighter than any surface `accentTextTone()` measures
+   * against. The rule therefore carries its own opaque surface.
+   */
+  it.each(['.sp-live', '.sp-live:hover'])('is opaque and no lighter than the menus (%s)', (selector) => {
+    const background = backgroundOf(selector);
+
+    // A rgba() here would let the picture through and lighten it.
+    expect(background).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(luminance(background)).toBeLessThanOrEqual(luminance(SURFACES.brightMenu));
+  });
+
+  it('clears AA for its own default accent', () => {
+    // A host that themes the player owns its ratio, and accentTextTone() gives
+    // it one measured against exactly this surface.
+    expect(contrast(colourOf('.sp-live'), backgroundOf('.sp-live'))).toBeGreaterThanOrEqual(
+      AA_TEXT
+    );
+  });
+});
+
 describe('stylesheet colour defaults', () => {
   it('finds the accent text rules', () => {
     // A guard on the parser rather than the styles: a regex that silently

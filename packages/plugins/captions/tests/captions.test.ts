@@ -324,6 +324,59 @@ function fakeTextTrackList(
 }
 
 /**
+ * A TextTrackList double that grows the way a browser's does: the native
+ * renditions the element already carried, then one TextTrack per `<track>` the
+ * plugin appends.
+ *
+ * jsdom creates neither the TextTrack nor the list entry for an appended
+ * `<track>`, so the object is minted on first read and hung off the element as
+ * `.track` - the property the plugin compares against to tell its own track
+ * from a native one with the same language and label.
+ *
+ * @param video - The element the plugin appends its `<track>` elements to
+ * @param native - Tracks that precede them in the list
+ * @returns A TextTrackList double reflecting both
+ */
+function liveTextTrackList(
+  video: HTMLVideoElement,
+  native: Array<{ kind: string; label: string; language: string; mode?: string }>,
+): TextTrackList {
+  const target = new EventTarget();
+
+  const trackOf = (el: HTMLTrackElement): unknown => {
+    const existing = (el as unknown as { track?: unknown }).track;
+    if (existing) return existing;
+
+    const created = { kind: el.kind, label: el.label, language: el.srclang, mode: 'disabled' };
+    Object.defineProperty(el, 'track', { value: created, configurable: true });
+    return created;
+  };
+
+  // Mapped once so a write to `mode` survives the next read; the appended
+  // tracks are cached on their own elements by trackOf.
+  const fixedNative = native.map((track) => ({ mode: 'disabled', ...track }));
+
+  const list = {
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+  };
+
+  const all = (): unknown[] => [
+    ...fixedNative,
+    ...Array.from(video.querySelectorAll('track')).map(trackOf),
+  ];
+
+  return new Proxy(list, {
+    get(base, prop, receiver) {
+      if (prop === 'length') return all().length;
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) return all()[Number(prop)];
+      return Reflect.get(base, prop, receiver);
+    },
+  }) as unknown as TextTrackList;
+}
+
+/**
  * Wire a mock API's getState/setState into a real store, so code that writes
  * state and reads it back (maybeAutoSelect) behaves as it does in the player.
  */
@@ -642,6 +695,42 @@ describe('auto-select', () => {
     // Language alone would have matched the plain English row above it; the
     // label is what makes the marked rendition reachable at all.
     expect(selected()).toMatchObject({ language: 'en', label: 'English (SDH)' });
+  });
+
+  it('selects the configured source, not an identical native track above it', () => {
+    const mockApi = createMockApi();
+    withStatefulApi(mockApi);
+    let mediaLoaded: () => void = () => {};
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'media:loaded') mediaLoaded = cb as () => void;
+      return vi.fn();
+    });
+    mockApi.getPlugin.mockReturnValue({ getHlsInstance: () => null, isNativeHLS: () => true });
+
+    // A rendition the browser parsed from the manifest itself, carrying the
+    // same language and label as the source the host configured - which is
+    // what native HLS produces when the two overlap.
+    Object.defineProperty(mockApi.video, 'textTracks', {
+      value: liveTextTrackList(mockApi.video, [
+        { kind: 'subtitles', label: 'English', language: 'en' },
+      ]),
+      configurable: true,
+    });
+
+    const plugin = createCaptionsPlugin({
+      sources: [{ src: 'en.vtt', label: 'English', language: 'en', default: true }],
+    });
+    plugin.init(mockApi);
+    mediaLoaded();
+
+    // Matched on values the native track above answers first, and the viewer
+    // gets a file the host never configured.
+    expect(mockApi.getState('currentTextTrack')).toMatchObject({
+      id: 'track-1',
+      language: 'en',
+      label: 'English',
+    });
+    expect((mockApi.video.textTracks[0] as unknown as { mode: string }).mode).toBe('disabled');
   });
 
   it('leaves a track the browser is already showing alone', () => {

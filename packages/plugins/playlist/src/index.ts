@@ -386,10 +386,18 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     if (typeof document === 'undefined') return;
 
     const index = peekNextIndex();
-    if (index < 0 || index === currentIndex) return;
+    const next = index >= 0 && index !== currentIndex ? tracks[index] : undefined;
 
-    const next = tracks[index];
-    if (!next?.src || next.src === preloadedSrc) return;
+    if (!next?.src) {
+      // Nothing to warm any more: the end of a playlist that does not repeat,
+      // a shuffled wrap whose next track is undrawn, or repeat 'one'. An
+      // element left warming here keeps fetching a track that is no longer
+      // next, and holds a connection open for the rest of the session.
+      clearPreload();
+      return;
+    }
+
+    if (next.src === preloadedSrc) return;
 
     const kind = next.type === 'video' ? 'video' : 'audio';
     // The element has to match the medium: an <audio> handed an MP4 aborts the
@@ -713,6 +721,9 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       tracks = [];
       currentIndex = -1;
       shuffleOrder = [];
+      // The warmed track is gone with the rest of the playlist; without this
+      // its fetch outlives the tracks it was warming for.
+      clearPreload();
 
       api?.emit('playlist:clear', undefined);
       emitChange();

@@ -161,11 +161,14 @@ player.on('error:recovered', () => hideWaiting());
 player.on('error', (err) => { if (err.fatal) showError(err); });
 ```
 
-The promise rejects when the failure is terminal - a refused token, a stream
-that does not exist, an endpoint that does not speak WHEP - and those reject in
-seconds, not at the end of the window. If a host needs a hard bound on the wait
-it owns the timeout: race the promise yourself, or set a shorter
-`reconnectWindowMs`.
+A terminal failure - a refused token, a stream that does not exist, an endpoint
+that does not speak WHEP - is never scheduled for reconnect, so it is reported
+in seconds rather than at the end of the window. It is reported through the
+fatal `error` event and the player's `error` state, not through the promise:
+`ScarlettPlayer.load()` catches what a provider throws and routes it to the
+error handler, so the promise it returns resolves either way. If a host needs a
+hard bound on the wait it owns the timeout: race the promise yourself, or set a
+shorter `reconnectWindowMs`.
 
 The reconnect delay doubles from the server's `Retry-After` when the failure
 carried one (a `409` polls at 5, 10, 20, 30, 30 s) and from
@@ -178,8 +181,9 @@ the dead session first.
 join needed (so a monitor opened before the producer starts plays as soon as
 the stream goes live; on Tmesis, which answers `409` until then. MediaMTX
 answers `404`, which is terminal on a first join, so open a MediaMTX monitor
-after the publisher), and rejects when the failure is terminal, the window
-closes, or a newer load or `destroy()` supersedes it.
+after the publisher), and returns on a terminal failure, on the window closing,
+or when a newer load or `destroy()` supersedes it - the first two leaving a
+fatal `error` behind them.
 
 ### Not in v1
 
@@ -234,7 +238,7 @@ connection fails, the attempts that follow get MediaMTX's `404` (recoverable
 once the source has played), and the stream recovers when ffmpeg is
 restarted inside `reconnectWindowMs` (five minutes by default). Past that
 the scheduler gives up (`error:reconnect-exhausted`, a final fatal `error`,
-and `load()` rejects), so restart ffmpeg and press Join again.
+and `load()` returns), so restart ffmpeg and press Join again.
 
 ## License
 

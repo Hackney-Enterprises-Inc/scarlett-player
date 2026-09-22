@@ -97,6 +97,13 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   let api: IPluginAPI | null = null;
   let video: HTMLVideoElement | null = null;
   let addedTrackElements: HTMLTrackElement[] = [];
+  /**
+   * The `<track>` element added for the source the host marked `default`.
+   *
+   * Held so selection can find that source through its own TextTrack object
+   * instead of by language and label, which do not identify it.
+   */
+  let defaultTrackElement: HTMLTrackElement | null = null;
   let hlsSubtitleHandler: ((...args: unknown[]) => void) | null = null;
   let hlsSubtitleSwitchHandler: ((...args: unknown[]) => void) | null = null;
   let observedTextTracks: TextTrackList | null = null;
@@ -136,6 +143,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       trackEl.parentNode?.removeChild(trackEl);
     }
     addedTrackElements = [];
+    defaultTrackElement = null;
 
     // Reset state
     api?.setState('textTracks', []);
@@ -240,6 +248,44 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
   };
 
   /**
+   * The state track for the source the host marked `default`.
+   *
+   * Resolved through the TextTrack object of the `<track>` element we added,
+   * because language and label do not identify that source: a native rendition
+   * carrying the same pair can sit ABOVE ours in the TextTrackList - the shape
+   * native HLS produces when the manifest already offers the subtitle the host
+   * also configured - and a value match would select that one instead.
+   *
+   * Falls back to the value match when the element has no TextTrack to compare
+   * (nothing has created one yet), which keeps the marked source reachable
+   * rather than unselectable.
+   *
+   * @param tracks - The synced `textTracks` state
+   * @returns The marked source's state track, or undefined when none matches
+   */
+  const markedTrack = (tracks: ScarlettTextTrack[]): ScarlettTextTrack | undefined => {
+    if (!defaultSource) return undefined;
+
+    const videoEl = getVideo();
+    const textTrack = defaultTrackElement?.track;
+
+    if (videoEl && textTrack) {
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        if (videoEl.textTracks[i] !== textTrack) continue;
+
+        const own = tracks.find((t) => t.id === `track-${i}`);
+        if (own) return own;
+      }
+    }
+
+    return tracks.find(
+      (t) =>
+        t.language === defaultSource.language &&
+        (!defaultSource.label || t.label === defaultSource.label)
+    );
+  };
+
+  /**
    * Select a track on load, at most once per media.
    *
    * Two things can ask for one: a source the host marked `default`, and
@@ -262,17 +308,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
 
     const tracks = api?.getState('textTracks') || [];
 
-    // Matched on label as well as language when the source carries one: two
-    // renditions of the same language are otherwise indistinguishable here,
-    // and the state track's label is the one the <track> element was given.
-    const marked = defaultSource
-      ? tracks.find(
-          t =>
-            t.language === defaultSource.language &&
-            (!defaultSource.label || t.label === defaultSource.label)
-        )
-      : undefined;
-
+    const marked = markedTrack(tracks);
     const match = marked ?? (autoSelect ? tracks.find(t => t.language === defaultLanguage) : undefined);
     if (!match) return;
 
@@ -445,7 +481,8 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
     if (!config.sources?.length) return;
 
     for (const source of config.sources) {
-      addTrackElement(source);
+      const trackEl = addTrackElement(source);
+      if (source === defaultSource) defaultTrackElement = trackEl;
     }
   };
 
