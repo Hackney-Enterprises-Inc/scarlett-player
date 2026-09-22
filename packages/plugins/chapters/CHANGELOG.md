@@ -1,5 +1,11 @@
 # @scarlett-player/chapters
 
+## 1.16.1
+
+### Patch Changes
+
+- [#112](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/112) [`705f8ec`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/705f8eccf08bd97dea716d7d521408dbf6316d15) Thanks [@alexhackney](https://github.com/alexhackney)! - Each package README now links the documentation site (scarlettplayer.com/documentation/) and the Markdown published for AI coding agents: llms.txt, an index of the guides and packages, and llms-full.txt, every guide in one file. Documentation only; no code changes.
+
 ## 1.16.0
 
 ## 1.15.4
