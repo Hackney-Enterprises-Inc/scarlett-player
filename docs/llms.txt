@@ -1,6 +1,6 @@
 # Scarlett Player
 
-> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.16.0). MIT licensed.
+> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.16.1). MIT licensed.
 
 Every guide below is also a web page at the same path without `index.md`. https://scarlettplayer.com/llms-full.txt holds all of them in one file.
 
