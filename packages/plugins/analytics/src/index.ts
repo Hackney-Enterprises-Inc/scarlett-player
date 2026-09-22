@@ -288,11 +288,25 @@ export function createAnalyticsPlugin(
       let urlWithApiKey = mergedConfig.beaconUrl;
       if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
         try {
-          const urlObj = new URL(mergedConfig.beaconUrl);
+          // Parsed against the page, the way isHttpsUrl() judged it HTTPS in
+          // the first place: a relative beaconUrl such as `/analytics/beacon`
+          // is legal here and `new URL()` alone rejects it, which dropped
+          // every relative endpoint into the string fallback below.
+          const base =
+            typeof window !== 'undefined' && window.location?.href
+              ? window.location.href
+              : undefined;
+          const urlObj = base
+            ? new URL(mergedConfig.beaconUrl, base)
+            : new URL(mergedConfig.beaconUrl);
           urlObj.searchParams.set('api_key', mergedConfig.apiKey);
           urlWithApiKey = urlObj.toString();
         } catch {
-          urlWithApiKey = `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
+          // Last resort for a URL neither parse could take. Appending with the
+          // right separator matters: a `?` on an endpoint that already carries
+          // a query string folds the key into the previous parameter's value.
+          const separator = mergedConfig.beaconUrl.includes('?') ? '&' : '?';
+          urlWithApiKey = `${mergedConfig.beaconUrl}${separator}api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
         }
       }
       const blob = new Blob([body], { type: 'application/json' });

@@ -97,7 +97,7 @@ const player = await createPlayer({
   heartbeatInterval?: number;     // Default: 10000ms (10 seconds)
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
-  apiKey?: string;                // Sent as an X-API-Key header on HTTPS fetch fallbacks
+  apiKey?: string;                // HTTPS endpoints only: X-API-Key header, or ?api_key= on unload (see API key transport)
   customBeacon?: (url: string, payload: BeaconPayload) => void; // Replace the transport (see Testing)
 }
 ```
@@ -259,11 +259,50 @@ Your beacon endpoint should:
 2. Handle `application/json` content type
 3. Support the `navigator.sendBeacon()` API (for reliability)
 4. Return quickly (don't block analytics on slow processing)
+5. Authenticate from either the `X-API-Key` header or the `api_key` query
+   parameter, if you set `apiKey` (see below)
+
+### API key transport
+
+`apiKey` reaches your endpoint two different ways, and an endpoint that only
+reads the header will reject the most important beacon you get.
+
+| Path | Transport | Where the key is |
+|------|-----------|------------------|
+| Every in-session beacon (`viewStart`, `heartbeat`, `pause`, `error`, ...) | `fetch` with `keepalive` | `X-API-Key` request header |
+| `viewEnd` on `pagehide` / `beforeunload` | `navigator.sendBeacon` | `api_key` query parameter |
+| `viewEnd` when `sendBeacon` is missing or refuses the payload | `fetch` with `keepalive` | `X-API-Key` request header |
+
+The unload path cannot use the header: `navigator.sendBeacon()` takes a URL and
+a body and has no way to set one, and it is the only transport that survives
+iOS Safari terminating the page on `pagehide`. Dropping the key there would
+cost you every `viewEnd` - the beacon carrying watch time, exit type and the
+final QoE score - so the key goes on the URL instead.
+
+Two consequences worth designing for:
+
+- **Accept both.** Read `X-API-Key`, and fall back to the `api_key` query
+  parameter. Rejecting the query form loses `viewEnd` and nothing else, which
+  looks like viewers who never stop watching.
+- **Treat the key as logged.** Query strings land in access logs, proxy logs
+  and `Referer` headers. Issue the player a key scoped to beacon ingest only -
+  write-only, no read access to analytics - and rotate it on its own schedule.
+
+The key is attached only when `beaconUrl` resolves to HTTPS (a relative URL
+counts when the page itself is HTTPS). Over plain HTTP it is sent on neither
+path, header or query, so a local `http://` endpoint will see unauthenticated
+beacons by design.
 
 ### Example Express.js Handler
 
 ```javascript
 app.post('/analytics/beacon', async (req, res) => {
+  // Either transport, or the unload beacon is turned away (see above)
+  const key = req.get('X-API-Key') ?? req.query.api_key;
+  if (key !== process.env.BEACON_KEY) {
+    return res.status(401).send();
+  }
+
   // Immediately respond
   res.status(204).send();
 
@@ -443,6 +482,9 @@ The plugin is designed for minimal performance impact:
 2. Verify `beaconUrl` is correct
 3. Check network tab for beacon requests
 4. Ensure endpoint accepts POST with JSON
+5. If only `viewEnd` is missing, check the endpoint's auth: that beacon
+   carries the key as `?api_key=` rather than a header (see
+   [API key transport](#api-key-transport))
 
 ### Missing Events
 

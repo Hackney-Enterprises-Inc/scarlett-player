@@ -29,8 +29,20 @@ export const styles = `
   object-fit: contain;
 }
 
+/* The container is a tab stop - the plugin sets tabindex="0" on it so the
+   keyboard shortcuts have somewhere to land - so it must show where focus is.
+   A pointer press focuses it too, which is why the ring is on :focus-visible
+   and the plain :focus keeps outline:none: clicking the video should not draw
+   a box around the player. The offset is negative so the ring is painted
+   inside the player box; drawn outside it, a host page's own overflow or a
+   flush-fitting wrapper can clip it away. */
 .sp-container:focus {
   outline: none;
+}
+
+.sp-container:focus-visible {
+  outline: 3px solid var(--sp-accent, #e50914);
+  outline-offset: -3px;
 }
 
 /* ============================================
@@ -540,6 +552,14 @@ export const styles = `
 /* ============================================
    Live Indicator
    ============================================ */
+/* Accent text uses --sp-accent-text, not --sp-accent: the brand red as TEXT
+   is 4.38:1 on black and 3.84:1 on the menus' own rgba(20,20,20,.95), under
+   the 4.5:1 WCAG AA wants for 11-13px labels. The lighter default clears it at
+   6.4:1 and 5.7:1. --sp-accent keeps the brand red for progress fills, big
+   play and focus rings, which are non-text and need only 3:1. A host that
+   themes --sp-accent still colours this text - the chain reads its token
+   first - so setting --sp-accent-text is only needed when that colour is too
+   dark to read. */
 .sp-live {
   display: flex;
   align-items: center;
@@ -548,7 +568,7 @@ export const styles = `
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
   cursor: pointer;
   padding: 6px 10px;
   border-radius: 4px;
@@ -660,7 +680,7 @@ export const styles = `
 }
 
 .sp-quality-menu__item--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-quality-menu__check {
@@ -832,7 +852,7 @@ export const styles = `
 }
 
 .sp-settings-panel__item--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-settings-panel__check {
@@ -857,14 +877,14 @@ export const styles = `
    Captions Button
    ============================================ */
 .sp-captions--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 /* ============================================
    Cast Button States
    ============================================ */
 .sp-cast--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-cast--unavailable {
@@ -1147,5 +1167,11 @@ export const styles = `
 
    setTheme() writes the same names onto the player's container, which still
    wins over the fallbacks.
+
+   --sp-accent-text is the one token with no setTheme() equivalent: it is the
+   accent applied to TEXT and active-state glyphs, split from --sp-accent
+   because the same colour has to clear 4.5:1 there and only 3:1 as a fill.
+   It falls back to --sp-accent, so a themed player needs it only when the
+   host's accent is too dark to read against the controls.
    ============================================ */
 `;

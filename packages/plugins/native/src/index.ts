@@ -482,6 +482,16 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       const { code, message } = classifyMediaError(error);
 
       api?.logger.error('Video error', { mediaErrorCode: error?.code, code, message });
+
+      // Move the player out of whatever state the failure interrupted before
+      // announcing it. A source that errors while loading otherwise leaves
+      // `playbackState` on 'loading' and `buffering` true for good - the
+      // element fires no further events - so the UI shows the error overlay
+      // over a spinner that never stops. The HLS and WHEP providers write
+      // these two keys on their fatal path for the same reason.
+      api?.setState('playbackState', 'error');
+      api?.setState('buffering', false);
+
       api?.emit('error', {
         code,
         message,
@@ -796,10 +806,17 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
         // Watchdog: a load must terminate. Without this, a request that
         // stalls without erroring pins the viewer on a spinner forever.
+        //
+        // The element fires nothing on this path - that is the point of the
+        // watchdog - so the state keys the `error` listener would otherwise
+        // write have to be written here, or the rejection core reports lands
+        // on a player still reading as 'loading'.
         if (load_timeout_ms > 0) {
           watchdog = setTimeout(() => {
             if (session !== loadSession) return;
             settle();
+            api?.setState('playbackState', 'error');
+            api?.setState('buffering', false);
             reject(new Error('Video took too long to load (network timeout)'));
           }, load_timeout_ms);
         }
