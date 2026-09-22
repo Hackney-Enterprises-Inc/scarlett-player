@@ -1,0 +1,40 @@
+# Scarlett Player
+
+> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.16.0). MIT licensed.
+
+Every guide below is also a web page at the same path without `index.md`. https://scarlettplayer.com/llms-full.txt holds all of them in one file.
+
+## Docs
+
+- [Architecture](https://scarlettplayer.com/architecture/index.md): How Scarlett Player is built: the core engine, plugin lifecycle and plugin API, reactive state, events, the error and reconnect model, live playback and the build.
+- [Writing a plugin](https://scarlettplayer.com/plugin-authoring/index.md): Write a Scarlett Player plugin that adds its own events, state and control-bar controls without editing the core or UI packages.
+- [Embed guide](https://scarlettplayer.com/embed/index.md): How the Scarlett Player embed package is built and integrated: script tags, iframes and the JavaScript API, CDN layout, multi-tenant branding and bundle sizes.
+- [Contributing](https://scarlettplayer.com/contributing/index.md): Code standards for Scarlett Player: TypeScript and TSDoc rules, plugin guidelines, testing, the git workflow and changesets, performance, security and accessibility.
+
+## Packages
+
+- [@scarlett-player/core](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/core): Core engine - reactive state, event bus, plugin system, error handling
+- [@scarlett-player/hls](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/hls): HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery
+- [@scarlett-player/native](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/native): Native provider - video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus)
+- [@scarlett-player/whep](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/whep): WHEP provider - WebRTC playback over WHEP for sub-second live monitoring; bearer token or async token provider, the HLS provider's reconnect knobs, a receiver-side latency estimate. Answers only (no server counter-offers)
+- [@scarlett-player/ui](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/ui): Video UI - play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts
+- [@scarlett-player/audio-ui](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/audio-ui): Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts
+- [@scarlett-player/airplay](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/airplay): AirPlay casting - Safari AirPlay with auto-detect
+- [@scarlett-player/chromecast](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/chromecast): Chromecast - Google Cast SDK, session management, remote control
+- [@scarlett-player/analytics](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/analytics): Analytics - startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport
+- [@scarlett-player/playlist](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/playlist): Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence
+- [@scarlett-player/media-session](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/media-session): Media Session - lock screen controls, media keys, album art, seek bar
+- [@scarlett-player/captions](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/captions): Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language
+- [@scarlett-player/watermark](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/watermark): Watermark - anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning
+- [@scarlett-player/share](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/share): Share - native share sheet on mobile, copy link, social targets, embed codes, playback timestamps
+- [@scarlett-player/chapters](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/chapters): Chapters - markers on the progress bar, chapter list, seek to chapter, WebVTT chapters track support
+- [@scarlett-player/gestures](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/gestures): Gestures - double-tap left/right to seek with accumulation, tap to toggle controls, touch only
+- [@scarlett-player/clips](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/clips): Clips - two-handle in/out range selection, loop preview, submission through a host callback or a built-in POST. VOD only in v1; the player captures the range, the server produces the clip
+- [@scarlett-player/vue](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/vue): Vue 3 - `<ScarlettPlayer>` component + `useScarlettPlayer()` composable
+- [@scarlett-player/embed](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/embed): CDN embed - auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points
+
+## Optional
+
+- [README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/README.md): installation, quick starts, theming and keyboard shortcuts
+- [Playground](https://scarlettplayer.com/demo/): every scenario and option, with generated integration code
+- [Source](https://github.com/Hackney-Enterprises-Inc/scarlett-player): the pnpm monorepo

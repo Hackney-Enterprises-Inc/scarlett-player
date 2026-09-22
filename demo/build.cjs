@@ -17,6 +17,13 @@
  * copies them beside each generated page - demo/ (the source route the
  * browser harness loads) and docs/demo/ (the served route) - overwriting the
  * mirrors on every run. Never hand-edit a mirror.
+ *
+ * It also renders the HTML documentation (demo/docs-build.mjs): the guides
+ * under docs/*.md become docs/<slug>/index.html, plus a docs/documentation/
+ * index, each directory regenerated wholesale and byte-for-byte deterministic.
+ * Those pages sit one level below docs/ and link `../site.css` and
+ * `../assets/`, which resolves to docs/ both locally and on production, so
+ * they need no mirror. Generated and tracked, like docs/demo/.
  */
 
 const esbuild = require('esbuild');
@@ -241,6 +248,13 @@ async function build() {
     // homepage is authored in place and stamped the same way.
     stampBundleVersion(path.join(__dirname, 'index.html'));
     stampBundleVersion(path.join(REPO_ROOT, 'docs/index.html'));
+
+    // After the homepage is stamped: the docs pages lift its header and
+    // footer, and should carry the same version and nav. ESM, hence the
+    // dynamic import from this CommonJS script.
+    const { buildDocs } = await import('./docs-build.mjs');
+    const docsPages = buildDocs({ version: VERSION, cssVersion: siteCssDigest() });
+    console.log(`📚 Documentation rendered: ${docsPages.length} files (pages, Markdown copies, llms.txt)`);
 
     // Publish to docs/demo/ (served by Forge at scarlettplayer.com).
     //

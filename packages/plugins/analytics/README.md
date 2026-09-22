@@ -2,6 +2,8 @@
 
 Analytics plugin for Scarlett Player that collects Quality of Experience (QoE) metrics and engagement data for live events and VOD content.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Features
 
 - **Quality of Experience (QoE) Metrics**

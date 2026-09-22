@@ -2,6 +2,8 @@
 
 Share plugin for [Scarlett Player](https://scarlettplayer.com). Native share sheet on mobile, copy link, social targets, embed codes, and timestamps.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ```bash
 npm install @scarlett-player/share
 ```

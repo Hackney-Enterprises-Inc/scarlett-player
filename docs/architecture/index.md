@@ -1,5 +1,7 @@
 # Scarlett Player - Architecture
 
+> Rendered at https://scarlettplayer.com/architecture/ · Source: https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/architecture.md
+
 This describes the player as it is built, not as it was planned. Every class,
 method and event named here exists in `packages/*/src`. Where a name in an
 older revision of this document did not survive contact with the code (the
@@ -637,6 +639,6 @@ Chrome and Edge 80+, Firefox 78+, Safari 14+, iOS Safari 14+, Android Chrome
 
 ## See also
 
-- [Writing a plugin](plugin-authoring.md) - events, state and controls
-- [Contributing](contributing.md) - code standards, testing and review conventions
-- [README](../README.md) - installation, quick starts and the package table
+- [Writing a plugin](https://scarlettplayer.com/plugin-authoring/index.md) - events, state and controls
+- [Contributing](https://scarlettplayer.com/contributing/index.md) - code standards, testing and review conventions
+- [README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/README.md) - installation, quick starts and the package table

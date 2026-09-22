@@ -2,6 +2,8 @@
 
 Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<script>` tag and start streaming.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Features
 
 - **Zero Dependencies** - Self-contained bundle with everything included

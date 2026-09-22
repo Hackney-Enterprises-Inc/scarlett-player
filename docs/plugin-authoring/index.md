@@ -1,5 +1,7 @@
 # Writing a Scarlett Player Plugin
 
+> Rendered at https://scarlettplayer.com/plugin-authoring/ · Source: https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/plugin-authoring.md
+
 A plugin can add three things to the player: **events**, **state**, and **control-bar controls**. All three are open - a plugin package extends them without editing `@scarlett-player/core` or `@scarlett-player/ui`.
 
 This is what `@scarlett-player/captions`, `@scarlett-player/watermark` and friends do, and it is what any third-party package can do.

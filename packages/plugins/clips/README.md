@@ -2,6 +2,8 @@
 
 **The player captures a range; it does not produce a clip.** Rendering, storage, moderation and playback of the result are the server's problem. This plugin gives viewers a two-handle in/out selector on the timeline, loops the selection as a preview, and hands the committed range to your host code or posts it to an endpoint you configure. What happens after that is up to you.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

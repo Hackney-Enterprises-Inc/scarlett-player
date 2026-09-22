@@ -2,6 +2,8 @@
 
 WebVTT subtitles and closed captions for [Scarlett Player](https://scarlettplayer.com). External `.vtt` files are attached as `<track>` elements, subtitle renditions that hls.js parses out of an HLS manifest are picked up as they arrive, and on native HLS (Safari, iOS) the browser's own text tracks are observed. Rendering is left to the browser; there is no custom VTT parser.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

@@ -1,7 +1,9 @@
 # Scarlett Player - Development Guidelines
 
-Companion documents: [Architecture](architecture.md) (how the player is put
-together) and [Writing a plugin](plugin-authoring.md) (writing a plugin package).
+> Rendered at https://scarlettplayer.com/contributing/ · Source: https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/contributing.md
+
+Companion documents: [Architecture](https://scarlettplayer.com/architecture/index.md) (how the player is put
+together) and [Writing a plugin](https://scarlettplayer.com/plugin-authoring/index.md) (writing a plugin package).
 
 ## Code Standards
 

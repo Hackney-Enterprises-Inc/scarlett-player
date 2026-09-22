@@ -5,6 +5,8 @@ for Scarlett Player: sub-second live monitoring into an ordinary `<video>`.
 Built for the Tmesis low-delay preview (`/whep/v1/streams/<id>` on a Tmesis
 box), and it plays any WHEP server that answers offers with a `201`.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

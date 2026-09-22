@@ -2,6 +2,8 @@
 
 Chromecast plugin for Scarlett Player. Enables casting to Chromecast and Google Cast-compatible devices.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

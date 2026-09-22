@@ -2,6 +2,8 @@
 
 Compact audio player UI for [Scarlett Player](https://scarlettplayer.com). Album artwork, title and artist, a seekable progress bar that animates smoothly between time updates, play/pause, previous/next, volume, and shuffle/repeat buttons that drive the playlist plugin when it is installed. Three layouts: `full`, `compact` and `mini`.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

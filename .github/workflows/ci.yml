@@ -99,6 +99,15 @@ jobs:
         env:
           NODE_OPTIONS: --no-experimental-require-module
 
+      # Renders every documentation page and agent file in memory and writes
+      # nothing. The build that writes them (demo/build.cjs) runs only on
+      # push, below, so without this a guide link to a missing file, raw HTML
+      # the renderer refuses, or a malformed README "## Packages" table would
+      # pass review and first fail on main. Cheap (no browser), so it runs
+      # on pull requests too.
+      - name: Check documentation build
+        run: node demo/docs-build.mjs --check
+
       # ---- Real-browser verification: push to main only ----
       #
       # jsdom has no layout engine and no MSE, so three classes of defect are
@@ -145,11 +154,14 @@ jobs:
         run: node scripts/hls-fixture.mjs
 
       # Two harnesses against the same server and the same build. The site
-      # harness (scripts/verify-site.mjs) drives the homepage and both demo
-      # routes through every scenario hash at seven viewport widths and
-      # fetches every asset the pages reference from the local tree, so a
-      # stylesheet or poster that resolves to the wrong sibling path, or an
-      # image left on a hosted origin, fails here rather than on
+      # harness (scripts/verify-site.mjs) drives the homepage, both demo
+      # routes (through every scenario hash) and the five generated
+      # documentation pages at seven viewport widths, fetches every asset
+      # and every in-site link the pages reference from the local tree, and
+      # holds docs/sitemap.xml to that same route list. A stylesheet or
+      # poster that resolves to the wrong path, an image left on a hosted
+      # origin, a guide link to a slug that does not exist, or a page
+      # missing from the sitemap fails here rather than on
       # scarlettplayer.com. Same push-only gating as the playback harness:
       # it needs the Chromium install above, and runs on merge.
       - name: Run headless browser verification
@@ -168,19 +180,31 @@ jobs:
       # writes: the two bundles, the version stamps on demo/index.html and
       # docs/index.html, the generated docs/demo/index.html, the site.css and
       # assets/ mirrors beside each generated page, and the homepage entry
-      # under docs/site/. The .map files are gitignored, and naming an
+      # under docs/site/, and the documentation pages demo/docs-build.mjs
+      # renders into docs/documentation/, docs/architecture/,
+      # docs/plugin-authoring/, docs/embed/ and docs/contributing/ (the
+      # directories only: the authored .md files beside them are never
+      # written by the build; each directory also holds the guide's
+      # generated index.md), and docs/llms.txt + docs/llms-full.txt at the
+      # site root. The .map files are gitignored, and naming an
       # untracked path in a single `git checkout` would make it reject the
       # whole pathspec list and restore nothing - hence one call per path,
       # each allowed to fail on its own. `git clean` then removes what the
       # build created rather than rewrote: a hashed chunk under docs/site/
-      # whose name changed, or an asset mirrored for the first time.
+      # whose name changed, an asset mirrored for the first time, or a
+      # documentation directory on the first build after it was added,
+      # before the release bot has ever committed it.
       - name: Discard the rebuilt demo
         if: always() && github.event_name == 'push'
         run: |
           for path in \
             demo/demo.bundle.js demo/index.html demo/site.css demo/assets \
             docs/demo/demo.bundle.js docs/demo/index.html docs/demo/site.css docs/demo/assets \
-            docs/index.html docs/site; do
+            docs/index.html docs/site \
+            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/llms.txt docs/llms-full.txt; do
             git checkout -- "$path" 2>/dev/null || true
           done
-          git clean -fdq -- demo/assets docs/demo/assets docs/site || true
+          git clean -fdq -- demo/assets docs/demo/assets docs/site \
+            docs/documentation/ docs/architecture/ docs/plugin-authoring/ docs/embed/ docs/contributing/ \
+            docs/llms.txt docs/llms-full.txt || true

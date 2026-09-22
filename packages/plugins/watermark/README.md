@@ -2,6 +2,8 @@
 
 Anti-piracy watermark plugin for [Scarlett Player](https://scarlettplayer.com). Overlays text (typically the viewer's email or account id) or an image on the player, at a fixed corner or moving to a random position on a timer, with an optional delay before it first appears. The overlay is hidden until the first play and hidden again on ended, so it never sits on the poster. It stays visible while paused — hiding it there would leave screenshots and screen captures unmarked.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

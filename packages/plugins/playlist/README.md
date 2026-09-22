@@ -2,6 +2,8 @@
 
 Playlist plugin for [Scarlett Player](https://scarlettplayer.com). Queue management (add, insert, remove, move, clear), shuffle with a Fisher-Yates order, repeat modes, auto-advance when a track ends, optional localStorage persistence, and control-bar buttons for previous, next and a queue panel when `@scarlett-player/ui` is installed.
 
+> **Docs:** [scarlettplayer.com/documentation](https://scarlettplayer.com/documentation/) · **For AI coding agents:** [llms.txt](https://scarlettplayer.com/llms.txt) (index) and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) (every guide as one Markdown file)
+
 ## Installation
 
 ```bash

@@ -11,7 +11,9 @@
 
 **A lightweight, plugin-based media player for the modern web**
 
-**[scarlettplayer.com](https://scarlettplayer.com/)** | **[Playground](https://scarlettplayer.com/demo/)** | **[Architecture](./docs/architecture.md)** | **[Writing a plugin](./docs/plugin-authoring.md)** | **[Embed](./packages/embed/README.md)**
+**[scarlettplayer.com](https://scarlettplayer.com/)** | **[Docs](https://scarlettplayer.com/documentation/)** | **[Playground](https://scarlettplayer.com/demo/)** | **[Architecture](./docs/architecture.md)** | **[Writing a plugin](./docs/plugin-authoring.md)** | **[Embed](./packages/embed/README.md)**
+
+For AI coding agents: [llms.txt](https://scarlettplayer.com/llms.txt) indexes the guides and packages, and [llms-full.txt](https://scarlettplayer.com/llms-full.txt) holds every guide as one Markdown file.
 
 > **Built for [The Stream Platform](https://thestreamplatform.com)** - the official player powering live streaming, VOD, and PPV for combat sports events.
 

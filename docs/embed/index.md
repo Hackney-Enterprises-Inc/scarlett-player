@@ -1,8 +1,10 @@
 # Embed Package Implementation Guide
 
+> Rendered at https://scarlettplayer.com/embed/ · Source: https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/docs/embed-implementation.md
+
 How `@scarlett-player/embed` is built and how a host integrates it. The
 authoritative reference for every supported data attribute is
-[`packages/embed/README.md`](../packages/embed/README.md) - this document links
+[`packages/embed/README.md`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/embed/README.md) - this document links
 to it rather than repeating the table, so the two cannot drift.
 
 ## Quick Start
@@ -105,7 +107,7 @@ Auto-init scans for three selectors (`PLAYER_SELECTORS` in `create-embed.ts`):
 
 Attributes are accepted in both a short and a prefixed form - `src` or
 `data-src`, `color` or `data-brand-color`. See
-[`packages/embed/README.md`](../packages/embed/README.md) for the full list.
+[`packages/embed/README.md`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/embed/README.md) for the full list.
 
 ```html
 <!-- Simplest possible -->
