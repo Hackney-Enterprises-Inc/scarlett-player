@@ -1168,10 +1168,10 @@ export const styles = `
    setTheme() writes the same names onto the player's container, which still
    wins over the fallbacks.
 
-   --sp-accent-text is the one token with no setTheme() equivalent: it is the
-   accent applied to TEXT and active-state glyphs, split from --sp-accent
-   because the same colour has to clear 4.5:1 there and only 3:1 as a fill.
-   It falls back to --sp-accent, so a themed player needs it only when the
-   host's accent is too dark to read against the controls.
+   --sp-accent-text is the accent applied to TEXT and active-state glyphs,
+   split from --sp-accent because the same colour has to clear 4.5:1 there and
+   only 3:1 as a fill. It falls back to --sp-accent, so a themed player needs
+   it only when the host's accent is too dark to read against the controls;
+   setTheme({ accentTextColor }) writes it, and accentTextTone() derives one.
    ============================================ */
 `;

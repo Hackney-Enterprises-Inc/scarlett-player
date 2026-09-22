@@ -138,6 +138,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
 | `data-gestures` | boolean | `true` | Touch gestures on the picture (video only): double-tap the sides to seek, tap to toggle the controls. Touch only, by input type, so a mouse never triggers them. Set `false` if your page owns those gestures |
 | `data-brand-color` | string | - | Accent color (e.g., `#e50914`). `data-color` is accepted as an alias |
+| `data-brand-text-color` | string | derived | Accent for TEXT and active-state glyphs: the LIVE label, the active rows in the settings and quality menus. Defaults to a readable tone derived from `data-brand-color`, because text answers to 4.5:1 where a fill answers to 3:1 and your CSS cannot reach inside the player. Set it to take that over |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |
 | `data-hide-delay` | number | `3000` | Auto-hide delay (ms) |
@@ -287,7 +288,7 @@ or camelCase):
 - `autoplay`, `muted`, `loop` - `true` or `1` to enable
 - `controls` - `false` or `0` to hide the control bar
 - `poster`
-- `brand-color`, `primary-color`, `background-color`
+- `brand-color`, `brand-text-color`, `primary-color`, `background-color`
 - `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
 - `hide-delay`, `playback-rate`, `start-time`
 - `share-url` - the page the viewer should be sent to. Setting it adds the share button; omitting it leaves the control bar unchanged. See [Sharing](#sharing)

@@ -61,7 +61,7 @@ If you do pass `src` to `createPlayer()` for the first track, set `initialIndex:
 | `initialIndex` | `number` | `-1` | Index of the track already loaded by the player. `-1` means no track is active. Out-of-range values fall back to `-1` |
 | `persist` | `boolean` | `false` | Save tracks, index, shuffle and repeat to localStorage and restore them on init |
 | `persistKey` | `string` | `'scarlett-playlist'` | localStorage key used by `persist` |
-| `preloadNext` | `boolean` | `true` | Accepted and stored, but no code path currently reads it |
+| `preloadNext` | `boolean` | `true` | Warm the next track when the current one starts: a detached media element with `preload="metadata"`, so DNS, TLS and the container header are done before the viewer gets there. Nothing is downloaded ahead beyond that, and the end of a non-repeating playlist warms nothing |
 
 A `PlaylistTrack` is `{ id, src, title?, artist?, album?, artwork?, duration?, type?, mimeType?, metadata? }` plus any extra properties you want to carry. `type` defaults to `'audio'` in player state when omitted.
 

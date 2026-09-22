@@ -136,12 +136,36 @@ down.
 | `409` `not_live` | the publisher is not there yet, or the tap has not delivered its init | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (5 s), doubling |
 | `503` `max_monitors` | the stream is at its monitor cap | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (30 s) |
 | `503` `preview_disabled` | the preview is off for this stream | `MEDIA_NETWORK_ERROR` | yes, at `Retry-After` (30 s) |
+| `501`, `505` | the endpoint does not speak WHEP at all - a plain HTTP server answers a WHEP POST this way | `SOURCE_LOAD_FAILED` | no |
 | other `5xx` | the server failed | `MEDIA_NETWORK_ERROR` | yes, from `reconnectBaseDelayMs` |
 | the request failed (offline, DNS, CORS) | | `MEDIA_NETWORK_ERROR` | yes |
 | the answer could not be applied | | `MEDIA_NETWORK_ERROR` (`detail.type: 'media'`) | yes |
 | the connection `failed`, or stayed `disconnected` past 5 s | | `MEDIA_NETWORK_ERROR` | yes |
 | a join did not connect inside `loadTimeoutMs` | | `MEDIA_NETWORK_ERROR` | yes |
 | the video element reported an error | | `MEDIA_DECODE_ERROR` | yes |
+
+### What `load()` promises
+
+`player.load(url)` resolves once the stream is playable, and **stays pending
+while the reconnect scheduler is working** - up to `reconnectWindowMs`, five
+minutes by default. A stream that is not live yet (`409`) or at its monitor cap
+(`503`) is a wait, not a failure, and an `await load()` that rejected on the
+first one would turn every such wait into a host-visible error with a reconnect
+still running behind it.
+
+So do not use the promise as the progress channel. Listen instead:
+
+```ts
+player.on('error:reconnecting', ({ attempt, delayMs }) => showWaiting(attempt, delayMs));
+player.on('error:recovered', () => hideWaiting());
+player.on('error', (err) => { if (err.fatal) showError(err); });
+```
+
+The promise rejects when the failure is terminal - a refused token, a stream
+that does not exist, an endpoint that does not speak WHEP - and those reject in
+seconds, not at the end of the window. If a host needs a hard bound on the wait
+it owns the timeout: race the promise yourself, or set a shorter
+`reconnectWindowMs`.
 
 The reconnect delay doubles from the server's `Retry-After` when the failure
 carried one (a `409` polls at 5, 10, 20, 30, 30 s) and from

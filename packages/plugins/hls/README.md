@@ -157,6 +157,13 @@ automatically (emitting `error:reconnecting` and `error:recovered` for the
 UI), and reconnects immediately when the browser comes back online. Only after
 the reconnect window closes does the viewer see the retry UI.
 
+`player.load(url)` resolves when the manifest has been parsed and the source is
+playable, and stays pending while that reconnect window is open rather than
+rejecting on the first failure inside it - the same contract the WHEP provider
+documents. Hosts that need progress listen to `error:reconnecting`,
+`error:recovered` and fatal `error`; a host that needs a hard bound sets a
+shorter `reconnectWindowMs` or races the promise itself.
+
 ## Light Build
 
 `@scarlett-player/hls/light` uses hls.js/light (roughly 35% smaller, no

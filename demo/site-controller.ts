@@ -26,7 +26,7 @@
  */
 
 import type { ScarlettPlayer, Chapter, StateStore } from '../packages/core/src/index';
-import type { IUIPlugin } from '../packages/plugins/ui/src/index';
+import { accentTextTone, type IUIPlugin } from '../packages/plugins/ui/src/index';
 import type { IAudioUIPlugin } from '../packages/plugins/audio-ui/src/index';
 import type { IWatermarkPlugin, WatermarkPosition } from '../packages/plugins/watermark/src/index';
 import type { ClipsPlugin, ClipRange } from '../packages/plugins/clips/src/index';
@@ -48,7 +48,6 @@ import {
   type SnippetCaption,
   type SnippetKind,
 } from './snippets';
-import { accentTextTone } from './accent';
 
 /** A track handed to the full audio player's playlist. */
 export interface AudioTrackSpec {
@@ -1036,11 +1035,10 @@ export function createSiteController(deps: ControllerDeps): SiteController {
   const applyAccent = (color: string): void => {
     accent = color;
     document.documentElement.style.setProperty('--player-accent', color);
-    deps.ui.setTheme({ accentColor: color });
-    // setTheme writes --sp-accent, which the menus' text would inherit; the
-    // picker offers colours too dark to read at 13px, so the readable tone
-    // goes on the container beside it. See demo/accent.ts.
-    req('player').style.setProperty('--sp-accent-text', accentTextTone(color));
+    // The picker offers colours too dark to read at 13px, so the accent goes
+    // in with its readable tone: --sp-accent for fills, --sp-accent-text for
+    // the LIVE label and the active menu rows.
+    deps.ui.setTheme({ accentColor: color, accentTextColor: accentTextTone(color) });
     deps.audioUI.setTheme({ primary: color, progressFill: color });
     deps.miniUI.setTheme({ primary: color, progressFill: color });
     accentHex.textContent = color.toUpperCase();

@@ -852,6 +852,67 @@ describe('Analytics Plugin', () => {
       const [, options] = fetchMock.mock.calls[0];
       expect(options.headers['X-API-Key']).toBeUndefined();
     });
+
+    it('merges static headers over the defaults', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'static-headers-vid',
+        apiKey: 'secret-key-123',
+        headers: { 'X-CSRF-Token': 'csrf-1', 'X-Tenant': '42' },
+      });
+
+      await plugin.init(api);
+
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        'X-API-Key': 'secret-key-123',
+        'X-CSRF-Token': 'csrf-1',
+        'X-Tenant': '42',
+      });
+    });
+
+    it('resolves a headers function per beacon', async () => {
+      let issued = 0;
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'fn-headers-vid',
+        headers: async () => ({ 'X-CSRF-Token': `csrf-${++issued}` }),
+      });
+
+      await plugin.init(api);
+      // The async path costs a microtask, which a synchronous assertion here
+      // would miss - the static path above deliberately does not.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      plugin.trackEvent('custom-event');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const tokens = fetchMock.mock.calls.map(([, options]: any) => options.headers['X-CSRF-Token']);
+      // A rotating token is the reason the function form exists: each beacon
+      // must carry the value current when it was sent.
+      expect(tokens).toEqual(['csrf-1', 'csrf-2']);
+    });
+
+    it('still sends the beacon when headers() rejects', async () => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://api.example.com/analytics',
+        videoId: 'rejecting-headers-vid',
+        headers: () => Promise.reject(new Error('token service down')),
+      });
+
+      await plugin.init(api);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Analytics is not worth losing over a token the server would refuse.
+      expect(fetchMock).toHaveBeenCalled();
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers).toMatchObject({ 'Content-Type': 'application/json' });
+      expect(options.headers['X-CSRF-Token']).toBeUndefined();
+    });
   });
 
   describe('isHttpsUrl Helper', () => {

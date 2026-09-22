@@ -98,6 +98,8 @@ const player = await createPlayer({
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
   apiKey?: string;                // HTTPS endpoints only: X-API-Key header, or ?api_key= on unload (see API key transport)
+  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
+                                  // Extra headers for the fetch transport; a function is resolved per beacon (CSRF, Bearer)
   customBeacon?: (url: string, payload: BeaconPayload) => void; // Replace the transport (see Testing)
 }
 ```
@@ -287,6 +289,30 @@ Two consequences worth designing for:
 - **Treat the key as logged.** Query strings land in access logs, proxy logs
   and `Referer` headers. Issue the player a key scoped to beacon ingest only -
   write-only, no read access to analytics - and rotate it on its own schedule.
+
+### Extra headers
+
+`headers` adds to the fetch transport - an object, or a function resolved per
+beacon so a rotating CSRF or Bearer token is current when it is sent:
+
+```typescript
+createAnalyticsPlugin({
+  beaconUrl: '/analytics/beacon',
+  videoId: 'abc123',
+  headers: () => ({ 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')!.content }),
+});
+```
+
+They merge over `Content-Type` and `X-API-Key`, so either can be overridden. A
+function that rejects costs the headers, not the beacon: the request still goes
+out without them rather than being dropped.
+
+The unload beacon is the exception, and it is the same exception as everywhere
+else here: it travels by `navigator.sendBeacon`, which carries no headers at
+all. Its fetch fallback merges a static object, but never calls a function -
+the handler runs during pagehide, where a promise may never settle and a beacon
+that waits for a token is a beacon that never leaves. Authenticate that one
+with `apiKey`, which rides the URL.
 
 The key is attached only when `beaconUrl` resolves to HTTPS (a relative URL
 counts when the page itself is HTTPS). Over plain HTTP it is sent on neither

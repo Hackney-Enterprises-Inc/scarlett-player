@@ -11,7 +11,13 @@ export interface CaptionSource {
   src: string;
   /** Track kind - default: 'subtitles' */
   kind?: 'subtitles' | 'captions';
-  /** Whether this track should be selected by default */
+  /**
+   * Select this track once the media loads.
+   *
+   * Beats `defaultLanguage`, and applies even with `autoSelect` off. A
+   * viewer's own pick still wins: selection happens once per media, and a
+   * track already showing stands. Mark at most one source.
+   */
   default?: boolean;
 }
 

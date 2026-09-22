@@ -191,7 +191,25 @@ uiPlugin({
 play button and focus rings - all non-text, where WCAG asks for 3:1.
 
 Accent **text** (the LIVE label, the active row in the settings and quality
-menus, the active captions and cast glyphs) reads a second token first:
+menus, the active captions and cast glyphs) is a separate token, because the
+same colour has to clear 4.5:1 there. The brand red is 4.38:1 on black and
+3.84:1 on the menus' own background: fine as a progress bar, unreadable as an
+11px label. `accentTextColor` writes it:
+
+```typescript
+import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
+
+uiPlugin({
+  theme: {
+    accentColor: brand,
+    // Returns `brand` unchanged when it already clears AA, otherwise the
+    // nearest lighter tone of the same hue that does
+    accentTextColor: accentTextTone(brand),
+  },
+});
+```
+
+Or in CSS, which is the same token:
 
 ```css
 .my-player {
@@ -201,10 +219,8 @@ menus, the active captions and cast glyphs) reads a second token first:
 ```
 
 `--sp-accent-text` falls back to `--sp-accent`, so theming through
-`accentColor` alone still colours that text. Set it when your accent is dark
-enough that 11-13px labels miss the 4.5:1 AA threshold on the controls: the
-brand red is 4.38:1 on black and 3.84:1 on the menus' own background, which is
-why the default here is the lighter tone rather than `--sp-accent`.
+`accentColor` alone behaves as it always did - set one of the two forms above
+when your accent is dark enough to fail as text.
 
 ## Big Play Button
 

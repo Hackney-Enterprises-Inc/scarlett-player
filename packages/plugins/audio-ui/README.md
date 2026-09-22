@@ -42,7 +42,6 @@ The plugin appends its own element to the player container and injects one `<sty
 | `defaultArtwork` | `string` | - | Artwork URL shown until the media supplies a poster |
 | `theme` | `AudioUITheme` | see below | Colours, radius and font, merged over the defaults |
 | `classPrefix` | `string` | `'scarlett-audio'` | Prefix for every generated class name |
-| `autoHide` | `number` | `0` | Declared on the config interface but not read by the plugin yet |
 
 ### Theme
 

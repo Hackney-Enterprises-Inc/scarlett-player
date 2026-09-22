@@ -55,6 +55,15 @@ export interface PluginCreators {
    * control registry, so an audio player has nowhere to put the button.
    */
   share?: (config: any) => Plugin;
+  /**
+   * `accentTextTone` from `@scarlett-player/ui`, supplied by the builds that
+   * ship the video UI.
+   *
+   * It rides on the creators rather than being imported here so the audio-only
+   * bundle does not pull the whole UI package in for one function; the audio
+   * UIs colour their own glyphs and never read the accent-text token.
+   */
+  accentTextTone?: (color: string) => string;
 }
 
 /**
@@ -125,6 +134,18 @@ export async function createEmbedPlayer(
     if (config.brandColor) theme.accentColor = config.brandColor;
     if (config.primaryColor) theme.primaryColor = config.primaryColor;
     if (config.backgroundColor) theme.backgroundColor = config.backgroundColor;
+
+    // Accent TEXT - the LIVE label, the active menu rows - answers to 4.5:1
+    // where the same colour answers to 3:1 as a fill, and unset it follows the
+    // brand colour. An iframe host cannot reach the token with CSS of its own,
+    // so a dark brand colour is derived up to a readable tone here rather than
+    // rendering sub-AA labels nobody can fix from the outside.
+    // `data-brand-text-color` overrides, for a host that wants its own.
+    if (config.brandTextColor) {
+      theme.accentTextColor = config.brandTextColor;
+    } else if (config.brandColor && pluginCreators.accentTextTone) {
+      theme.accentTextColor = pluginCreators.accentTextTone(config.brandColor);
+    }
 
     // Build plugins array.
     //

@@ -64,8 +64,15 @@ describe('classifyResponse', () => {
     [415, 'unsupported_media_type', ErrorCode.SOURCE_LOAD_FAILED, false],
     [418, undefined, ErrorCode.SOURCE_LOAD_FAILED, false],
     [500, 'internal', ErrorCode.MEDIA_NETWORK_ERROR, true],
+    // 501 and 505 are the permanent corner of 5xx: a plain HTTP server
+    // answers a WHEP POST with 501, and retrying it for the whole reconnect
+    // window held load() pending for five minutes against a wrong URL.
+    [501, undefined, ErrorCode.SOURCE_LOAD_FAILED, false],
+    [502, 'bad_gateway', ErrorCode.MEDIA_NETWORK_ERROR, true],
     [503, 'max_monitors', ErrorCode.MEDIA_NETWORK_ERROR, true],
     [503, 'preview_disabled', ErrorCode.MEDIA_NETWORK_ERROR, true],
+    [504, 'gateway_timeout', ErrorCode.MEDIA_NETWORK_ERROR, true],
+    [505, undefined, ErrorCode.SOURCE_LOAD_FAILED, false],
   ])('%i %s maps onto %s (recoverable: %s)', (status, code, expected, recoverable) => {
     const failure = classifyResponse(status, 'application/json', null, code ? body(code) : '', URL);
     expect(failure.code).toBe(expected);
@@ -88,6 +95,17 @@ describe('classifyResponse', () => {
     expect(failure.recoverable).toBe(false);
     expect(failure.message).toContain('counter-offer');
     expect(failure.detail.type).toBe('media');
+  });
+
+  it('does not schedule a reconnect for a server that cannot speak WHEP', () => {
+    // The symptom this was found by: pointed at a plain HTTP endpoint, the
+    // provider treated 501 as a blip and kept `load()` pending for the whole
+    // reconnectWindowMs instead of failing in seconds.
+    for (const status of [501, 505]) {
+      const failure = classifyResponse(status, null, null, '', URL);
+      expect(failure.recoverable).toBe(false);
+      expect(failure.message).toContain('does not speak WHEP');
+    }
   });
 
   it('classes a token refusal as network with the status', () => {

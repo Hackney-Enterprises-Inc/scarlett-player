@@ -15,7 +15,7 @@
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
-import { uiPlugin } from '@scarlett-player/ui';
+import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
 import { createGesturesPlugin } from '@scarlett-player/gestures';
@@ -41,6 +41,7 @@ const pluginCreators: PluginCreators = {
   hls: createHLSPlugin,
   native: createNativePlugin,
   videoUI: uiPlugin,
+  accentTextTone,
   watermark: createWatermarkPlugin,
   captions: createCaptionsPlugin,
   gestures: createGesturesPlugin,

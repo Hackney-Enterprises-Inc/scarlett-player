@@ -54,7 +54,7 @@ const player = await createPlayer({
 | `label` | `string` | required | Human readable name shown in the picker |
 | `src` | `string` | required | WebVTT URL. Cross-origin URLs need CORS |
 | `kind` | `'subtitles' \| 'captions'` | `'subtitles'` | Track kind |
-| `default` | `boolean` | - | Declared on the interface but not read. Every track starts disabled and selection is managed by the plugin; use `autoSelect` and `defaultLanguage` instead |
+| `default` | `boolean` | - | Select this source once the media loads. Beats `defaultLanguage` and applies even with `autoSelect` off, so it is how you name one specific track. A track the browser is already showing still wins, and selection happens once per media. Mark at most one source |
 
 ## How tracks reach the player
 

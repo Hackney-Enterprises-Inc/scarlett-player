@@ -14,6 +14,9 @@ import { createPlayer, type Plugin, type PlayerOptions, type ScarlettPlayer } fr
  * through to `createPlayer`, but typing them properly is what stops this
  * fixture drifting away from the interface the real plugins implement.
  */
+/** What the stubbed tone helper returns, whatever it is handed. */
+const DERIVED_TONE = '#8f8fff';
+
 const mockPlugin = (id: string, name: string): Plugin => ({
   id,
   name,
@@ -39,6 +42,10 @@ const fullPluginCreators: PluginCreators = {
   hls: vi.fn(() => mockHLSPlugin),
   native: vi.fn(() => mockNativePlugin),
   videoUI: vi.fn(() => mockVideoUIPlugin),
+  // A stand-in for `accentTextTone` from the UI package: the real derivation
+  // is measured against WCAG in that package's own tests, and importing it
+  // here would drag the unmocked core into a suite that mocks it.
+  accentTextTone: vi.fn(() => DERIVED_TONE),
   audioUI: vi.fn(() => mockAudioUIPlugin),
   analytics: vi.fn(() => mockAnalyticsPlugin),
   playlist: vi.fn(() => mockPlaylistPlugin),
@@ -289,6 +296,49 @@ describe('createEmbedPlayer', () => {
     // embed must not hand it a value nobody asked for.
     const uiConfig = uiConfigOf(fullPluginCreators.videoUI);
     expect(uiConfig).not.toHaveProperty('bigPlayButton');
+  });
+
+  it('derives a readable accent text colour from the brand colour', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', brandColor: '#00008b' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    // An iframe host has no CSS of its own inside the player, so a dark brand
+    // colour would otherwise render the LIVE label and active menu rows below
+    // 4.5:1 with no way to fix it from outside.
+    const theme = uiConfigOf(fullPluginCreators.videoUI).theme as Record<string, string>;
+    expect(theme.accentColor).toBe('#00008b');
+    expect(theme.accentTextColor).toBe(DERIVED_TONE);
+    expect(fullPluginCreators.accentTextTone).toHaveBeenCalledWith('#00008b');
+  });
+
+  it('lets brandTextColor override the derived tone', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', brandColor: '#00008b', brandTextColor: '#c0ffee' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    const theme = uiConfigOf(fullPluginCreators.videoUI).theme as Record<string, string>;
+    expect(theme.accentTextColor).toBe('#c0ffee');
+  });
+
+  it('leaves accent text alone when the build ships no tone helper', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', brandColor: '#00008b' },
+      noSharePluginCreators,
+      fullAvailableTypes
+    );
+
+    // The audio-only bundle deliberately has no UI package to take the helper
+    // from; the token then falls back to --sp-accent, as it always did.
+    const theme = uiConfigOf(noSharePluginCreators.videoUI).theme as Record<string, string>;
+    expect(theme).not.toHaveProperty('accentTextColor');
   });
 
   it('should not pass bigPlayButton to the audio UI', async () => {

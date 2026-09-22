@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { uiPlugin } from '../src/index';
+import { uiPlugin, accentTextTone } from '../src/index';
 import type { MockPluginAPI } from './mock-api';
 import { PKG_VERSION } from '../src/version';
 import { registerControl, resetControlRegistry } from '../src/control-registry';
@@ -292,6 +292,32 @@ describe('UI Plugin', () => {
       expect(api.container.style.getPropertyValue('--sp-accent')).toBe('#00ff00');
       expect(api.container.style.getPropertyValue('--sp-control-height')).toBe('60px');
       expect(api.container.style.getPropertyValue('--sp-icon-size')).toBe('32px');
+
+      await plugin.destroy();
+    });
+
+    it('leaves accent text following the accent unless asked', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      plugin.setTheme({ accentColor: '#00ff00' });
+
+      // Unwritten, so the stylesheet's var() chain falls through to
+      // --sp-accent: a theme that predates this option behaves as it did.
+      expect(api.container.style.getPropertyValue('--sp-accent-text')).toBe('');
+
+      await plugin.destroy();
+    });
+
+    it('writes accent text when the theme carries one', async () => {
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      plugin.setTheme({ accentColor: '#00008b', accentTextColor: accentTextTone('#00008b') });
+
+      expect(api.container.style.getPropertyValue('--sp-accent')).toBe('#00008b');
+      expect(api.container.style.getPropertyValue('--sp-accent-text')).not.toBe('');
+      expect(api.container.style.getPropertyValue('--sp-accent-text')).not.toBe('#00008b');
 
       await plugin.destroy();
     });

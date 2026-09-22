@@ -551,6 +551,124 @@ describe('hls.js subtitle extraction', () => {
 });
 
 describe('auto-select', () => {
+
+  /**
+   * Drive a plugin to the point where selection has run once.
+   *
+   * The element's TextTrackList is replaced with a double because jsdom
+   * creates no TextTrack for an appended `<track>`, so the list the plugin
+   * reads has to be supplied.
+   */
+  const loadWith = (
+    config: Parameters<typeof createCaptionsPlugin>[0],
+    tracks: Array<{ kind: string; label: string; language: string; mode?: string }>,
+  ) => {
+    const mockApi = createMockApi();
+    withStatefulApi(mockApi);
+    let mediaLoaded: () => void = () => {};
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === 'media:loaded') mediaLoaded = cb as () => void;
+      return vi.fn();
+    });
+    mockApi.getPlugin.mockReturnValue({ getHlsInstance: () => null, isNativeHLS: () => true });
+
+    Object.defineProperty(mockApi.video, 'textTracks', {
+      value: fakeTextTrackList(tracks),
+      configurable: true,
+    });
+
+    const plugin = createCaptionsPlugin(config);
+    plugin.init(mockApi);
+    mediaLoaded();
+
+    return {
+      selected: () =>
+        (mockApi.getState('currentTextTrack') as { language: string; label: string } | null) ?? null,
+    };
+  };
+
+  it('selects a source the host marked default, with autoSelect off', () => {
+    const { selected } = loadWith(
+      {
+        sources: [
+          { src: 'en.vtt', label: 'English', language: 'en' },
+          { src: 'es.vtt', label: 'Spanish', language: 'es', default: true },
+        ],
+      },
+      [
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es' },
+      ],
+    );
+
+    // The flag is the host naming a track, not a preference to weigh against
+    // autoSelect - which is off here.
+    expect(selected()?.language).toBe('es');
+  });
+
+  it('prefers the marked source over defaultLanguage', () => {
+    const { selected } = loadWith(
+      {
+        autoSelect: true,
+        defaultLanguage: 'en',
+        sources: [
+          { src: 'en.vtt', label: 'English', language: 'en' },
+          { src: 'es.vtt', label: 'Spanish', language: 'es', default: true },
+        ],
+      },
+      [
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es' },
+      ],
+    );
+
+    expect(selected()?.language).toBe('es');
+  });
+
+  it('tells two renditions of one language apart by label', () => {
+    const { selected } = loadWith(
+      {
+        sources: [
+          { src: 'en.vtt', label: 'English', language: 'en' },
+          { src: 'en-sdh.vtt', label: 'English (SDH)', language: 'en', default: true },
+        ],
+      },
+      [
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'English (SDH)', language: 'en' },
+      ],
+    );
+
+    // Language alone would have matched the plain English row above it; the
+    // label is what makes the marked rendition reachable at all.
+    expect(selected()).toMatchObject({ language: 'en', label: 'English (SDH)' });
+  });
+
+  it('leaves a track the browser is already showing alone', () => {
+    const { selected } = loadWith(
+      {
+        sources: [
+          { src: 'en.vtt', label: 'English', language: 'en', default: true },
+          { src: 'es.vtt', label: 'Spanish', language: 'es' },
+        ],
+      },
+      [
+        { kind: 'subtitles', label: 'English', language: 'en' },
+        { kind: 'subtitles', label: 'Spanish', language: 'es', mode: 'showing' },
+      ],
+    );
+
+    expect(selected()?.language).toBe('es');
+  });
+
+  it('selects nothing when no source is marked and autoSelect is off', () => {
+    const { selected } = loadWith(
+      { sources: [{ src: 'en.vtt', label: 'English', language: 'en' }] },
+      [{ kind: 'subtitles', label: 'English', language: 'en' }],
+    );
+
+    expect(selected()).toBeNull();
+  });
   it('does not override a selection made outside the player', () => {
     const mockApi = createMockApi();
     withStatefulApi(mockApi);

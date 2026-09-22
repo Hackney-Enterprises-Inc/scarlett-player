@@ -47,8 +47,29 @@ export interface AnalyticsConfig {
   /** Your API endpoint for receiving analytics beacons */
   beaconUrl: string;
 
-  /** Optional API key for authentication (only sent on HTTPS fetch fallbacks) */
+  /**
+   * Optional API key for authentication.
+   *
+   * HTTPS endpoints only. Sent as `X-API-Key` on the fetch transport, and as
+   * an `api_key` query parameter on the unload beacon, which `sendBeacon`
+   * cannot give a header to.
+   */
   apiKey?: string;
+
+  /**
+   * Extra headers for the fetch transport: an object, or a function resolved
+   * per beacon for a rotating CSRF or Bearer token. Merged over
+   * `Content-Type` and `X-API-Key`, so either can be overridden.
+   *
+   * The unload beacon (`viewEnd` on pagehide) goes out through
+   * `navigator.sendBeacon`, which carries no headers at all; its fetch
+   * fallback merges a static object but never calls a function, because a
+   * promise awaited in a pagehide handler may never settle. Authenticate that
+   * one with `apiKey`, which rides the URL.
+   */
+  headers?:
+    | Record<string, string>
+    | (() => Record<string, string> | Promise<Record<string, string>>);
 
   // === Video Metadata ===
   /** Unique video identifier (required) */

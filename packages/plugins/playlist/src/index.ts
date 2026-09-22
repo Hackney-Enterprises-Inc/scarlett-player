@@ -220,6 +220,34 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
   };
 
   /**
+   * The index `next()` would play, read-only.
+   *
+   * `getNextIndex()` is not a pure query: at the wrap of a shuffled
+   * `repeat: 'all'` playlist it draws a fresh shuffle order, which is the
+   * right thing to do when the viewer actually advances and the wrong thing to
+   * do for anyone merely looking ahead. Calling it from the preloader moved
+   * that draw to the moment the last track STARTED, so `previous()` and any UI
+   * reading `shuffleOrder` from state saw the next order early.
+   *
+   * At that wrap this returns -1 rather than guessing: under shuffle the track
+   * after the last one does not exist until the order is drawn. Everywhere
+   * else it agrees with `getNextIndex()`.
+   */
+  const peekNextIndex = (): number => {
+    if (tracks.length === 0) return -1;
+    if (repeat === 'one') return currentIndex;
+
+    const nextLogical = getLogicalIndex(currentIndex) + 1;
+
+    if (nextLogical >= tracks.length) {
+      // An unshuffled repeat wraps to a track that is already known.
+      return repeat === 'all' && !shuffle ? getActualIndex(0) : -1;
+    }
+
+    return getActualIndex(nextLogical);
+  };
+
+  /**
    * Get previous track index
    */
   const getPreviousIndex = (): number => {
@@ -321,6 +349,73 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
   };
 
   /**
+   * Detached media element that warms the next track, when `preloadNext` is on.
+   *
+   * A media element fetches without ever being in the document, so nothing is
+   * inserted, styled or shown. `preload="metadata"` is the deliberate limit:
+   * the point is to have DNS, TLS and the container header done before the
+   * viewer reaches the next track, not to pull the next file down while the
+   * current one still needs the bandwidth.
+   */
+  let preloadEl: HTMLMediaElement | null = null;
+
+  /** The src `preloadEl` is warming, so re-running this is free. */
+  let preloadedSrc = '';
+
+  /** Stop and release the preload element. */
+  const clearPreload = (): void => {
+    if (!preloadEl) return;
+
+    // Both lines, in this order: dropping the attribute alone leaves the
+    // in-flight fetch running until the element is collected.
+    preloadEl.removeAttribute('src');
+    preloadEl.load();
+    preloadEl = null;
+    preloadedSrc = '';
+  };
+
+  /**
+   * Warm the track that `next()` would play.
+   *
+   * A no-op when `preloadNext` is off, when there is no next track (the end of
+   * a playlist that does not repeat), when repeat is `'one'` (the next track
+   * is the one already loaded), or when that src is already being warmed.
+   */
+  const preloadNextTrack = (): void => {
+    if (mergedConfig.preloadNext === false) return;
+    if (typeof document === 'undefined') return;
+
+    const index = peekNextIndex();
+    if (index < 0 || index === currentIndex) return;
+
+    const next = tracks[index];
+    if (!next?.src || next.src === preloadedSrc) return;
+
+    const kind = next.type === 'video' ? 'video' : 'audio';
+    // The element has to match the medium: an <audio> handed an MP4 aborts the
+    // fetch it was created for and fires `error` instead.
+    if (!preloadEl || preloadEl.tagName.toLowerCase() !== kind) {
+      clearPreload();
+      preloadEl = document.createElement(kind);
+      preloadEl.preload = 'metadata';
+      // A warm-up that fails costs nothing and must stay silent: the real load
+      // reports its own errors through the provider when the viewer gets there.
+      //
+      // Reads preloadedSrc rather than closing over this call's track: the
+      // element is reused for every later track of the same kind, so a
+      // captured src would name the first one in every log line after that.
+      preloadEl.addEventListener('error', () => {
+        api?.logger.debug('Preload of the next track failed', { src: sanitizeUrl(preloadedSrc) });
+      });
+    }
+
+    preloadedSrc = next.src;
+    preloadEl.src = next.src;
+
+    api?.logger.debug('Preloading next track', { index, src: sanitizeUrl(next.src) });
+  };
+
+  /**
    * Set current track (emits playlist:change event).
    *
    * When autoLoad is enabled (default), also emits media:load-request so the
@@ -363,6 +458,10 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
     if (mergedConfig.autoLoad !== false && track.src) {
       api?.emit('media:load-request', { src: track.src, autoplay: options.autoplay ?? true });
     }
+
+    // After the load request, not before: the current track owns the network
+    // until it has what it needs.
+    preloadNextTrack();
   };
 
   // Plugin implementation
@@ -510,6 +609,7 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
       lifecycle++;
       api?.logger.info('Playlist plugin destroying');
       persistPlaylist();
+      clearPreload();
       releaseStyles?.();
       releaseStyles = null;
       releaseControls?.();

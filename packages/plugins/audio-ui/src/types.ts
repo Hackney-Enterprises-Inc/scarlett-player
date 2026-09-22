@@ -78,9 +78,6 @@ export interface AudioUIPluginConfig {
   /** CSS class prefix (default: 'scarlett-audio') */
   classPrefix?: string;
 
-  /** Auto-hide controls after inactivity (ms, 0 to disable) */
-  autoHide?: number;
-
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }
