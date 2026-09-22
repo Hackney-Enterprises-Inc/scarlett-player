@@ -4477,7 +4477,7 @@
       }
     }
     return videoCodecs !== void 0 && // Force media capabilities check for HEVC to avoid failure on Windows
-    (videoCodecs.split(",").some((videoCodec) => isHEVC(videoCodec)) || level.width > 1920 && level.height > 1088 || level.height > 1920 && level.width > 1088 || level.frameRate > Math.max(currentFrameRate, 30) || level.videoRange !== "SDR" && level.videoRange !== currentVideoRange || level.bitrate > Math.max(currentBw, 8e6)) || !!audioChannels && isFiniteNumber(maxChannels) && Object.keys(audioChannels).some((channels) => parseInt(channels) > maxChannels);
+    (videoCodecs.split(",").some((videoCodec) => isHEVC(videoCodec)) || level.width > 1920 && level.height > 1088 || level.height > 1920 && level.width > 1088 || level.frameRate > Math.max(currentFrameRate, 30) || level.videoRange !== "SDR" && level.videoRange !== currentVideoRange || level.bitrate > Math.max(currentBw, 8e6)) || !!audioChannels && isFiniteNumber(maxChannels) && Object.keys(audioChannels).some((channels2) => parseInt(channels2) > maxChannels);
   }
   function getMediaDecodingInfoPromise(level, audioTracksByGroup, mediaCapabilities, cache = {}) {
     const videoCodecs = level.videoCodec;
@@ -4846,8 +4846,8 @@
             return;
           }
           tier.hasDefaultAudio = tier.hasDefaultAudio || audioTracksByGroup.hasDefaultAudio ? audioGroup.hasDefault : audioGroup.hasAutoSelect || !audioTracksByGroup.hasDefaultAudio && !audioTracksByGroup.hasAutoSelectAudio;
-          Object.keys(audioGroup.channels).forEach((channels) => {
-            tier.channels[channels] = (tier.channels[channels] || 0) + audioGroup.channels[channels];
+          Object.keys(audioGroup.channels).forEach((channels2) => {
+            tier.channels[channels2] = (tier.channels[channels2] || 0) + audioGroup.channels[channels2];
           });
         });
       }
@@ -4862,14 +4862,14 @@
       lang,
       assocLang,
       characteristics,
-      channels,
+      channels: channels2,
       audioCodec
     } = option;
     return {
       lang,
       assocLang,
       characteristics,
-      channels,
+      channels: channels2,
       audioCodec
     };
   }
@@ -4913,9 +4913,9 @@
   function audioMatchPredicate(option, track) {
     const {
       audioCodec,
-      channels
+      channels: channels2
     } = option;
-    return (audioCodec === void 0 || (track.audioCodec || "").substring(0, 4) === audioCodec.substring(0, 4)) && (channels === void 0 || channels === (track.channels || "2"));
+    return (audioCodec === void 0 || (track.audioCodec || "").substring(0, 4) === audioCodec.substring(0, 4)) && (channels2 === void 0 || channels2 === (track.channels || "2"));
   }
   function findClosestLevelWithAudioGroup(option, levels, allAudioTracks, searchIndex, matchPredicate) {
     const currentLevel = levels[searchIndex];
@@ -12537,7 +12537,7 @@ ${newDetails.m3u8}`);
               results[type] = medias;
               const lang = attrs.LANGUAGE;
               const assocLang = attrs["ASSOC-LANGUAGE"];
-              const channels = attrs.CHANNELS;
+              const channels2 = attrs.CHANNELS;
               const characteristics = attrs.CHARACTERISTICS;
               const instreamId = attrs["INSTREAM-ID"];
               const media = {
@@ -12556,8 +12556,8 @@ ${newDetails.m3u8}`);
               if (assocLang) {
                 media.assocLang = assocLang;
               }
-              if (channels) {
-                media.channels = channels;
+              if (channels2) {
+                media.channels = channels2;
               }
               if (characteristics) {
                 media.characteristics = characteristics;
@@ -20309,7 +20309,7 @@ ${newDetails.m3u8}`);
               assocLang,
               characteristics,
               audioCodec,
-              channels
+              channels: channels2
             } = this.bufferedTrack;
             if (!matchesOption({
               name,
@@ -20317,7 +20317,7 @@ ${newDetails.m3u8}`);
               assocLang,
               characteristics,
               audioCodec,
-              channels
+              channels: channels2
             }, switchingTrack, audioMatchPredicate)) {
               if (useAlternateAudio(switchingTrack.url, this.hls)) {
                 this.log("Switching audio track : flushing all audio");
@@ -20831,7 +20831,7 @@ ${newDetails.m3u8}`);
               assocLang,
               characteristics,
               audioCodec,
-              channels
+              channels: channels2
             } = currentTrack;
             for (let i = 0; i < audioTracks.length; i++) {
               const track = audioTracks[i];
@@ -20841,7 +20841,7 @@ ${newDetails.m3u8}`);
                 assocLang,
                 characteristics,
                 audioCodec,
-                channels
+                channels: channels2
               }, track, audioMatchPredicate)) {
                 return i;
               }
@@ -36027,8 +36027,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   object-fit: contain;
 }
 
+/* The container is a tab stop - the plugin sets tabindex="0" on it so the
+   keyboard shortcuts have somewhere to land - so it must show where focus is.
+   A pointer press focuses it too, which is why the ring is on :focus-visible
+   and the plain :focus keeps outline:none: clicking the video should not draw
+   a box around the player. The offset is negative so the ring is painted
+   inside the player box; drawn outside it, a host page's own overflow or a
+   flush-fitting wrapper can clip it away. */
 .sp-container:focus {
   outline: none;
+}
+
+.sp-container:focus-visible {
+  outline: 3px solid var(--sp-accent, #e50914);
+  outline-offset: -3px;
 }
 
 /* ============================================
@@ -36538,6 +36550,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 /* ============================================
    Live Indicator
    ============================================ */
+/* Accent text uses --sp-accent-text, not --sp-accent: the brand red as TEXT
+   is 4.38:1 on black and 3.84:1 on the menus' own rgba(20,20,20,.95), under
+   the 4.5:1 WCAG AA wants for 11-13px labels. The lighter default clears it at
+   6.4:1 and 5.7:1. --sp-accent keeps the brand red for progress fills, big
+   play and focus rings, which are non-text and need only 3:1. A host that
+   themes --sp-accent still colours this text - the chain reads its token
+   first - so setting --sp-accent-text is only needed when that colour is too
+   dark to read. */
 .sp-live {
   display: flex;
   align-items: center;
@@ -36546,7 +36566,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
   cursor: pointer;
   padding: 6px 10px;
   border-radius: 4px;
@@ -36658,7 +36678,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 .sp-quality-menu__item--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-quality-menu__check {
@@ -36830,7 +36850,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 .sp-settings-panel__item--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-settings-panel__check {
@@ -36855,14 +36875,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
    Captions Button
    ============================================ */
 .sp-captions--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 /* ============================================
    Cast Button States
    ============================================ */
 .sp-cast--active {
-  color: var(--sp-accent, #e50914);
+  color: var(--sp-accent-text, var(--sp-accent, #ff4d57));
 }
 
 .sp-cast--unavailable {
@@ -37145,6 +37165,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 
    setTheme() writes the same names onto the player's container, which still
    wins over the fallbacks.
+
+   --sp-accent-text is the one token with no setTheme() equivalent: it is the
+   accent applied to TEXT and active-state glyphs, split from --sp-accent
+   because the same colour has to clear 4.5:1 there and only 3:1 as a fill.
+   It falls back to --sp-accent, so a themed player needs it only when the
+   host's accent is too dark to read against the controls.
    ============================================ */
 `;
     }
@@ -42617,6 +42643,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const error = videoEl.error;
         const { code, message } = classifyMediaError(error);
         api?.logger.error("Video error", { mediaErrorCode: error?.code, code, message });
+        api?.setState("playbackState", "error");
+        api?.setState("buffering", false);
         api?.emit("error", {
           code,
           message,
@@ -42835,6 +42863,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             watchdog = setTimeout(() => {
               if (session !== loadSession) return;
               settle();
+              api?.setState("playbackState", "error");
+              api?.setState("buffering", false);
               reject(new Error("Video took too long to load (network timeout)"));
             }, load_timeout_ms);
           }
@@ -52248,11 +52278,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         let urlWithApiKey = mergedConfig.beaconUrl;
         if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
           try {
-            const urlObj = new URL(mergedConfig.beaconUrl);
+            const base = typeof window !== "undefined" && window.location?.href ? window.location.href : void 0;
+            const urlObj = base ? new URL(mergedConfig.beaconUrl, base) : new URL(mergedConfig.beaconUrl);
             urlObj.searchParams.set("api_key", mergedConfig.apiKey);
             urlWithApiKey = urlObj.toString();
           } catch {
-            urlWithApiKey = `${mergedConfig.beaconUrl}?api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
+            const separator = mergedConfig.beaconUrl.includes("?") ? "&" : "?";
+            urlWithApiKey = `${mergedConfig.beaconUrl}${separator}api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
           }
         }
         const blob = new Blob([body], { type: "application/json" });
@@ -53059,6 +53091,50 @@ ${indent}src: ${tsString(config.src)},`;
     }
   }
 
+  // demo/accent.ts
+  var MENU_BACKGROUND = "#202020";
+  var AA_TEXT = 4.5;
+  function channels(hex2) {
+    const value = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex2.trim());
+    const digits = value?.[1];
+    if (!digits) return null;
+    const full = digits.length === 3 ? digits.split("").map((c) => c + c).join("") : digits;
+    return [
+      parseInt(full.slice(0, 2), 16),
+      parseInt(full.slice(2, 4), 16),
+      parseInt(full.slice(4, 6), 16)
+    ];
+  }
+  function luminance([r, g, b]) {
+    const [lr, lg, lb] = [r, g, b].map((channel) => {
+      const srgb = channel / 255;
+      return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+  }
+  function contrast(a, b) {
+    const light = Math.max(luminance(a), luminance(b));
+    const dark = Math.min(luminance(a), luminance(b));
+    return (light + 0.05) / (dark + 0.05);
+  }
+  function lighten(color, amount) {
+    return color.map((channel) => Math.round(channel + (255 - channel) * amount));
+  }
+  function hex(color) {
+    return `#${color.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+  }
+  function accentTextTone(color) {
+    const parsed = channels(color);
+    const background = channels(MENU_BACKGROUND);
+    if (!parsed || !background) return color;
+    if (contrast(parsed, background) >= AA_TEXT) return hex(parsed);
+    for (let amount = 0.04; amount <= 1; amount += 0.04) {
+      const candidate = lighten(parsed, amount);
+      if (contrast(candidate, background) >= AA_TEXT) return hex(candidate);
+    }
+    return "#ffffff";
+  }
+
   // demo/site-controller.ts
   var DEFAULT_ACCENT = "#e50914";
   var LOG_LIMIT = 200;
@@ -53777,6 +53853,7 @@ ${indent}src: ${tsString(config.src)},`;
       accent = color;
       document.documentElement.style.setProperty("--player-accent", color);
       deps.ui.setTheme({ accentColor: color });
+      req("player").style.setProperty("--sp-accent-text", accentTextTone(color));
       deps.audioUI.setTheme({ primary: color, progressFill: color });
       deps.miniUI.setTheme({ primary: color, progressFill: color });
       accentHex.textContent = color.toUpperCase();
@@ -54376,7 +54453,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.15.3" : "dev";
+  var VERSION = true ? "1.15.4" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT
