@@ -343,6 +343,16 @@ retried with "Re-run failed jobs". A local publish is the same script:
 doppler run -- ./scripts/upload-cdn.sh 1.11.1
 ```
 
+The script ends by checking the CDN against the origin: the versioned file
+must carry the version, and a cache-busted `latest/` must have the same ETag.
+The edge's own copy of `latest/` is reported but never failed on, because it
+is written with a one-hour `max-age` and turns over on its own. The same
+check runs on its own, without credentials, for any published version:
+
+```bash
+VERIFY_ONLY=1 ./scripts/upload-cdn.sh 1.16.1
+```
+
 ### Layout
 
 ```

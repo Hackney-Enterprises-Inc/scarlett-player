@@ -426,11 +426,8 @@ several scenarios assert against fixed waits tuned on a developer machine.
 run those by hand after `pnpm build` when you touch a package manifest or the
 embed build.
 
-CI runs on Node 24 with `NODE_OPTIONS=--no-experimental-require-module` for the
-test step. Vitest 1.x races Node 24's `require(esm)` during worker teardown and
-aborts the process after every test has passed (exit 134). If `pnpm test` dies
-that way locally on Node 24, set the same variable; it goes away once vitest is
-upgraded to 3.x.
+CI runs the test step on Node 24 with no extra flags: since the move to vitest 3
+nothing about Node 24 needs working around.
 
 ### Releasing
 

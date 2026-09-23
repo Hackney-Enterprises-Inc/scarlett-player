@@ -68,7 +68,7 @@ function createMockApi(state: Record<string, unknown> = {}) {
   };
 }
 
-let warn: MockInstance<any[], any>;
+let warn: MockInstance<typeof console.warn>;
 
 beforeEach(() => {
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

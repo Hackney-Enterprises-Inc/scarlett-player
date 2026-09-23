@@ -119,7 +119,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: 
   return { promise, resolve, reject };
 }
 
-let warn: MockInstance<any[], any>;
+let warn: MockInstance<typeof console.warn>;
 
 beforeEach(() => {
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

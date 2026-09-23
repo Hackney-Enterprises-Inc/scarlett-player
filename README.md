@@ -361,11 +361,8 @@ Node `>=18` and pnpm `>=8`, per `engines` in the root `package.json`. pnpm
 `10.25.0` is pinned by `packageManager`, and CI installs pnpm from that field
 rather than from a version pin of its own.
 
-CI runs on Node 24 and sets `NODE_OPTIONS=--no-experimental-require-module`
-for `pnpm test`. That is a workaround for a teardown crash, not a test
-failure: vitest 1.x predates Node 24's `require(esm)` and the two race when
-vitest tears down its worker threads, aborting the process after every test
-has already passed. It goes away once vitest moves to 3.x.
+CI runs on Node 24, and `pnpm test` needs no extra flags there since the
+move to vitest 3.
 
 ```bash
 pnpm install          # Install dependencies
