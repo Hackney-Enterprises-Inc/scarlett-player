@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/clips",
-  "version": "1.16.1",
+  "version": "1.16.2",
   "description": "Clips Plugin for Scarlett Player - viewer-created clips with two-handle range selection, preview loop and host submission",
   "type": "module",
   "main": "dist/index.cjs",
