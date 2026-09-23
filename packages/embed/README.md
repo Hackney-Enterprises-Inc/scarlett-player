@@ -139,8 +139,8 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-controls` | boolean | `true` | Show/hide UI controls |
 | `data-big-play-button` | boolean | `true` | Centred play button over the poster (video only). Set `false` when your page draws its own play affordance |
 | `data-gestures` | boolean | `true` | Touch gestures on the picture (video only): double-tap the sides to seek, tap to toggle the controls. Touch only, by input type, so a mouse never triggers them. Set `false` if your page owns those gestures |
-| `data-brand-color` | string | - | Accent color (e.g., `#e50914`). `data-color` is accepted as an alias |
-| `data-brand-text-color` | string | derived | Accent for TEXT and active-state glyphs: the LIVE label, the active rows in the settings and quality menus. Defaults to a readable tone derived from `data-brand-color`, because text answers to 4.5:1 where a fill answers to 3:1 and your CSS cannot reach inside the player. Set it to take that over |
+| `data-brand-color` | string | - | Accent color, any CSS color value (e.g., `#e50914`, `rgb(229 9 20)`, `crimson`). Hex, `rgb()`/`rgba()` and named colors also get a readable text tone derived for them, see `data-brand-text-color`. `data-color` is accepted as an alias |
+| `data-brand-text-color` | string | derived | Accent for TEXT and active-state glyphs: the LIVE label, the active rows in the settings and quality menus. Defaults to a readable tone derived from `data-brand-color` in any hex, `rgb()` or named form (any other form, such as `hsl()` or `var()`, is used as given), because text answers to 4.5:1 where a fill answers to 3:1 and your CSS cannot reach inside the player. Set it to take that over |
 | `data-primary-color` | string | - | Primary UI color |
 | `data-background-color` | string | - | Control bar background |
 | `data-hide-delay` | number | `3000` | Auto-hide delay (ms) |

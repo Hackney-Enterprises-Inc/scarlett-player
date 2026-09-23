@@ -92,7 +92,7 @@ describe('HLSPlugin', () => {
     HTMLVideoElement.prototype.pause = vi.fn();
 
     // Mock canPlayType for native HLS detection
-    HTMLVideoElement.prototype.canPlayType = vi.fn((_type: string) => {
+    HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>((_type) => {
       // Simulate non-Safari (no native HLS support)
       return '';
     });
@@ -1455,7 +1455,7 @@ describe('hls-loader', () => {
     });
 
     it('should return false when native HLS not supported', () => {
-      HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
+      HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
 
       expect(hlsLoader.supportsNativeHLS()).toBe(false);
     });
@@ -1475,7 +1475,7 @@ describe('hls-loader', () => {
 
   describe('isHLSSupported()', () => {
     it('should return true if hls.js is supported', () => {
-      HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
+      HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
       expect(hlsLoader.isHLSSupported()).toBe(true);
     });
 
@@ -1491,7 +1491,7 @@ describe('hls-loader', () => {
     it('should return false if neither is supported', () => {
       delete (window as any).MediaSource;
       delete (window as any).WebKitMediaSource;
-      HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
+      HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
       expect(hlsLoader.isHLSSupported()).toBe(false);
     });
   });

@@ -76,7 +76,8 @@ export interface ThemeConfig {
    * answers to 3:1: the brand red is 4.38:1 on black and fails as a label
    * while passing as a progress bar. Unset, it follows `accentColor`, so a
    * dark brand accent needs this set - `accentTextTone(accentColor)` derives
-   * one that clears AA on the menus.
+   * one that clears AA on the menus from a hex, `rgb()`/`rgba()` or named
+   * `accentColor`, and hands any other form (`hsl()`, `var()`) back as given.
    */
   accentTextColor?: string;
   /** Control bar background (default: 'rgba(0,0,0,0.7)') */

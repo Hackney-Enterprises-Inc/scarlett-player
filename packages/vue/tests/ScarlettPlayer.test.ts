@@ -206,10 +206,10 @@ describe('ScarlettPlayer.vue typed event payloads', () => {
       handler(payload);
     }
 
-    expect(onLoaded.mock.calls[0][0]).toBe(payloads['media:loaded']);
-    expect(onLoadedmetadata.mock.calls[0][0]).toBe(payloads['media:loadedmetadata']);
-    expect(onQualitylevels.mock.calls[0][0]).toBe(payloads['quality:levels']);
-    expect(onError.mock.calls[0][0]).toBe(payloads.error);
+    expect(onLoaded.mock.calls[0]?.[0]).toBe(payloads['media:loaded']);
+    expect(onLoadedmetadata.mock.calls[0]?.[0]).toBe(payloads['media:loadedmetadata']);
+    expect(onQualitylevels.mock.calls[0]?.[0]).toBe(payloads['quality:levels']);
+    expect(onError.mock.calls[0]?.[0]).toBe(payloads.error);
   });
 
   it.each([new Error('Init failed'), 'Init failed'])('emits an Error for init rejection %s', async (failure) => {
@@ -221,7 +221,7 @@ describe('ScarlettPlayer.vue typed event payloads', () => {
     await settle();
 
     expect(onError).toHaveBeenCalledOnce();
-    const emitted = onError.mock.calls[0][0];
+    const emitted = onError.mock.calls[0]?.[0];
     expect(emitted).toBeInstanceOf(Error);
     expect(emitted.message).toBe('Init failed');
     if (failure instanceof Error) expect(emitted).toBe(failure);

@@ -14,12 +14,10 @@ export type HlsEventHandler = (...args: unknown[]) => void;
 /**
  * A mock hls.js instance plus its captured event handlers.
  *
- * The members are typed `Mock` rather than `ReturnType<typeof vi.fn>`: the
- * latter resolves to `vi.fn`'s implementation overload, `Mock<any[], unknown>`,
- * and a mock created with a typed implementation (`on` below) is not assignable
- * to it, because `withImplementation` puts the argument tuple in a contravariant
- * position. Bare `Mock` is `Mock<any, any>`, which accepts every shape while
- * still exposing `.mock`, `.mockImplementation` and friends to the suites.
+ * The members are typed bare `Mock`, which since vitest 2 is
+ * `Mock<(...args: any[]) => any>`: it accepts a mock created with a typed
+ * implementation (`on` below) while still exposing `.mock`,
+ * `.mockImplementation` and friends to the suites.
  */
 export interface CapturedHls {
   instance: {
@@ -188,7 +186,7 @@ export const installMediaStubs = (): void => {
   HTMLVideoElement.prototype.play = vi.fn().mockResolvedValue(undefined);
   HTMLVideoElement.prototype.pause = vi.fn();
   // Non-Safari: no native HLS, force the hls.js path
-  HTMLVideoElement.prototype.canPlayType = vi.fn(() => '');
+  HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
 };
 
 /**

@@ -204,12 +204,20 @@ import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
 uiPlugin({
   theme: {
     accentColor: brand,
-    // Returns `brand` unchanged when it already clears AA, otherwise the
+    // Returns `brand` as `#rrggbb` when it already clears AA, otherwise the
     // nearest lighter tone of the same hue that does
     accentTextColor: accentTextTone(brand),
   },
 });
 ```
+
+`accentTextTone()` reads hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`),
+`rgb()`/`rgba()` in the comma or space syntax (channels and alpha as numbers or
+percentages) and the CSS named colours, ignoring case and surrounding space. A
+translucent accent is composited over the menus first, since that is what the
+viewer sees, and the result is always an opaque `#rrggbb`: `white` comes back as
+`#ffffff`. Anything else - `hsl()`, `var()`, a gradient, `transparent` - comes
+back unchanged, so set `accentTextColor` yourself for those.
 
 Or in CSS, which is the same token:
 

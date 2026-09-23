@@ -11,6 +11,14 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    # main only, on both triggers. workflow_dispatch lets a person pick any
+    # branch, and the job would then lint, build and record the version from
+    # THAT branch before "Return to main" switched the checkout for the
+    # publish: main's manifests published under another branch's recorded
+    # version, with the CDN job handed the other branch's bundles. A skipped
+    # release job also skips the cdn job (needs.release.result is not
+    # 'success'), so nothing downstream runs on a stray dispatch either.
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
       pull-requests: write
@@ -74,7 +82,7 @@ jobs:
         run: pnpm run typecheck
 
       - name: Run test suite
-        run: NODE_OPTIONS=--no-experimental-require-module pnpm run test
+        run: pnpm run test
 
       # Gate the publish on the tarballs actually containing what their
       # manifests promise. v1.7.0 went out with @scarlett-player/embed and
@@ -133,6 +141,35 @@ jobs:
           commit: 'chore: release packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Put the checkout back on main before anything else builds or commits.
+      #
+      # With a pending changeset, changesets/action runs `git checkout -b
+      # changeset-release/main` (or checks out the existing branch), versions,
+      # commits, force-pushes, and LEAVES THE CHECKOUT ON THAT BRANCH. Every
+      # step after it then worked on the release branch. On the PR #112 merge
+      # (run 35783689203) "Update demo site" committed "chore: rebuild demo
+      # bundle for v1.16.0 [skip ci]" there and `git push` failed with "The
+      # current branch changeset-release/main has no upstream branch"; on the
+      # PR #108 merge an earlier variant pushed the demo commit INTO release
+      # PR #109. Only the release-PR merge itself, where there is no changeset
+      # and the action never leaves main, rebuilt the site, which is the
+      # opposite of what the demo step is for.
+      #
+      # Before "Publish to npm" as well as the demo step: the publish reads
+      # each package's version from the working tree, and on the release
+      # branch that is the next, unmerged version. --force is safe because
+      # the action commits everything it changed, so anything left over is
+      # not wanted on main. actions/checkout with fetch-depth: 0 on a push
+      # creates the local main branch, so the target exists.
+      - name: Return to main
+        run: |
+          git checkout --quiet --force main
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$branch" != "main" ]; then
+            echo "::error::expected to be on main after changesets/action, found $branch"
+            exit 1
+          fi
 
       # Publish to npm.
       #
@@ -394,6 +431,14 @@ jobs:
               docs/vs-videojs/ docs/vs-mux/ docs/vs-bitmovin/ \
               docs/llms.txt docs/llms-full.txt
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
+            # Checked again right before the push, so a future reordering
+            # of the steps above fails here instead of pushing the demo
+            # commit to a release branch (see "Return to main").
+            branch=$(git rev-parse --abbrev-ref HEAD)
+            if [ "$branch" != "main" ]; then
+              echo "::error::refusing to push the demo commit from $branch; it belongs on main"
+              exit 1
+            fi
             git push
             echo "- Demo site updated" >> $GITHUB_STEP_SUMMARY
           fi

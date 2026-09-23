@@ -203,8 +203,8 @@ describe('track:audio selection routing', () => {
   /** Invoke the handler the plugin registered for a player event. */
   const fire = (event: string, payload: unknown): void => {
     api.on.mock.calls
-      .filter(([name]: [string]) => name === event)
-      .forEach(([, handler]: [string, (p: unknown) => void]) => handler(payload));
+      .filter(([name]) => name === event)
+      .forEach(([, handler]) => (handler as (p: unknown) => void)(payload));
   };
 
   beforeEach(async () => {
