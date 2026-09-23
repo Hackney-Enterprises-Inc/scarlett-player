@@ -424,11 +424,8 @@ several scenarios assert against fixed waits tuned on a developer machine.</p>
 <p><code>pnpm validate</code> covers everything except the two post-build guards (3 and 4);
 run those by hand after <code>pnpm build</code> when you touch a package manifest or the
 embed build.</p>
-<p>CI runs on Node 24 with <code>NODE_OPTIONS=--no-experimental-require-module</code> for the
-test step. Vitest 1.x races Node 24&#39;s <code>require(esm)</code> during worker teardown and
-aborts the process after every test has passed (exit 134). If <code>pnpm test</code> dies
-that way locally on Node 24, set the same variable; it goes away once vitest is
-upgraded to 3.x.</p>
+<p>CI runs the test step on Node 24 with no extra flags: since the move to vitest 3
+nothing about Node 24 needs working around.</p>
 <h3 id="releasing"><a class="anchor" href="#releasing">Releasing</a></h3>
 <p>Merging a changeset to <code>main</code> makes <code>release.yml</code> open (or update) a
 <code>chore: release packages</code> PR on the <code>changeset-release/main</code> branch. Merging

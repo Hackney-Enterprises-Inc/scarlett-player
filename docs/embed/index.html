@@ -374,6 +374,12 @@ class EmbedController extends Controller
 keeps the two jobs publishing byte-identical files and lets a failed upload be
 retried with &quot;Re-run failed jobs&quot;. A local publish is the same script:</p>
 <pre tabindex="0"><code class="language-bash">doppler run -- ./scripts/upload-cdn.sh 1.11.1</code></pre>
+<p>The script ends by checking the CDN against the origin: the versioned file
+must carry the version, and a cache-busted <code>latest/</code> must have the same ETag.
+The edge&#39;s own copy of <code>latest/</code> is reported but never failed on, because it
+is written with a one-hour <code>max-age</code> and turns over on its own. The same
+check runs on its own, without credentials, for any published version:</p>
+<pre tabindex="0"><code class="language-bash">VERIFY_ONLY=1 ./scripts/upload-cdn.sh 1.16.1</code></pre>
 <h3 id="layout"><a class="anchor" href="#layout">Layout</a></h3>
 <pre tabindex="0"><code>assets.thestreamplatform.com/scarlett-player/
 ├── v&lt;version&gt;/          # immutable, max-age=31536000

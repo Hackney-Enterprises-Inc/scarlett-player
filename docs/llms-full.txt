@@ -1298,6 +1298,16 @@ retried with "Re-run failed jobs". A local publish is the same script:
 doppler run -- ./scripts/upload-cdn.sh 1.11.1
 ```
 
+The script ends by checking the CDN against the origin: the versioned file
+must carry the version, and a cache-busted `latest/` must have the same ETag.
+The edge's own copy of `latest/` is reported but never failed on, because it
+is written with a one-hour `max-age` and turns over on its own. The same
+check runs on its own, without credentials, for any published version:
+
+```bash
+VERIFY_ONLY=1 ./scripts/upload-cdn.sh 1.16.1
+```
+
 ### Layout
 
 ```
@@ -1862,11 +1872,8 @@ several scenarios assert against fixed waits tuned on a developer machine.
 run those by hand after `pnpm build` when you touch a package manifest or the
 embed build.
 
-CI runs on Node 24 with `NODE_OPTIONS=--no-experimental-require-module` for the
-test step. Vitest 1.x races Node 24's `require(esm)` during worker teardown and
-aborts the process after every test has passed (exit 134). If `pnpm test` dies
-that way locally on Node 24, set the same variable; it goes away once vitest is
-upgraded to 3.x.
+CI runs the test step on Node 24 with no extra flags: since the move to vitest 3
+nothing about Node 24 needs working around.
 
 ### Releasing
 
