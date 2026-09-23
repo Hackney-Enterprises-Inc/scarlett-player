@@ -125,6 +125,10 @@ describe('accentTextTone', () => {
       'rgb(1 2)',
       'rgb(1, 2, 3, 4, 5)',
       'notacolour',
+      // Hex digits without the # are not a CSS colour: the fill could not render
+      // them, so the text tone is not derived from them either.
+      'e50914',
+      'f00',
     ]) {
       expect(accentTextTone(value)).toBe(value);
     }

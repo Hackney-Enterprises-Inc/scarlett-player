@@ -96,10 +96,11 @@ function component(token: string, scale: number): number | null {
 
 /**
  * Parse `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa` into 0-255 channels and a
- * 0-1 alpha.
+ * 0-1 alpha. The `#` is required: bare digits are not a CSS colour, and the
+ * accent fill this tone accompanies could not render them either.
  */
 function parseHex(value: string): [Rgb, number] | null {
-  const digits = /^#?([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(value)?.[1];
+  const digits = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(value)?.[1];
   if (!digits) return null;
 
   const full =
@@ -162,7 +163,7 @@ function parseRgb(value: string): [Rgb, number] | null {
 function channels(color: string, background: Rgb): Rgb | null {
   const value = color.trim().toLowerCase();
   const namedHex = named(value);
-  const parsed = namedHex ? parseHex(namedHex) : (parseHex(value) ?? parseRgb(value));
+  const parsed = namedHex ? parseHex(`#${namedHex}`) : (parseHex(value) ?? parseRgb(value));
   if (!parsed) return null;
 
   const [rgb, alpha] = parsed;
@@ -219,7 +220,8 @@ function hex(color: Rgb): string {
  *                and trailing space and letter case are ignored
  * @returns A `#rrggbb` tone clearing AA on the menus, or the input unchanged
  *          when it cannot be parsed (`transparent` or any fully transparent
- *          colour, `hsl()`, a gradient, a `var()`, an empty string)
+ *          colour, `hsl()`, a gradient, a `var()`, hex digits without the
+ *          `#`, an empty string)
  *
  * @example
  * ```ts

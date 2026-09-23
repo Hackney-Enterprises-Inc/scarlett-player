@@ -13,4 +13,5 @@ accents get the same readable accent-text tone a hex one always did. A
 translucent accent is composited over the menus before it is measured, and the
 result is always an opaque `#rrggbb`: a named colour that already clears AA
 comes back as its hex (`white` gives `#ffffff`). `hsl()`, `var()`, gradients and
-`transparent` are still handed back as given.
+`transparent` are still handed back as given, and so now are hex digits without
+the `#`, which the accent fill could not render either.
