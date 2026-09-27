@@ -41064,7 +41064,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       }
       api.emit("quality:change", {
-        quality: level ? formatLevel(level) : "auto",
+        quality: level ? `level-${data.level}` : "auto",
         auto: isAuto
       });
       callbacks.onLevelSwitched?.(data.level);
@@ -52836,13 +52836,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onCoreError(err) {
       if (!err) return;
-      const error = err.originalError || err;
-      if (!(error instanceof Error)) return;
+      const original = err.originalError || err;
+      const code = typeof err.code === "string" ? err.code : typeof original.code === "string" ? original.code : void 0;
+      let type;
+      let message;
+      if (original instanceof Error) {
+        type = original.name || "CoreError";
+        message = original.message || "Unknown core error";
+      } else if (code !== void 0 || typeof err.message === "string") {
+        const name = typeof err.name === "string" ? err.name : "";
+        type = code || name || "CoreError";
+        message = typeof err.message === "string" && err.message || "Unknown core error";
+      } else {
+        return;
+      }
       session.errorCount++;
       const errorEvent = {
         time: Date.now(),
-        type: error.name || "CoreError",
-        message: error.message || "Unknown core error",
+        type,
+        message,
         fatal: err.fatal ?? false
       };
       session.errors.push(errorEvent);
@@ -52852,6 +52864,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       sendBeacon("error", {
         errorType: errorEvent.type,
         errorMessage: errorEvent.message,
+        errorCode: code,
         fatal: errorEvent.fatal
       });
       if (errorEvent.fatal) {
@@ -53819,7 +53832,10 @@ ${indent}src: ${tsString(config.src)},`;
       });
       player.on("media:loadedmetadata", ({ duration }) => log(role, "info", "metadata", `duration ${formatTime2(duration)}`));
       player.on("quality:levels", ({ levels }) => log(role, "info", "quality:levels", levels.map((l) => l.label).join(", ")));
-      player.on("quality:change", ({ quality, auto }) => log(role, "info", "quality:change", `${quality}${auto ? " (auto)" : ""}`));
+      player.on("quality:change", ({ quality, auto }) => {
+        const label = player.getState().qualities.find((q) => q.id === quality)?.label ?? quality;
+        log(role, "info", "quality:change", `${label}${auto ? " (auto)" : ""}`);
+      });
       player.on("track:text", ({ trackId }) => log(role, "info", "captions", trackId ?? "off"));
       player.on("error", (error) => {
         const code = "code" in error ? String(error.code) : "Error";

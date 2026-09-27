@@ -77,9 +77,10 @@ to it rather than repeating the table, so the two cannot drift.</p>
 <h3 id="build"><a class="anchor" href="#build">Build</a></h3>
 <pre tabindex="0"><code class="language-bash">pnpm --filter @scarlett-player/embed build   # from the repo root
 pnpm --filter @scarlett-player/embed dev     # Vite dev server over demo.html</code></pre>
-<p>The build is <code>rimraf dist &amp;&amp; tsc &amp;&amp; vite build &amp;&amp; BUILD_VIDEO=true vite build &amp;&amp; BUILD_AUDIO=true vite build</code>: <code>tsc</code> emits the declarations, then Vite writes
-three bundles into the same <code>dist</code>. <code>emptyOutDir</code> is pinned to <code>false</code> because
-the three builds share that directory and the declarations are already in it.</p>
+<p>The build is <code>rimraf dist &amp;&amp; tsc &amp;&amp; vite build &amp;&amp; BUILD_VIDEO=true vite build &amp;&amp; BUILD_AUDIO=true vite build &amp;&amp; BUILD_ADDON=chapters vite build &amp;&amp; BUILD_ADDON=clips vite build</code>: <code>tsc</code> emits the declarations, then Vite writes
+the three builds and the two addons into the same <code>dist</code>. <code>emptyOutDir</code> is
+pinned to <code>false</code> because the runs share that directory and the declarations
+are already in it.</p>
 <h3 id="simplest-integration"><a class="anchor" href="#simplest-integration">Simplest integration</a></h3>
 <pre tabindex="0"><code class="language-html">&lt;script src=&quot;https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs&quot;&gt;&lt;/script&gt;
 &lt;div data-sp src=&quot;https://example.com/video.m3u8&quot;&gt;&lt;/div&gt;</code></pre>
@@ -91,10 +92,13 @@ the three builds share that directory and the declarations are already in it.</p
 │   ├── index.ts           # Full build entry: global API + auto-init
 │   ├── index-video.ts     # Video-only build entry
 │   ├── index-audio.ts     # Audio-only build entry
-│   ├── create-embed.ts    # Player creation, global API, auto-init scan
+│   ├── create-embed.ts    # Player creation, global API (incl. use()), auto-init scan
+│   ├── control-layout.ts  # Video control-bar layout when share, clip or chapters is on
 │   ├── parser.ts          # Data attribute parsing
 │   ├── types.ts           # EmbedConfig, ScarlettPlayerGlobal, PlayerType
-│   └── version.ts         # __PKG_VERSION__, replaced at build time
+│   ├── version.ts         # __PKG_VERSION__, replaced at build time
+│   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
+│                          # lookup and the core/ui shims they build against
 ├── templates/
 │   ├── laravel-embed.blade.php  # Laravel Blade template for /v/{id}
 │   └── EmbedController.php      # Example Laravel controller
@@ -111,6 +115,8 @@ dist/ (generated)
 ├── embed.js / embed.umd.cjs                    # Full build (ESM / UMD)
 ├── embed.video.js / embed.video.umd.cjs        # Video-only build
 ├── embed.audio.js / embed.audio.umd.cjs        # Audio-only build
+├── embed.addon.chapters.js / .umd.cjs          # Chapters addon
+├── embed.addon.clips.js / .umd.cjs             # Clips addon
 ├── hls.&lt;version&gt;.js                            # Shared hls.js chunk (ESM only)
 ├── hls.light.&lt;version&gt;.js                      # Shared hls.js/light chunk
 ├── *.d.ts                                      # Declarations, emitted by tsc
@@ -139,11 +145,22 @@ dist/ (generated)
 <td><code>src/index-audio.ts</code></td>
 <td>hls/light, native, audio-ui, playlist, media-session</td>
 </tr>
+<tr>
+<td>Addons (<code>embed.addon.chapters</code>, <code>embed.addon.clips</code>)</td>
+<td><code>src/addons/chapters.ts</code>, <code>src/addons/clips.ts</code></td>
+<td>chapters, clips; each registers into the embed already on the page</td>
+</tr>
 </tbody></table></div>
-<p>Chapters and clips are not in any embed build; a host that wants them installs
-the packages and builds its own bundle.</p>
-<p>All three assign the same <code>window.ScarlettPlayer</code> global, so a page loads
-exactly one of them.</p>
+<p>Chapters and clips are not in any embed build; they ship as addons, separate
+files a page loads after a Full or Video build. An addon registers its plugin
+through <code>ScarlettPlayer.use()</code> and reaches core and the UI only through the
+embed&#39;s frozen <code>ScarlettPlayer.addonRuntime</code>, so its control lands in the
+embed&#39;s own control bar (the UI control registry is per module copy). The
+builds stay as they are; new features are addons. Load order, the version rule
+and the clips CSRF opt-in are in the
+<a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/embed/README.md#addons">embed README&#39;s Addons section</a>.</p>
+<p>All three builds assign the same <code>window.ScarlettPlayer</code> global, so a page
+loads exactly one of them, plus any addons.</p>
 <h3 id="why-the-hlsjs-chunks-carry-the-version"><a class="anchor" href="#why-the-hlsjs-chunks-carry-the-version">Why the hls.js chunks carry the version</a></h3>
 <p><code>latest/</code> is mutable and cached for an hour while <code>v&lt;version&gt;/</code> is immutable, so
 an unstamped <code>latest/hls.js</code> let a browser pair yesterday&#39;s cached chunk with a
@@ -220,6 +237,16 @@ player.destroy();</code></pre>
 <td><code>availableTypes</code></td>
 <td><code>PlayerType[]</code></td>
 <td>Which of <code>video</code> / <code>audio</code> this build ships</td>
+</tr>
+<tr>
+<td><code>use(name, creator)</code></td>
+<td><code>void</code></td>
+<td>Register an addon&#39;s plugin creator (<code>chapters</code> or <code>clips</code>); the addon files call it themselves</td>
+</tr>
+<tr>
+<td><code>addonRuntime</code></td>
+<td><code>AddonRuntime</code></td>
+<td>Frozen: the embed&#39;s version and its own <code>injectSharedStyles</code>, <code>registerControl</code>, <code>unregisterControl</code>, for addon bundles only</td>
 </tr>
 </tbody></table></div>
 <h3 id="3-iframe-embed-isolated"><a class="anchor" href="#3-iframe-embed-isolated">3. iframe embed (isolated)</a></h3>
@@ -510,7 +537,7 @@ table, and watch what Vite prints during <code>pnpm build</code>.</p>
 <h2 id="development"><a class="anchor" href="#development">Development</a></h2>
 <pre tabindex="0"><code class="language-bash">pnpm install
 pnpm --filter @scarlett-player/embed dev        # Vite dev server
-pnpm --filter @scarlett-player/embed build      # all three builds
+pnpm --filter @scarlett-player/embed build      # all three builds and both addons
 pnpm --filter @scarlett-player/embed test       # vitest
 pnpm --filter @scarlett-player/embed typecheck</code></pre>
 <h3 id="adding-a-new-data-attribute"><a class="anchor" href="#adding-a-new-data-attribute">Adding a new data attribute</a></h3>
