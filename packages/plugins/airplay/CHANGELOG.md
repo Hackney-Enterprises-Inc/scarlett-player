@@ -1,5 +1,7 @@
 # @scarlett-player/airplay
 
+## 1.17.0
+
 ## 1.16.3
 
 ### Patch Changes

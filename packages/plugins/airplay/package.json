@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/airplay",
-  "version": "1.16.3",
+  "version": "1.17.0",
   "description": "AirPlay Plugin for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",
