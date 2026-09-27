@@ -500,6 +500,26 @@ describe('Analytics Plugin', () => {
       expect(plugin.getMetrics().errorCount).toBe(2);
     });
 
+    it('should not put a structured name or message from a payload into the beacon', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      // Hand-built payloads, deliberately outside the PlayerError type.
+      (api as any)._trigger('error', { code: 'MEDIA_NETWORK_ERROR', message: { nested: true }, name: 42, fatal: false });
+      (api as any)._trigger('error', { message: 'plain message', name: { not: 'a string' } });
+
+      const errors = beacons.filter((b) => b.event === 'error');
+      expect(errors).toHaveLength(2);
+      expect(errors[0]).toMatchObject({
+        errorType: 'MEDIA_NETWORK_ERROR',
+        errorCode: 'MEDIA_NETWORK_ERROR',
+        errorMessage: 'Unknown core error',
+      });
+      expect(errors[1]).toMatchObject({ errorType: 'CoreError', errorMessage: 'plain message' });
+      expect(errors[1]?.errorCode).toBeUndefined();
+    });
+
     it('should ignore an error payload with neither code nor message', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,

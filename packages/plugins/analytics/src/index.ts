@@ -674,8 +674,11 @@ export function createAnalyticsPlugin(
       type = original.name || 'CoreError';
       message = original.message || 'Unknown core error';
     } else if (code !== undefined || typeof err.message === 'string') {
-      type = code || err.name || 'CoreError';
-      message = err.message || 'Unknown core error';
+      // Only strings reach the beacon: a structured `name` or `message` on a
+      // hand-built payload falls back rather than being serialised in.
+      const name = typeof err.name === 'string' ? err.name : '';
+      type = code || name || 'CoreError';
+      message = (typeof err.message === 'string' && err.message) || 'Unknown core error';
     } else {
       return;
     }

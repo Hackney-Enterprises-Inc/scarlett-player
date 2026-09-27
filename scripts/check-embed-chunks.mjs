@@ -37,10 +37,10 @@
  * `upload-cdn.sh` now uploads dist by glob rather than by hand list, so what
  * this script validates is exactly what gets published.
  *
- * Usage: node scripts/check-embed-chunks.mjs (after a full five-build (three
- * embed builds plus two addons)
- * `pnpm --filter @scarlett-player/embed build`, which is what the expected set
- * of unprefixed chunks describes)
+ * Usage: node scripts/check-embed-chunks.mjs (after a full
+ * `pnpm --filter @scarlett-player/embed build`, which runs all five builds,
+ * three embed builds plus two addons, and is what the expected set of
+ * unprefixed chunks describes)
  * Exit code: 0 when every reference resolves and the unprefixed set matches,
  * 1 with the offending names.
  */
