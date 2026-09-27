@@ -52,6 +52,15 @@
  *      button rather than `player.play()` on purpose - the button calls
  *      `video.play()` directly, which is the path that carries no bus event of
  *      its own and is where the provider's emission is the only source.
+ *  11. Playlist auto-advance on a real element (local fixture listed twice):
+ *      a viewer who was playing reaches the end of track 1 and the advance's
+ *      `media:load-request` carries `autoplay: true`, and track 2 plays. The
+ *      element fires `pause` before `ended`, so the unit test that mocked
+ *      `paused` at `ended` passed while every advance loaded paused. Then a
+ *      paused viewer gets a second `player.load()`: it stays paused and the
+ *      big play button shows on the new source. The playlist is the one the
+ *      demo bundles, exposed as `window.createPlaylistPlugin` and registered
+ *      on the demo's video player.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -1905,6 +1914,129 @@ const state = (page) => page.evaluate(() => {
     'a pause from the control bar reaches the bus exactly once',
     pauseHeard.heard === 1 && pauseHeard.paused === true,
     JSON.stringify(pauseHeard)
+  );
+
+  await page.close();
+}
+
+// ============================================================ SCENARIO 11
+// Playlist auto-advance starts the next track when the viewer was playing.
+// The playlist read `paused` at `ended`, but a real element fires `pause`
+// (paused: true) BEFORE `ended`, so every advance asked for `autoplay: false`
+// and the next track sat paused. Only a real element has that order.
+//
+// The second pass is the paused half: a paused viewer handed a new source
+// stays paused, and the big play button offers the new source. It uses a
+// second `player.load()` rather than a paused seek to the end: whether
+// Chromium fires `ended` for a paused seek to the duration was not confirmed
+// when this was written, and the load exercises the same path (a new source
+// object, `playing` false).
+{
+  console.log('\n--- Scenario 11: playlist auto-advance keeps playing (local fixture) ---');
+  const { page, collect } = await newTrackedPage();
+
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('button.sp-play', { timeout: 30000 });
+  await loadFixture(page);
+
+  const TRACK_2 = `${FIXTURE_VOD}?track=2`;
+  // The demo bundles the playlist for its audio player and exposes the
+  // factory, so this is the same core and the same plugin the page ships.
+  await page.evaluate(async ({ track1, track2 }) => {
+    const { createPlaylistPlugin } = window;
+    const player = window.player;
+    const log = { requests: [], ended: 0 };
+    window.__scenario11 = log;
+    player.on('media:load-request', (req) => log.requests.push({ ...req }));
+    player.on('playback:ended', () => { log.ended += 1; });
+    player.setMuted(true);
+    player.registerPlugin(
+      createPlaylistPlugin({
+        tracks: [
+          { id: 't1', src: track1, title: 'Track 1', type: 'video' },
+          { id: 't2', src: track2, title: 'Track 2', type: 'video' },
+        ],
+        autoAdvance: true,
+        persist: false,
+      })
+    );
+    // A late-registered plugin is initialised by the next load().
+    await player.load(track1);
+    player.getPlugin('playlist').play(0);
+  }, { track1: FIXTURE_VOD, track2: TRACK_2 });
+
+  const playingTrack1 = await page
+    .waitForFunction(
+      () => window.player.getState().playing === true
+        && (document.querySelector('video')?.duration ?? 0) > 0,
+      null,
+      { timeout: 30000 }
+    )
+    .then(() => true, () => false);
+  record('track 1 plays from the playlist', playingTrack1);
+
+  await page.evaluate(() => {
+    const player = window.player;
+    player.seek(Math.max(0, player.getState().duration - 1));
+  });
+
+  const advanced = await page
+    .waitForFunction(
+      (track2) => {
+        const log = window.__scenario11;
+        const state = window.player.getState();
+        return log.ended > 0
+          && log.requests.length >= 2
+          && state.source?.src === track2
+          && state.playing === true;
+      },
+      TRACK_2,
+      { timeout: 20000 }
+    )
+    .then(() => true, () => false);
+  const afterAdvance = await page.evaluate(() => ({
+    ended: window.__scenario11.ended,
+    requests: window.__scenario11.requests,
+    source: window.player.getState().source?.src ?? null,
+    playing: window.player.getState().playing,
+  }));
+  record(
+    'the auto-advance load request carries autoplay: true',
+    afterAdvance.requests.length >= 2 && afterAdvance.requests[1].autoplay === true,
+    JSON.stringify(afterAdvance.requests)
+  );
+  record(
+    'track 2 is playing after the advance',
+    advanced,
+    JSON.stringify({ ended: afterAdvance.ended, source: afterAdvance.source, playing: afterAdvance.playing })
+  );
+
+  // Paused viewer, new source: stays paused and offers the big play button.
+  await page.evaluate(async (track3) => {
+    const player = window.player;
+    player.pause();
+    await new Promise((r) => setTimeout(r, 300));
+    await player.load(track3);
+  }, `${FIXTURE_VOD}?track=3`);
+  await page.waitForTimeout(1500);
+  const afterPausedLoad = await page.evaluate(() => ({
+    playing: window.player.getState().playing,
+    paused: document.querySelector('video')?.paused ?? null,
+    bigPlay: document.querySelector('.sp-big-play')?.classList.contains('sp-big-play--visible') ?? null,
+  }));
+  record(
+    'a paused viewer handed a new source stays paused with the big play button visible',
+    afterPausedLoad.playing === false
+      && afterPausedLoad.paused === true
+      && afterPausedLoad.bigPlay === true,
+    JSON.stringify(afterPausedLoad)
+  );
+
+  const errs = await collect();
+  record(
+    'zero uncaught errors or unhandled rejections across the playlist advance',
+    errs.pageErrors.length === 0 && errs.rejections.length === 0,
+    [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
   );
 
   await page.close();

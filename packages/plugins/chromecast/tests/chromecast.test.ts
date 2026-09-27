@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ScarlettPlayer } from '@scarlett-player/core';
 import { chromecastPlugin } from '../src/index';
 import { resetCastLoader } from '../src/cast-loader';
 import type { IPluginAPI } from '@scarlett-player/core';
@@ -121,8 +122,14 @@ const createMockCastSDK = () => {
   };
 };
 
-// Create mock plugin API
-const createMockApi = (): { api: IPluginAPI; state: Record<string, unknown>; video: HTMLVideoElement } => {
+// Create mock plugin API. `markDestroyed()` makes state access throw the way
+// core's StateManager does once the player is destroyed.
+const createMockApi = (): {
+  api: IPluginAPI;
+  state: Record<string, unknown>;
+  video: HTMLVideoElement;
+  markDestroyed: () => void;
+} => {
   const container = document.createElement('div');
   const video = document.createElement('video');
   container.appendChild(video);
@@ -132,11 +139,22 @@ const createMockApi = (): { api: IPluginAPI; state: Record<string, unknown>; vid
     source: { src: 'https://example.com/video.m3u8' },
   };
 
+  let destroyed = false;
+  const assertAlive = (key: string): void => {
+    if (destroyed) {
+      throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
+    }
+  };
+
   const api = {
     pluginId: 'chromecast',
     container,
-    getState: vi.fn((key?: string) => (key ? state[key] : state)),
+    getState: vi.fn((key?: string) => {
+      assertAlive(key ?? '');
+      return key ? state[key] : state;
+    }),
     setState: vi.fn((key: string, value: unknown) => {
+      assertAlive(key);
       state[key] = value;
     }),
     emit: vi.fn(),
@@ -156,7 +174,14 @@ const createMockApi = (): { api: IPluginAPI; state: Record<string, unknown>; vid
     subscribeToState: vi.fn(() => () => {}),
   } as unknown as IPluginAPI;
 
-  return { api, state, video };
+  return {
+    api,
+    state,
+    video,
+    markDestroyed: () => {
+      destroyed = true;
+    },
+  };
 };
 
 describe('Chromecast Plugin', () => {
@@ -725,6 +750,106 @@ describe('Chromecast Plugin', () => {
 
       expect(mockSDK.mockCastContext.removeEventListener).toHaveBeenCalled();
       expect(mockSDK.mockRemotePlayerController.removeEventListener).toHaveBeenCalled();
+    });
+
+    // SCAR-CAST-2: core destroys the StateManager right after the plugins,
+    // and every state read or write after that throws.
+
+    // Fails today: both getters read the destroyed StateManager and throw.
+    it('isAvailable() and isConnected() answer false after destroy instead of throwing', async () => {
+      const { api, state, markDestroyed } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+      state.chromecastAvailable = true;
+      state.chromecastActive = true;
+
+      await plugin.destroy();
+      markDestroyed();
+
+      expect(() => plugin.isAvailable()).not.toThrow();
+      expect(() => plugin.isConnected()).not.toThrow();
+      expect(plugin.isAvailable()).toBe(false);
+      expect(plugin.isConnected()).toBe(false);
+    });
+
+    // Preservation: passes today because handleRemotePlayerChange returns
+    // when remotePlayer is null, which destroy() ensures. Keeps that check.
+    it('ignores a remote-player change after destroy when the SDK was unloaded first', async () => {
+      const { api, state, markDestroyed } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+      state.chromecastActive = true;
+
+      // SDK gone before destroy, so destroy() cannot remove the listener.
+      delete (window as any).cast;
+      await plugin.destroy();
+      markDestroyed();
+      const readsAtDestroy = vi.mocked(api.getState).mock.calls.length;
+
+      for (const handler of mockSDK.remotePlayerHandlers) {
+        expect(() => handler({ field: 'currentTime', value: 5 })).not.toThrow();
+      }
+      expect(vi.mocked(api.getState).mock.calls.length).toBe(readsAtDestroy);
+    });
+
+    // Fails today: onSessionDisconnected() writes chromecastActive.
+    it('ignores a SESSION_ENDED the SDK delivers after destroy', async () => {
+      const { api, markDestroyed } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      await plugin.init(api);
+      mockSDK.sessionHandlers[0]?.({ sessionState: 'SESSION_STARTED' });
+
+      await plugin.destroy();
+      markDestroyed();
+      const writesAtDestroy = vi.mocked(api.setState).mock.calls.length;
+
+      expect(mockSDK.sessionHandlers.length).toBeGreaterThan(0);
+      for (const handler of mockSDK.sessionHandlers) {
+        expect(() => handler({ sessionState: 'SESSION_ENDED' })).not.toThrow();
+      }
+      expect(vi.mocked(api.setState).mock.calls.length).toBe(writesAtDestroy);
+    });
+
+    // Fails today: player.destroy() during loadCastSDK() never reaches the
+    // plugin's destroy() (PluginManager skips a record still 'initializing'),
+    // so the late SDK installs four listeners on a dead player and the next
+    // SDK callback throws `Manager is destroyed`. Uses the real core.
+    it('installs nothing when the Cast SDK arrives after the player was destroyed', async () => {
+      // This test installs the SDK itself, after destroy.
+      delete (window as any).cast;
+      delete (window as any).chrome;
+      resetCastLoader();
+
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const player = new ScarlettPlayer({ container });
+      const plugin = chromecastPlugin();
+      const destroySpy = vi.spyOn(plugin, 'destroy');
+      player.registerPlugin(plugin);
+
+      const initPromise = player.init();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await player.destroy();
+
+      // The SDK script finally lands.
+      mockSDK.setup();
+      window.__onGCastApiAvailable?.(true);
+      await initPromise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      for (const handler of mockSDK.castStateHandlers) {
+        expect(() => handler({ castState: 'NOT_CONNECTED' })).not.toThrow();
+      }
+      expect(mockSDK.mockCastContext.addEventListener).not.toHaveBeenCalled();
+      expect(mockSDK.mockRemotePlayerController.addEventListener).not.toHaveBeenCalled();
+      // Documents the core hole this guard contains: an initializing plugin
+      // gets no destroy() call when the player is destroyed.
+      expect(destroySpy).not.toHaveBeenCalled();
+
+      container.remove();
     });
   });
 

@@ -308,9 +308,9 @@ describe('ErrorHandler', () => {
       const history = errorHandler.getHistory();
 
       expect(history).toHaveLength(3);
-      expect(history[0].message).toBe('Error 1');
-      expect(history[1].message).toBe('Error 2');
-      expect(history[2].message).toBe('Error 3');
+      expect(history[0]!.message).toBe('Error 1');
+      expect(history[1]!.message).toBe('Error 2');
+      expect(history[2]!.message).toBe('Error 3');
     });
 
     it('should limit history to max', () => {
@@ -323,9 +323,9 @@ describe('ErrorHandler', () => {
       const history = limitedHandler.getHistory();
 
       expect(history).toHaveLength(3);
-      expect(history[0].message).toBe('Error 2');
-      expect(history[1].message).toBe('Error 3');
-      expect(history[2].message).toBe('Error 4');
+      expect(history[0]!.message).toBe('Error 2');
+      expect(history[1]!.message).toBe('Error 3');
+      expect(history[2]!.message).toBe('Error 4');
     });
 
     it('should get last error', () => {

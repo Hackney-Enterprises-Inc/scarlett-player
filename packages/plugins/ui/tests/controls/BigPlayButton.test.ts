@@ -130,6 +130,64 @@ describe('BigPlayButton', () => {
     expect(isVisible()).toBe(false);
   });
 
+  // Fails today (SCAR-UI-BIGPLAY-HASSTARTED): the playing latch held for the
+  // whole session, so a second source that loaded and sat paused (a paused
+  // playlist advance, a host load()) had no play affordance on the picture.
+  it('reappears for a new source loaded paused after an earlier one played', () => {
+    api.__state.source = { src: 'a.mp4', type: 'video/mp4' };
+    api.__state.playing = true;
+    api.__state.playbackState = 'playing';
+    button.update();
+    expect(isVisible()).toBe(false);
+
+    // load() writes a fresh source object and resets the playback keys.
+    api.__state.source = { src: 'b.mp4', type: 'video/mp4' };
+    api.__state.playing = false;
+    api.__state.paused = true;
+    api.__state.currentTime = 0;
+    api.__state.playbackState = 'loading';
+    button.update();
+    expect(isVisible()).toBe(false); // the spinner owns loading
+
+    api.__state.playbackState = 'ready';
+    button.update();
+    expect(isVisible()).toBe(true);
+  });
+
+  // Preservation: an autoplay advance calls play() straight after the load, so
+  // the element is already unpaused before `playing` arrives. The button must
+  // not flash in that frame once the latch resets per source.
+  it('stays hidden across an autoplay advance while play() is in flight', () => {
+    api.__state.source = { src: 'a.mp4', type: 'video/mp4' };
+    api.__state.playing = true;
+    api.__state.playbackState = 'playing';
+    button.update();
+
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    api.__state.source = { src: 'b.mp4', type: 'video/mp4' };
+    api.__state.playing = false;
+    api.__state.paused = true;
+    api.__state.currentTime = 0;
+    api.__state.playbackState = 'loading';
+    button.update();
+    api.__state.playbackState = 'ready';
+    button.update();
+
+    expect(isVisible()).toBe(false);
+  });
+
+  // Fails today: the same in-flight frame on the very first source, where no
+  // latch hides the button, flashed it between `ready` and `playing`.
+  it('stays hidden on the first source while an autoplay play() is in flight', () => {
+    const video = api.container.querySelector('video')!;
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    api.__state.playbackState = 'ready';
+    button.update();
+
+    expect(isVisible()).toBe(false);
+  });
+
   it('is hidden when an error is set', () => {
     api.__state.error = { code: 'MEDIA_NETWORK_ERROR', message: 'gone' };
     button.update();

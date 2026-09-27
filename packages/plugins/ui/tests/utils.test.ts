@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatTime, formatLiveTime } from '../src/utils';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { join, relative, resolve } from 'path';
+import { clearChildren, formatTime, formatLiveTime } from '../src/utils';
 import { formatTime as coreFormatTime } from '@scarlett-player/core';
 
 describe('re-exported formatters', () => {
@@ -19,5 +21,44 @@ describe('re-exported formatters', () => {
 
   it('is the same function core exports, not a second copy', () => {
     expect(formatTime).toBe(coreFormatTime);
+  });
+});
+
+describe('clearChildren', () => {
+  it('removes every child node, text included', () => {
+    const el = document.createElement('div');
+    el.append(document.createElement('span'), 'text', document.createElement('b'));
+
+    clearChildren(el);
+
+    expect(el.childNodes).toHaveLength(0);
+  });
+});
+
+/**
+ * Every file under a directory, recursively.
+ *
+ * @param dir - Directory to walk
+ * @returns Absolute file paths
+ */
+function listFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? listFiles(path) : [path];
+  });
+}
+
+// Fails today: Element.replaceChildren() is Chrome 86 / Safari 14, below the
+// documented Chrome 80 floor, and LG NetCast TVs lack it (Sentry TSP-WEB-2JN).
+// jsdom implements it, so no behavioural test can see a new call; this scan
+// is what keeps one from coming back.
+describe('engine floor', () => {
+  it('ships no Element.replaceChildren() call', () => {
+    const src = resolve(__dirname, '../src');
+    const offenders = listFiles(src)
+      .filter((file) => readFileSync(file, 'utf8').includes('.replaceChildren('))
+      .map((file) => relative(src, file));
+
+    expect(offenders).toEqual([]);
   });
 });

@@ -54,6 +54,17 @@ export function airplayPlugin(): IAirPlayPlugin {
   let video: WebkitVideoElement | null = null;
   let unsubMediaLoaded: (() => void) | null = null;
 
+  /**
+   * True once destroy() has started.
+   *
+   * Core destroys the StateManager right after the plugins, and any read or
+   * write after that throws `Manager is destroyed` on purpose. A provider
+   * switch settling after teardown read `airplayActive` in its `.finally` and
+   * surfaced as an unhandled rejection (Sentry TSP-WEB-2HT), so every path
+   * that can run after destroy() checks this before touching state.
+   */
+  let destroyed = false;
+
   /** The remote-playback watch currently held, so destroy() can cancel it. */
   let availabilityWatch: { remote: RemotePlaybackLike; id: number } | null = null;
 
@@ -67,6 +78,8 @@ export function airplayPlugin(): IAirPlayPlugin {
   let watchGeneration = 0;
 
   const handleAvailabilityChange = (e: Event): void => {
+    // Detached on destroy, but an event already queued for this task still runs.
+    if (destroyed) return;
     const event = e as WebkitPlaybackTargetAvailabilityEvent;
     const available = event.availability === 'available';
     api.setState('airplayAvailable', available);
@@ -120,14 +133,18 @@ export function airplayPlugin(): IAirPlayPlugin {
     providerSwitchInFlight = true;
     (active ? hlsPlugin.switchToNative() : hlsPlugin.switchToHlsJs())
       .then(() => {
+        if (destroyed) return;
         // The provider may have replaced the element.
         attachToVideo();
       })
       .catch((err: unknown) => {
+        // Not gated: the logger survives destroy, and a failed switch is
+        // still worth reporting.
         api.logger.warn(`Failed to switch to ${target} for AirPlay`, { error: err });
       })
       .finally(() => {
         providerSwitchInFlight = false;
+        if (destroyed) return;
 
         // Only when the viewer moved while the switch was running. Re-running
         // on an unchanged state would retry a failing switch forever.
@@ -138,6 +155,7 @@ export function airplayPlugin(): IAirPlayPlugin {
   };
 
   const handleTargetChange = (): void => {
+    if (destroyed) return;
     const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
     const wasActive = api.getState('airplayActive') === true;
     api.setState('airplayActive', active);
@@ -225,6 +243,8 @@ export function airplayPlugin(): IAirPlayPlugin {
       const generation = watchGeneration;
       remote
         .watchAvailability((available: boolean) => {
+          // The browser may deliver one more callback after the cancel.
+          if (destroyed) return;
           api.logger.debug('AirPlay: RemotePlayback availability', { available });
           if (available) {
             api.setState('airplayAvailable', true);
@@ -254,6 +274,7 @@ export function airplayPlugin(): IAirPlayPlugin {
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
+      destroyed = false;
 
       // Initialize state
       api.setState('airplayAvailable', false);
@@ -276,6 +297,9 @@ export function airplayPlugin(): IAirPlayPlugin {
     },
 
     async destroy(): Promise<void> {
+      // First, so a listener firing during the detach below is already gated.
+      destroyed = true;
+
       // Unsubscribe from media:loaded event
       unsubMediaLoaded?.();
       unsubMediaLoaded = null;
@@ -312,10 +336,14 @@ export function airplayPlugin(): IAirPlayPlugin {
     },
 
     isAvailable(): boolean {
+      // A torn-down plugin answers "no" rather than throwing from the
+      // destroyed StateManager.
+      if (destroyed) return false;
       return api?.getState('airplayAvailable') === true;
     },
 
     isActive(): boolean {
+      if (destroyed) return false;
       return api?.getState('airplayActive') === true;
     },
 

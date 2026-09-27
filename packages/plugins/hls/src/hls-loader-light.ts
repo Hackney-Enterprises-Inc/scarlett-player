@@ -11,7 +11,7 @@
  * here.
  */
 
-import type { HlsConstructor, HlsInstance } from './types';
+import type { HlsConstructor, HlsInstance, HlsSupportProbes } from './types';
 
 /** Cached hls.js constructor */
 let hlsConstructor: HlsConstructor | null = null;
@@ -19,14 +19,19 @@ let hlsConstructor: HlsConstructor | null = null;
 /** Loading promise to prevent duplicate loads */
 let loadingPromise: Promise<HlsConstructor> | null = null;
 
+/** The two MIME strings an HLS manifest goes by; WebKit answers both alike. */
+const HLS_MIME_TYPES = ['application/vnd.apple.mpegurl', 'application/x-mpegURL'] as const;
+
 /**
  * Check if browser supports native HLS (Safari/iOS).
  * In these browsers, we don't need hls.js at all.
+ *
+ * @returns True when the media element answers either HLS MIME string
  */
 export function supportsNativeHLS(): boolean {
   if (typeof document === 'undefined') return false;
   const video = document.createElement('video');
-  return video.canPlayType('application/vnd.apple.mpegurl') !== '';
+  return HLS_MIME_TYPES.some((type) => video.canPlayType(type) !== '');
 }
 
 /**
@@ -51,6 +56,35 @@ export function isHlsJsSupported(): boolean {
  */
 export function isHLSSupported(): boolean {
   return supportsNativeHLS() || isHlsJsSupported();
+}
+
+/**
+ * Report what every support probe answers in this browser.
+ *
+ * For diagnosis only: the provider attaches it to the `SOURCE_NOT_SUPPORTED`
+ * fatal when both probes fail, so the error says why. Nothing here decides
+ * playback. `ManagedMediaSource` is recorded but not accepted by
+ * {@link isHlsJsSupported} (Tarnock decision #148).
+ *
+ * @returns The probe values
+ */
+export function describeSupport(): HlsSupportProbes {
+  const video = typeof document === 'undefined' ? null : document.createElement('video');
+  const answer = (type: string): string => (video ? video.canPlayType(type) : '');
+  const win = (typeof window === 'undefined' ? {} : window) as Record<string, unknown>;
+
+  return {
+    canPlayType: {
+      'application/vnd.apple.mpegurl': answer('application/vnd.apple.mpegurl'),
+      'application/x-mpegURL': answer('application/x-mpegURL'),
+    },
+    MediaSource: typeof win.MediaSource,
+    ManagedMediaSource: typeof win.ManagedMediaSource,
+    WebKitMediaSource: typeof win.WebKitMediaSource,
+    hlsJsLoaded: hlsConstructor !== null,
+    hlsJsSupported: hlsConstructor ? hlsConstructor.isSupported() : null,
+    userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+  };
 }
 
 /**

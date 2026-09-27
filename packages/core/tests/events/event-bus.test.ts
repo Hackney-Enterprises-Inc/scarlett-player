@@ -243,9 +243,15 @@ describe('EventBus', () => {
     it('should emit events in registration order', () => {
       const order: number[] = [];
 
-      bus.on('playback:play', () => order.push(1));
-      bus.on('playback:play', () => order.push(2));
-      bus.on('playback:play', () => order.push(3));
+      bus.on('playback:play', () => {
+        order.push(1);
+      });
+      bus.on('playback:play', () => {
+        order.push(2);
+      });
+      bus.on('playback:play', () => {
+        order.push(3);
+      });
 
       bus.emit('playback:play', undefined);
 
@@ -680,7 +686,7 @@ describe('EventBus', () => {
       customBus.on('playback:play', () => {});
 
       expect(warnSpy).toHaveBeenCalled();
-      expect(warnSpy.mock.calls[0][0]).toContain('Max listeners');
+      expect(warnSpy.mock.calls[0]![0]).toContain('Max listeners');
 
       warnSpy.mockRestore();
     });

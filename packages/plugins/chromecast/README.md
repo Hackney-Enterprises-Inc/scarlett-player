@@ -53,6 +53,8 @@ plugin?.isAvailable();  // true when Cast devices are reachable
 // Check if casting
 plugin?.isConnected();  // true while a session is connected
 plugin?.getDeviceName(); // Connected device name, or null
+// isAvailable() and isConnected() answer false once the player is destroyed,
+// rather than throwing
 
 // Show device picker
 await plugin?.requestSession();

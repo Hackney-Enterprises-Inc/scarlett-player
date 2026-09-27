@@ -34,8 +34,9 @@ const player = await createPlayer({
 - Responsive control bar: measures itself and moves low-priority controls into
   an overflow tray rather than rendering them past a narrow player's edge
 - Play/pause, seek, volume controls
-- Big play button over the poster, shown until playback first starts and again
-  as Replay when it ends (`bigPlayButton: false` turns it off)
+- Big play button over the poster, shown until playback starts, again whenever
+  a new source is loaded and sits paused, and as Replay when it ends
+  (`bigPlayButton: false` turns it off)
 - Fullscreen toggle
 - Picture-in-Picture toggle (disabled until media metadata is loaded; hidden
   when the browser has no PiP support; Safari webkit presentation mode

@@ -16,22 +16,41 @@ const createMockVideo = (): WebkitVideoElement => {
   return video;
 };
 
+/** Mock api with a switch that makes state access throw like a destroyed StateManager. */
+type MockApi = IPluginAPI & {
+  /** Flip state access to throw, as core's StateManager does once destroyed. */
+  markDestroyed(): void;
+};
+
 // Create a mock plugin API
-const createMockApi = (video?: WebkitVideoElement): IPluginAPI => {
+const createMockApi = (video?: WebkitVideoElement): MockApi => {
   const container = document.createElement('div');
   if (video) {
     container.appendChild(video);
   }
 
   const state: Record<string, unknown> = {};
+  let destroyed = false;
+  const assertAlive = (key: string): void => {
+    if (destroyed) {
+      throw new Error(`[StateManager] Manager is destroyed (reading '${key}')`);
+    }
+  };
 
   return {
     pluginId: 'airplay',
     container,
-    getState: (key?: string) => (key ? state[key] : state),
-    setState: (key: string, value: unknown) => {
-      state[key] = value;
+    markDestroyed: () => {
+      destroyed = true;
     },
+    getState: vi.fn((key?: string) => {
+      assertAlive(key ?? '');
+      return key ? state[key] : state;
+    }),
+    setState: vi.fn((key: string, value: unknown) => {
+      assertAlive(key);
+      state[key] = value;
+    }),
     emit: vi.fn(),
     on: vi.fn(() => () => {}),
     once: vi.fn(() => () => {}),
@@ -44,7 +63,7 @@ const createMockApi = (video?: WebkitVideoElement): IPluginAPI => {
     getPlugin: vi.fn(),
     addCleanup: vi.fn(),
     runCleanups: vi.fn(),
-  } as unknown as IPluginAPI;
+  } as unknown as MockApi;
 };
 
 describe('AirPlay Plugin', () => {
@@ -623,5 +642,84 @@ describe('AirPlay Plugin - provider swaps and picker safety', () => {
     // A provider still reporting hls.js is not a reason to try forever.
     expect(switchToNative).toHaveBeenCalledTimes(1);
     expect(switchToHlsJs).not.toHaveBeenCalled();
+  });
+});
+
+// SCAR-AIRPLAY-DESTROYED-READ (Sentry TSP-WEB-2HT): core destroys the
+// StateManager right after the plugin, and every read after that throws.
+describe('AirPlay Plugin - after destroy()', () => {
+  let originalWebkitMethod: unknown;
+
+  beforeEach(() => {
+    originalWebkitMethod = (HTMLVideoElement.prototype as WebkitVideoElement)
+      .webkitShowPlaybackTargetPicker;
+    (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker = vi.fn();
+  });
+
+  afterEach(() => {
+    (HTMLVideoElement.prototype as WebkitVideoElement).webkitShowPlaybackTargetPicker =
+      originalWebkitMethod as never;
+    vi.restoreAllMocks();
+  });
+
+  // Fails today: the switch's .finally reads airplayActive from the destroyed
+  // StateManager, and the rejection escapes unhandled.
+  it('does not read state when a provider switch settles after destroy', async () => {
+    const video = createMockVideo();
+    const api = createMockApi(video);
+
+    let finishNativeSwitch = (): void => {};
+    const switchToNative = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishNativeSwitch = resolve;
+        })
+    );
+    vi.mocked(api.getPlugin).mockImplementation(((id: string) =>
+      id === 'hls-provider'
+        ? {
+            isNativeHLS: () => false,
+            switchToNative,
+            switchToHlsJs: vi.fn().mockResolvedValue(undefined),
+          }
+        : null) as never);
+
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+
+    // Device connects: the switch to native starts and stays in flight.
+    video.webkitCurrentPlaybackTargetIsWireless = true;
+    video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    expect(switchToNative).toHaveBeenCalledTimes(1);
+
+    // The host swaps players while the switch is still loading.
+    await plugin.destroy();
+    api.markDestroyed();
+    const readsAtDestroy = vi.mocked(api.getState).mock.calls.length;
+    const writesAtDestroy = vi.mocked(api.setState).mock.calls.length;
+
+    finishNativeSwitch();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    expect(vi.mocked(api.getState).mock.calls.length).toBe(readsAtDestroy);
+    expect(vi.mocked(api.setState).mock.calls.length).toBe(writesAtDestroy);
+  });
+
+  // Fails today: both getters read the destroyed StateManager and throw.
+  it('isActive() and isAvailable() answer false after destroy instead of throwing', async () => {
+    const video = createMockVideo();
+    const api = createMockApi(video);
+    const plugin = airplayPlugin();
+    await plugin.init(api);
+    api.setState('airplayAvailable', true);
+    api.setState('airplayActive', true);
+
+    await plugin.destroy();
+    api.markDestroyed();
+
+    expect(() => plugin.isActive()).not.toThrow();
+    expect(() => plugin.isAvailable()).not.toThrow();
+    expect(plugin.isActive()).toBe(false);
+    expect(plugin.isAvailable()).toBe(false);
   });
 });

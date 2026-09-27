@@ -12,8 +12,26 @@ import type { Plugin } from '../src/types/plugin';
 const tick = (): Promise<void> =>
   new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+/**
+ * Provider and cast members the tests hand to `createMockPlugin`. Core reaches
+ * these through `as any` casts, so there is no provider interface to import.
+ */
+type MockPlugin = Plugin &
+  Partial<{
+    canPlay(src: string): boolean;
+    loadSource(src: string): Promise<void>;
+    stop(): void;
+    requestSession(): Promise<void>;
+    stopSession(): void;
+    showPicker(): void;
+    getLevels(): unknown[];
+    setLevel(index: number): void;
+    getCurrentLevel(): number;
+    getLiveInfo(): unknown;
+  }>;
+
 // Mock plugin for testing
-const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
+const createMockPlugin = (overrides?: Partial<MockPlugin>): MockPlugin => ({
   id: 'test-plugin',
   name: 'Test Plugin',
   type: 'feature',
@@ -134,6 +152,78 @@ describe('ScarlettPlayer', () => {
       await player.load('video.mp4');
 
       expect(readySpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('media:load-request autoplay', () => {
+    /** A provider that accepts anything and resolves immediately. */
+    const createProvider = () =>
+      createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+      });
+
+    /** Emit a load request and let the async handler and its load() finish. */
+    const requestLoad = async (player: ScarlettPlayer, src: string, autoplay: boolean) => {
+      (player as any).eventBus.emit('media:load-request', { src, autoplay });
+      for (let i = 0; i < 5; i++) await tick();
+    };
+
+    // Fails today: load() played on the autoplay state key before the handler
+    // ever looked at the request's autoplay: false.
+    it('stays paused for a request carrying autoplay: false on an autoplay: true player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createProvider()], autoplay: true });
+      await player.load('a.mp4');
+      player.pause();
+
+      const onPlay = vi.fn();
+      player.on('playback:play', onPlay);
+
+      await requestLoad(player, 'b.mp4', false);
+
+      expect(player.getState().source?.src).toBe('b.mp4');
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    // Preservation: the request's autoplay: true starts playback once.
+    it('plays once for a request carrying autoplay: true on an autoplay: false player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createProvider()], autoplay: false });
+      await player.load('a.mp4');
+
+      const onPlay = vi.fn();
+      player.on('playback:play', onPlay);
+
+      await requestLoad(player, 'b.mp4', true);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    // Fails today: load() played for the state key and the handler played
+    // again for the request, arming the providers' core-play gate twice.
+    it('plays once for a request carrying autoplay: true on an autoplay: true player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createProvider()], autoplay: true });
+      await player.load('a.mp4');
+
+      const onPlay = vi.fn();
+      player.on('playback:play', onPlay);
+
+      await requestLoad(player, 'b.mp4', true);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    // Preservation: load(src) with no override still follows the option.
+    it('still plays on load(src) with one argument on an autoplay: true player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createProvider()], autoplay: true });
+
+      const onPlay = vi.fn();
+      player.on('playback:play', onPlay);
+
+      await player.load('a.mp4');
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -951,7 +1041,7 @@ describe('ScarlettPlayer', () => {
       await tick();
 
       expect(loadSpy).toHaveBeenCalledTimes(1);
-      expect(loadSpy).toHaveBeenCalledWith('second.mp4');
+      expect(loadSpy).toHaveBeenCalledWith('second.mp4', { autoplay: false });
     });
 
     it('should wire the error:retry handler once across load() and init()', async () => {

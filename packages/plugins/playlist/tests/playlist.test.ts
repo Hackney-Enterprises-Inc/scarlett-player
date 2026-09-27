@@ -1241,15 +1241,41 @@ describe('auto-advance', () => {
     });
   });
 
-  it('carries autoplay: false when auto-advancing a paused playlist', async () => {
+  /**
+   * Drives the playlist through the order a real media element uses at the end
+   * of the media: `pause` (with `ended` already true on the element) and only
+   * then `ended`. By the time `ended` arrives the `paused` state key is true
+   * for a viewer who was playing, so these mocks report `paused: true` there,
+   * as the providers do.
+   */
+  const setupAdvanceHarness = async (
+    config: Parameters<typeof createPlaylistPlugin>[0] = {},
+    options: { element?: boolean; alreadyPlaying?: boolean } = {},
+  ) => {
     localStorageMock.clear();
-    const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true });
+    const plugin = createPlaylistPlugin({ tracks: sampleTracks, autoAdvance: true, ...config });
     const mockApi = createMockApi();
-    mockApi.getState.mockImplementation((key: string) => (key === 'paused' ? true : 0));
 
-    const captured: { ended?: () => void } = {};
-    mockApi.on.mockImplementation((event, cb) => {
-      if (event === 'playback:ended') captured.ended = cb;
+    const video = document.createElement('video');
+    let elementEnded = false;
+    Object.defineProperty(video, 'ended', { get: () => elementEnded, configurable: true });
+    if (options.element !== false) mockApi.container.appendChild(video);
+
+    // `alreadyPlaying` models a plugin registered and initialised while the
+    // media is already playing: the state keys read as playing at init().
+    const state: Record<string, unknown> = options.alreadyPlaying
+      ? { playing: true, paused: false, currentTime: 0, duration: 0 }
+      : { paused: true, currentTime: 0, duration: 0 };
+    mockApi.getState.mockImplementation((key: string) => state[key] ?? 0);
+
+    const handlers: Record<string, (payload?: unknown) => void> = {};
+    mockApi.on.mockImplementation((event: string, cb: (payload?: unknown) => void) => {
+      handlers[event] = cb;
+      return vi.fn();
+    });
+    let stateCallback: ((event: { key: string; value: unknown }) => void) | undefined;
+    mockApi.subscribeToState.mockImplementation((cb: typeof stateCallback) => {
+      stateCallback = cb;
       return vi.fn();
     });
 
@@ -1257,12 +1283,164 @@ describe('auto-advance', () => {
     plugin.play(0);
     mockApi.emit.mockClear();
 
-    captured.ended?.();
+    const setState = (key: string, value: unknown): void => {
+      state[key] = value;
+      stateCallback?.({ key, value });
+    };
 
-    expect(mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+    return {
+      plugin,
+      mockApi,
+      state,
+      /** The element's `playing` event, as the providers mirror it into state. */
+      play: () => {
+        setState('playing', true);
+        setState('paused', false);
+      },
+      /** A `pause` event; `atEnd` is the element's own end-of-media pause. */
+      pause: (atEnd: boolean) => {
+        elementEnded = atEnd;
+        setState('playing', false);
+        setState('paused', true);
+        handlers['playback:pause']?.();
+      },
+      ended: () => handlers['playback:ended']?.(),
+      setState,
+      loadRequests: () =>
+        mockApi.emit.mock.calls.filter(([event]) => event === 'media:load-request'),
+    };
+  };
+
+  // Fails today: the handler read `paused` at `ended`, which the element's
+  // end-of-media pause has already set, so every advance loaded paused.
+  it('carries autoplay: true when a playing viewer reaches the end (pause, then ended)', async () => {
+    const h = await setupAdvanceHarness();
+
+    h.play();
+    h.pause(true);
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: true,
+    });
+  });
+
+  // Preservation: a viewer who paused mid-track stays paused on the next track.
+  it('carries autoplay: false when the viewer paused mid-track before ended', async () => {
+    const h = await setupAdvanceHarness();
+
+    h.play();
+    h.pause(false);
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
       src: 'track2.mp3',
       autoplay: false,
     });
+  });
+
+  // Preservation: never played (scrubbed to the end while paused), so the
+  // spec's `ended` with no `pause` before it must not start the next track.
+  it('carries autoplay: false for an ended with no playback before it', async () => {
+    const h = await setupAdvanceHarness();
+
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: false,
+    });
+  });
+
+  // Preservation: the advance consumes the flag, so a synthetic ended on the
+  // next track with no playback in between does not autoplay the one after.
+  it('does not carry the previous track\'s playback into the next advance', async () => {
+    const h = await setupAdvanceHarness();
+
+    h.play();
+    h.pause(true);
+    h.ended();
+    h.mockApi.emit.mockClear();
+
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track3.mp3',
+      autoplay: false,
+    });
+  });
+
+  // Fails today: a playlist registered and initialised (player.init()) while
+  // the media was already playing saw no `playing` change, so its first
+  // auto-advance loaded the next track paused. The flag is seeded from state.
+  it('carries autoplay: true when initialised while the media was already playing', async () => {
+    const h = await setupAdvanceHarness({}, { alreadyPlaying: true });
+
+    h.pause(true);
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: true,
+    });
+  });
+
+  // Fails today: with no media element to ask, a pause at currentTime ===
+  // duration is the end-of-media pause.
+  it('treats a pause at the end of the duration as end-of-media when no element is found', async () => {
+    const h = await setupAdvanceHarness({}, { element: false });
+
+    h.play();
+    h.state.duration = 30;
+    h.state.currentTime = 30;
+    h.pause(false);
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: true,
+    });
+  });
+
+  // Preservation: a host load() mid-track emits no playback:pause, so the new
+  // source is the only signal that the old track's playback is gone.
+  it('forgets playback when the source changes without a pause', async () => {
+    const h = await setupAdvanceHarness();
+
+    h.play();
+    // What load() writes: the playback reset through update(), then the new
+    // source object. No playback:pause reaches the playlist.
+    h.setState('playing', false);
+    h.setState('paused', true);
+    h.setState('source', { src: 'b.mp4' });
+    h.ended();
+
+    expect(h.mockApi.emit).toHaveBeenCalledWith('media:load-request', {
+      src: 'track2.mp3',
+      autoplay: false,
+    });
+  });
+
+  // Fails today: both ended events inside advanceDelay must read the viewer's
+  // real intent, so the surviving timer still carries autoplay: true.
+  it('keeps autoplay: true when two ended events land inside advanceDelay', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = await setupAdvanceHarness({ advanceDelay: 1000 });
+
+      h.play();
+      h.pause(true);
+      h.ended();
+      h.ended();
+      vi.advanceTimersByTime(2000);
+
+      expect(h.loadRequests()).toEqual([
+        ['media:load-request', { src: 'track2.mp3', autoplay: true }],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('schedules one advance when two ended events land inside advanceDelay', async () => {

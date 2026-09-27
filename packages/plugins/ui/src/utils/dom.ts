@@ -84,6 +84,22 @@ export function getVideo(container: HTMLElement): HTMLVideoElement | null {
 }
 
 /**
+ * Remove every child node of an element.
+ *
+ * Use this instead of `Element.replaceChildren`, which is Chrome 86 /
+ * Safari 14: the documented floor is Chrome 80, and LG NetCast TVs sit below
+ * it and threw `replaceChildren is not a function` on a control-bar rebuild
+ * (Sentry TSP-WEB-2JN).
+ *
+ * @param el - The node to empty
+ */
+export function clearChildren(el: Node): void {
+  while (el.firstChild) {
+    el.removeChild(el.firstChild);
+  }
+}
+
+/**
  * Markup last written to each element by {@link setHTML}.
  *
  * Reading `el.innerHTML` back is not a reliable comparison: the DOM

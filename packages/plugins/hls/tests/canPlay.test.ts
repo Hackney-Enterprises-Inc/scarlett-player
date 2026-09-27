@@ -12,8 +12,6 @@ describe('HLS Plugin - canPlay()', () => {
   let plugin: ReturnType<typeof createHLSPlugin>;
 
   beforeEach(() => {
-    // Mock HLS support
-    vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(true);
     plugin = createHLSPlugin();
   });
 
@@ -67,21 +65,17 @@ describe('HLS Plugin - canPlay()', () => {
   });
 
   describe('HLS support detection', () => {
-    it('should return false when HLS is not supported', () => {
+    // Fails today (SCAR-HLS-PROVIDER-NOT-FOUND-IOS): an unsupported browser
+    // made canPlay() refuse the source, so core reported PROVIDER_NOT_FOUND
+    // with nothing about why (Sentry TSP-WEB-2JP). The provider claims HLS by
+    // shape; support is loadSource()'s question.
+    it('claims an .m3u8 source even when HLS is not supported', () => {
       vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(false);
       const unsupportedPlugin = createHLSPlugin();
 
-      expect(unsupportedPlugin.canPlay('video.m3u8')).toBe(false);
-      expect(unsupportedPlugin.canPlay('http://example.com/stream.m3u8')).toBe(false);
-    });
-
-    it('should return false for all URLs when HLS unsupported', () => {
-      vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(false);
-      const unsupportedPlugin = createHLSPlugin();
-
-      expect(unsupportedPlugin.canPlay('video.m3u8')).toBe(false);
+      expect(unsupportedPlugin.canPlay('video.m3u8')).toBe(true);
+      expect(unsupportedPlugin.canPlay('stream?type=application/x-mpegurl')).toBe(true);
       expect(unsupportedPlugin.canPlay('video.mp4')).toBe(false);
-      expect(unsupportedPlugin.canPlay('stream?type=application/x-mpegurl')).toBe(false);
     });
   });
 

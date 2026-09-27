@@ -11,10 +11,10 @@ export interface IAirPlayPlugin extends Plugin {
   /** Show the AirPlay device picker (Safari only) */
   showPicker(): void;
 
-  /** Check if AirPlay is available (Safari + devices found) */
+  /** Check if AirPlay is available (Safari + devices found). False once the player is destroyed. */
   isAvailable(): boolean;
 
-  /** Check if currently casting via AirPlay */
+  /** Check if currently casting via AirPlay. False once the player is destroyed. */
   isActive(): boolean;
 
   /** Stop AirPlay casting */

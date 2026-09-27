@@ -46,6 +46,7 @@ import {
 } from './controls';
 import { getControlFactory, onControlRegistered } from './control-registry';
 import { PKG_VERSION } from './version';
+import { clearChildren } from './utils';
 
 export type {
   IUIPlugin,
@@ -823,7 +824,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     entries = [];
     timeEntry = null;
     tray = null;
-    controlBar.replaceChildren();
+    clearChildren(controlBar);
 
     // Everything the previous fit knew (cached widths, the signature, which
     // element sat where) described elements that no longer exist, so the

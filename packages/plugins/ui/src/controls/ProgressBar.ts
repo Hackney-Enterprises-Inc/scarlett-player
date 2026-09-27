@@ -6,7 +6,7 @@
 
 import type { Chapter, IPluginAPI, ThumbnailConfig } from '@scarlett-player/core';
 import type { Control } from './Control';
-import { createElement, getVideo, formatTime, formatLiveTime } from '../utils';
+import { createElement, getVideo, formatTime, formatLiveTime, clearChildren } from '../utils';
 import { ThumbnailPreview } from './ThumbnailPreview';
 import { attachTimelineHost } from '../timeline-registry';
 import type {
@@ -149,7 +149,7 @@ export class ProgressBar implements Control {
       this.extension = null;
       this.setExtensionDragging(false);
       this.setExtensionEditing(false);
-      this.extensionLayer.replaceChildren();
+      clearChildren(this.extensionLayer);
     }
 
     if (!factory) return;

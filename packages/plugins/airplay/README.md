@@ -46,6 +46,8 @@ plugin?.isAvailable();  // true if AirPlay devices detected
 // Check if currently casting
 plugin?.isActive();     // true if casting to AirPlay
 
+// Both answer false once the player is destroyed, rather than throwing
+
 // Show device picker
 await plugin?.showPicker();
 ```
