@@ -23,8 +23,9 @@
  *     Access-Control-Allow-Credentials: true, without which the credentialed
  *     unload sendBeacon is silently dropped.
  *
- * Five scenarios, each in a fresh browser context (fresh viewId, viewerId and
- * session): full session, unload, destroy, fatal error, clip create + retry.
+ * Six scenarios, each in a fresh browser context (fresh viewId, viewerId and
+ * session): full session, unload, destroy, fatal error, clip create + retry,
+ * and a live stream abandoned by navigation (the latency summary keys).
  * The assertions below run before anything is written; a failure exits
  * non-zero and writes nothing, because a fixture set that contradicts the
  * contract is worse than none.
@@ -77,6 +78,9 @@ const CUSTOM_DIMENSIONS = { tenant: 'wire', planTier: 'free', experiment: 42, be
 /** Present on the ended viewEnd; absent from the unload viewEnd (the plan's two-variant table). */
 const VIEW_END_SHARED = ['watchTime', 'playTime', 'startupTime', 'rebufferCount', 'rebufferDuration', 'avgBitrate', 'maxBitrate', 'exitType'];
 const VIEW_END_FETCH_ONLY = ['qoeScore', 'rebufferRatio', 'qualityChanges', 'pauseCount', 'pauseDuration', 'seekCount', 'errorCount', 'completionRate'];
+
+/** Every live heartbeat and live viewEnd carries these; no VOD beacon carries any. */
+const LATENCY_KEYS = ['liveLatencySamples', 'liveLatencyMean', 'liveLatencyP95', 'liveLatencyMax', 'lowLatency'];
 
 /** Headers that describe the connection, not the request; dropped from fixtures. */
 const HOP_BY_HOP = new Set(['host', 'connection', 'content-length']);
@@ -225,6 +229,44 @@ const MASTER_PLAYLIST = [
   '/scripts/fixtures/hls/vod.m3u8',
   '',
 ].join('\n');
+
+/** Segments in the fixture's vod.m3u8, 2 s each. */
+const LIVE_SEGMENTS = 30;
+const LIVE_SEGMENT_SECONDS = 2;
+/** Segments in the sliding window, and how far into the stream a viewer joins. */
+const LIVE_WINDOW = 6;
+const LIVE_PRIME_SECONDS = 12;
+
+/** The live origin's clock: set by the first playlist request of each run of scenarioLive. */
+const liveClock = { startedAt: null };
+
+/**
+ * A rolling live media playlist over the fixture's 2 s segments.
+ *
+ * No ENDLIST, a sliding window and a media sequence that advances with the
+ * clock, so hls.js classifies it live and the HLS plugin emits `live:latency`.
+ * Standard latency, not LL: the wire question is which keys a live beacon
+ * carries, and `lowLatency: false` is as much a fixture as `true` would be.
+ * Served by the page server rather than a Playwright route (see segmentHold).
+ *
+ * @returns {string} The playlist as of now
+ */
+function livePlaylist() {
+  liveClock.startedAt ??= Date.now();
+  const elapsed = LIVE_PRIME_SECONDS + (Date.now() - liveClock.startedAt) / 1000;
+  const published = Math.min(LIVE_SEGMENTS, Math.floor(elapsed / LIVE_SEGMENT_SECONDS));
+  const first = Math.max(0, published - LIVE_WINDOW);
+  const lines = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-TARGETDURATION:${LIVE_SEGMENT_SECONDS}`,
+    `#EXT-X-MEDIA-SEQUENCE:${first}`,
+  ];
+  for (let i = first; i < published; i++) {
+    lines.push(`#EXTINF:${LIVE_SEGMENT_SECONDS.toFixed(6)},`, `/scripts/fixtures/hls/seg${i}.ts`);
+  }
+  return `${lines.join('\n')}\n`;
+}
 
 /**
  * Segment responses parked while the runner starves the buffer.
@@ -375,6 +417,12 @@ async function startPageServer(bundlePath) {
       return;
     }
 
+    if (url.pathname === '/__wire/live.m3u8') {
+      res.writeHead(200, { 'Content-Type': MIME['.m3u8'], 'Cache-Control': 'no-store' });
+      res.end(livePlaylist());
+      return;
+    }
+
     if (segmentHold.active && /^\/scripts\/fixtures\/hls\/seg\d+\.ts$/.test(url.pathname)) {
       await new Promise((resume) => segmentHold.parked.push(resume));
     }
@@ -453,9 +501,10 @@ const transportOf = (r) => (!r.headers['x-api-key'] && r.query.api_key !== undef
  * @param {string} pageOrigin
  * @param {string} beaconOrigin
  * @param {string} [src] - Playlist path; the page defaults to the fixture
+ * @param {'vod'|'live'} [video] - Which videoId/videoTitle the beacons carry
  * @returns {Promise<{ context: import('playwright').BrowserContext, page: import('playwright').Page, pageErrors: string[] }>}
  */
-async function openPlayer(browser, pageOrigin, beaconOrigin, src) {
+async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod') {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   // Nothing may leave 127.0.0.1, as in verify-browser.mjs, but enforced by
   // the launch's --host-resolver-rules rather than a route (see
@@ -469,7 +518,7 @@ async function openPlayer(browser, pageOrigin, beaconOrigin, src) {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  const query = new URLSearchParams({ beacon: beaconOrigin, src: src ?? '/__wire/master.m3u8' });
+  const query = new URLSearchParams({ beacon: beaconOrigin, src: src ?? '/__wire/master.m3u8', video });
   await page.goto(`${pageOrigin}/scripts/wire-capture/index.html?${query}`);
   await page.waitForFunction(() => window.wire !== undefined);
   const initError = await page.evaluate(async () => {
@@ -694,12 +743,44 @@ async function scenarioClip(browser, pageOrigin, beaconOrigin) {
   return { notes };
 }
 
+/**
+ * Scenario 6: a live stream the viewer abandons by navigating away.
+ *
+ * Yields the live heartbeat and the live unload viewEnd, the two beacons that
+ * carry the latency summary. Navigates to about:blank like scenario 2.
+ */
+async function scenarioLive(browser, pageOrigin, beaconOrigin) {
+  liveClock.startedAt = null;
+  const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live');
+  const notes = { pageErrors };
+  try {
+    await play(page);
+    await waitPlaying(page);
+    await waitFor(
+      () =>
+        beaconsOf('live').filter((r) => eventOf(r) === 'heartbeat' && r.body.liveLatencySamples > 0).length >= 2,
+      15000,
+      'two heartbeats with latency readings'
+    );
+    notes.state = await page.evaluate(() => {
+      const s = window.wire.player.getState();
+      return { live: s.live, liveLatency: s.liveLatency, lowLatencyMode: s.lowLatencyMode };
+    });
+    await page.goto('about:blank');
+    await sleep(2000);
+  } finally {
+    await context.close();
+  }
+  return { notes };
+}
+
 const SCENARIOS = [
   ['full-session', scenarioFullSession],
   ['unload', scenarioUnload],
   ['destroy', scenarioDestroy],
   ['error', scenarioError],
   ['clip', scenarioClip],
+  ['live', scenarioLive],
 ];
 
 // ---------------------------------------------------------------------------
@@ -774,6 +855,11 @@ function selectFixtures(scenarioNotes) {
     if (clipPosts[i]) put(file, clipPosts[i], { event: 'clip', transport: 'fetch', variant: name, scenario: 'clip', status: clipPosts[i].status });
     else absent.push({ file, required: true, reason: `clip submission ${i + 1} never arrived` });
   }
+
+  // Scenario 6
+  beaconFixture('live', 'viewStart', { variant: 'live' });
+  beaconFixture('live', 'heartbeat', { pick: 'last', variant: 'live' });
+  beaconFixture('live', 'viewEnd', { variant: 'live-unload' });
 
   return { fixtures, absent };
 }
@@ -904,6 +990,32 @@ function runAssertions(fixtures, absent, scenarioNotes) {
     if (notes.afterRetry?.open !== false) fail('selector still open after the successful retry');
   });
 
+  check('live heartbeat and live unload viewEnd carry isLive and the latency summary; no VOD beacon has latency keys', () => {
+    const state = scenarioNotes.live?.state;
+    if (state?.live !== true) fail(`player state live ${state?.live}`);
+    const heartbeat = body('heartbeat.fetch.live.json');
+    const unload = fixtures.get('viewEnd.sendBeacon.live-unload.json')?.record;
+    if (!heartbeat || !unload) fail('live heartbeat or live unload viewEnd missing');
+    if (transportOf(unload) !== 'sendBeacon') fail(`live unload viewEnd arrived by ${transportOf(unload)}`);
+    for (const [name, b] of [['heartbeat', heartbeat], ['viewEnd', unload.body]]) {
+      if (b.isLive !== true) fail(`live ${name} isLive ${b.isLive}`);
+      if (b.videoId !== 'wire-fixture-live') fail(`live ${name} videoId ${b.videoId}`);
+      for (const key of LATENCY_KEYS.slice(0, 4)) {
+        if (typeof b[key] !== 'number' || !Number.isFinite(b[key])) fail(`live ${name} ${key} = ${JSON.stringify(b[key])}`);
+      }
+      if (typeof b.lowLatency !== 'boolean') fail(`live ${name} lowLatency = ${JSON.stringify(b.lowLatency)}`);
+      if (!(b.liveLatencySamples > 0)) fail(`live ${name} liveLatencySamples ${b.liveLatencySamples}`);
+    }
+    for (const key of VIEW_END_SHARED) if (!(key in unload.body)) fail(`live unload lacks ${key}`);
+    for (const key of VIEW_END_FETCH_ONLY) if (key in unload.body) fail(`live unload has ${key}`);
+    if (unload.body.exitType !== 'abandoned') fail(`live unload exitType ${unload.body.exitType}`);
+    for (const r of beacons.filter((b) => b.scenario !== 'live')) {
+      const leaked = LATENCY_KEYS.filter((key) => key in r.body);
+      if (leaked.length) fail(`${eventOf(r)} (${r.scenario}) carries ${leaked.join(', ')} on VOD`);
+    }
+    return `latency mean ${heartbeat.liveLatencyMean}s over ${heartbeat.liveLatencySamples} readings, lowLatency ${heartbeat.lowLatency}`;
+  });
+
   check('heartbeat watchTime and rebufferCount never decrease (sanity)', () => {
     const beats = beaconsOf('full-session').filter((r) => eventOf(r) === 'heartbeat').map((r) => r.body);
     for (let i = 1; i < beats.length; i++) {
@@ -1001,6 +1113,12 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
           beacons: beaconsOf(name).length,
           pageErrors: notes.pageErrors ?? [],
           ...(notes.rebuffer ? { rebuffer: notes.rebuffer, startupRebuffer: notes.startupRebuffer } : {}),
+          // isLive per event as first sent: on live, viewStart leaves before
+          // the manifest is parsed, so it can say false where later beacons
+          // say true. Recorded, not asserted; the ingest decides what wins.
+          ...(name === 'live'
+            ? { isLiveByEvent: Object.fromEntries(beaconsOf(name).reverse().map((r) => [eventOf(r), r.body.isLive])) }
+            : {}),
         },
       ])
     ),

@@ -10,6 +10,9 @@
  * Query parameters, all set by the runner:
  *   beacon  - the HTTPS beacon recorder's origin (required)
  *   src     - playlist path on the page origin (default: the local fixture)
+ *   video   - `vod` (default) or `live`: the videoId/videoTitle the beacons
+ *             carry. `isLive` is never configured; analytics reads it from
+ *             player state, which is what the live fixtures verify.
  *
  * Bundled by the runner with esbuild into a temp directory, with
  * `__PKG_VERSION__` defined from packages/plugins/analytics/package.json so
@@ -55,6 +58,7 @@ const params = new URLSearchParams(window.location.search);
 const beaconOrigin = params.get('beacon');
 if (!beaconOrigin) throw new Error('wire-capture: ?beacon=<https origin> is required');
 const src = params.get('src') ?? '/scripts/fixtures/hls/vod.m3u8';
+const video = params.get('video') === 'live' ? 'live' : 'vod';
 
 /**
  * Read a `<meta name>` tag's content, the way a Laravel page exposes its CSRF
@@ -70,8 +74,8 @@ function readMeta(name: string): string {
 const analytics = createAnalyticsPlugin({
   beaconUrl: `${beaconOrigin}/api/scarlett/beacons`,
   apiKey: 'wire-capture-key',
-  videoId: 'wire-fixture-vod',
-  videoTitle: 'Wire fixture (VOD)',
+  videoId: `wire-fixture-${video}`,
+  videoTitle: video === 'live' ? 'Wire fixture (live)' : 'Wire fixture (VOD)',
   // The 10 s default would add minutes to every scenario.
   heartbeatInterval: 1000,
   customDimensions: { tenant: 'wire', planTier: 'free', experiment: 42, beta: true },

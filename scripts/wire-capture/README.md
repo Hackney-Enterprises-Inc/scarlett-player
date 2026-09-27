@@ -24,11 +24,21 @@ Capture after the release you want to pin: `<version>` is read from
 One JSON per request, `<event>.<transport>[.<variant>].json`, each
 `{ fixture, request, response? }`, plus `_session.sequence.json` (every beacon
 of the full session in arrival order) and `manifest.json` (versions, files,
-expected-but-absent fixtures with a reason, assertion results). Five
+expected-but-absent fixtures with a reason, assertion results). Six
 scenarios, each in a fresh browser context: full session ending on `ended`,
-unload (`sendBeacon`), `destroy()`, fatal playlist 404, and a clip whose first
-POST gets a 500 and whose retry gets a 202. `rebufferStart`/`rebufferEnd` are
+unload (`sendBeacon`), `destroy()`, fatal playlist 404, a clip whose first
+POST gets a 500 and whose retry gets a 202, and a live stream abandoned by
+navigation (`viewStart.fetch.live.json`, `heartbeat.fetch.live.json`,
+`viewEnd.sendBeacon.live-unload.json`). `rebufferStart`/`rebufferEnd` are
 best effort; everything else is required.
+
+The live scenario plays `/__wire/live.m3u8`, a rolling playlist the page
+server builds over the same 2 s segments (six-segment window, no `ENDLIST`,
+standard latency, so `lowLatency` is `false`). The page never configures
+`isLive`; analytics reads it from player state. On live, `viewStart` leaves
+before hls.js has parsed the manifest and carries `isLive: false` while every
+later beacon says `true`; the manifest's `scenarios.live.isLiveByEvent` records
+that per event rather than asserting it away.
 
 The page plays a one-variant master playlist the runner serves over the
 shared fixture's `vod.m3u8` (`BANDWIDTH=264000,RESOLUTION=320x180`): the
@@ -44,7 +54,10 @@ produces a real stall. `trackEvent('wireCustom')` goes over the wire as
 on every fetch beacon and only `?api_key=` on the unload beacon; the preflight
 names `x-api-key`; the unload `viewEnd` is the documented field subset of the
 ended one; a fatal error sends `error` (with `errorCode`) and then a `viewEnd`
-with `exitType: 'error'`; custom dimensions at the top level; clip create and retry share
+with `exitType: 'error'`; the live heartbeat and live unload `viewEnd` carry
+`isLive: true` and all five latency summary keys (`liveLatencySamples`,
+`liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`, `lowLatency`) and no VOD
+beacon carries any; custom dimensions at the top level; clip create and retry share
 `clientRequestId` and body (`capturedAt` is minted per attempt) and carry the
 CSRF header; heartbeats never go backwards; every bus `quality:change` produced
 a matching `qualityChange` beacon; nothing left `127.0.0.1`. Any failure
