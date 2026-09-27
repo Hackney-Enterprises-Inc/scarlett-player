@@ -1003,7 +1003,9 @@ function runAssertions(fixtures, absent, scenarioNotes) {
       for (const key of LATENCY_KEYS.slice(0, 4)) {
         if (typeof b[key] !== 'number' || !Number.isFinite(b[key])) fail(`live ${name} ${key} = ${JSON.stringify(b[key])}`);
       }
-      if (typeof b.lowLatency !== 'boolean') fail(`live ${name} lowLatency = ${JSON.stringify(b.lowLatency)}`);
+      // The live playlist is standard latency (see livePlaylist), so true
+      // would mean the stream was misclassified, not a valid alternative.
+      if (b.lowLatency !== false) fail(`live ${name} lowLatency = ${JSON.stringify(b.lowLatency)}, expected false`);
       if (!(b.liveLatencySamples > 0)) fail(`live ${name} liveLatencySamples ${b.liveLatencySamples}`);
     }
     for (const key of VIEW_END_SHARED) if (!(key in unload.body)) fail(`live unload lacks ${key}`);

@@ -56,8 +56,8 @@ names `x-api-key`; the unload `viewEnd` is the documented field subset of the
 ended one; a fatal error sends `error` (with `errorCode`) and then a `viewEnd`
 with `exitType: 'error'`; the live heartbeat and live unload `viewEnd` carry
 `isLive: true` and all five latency summary keys (`liveLatencySamples`,
-`liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`, `lowLatency`) and no VOD
-beacon carries any; custom dimensions at the top level; clip create and retry share
+`liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`, `lowLatency`, which must
+be `false` on the standard-latency playlist) and no VOD beacon carries any; custom dimensions at the top level; clip create and retry share
 `clientRequestId` and body (`capturedAt` is minted per attempt) and carry the
 CSRF header; heartbeats never go backwards; every bus `quality:change` produced
 a matching `qualityChange` beacon; nothing left `127.0.0.1`. Any failure
