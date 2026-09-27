@@ -61,6 +61,19 @@
  *      big play button shows on the new source. The playlist is the one the
  *      demo bundles, exposed as `window.createPlaylistPlugin` and registered
  *      on the demo's video player.
+ *  12. Embed addons (SCAR-EMBED-3): a host page, served from the local server,
+ *      loads the built embed UMD and then both addon UMDs as plain scripts,
+ *      with `data-chapters`, `data-clips-endpoint` + `data-clips-csrf="meta"`
+ *      and a csrf-token meta tag. The global survives the addon scripts, the
+ *      `chapters` and `clip` controls render in the embed's own bar (the
+ *      addons' shims reached the embed's control registry), and a
+ *      programmatic clip commit reaches a local route carrying the page's
+ *      X-CSRF-TOKEN. Then the negatives: the same page without the addon
+ *      scripts shows neither control and logs exactly two warnings, and
+ *      `embed.video.umd.cjs` behaves as the full build does. The same host
+ *      page with `defer` scripts and with `type="module"` ESM scripts also
+ *      gets both controls: auto-init waits for DOMContentLoaded, after the
+ *      addon scripts that follow the embed in document order.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -2040,6 +2053,196 @@ const state = (page) => page.evaluate(() => {
   );
 
   await page.close();
+}
+
+// ============================================================ SCENARIO 12
+// Embed addons. The addon bundles alias @scarlett-player/core and /ui to shims
+// that call the embed's window.ScarlettPlayer.addonRuntime, so a control an
+// addon registers lands in the embed's own registry. Nothing short of a real
+// browser loading the built files can show that: the unit tests import the
+// sources, where there is only ever one registry.
+{
+  console.log('\n--- Scenario 12: embed addons, chapters + clips (local fixture) ---');
+
+  const CLIPS_ROUTE = 'http://127.0.0.1:8899/api/scarlett/clips';
+  const CHAPTERS = JSON.stringify([
+    { time: 0, label: 'Intro' },
+    { time: 4, label: 'Middle' },
+  ]);
+
+  /**
+   * Serve a host page from the local origin and open it. Plain script tags in
+   * document order, the way the embed README tells a host to load addons, so
+   * auto-init at DOMContentLoaded already sees both registrations.
+   *
+   * @param {string} build - Embed bundle file name in packages/embed/dist
+   * @param {boolean} withAddons - Whether to load the two addon UMDs
+   * @returns {Promise<{page: import('playwright').Page, warnings: string[], posts: object[], collect: Function}>}
+   */
+  const openHostPage = async (build, withAddons, scriptStyle = 'plain') => {
+    const { page, collect } = await newTrackedPage();
+    const warnings = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'warning' && msg.text().startsWith('[ScarlettPlayer]')) warnings.push(msg.text());
+    });
+    const posts = [];
+    await page.route(CLIPS_ROUTE, async (route) => {
+      const request = route.request();
+      posts.push({ method: request.method(), headers: request.headers(), body: request.postDataJSON() });
+      await route.fulfill({ status: 201, contentType: 'application/json', body: '{"id":"clip-1"}' });
+    });
+    // `defer` and `type="module"` scripts run when readyState is already
+    // 'interactive' but before the deferred scripts after them; the embed's
+    // auto-init has to wait for DOMContentLoaded or it scans before the
+    // addons register (found in review, 2026-09-27). The module style loads
+    // the ESM files, which is what a module host would do.
+    const tag = (file) => {
+      if (scriptStyle === 'module') return `<script type="module" src="${EMBED_DIST}${file.replace(/\.umd\.cjs$/, '.js')}"></script>`;
+      if (scriptStyle === 'defer') return `<script defer src="${EMBED_DIST}${file}"></script>`;
+      return `<script src="${EMBED_DIST}${file}"></script>`;
+    };
+    const addonTags = withAddons
+      ? ['chapters', 'clips'].map((n) => tag(`embed.addon.${n}.umd.cjs`)).join('\n')
+      : '';
+    const html = `<!doctype html><html><head><meta charset="utf-8">
+<meta name="csrf-token" content="tok-s12">
+${tag(build)}
+${addonTags}
+</head><body>
+<div id="auto" style="width:960px" data-scarlett-player data-src="${FIXTURE_VOD}" data-muted="true"
+  data-chapters='${CHAPTERS}' data-clips-endpoint="${CLIPS_ROUTE}" data-clips-csrf="meta"
+  data-clips-media-id="abc123"></div>
+<div id="prog" style="width:960px"></div>
+</body></html>`;
+    const pageUrl = 'http://127.0.0.1:8899/__scenario12.html';
+    await page.route(pageUrl, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#auto .sp-controls', { timeout: 30000 }).catch(() => {});
+    // Controls are registered after a dynamic import resolves; give it a beat.
+    await page.waitForTimeout(1000);
+    return { page, warnings, posts, collect };
+  };
+
+  const barState = (page) => page.evaluate(() => {
+    const bar = document.querySelector('#auto .sp-controls');
+    return {
+      createType: typeof window.ScarlettPlayer?.create,
+      version: window.ScarlettPlayer?.version ?? null,
+      runtimeVersion: window.ScarlettPlayer?.addonRuntime?.version ?? null,
+      chapters: !!bar?.querySelector('.sp-chapters__button'),
+      clip: !!bar?.querySelector('.sp-clip-control'),
+    };
+  });
+
+  for (const build of ['embed.umd.cjs', 'embed.video.umd.cjs']) {
+    const { page, warnings, posts, collect } = await openHostPage(build, true);
+    const bar = await barState(page);
+    record(
+      `[${build}] window.ScarlettPlayer.create survives both addon scripts`,
+      bar.createType === 'function',
+      JSON.stringify(bar)
+    );
+    record(
+      `[${build}] addonRuntime.version is the bare package version`,
+      bar.runtimeVersion === EMBED_VERSION,
+      `runtime=${bar.runtimeVersion}, package.json=${EMBED_VERSION}`
+    );
+    record(
+      `[${build}] the chapters and clip controls render in the embed's bar`,
+      bar.chapters && bar.clip,
+      JSON.stringify(bar)
+    );
+    record(`[${build}] no addon warnings with the addons loaded`, warnings.length === 0, warnings.join(' | '));
+
+    // Programmatic submission through the same wiring create() uses.
+    const commit = await page.evaluate(async ({ src, route }) => {
+      const player = await window.ScarlettPlayer.create({
+        container: '#prog',
+        src,
+        muted: true,
+        clips: { endpoint: route, csrf: 'meta', mediaId: 'abc123' },
+      });
+      // The clips plugin refuses to open until the duration is known, and
+      // the HLS provider fetches nothing before the first play.
+      await player.play().catch(() => {});
+      const deadline = Date.now() + 15000;
+      while (!(player.getState().duration > 0) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      player.pause();
+      const clips = player.getPlugin('clips');
+      const events = [];
+      player.on('clip:created', () => events.push('created'));
+      player.on('clip:error', (e) => events.push(`error:${e?.code ?? e?.error?.message ?? JSON.stringify(e)}`));
+      clips.open();
+      const opened = clips.isOpen();
+      clips.setRange(1, 5);
+      const range = clips.getRange();
+      try {
+        await clips.commit();
+        return { ok: events.includes('created'), opened, range, events };
+      } catch (e) {
+        return { ok: false, opened, range, events, error: String(e) };
+      }
+    }, { src: FIXTURE_VOD, route: CLIPS_ROUTE });
+    const post = posts[0];
+    record(
+      `[${build}] a programmatic clip commit reaches the local route with X-CSRF-TOKEN`,
+      commit.ok && posts.length === 1 && post.method === 'POST' && post.headers['x-csrf-token'] === 'tok-s12'
+        && post.body?.mediaId === 'abc123',
+      JSON.stringify({ commit, posts: posts.map((p) => ({ m: p.method, csrf: p.headers['x-csrf-token'], body: p.body })) })
+    );
+
+    const errs = await collect();
+    record(
+      `[${build}] zero uncaught errors or unhandled rejections with the addons`,
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  for (const scriptStyle of ['defer', 'module']) {
+    const { page, warnings, collect } = await openHostPage('embed.umd.cjs', true, scriptStyle);
+    const bar = await barState(page);
+    record(
+      `[${scriptStyle} scripts] the chapters and clip controls render (auto-init waits for the addon scripts)`,
+      bar.createType === 'function' && bar.chapters && bar.clip,
+      JSON.stringify(bar)
+    );
+    record(`[${scriptStyle} scripts] no addon warnings`, warnings.length === 0, warnings.join(' | '));
+    const errs = await collect();
+    record(
+      `[${scriptStyle} scripts] zero uncaught errors`,
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  for (const build of ['embed.umd.cjs', 'embed.video.umd.cjs']) {
+    const { page, warnings, collect } = await openHostPage(build, false);
+    const bar = await barState(page);
+    record(
+      `[${build}] without the addon scripts neither control renders`,
+      !bar.chapters && !bar.clip,
+      JSON.stringify(bar)
+    );
+    record(
+      `[${build}] without the addon scripts exactly two warnings, one per addon`,
+      warnings.length === 2
+        && warnings.some((w) => w.includes('embed.addon.chapters'))
+        && warnings.some((w) => w.includes('embed.addon.clips')),
+      warnings.join(' | ')
+    );
+    const errs = await collect();
+    record(
+      `[${build}] zero uncaught errors without the addons`,
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
 }
 
 // ============================================================ SUMMARY

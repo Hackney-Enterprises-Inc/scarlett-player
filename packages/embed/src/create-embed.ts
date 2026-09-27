@@ -5,9 +5,19 @@
  * Each build (full, video, audio) uses this with different plugin sets.
  */
 
-import { ScarlettPlayer, createPlayer, type Plugin } from '@scarlett-player/core';
+import { ScarlettPlayer, createPlayer, injectSharedStyles, type Plugin } from '@scarlett-player/core';
 import type { EmbedConfig, EmbedPlayerOptions, PlayerType, ScarlettPlayerGlobal } from './types';
 import { parseDataAttributes, applyContainerStyles } from './parser';
+import { buildControlLayout } from './control-layout';
+import {
+  ADDON_NAMES,
+  type AddonCreator,
+  type AddonName,
+  type AddonRuntime,
+  type RegisterControl,
+  type UnregisterControl,
+} from './addons/runtime';
+import { PKG_VERSION } from './version';
 
 /**
  * Plugin creators that builds can provide.
@@ -56,6 +66,18 @@ export interface PluginCreators {
    */
   share?: (config: any) => Plugin;
   /**
+   * Chapter markers and the chapter list control. No build ships it; the
+   * `embed.addon.chapters` bundle registers it through `ScarlettPlayer.use()`.
+   * Video players only.
+   */
+  chapters?: AddonCreator;
+  /**
+   * Viewer-created clips. No build ships it; the `embed.addon.clips` bundle
+   * registers it through `ScarlettPlayer.use()`. Video players only, and only
+   * with the `data-clips-csrf="meta"` opt-in.
+   */
+  clips?: AddonCreator;
+  /**
    * `accentTextTone` from `@scarlett-player/ui`, supplied by the builds that
    * ship the video UI.
    *
@@ -67,37 +89,63 @@ export interface PluginCreators {
 }
 
 /**
- * Control bar layout used when the embed adds the share button.
- *
- * `registerControl` never places anything on its own: a registered control
- * appears only in players whose layout lists its id, and `uiPlugin`'s own
- * default layout has no `share` slot. So the embed has to hand the UI plugin a
- * layout, and this is that default with `share` inserted at the head of the
- * right-hand group.
- *
- * It is a copy of `DEFAULT_LAYOUT` in `@scarlett-player/ui`, which that package
- * does not export. Keep the two in step: a slot added there and missed here
- * would silently go missing from every embed that turns sharing on. The embed
- * only uses this layout when `shareUrl` is set, so an embed without sharing
- * still gets the UI plugin's own default and cannot drift at all.
+ * The UI functions an entry hands `createScarlettPlayerAPI()` for the addon
+ * runtime. The video-capable builds pass `@scarlett-player/ui`'s own exports;
+ * the audio build ships no UI package and passes none.
  */
-const SHARE_CONTROL_LAYOUT = [
-  'play',
-  'skip-backward',
-  'skip-forward',
-  'volume',
-  'time',
-  'live-indicator',
-  'bandwidth-indicator',
-  'spacer',
-  'share',
-  'settings',
-  'captions',
-  'chromecast',
-  'airplay',
-  'pip',
-  'fullscreen',
-];
+export interface AddonUIFunctions {
+  registerControl: RegisterControl;
+  unregisterControl: UnregisterControl;
+}
+
+/**
+ * Plugin-creator maps that have created at least one player, so `use()` can
+ * tell the host that a late registration misses the players already built.
+ */
+const initialisedCreators = new WeakSet<PluginCreators>();
+
+/**
+ * Warn about an addon-backed attribute that cannot take effect, and say why.
+ *
+ * @param attribute - The attribute (or config key) that was ignored
+ * @param addon - The addon that would provide it
+ * @param availableTypes - The player types this build supports
+ * @param type - The type of the player being created
+ */
+function warnAddonUnavailable(
+  attribute: string,
+  addon: AddonName,
+  availableTypes: PlayerType[],
+  type: PlayerType
+): void {
+  if (!availableTypes.includes('video')) {
+    console.warn(
+      `[ScarlettPlayer] ${attribute} ignored: the ${addon} addon needs a video build ` +
+      '(embed.js or embed.video.js); this is the audio build.'
+    );
+  } else if (type !== 'video') {
+    console.warn(`[ScarlettPlayer] ${attribute} ignored: ${addon} applies to video players only.`);
+  } else {
+    console.warn(
+      `[ScarlettPlayer] ${attribute} ignored: load embed.addon.${addon}.js ` +
+      `(or embed.addon.${addon}.umd.cjs) after the embed to enable it.`
+    );
+  }
+}
+
+/**
+ * Read the host page's CSRF token for the clips endpoint.
+ *
+ * Only called for an embed whose host opted in with `data-clips-csrf="meta"`.
+ * A missing tag sends an empty header, and the server's 419 reaches the
+ * viewer through the clips overlay.
+ *
+ * @returns The `X-CSRF-TOKEN` header
+ */
+function csrfMetaHeaders(): Record<string, string> {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
+  return { 'X-CSRF-TOKEN': meta?.content ?? '' };
+}
 
 /**
  * Create an embed player with the given plugins
@@ -193,6 +241,10 @@ export async function createEmbedPlayer(
     // Add captions plugin if available
     if (pluginCreators.captions) {
       plugins.push(pluginCreators.captions(config.captions || {}));
+    } else if (config.captions?.sources?.length) {
+      console.warn(
+        '[ScarlettPlayer] data-captions ignored: captions need a video build (embed.js or embed.video.js).'
+      );
     }
 
     // Add gestures on video, where the bar is narrowest and the skip buttons
@@ -224,6 +276,43 @@ export async function createEmbedPlayer(
       plugins.push(pluginCreators.share(shareConfig));
     }
 
+    // Chapters and clips arrive as addons (`embed.addon.<name>`) through
+    // `ScarlettPlayer.use()`; no build carries them. Each attribute that
+    // cannot take effect warns once and installs nothing.
+    let chaptersEnabled = false;
+    if (config.chapters) {
+      if (type === 'video' && pluginCreators.chapters) {
+        plugins.push(pluginCreators.chapters({ ...config.chapters }));
+        chaptersEnabled = true;
+      } else {
+        warnAddonUnavailable('data-chapters', 'chapters', availableTypes, type);
+      }
+    }
+
+    let clipsEnabled = false;
+    if (config.clips) {
+      if (type !== 'video' || !pluginCreators.clips) {
+        warnAddonUnavailable('data-clips-endpoint', 'clips', availableTypes, type);
+      } else if (config.clips.csrf !== 'meta') {
+        // A third-party bundle reading the host page's CSRF token is
+        // behaviour the host has to ask for; without it the endpoint could
+        // only be called unauthenticated, which a Laravel route answers 419.
+        console.warn(
+          '[ScarlettPlayer] data-clips-endpoint ignored: set data-clips-csrf="meta" to allow ' +
+          "the embed to read your page's csrf-token meta tag."
+        );
+      } else {
+        const clipsConfig: Record<string, unknown> = {
+          endpoint: { url: config.clips.endpoint, headers: csrfMetaHeaders },
+          mediaId: config.clips.mediaId || config.analytics?.videoId || config.src,
+        };
+        if (config.clips.maxDuration !== undefined) clipsConfig.maxDuration = config.clips.maxDuration;
+        if (config.clips.minDuration !== undefined) clipsConfig.minDuration = config.clips.minDuration;
+        plugins.push(pluginCreators.clips(clipsConfig));
+        clipsEnabled = true;
+      }
+    }
+
     // Add analytics plugin if available and configured
     if (pluginCreators.analytics && config.analytics?.beaconUrl) {
       plugins.push(pluginCreators.analytics({
@@ -245,10 +334,16 @@ export async function createEmbedPlayer(
         // default is not duplicated in two packages. The audio UIs below have
         // no big play button, which is why this sits in the video branch.
         if (config.bigPlayButton !== undefined) uiConfig.bigPlayButton = config.bigPlayButton;
-        // The share control has to be in the layout to be built at all, and
-        // only a build that ships the plugin can build it. Without both, leave
-        // `controls` unset so the UI plugin keeps its own default layout.
-        if (shareEnabled && pluginCreators.share) uiConfig.controls = SHARE_CONTROL_LAYOUT;
+        // A registered control has to be in the layout to be built at all,
+        // and neither share, chapters nor clip is in the UI plugin's default.
+        // With none of them installed, leave `controls` unset so the UI
+        // plugin keeps its own default layout.
+        const controls = buildControlLayout({
+          share: shareEnabled && Boolean(pluginCreators.share),
+          chapters: chaptersEnabled,
+          clip: clipsEnabled,
+        });
+        if (controls) uiConfig.controls = controls;
         plugins.push(pluginCreators.videoUI(uiConfig));
       } else if ((type === 'audio' || type === 'audio-mini') && pluginCreators.audioUI) {
         plugins.push(pluginCreators.audioUI({
@@ -272,6 +367,7 @@ export async function createEmbedPlayer(
       loop: config.loop || false,
       plugins,
     });
+    initialisedCreators.add(pluginCreators);
 
     // Apply post-initialization settings
     const video = container.querySelector('video');
@@ -398,11 +494,61 @@ export async function initAll(
 export function createScarlettPlayerAPI(
   pluginCreators: PluginCreators,
   availableTypes: PlayerType[],
-  version: string
+  version: string,
+  ui?: AddonUIFunctions
 ): ScarlettPlayerGlobal {
+  // Names this build ships itself, fixed at creation so a later `use()` that
+  // replaces an addon is told apart from one that would shadow the build.
+  const builtIn = new Set<AddonName>(ADDON_NAMES.filter((name) => pluginCreators[name]));
+
+  const noVideoUI = (): never => {
+    throw new Error('[ScarlettPlayer] this embed build has no video UI; addons need embed.js or embed.video.js');
+  };
+
+  const addonRuntime: AddonRuntime = Object.freeze({
+    // Bare package version: the addon compares it with its own, and the
+    // '-video' / '-audio' suffix on `version` names the build, not the release.
+    version: PKG_VERSION,
+    injectSharedStyles,
+    registerControl: ui?.registerControl ?? noVideoUI,
+    unregisterControl: ui?.unregisterControl ?? noVideoUI,
+  });
+
   return {
     version,
     availableTypes,
+    addonRuntime,
+
+    use(name: AddonName, creator: AddonCreator): void {
+      if (!(ADDON_NAMES as readonly string[]).includes(name)) {
+        console.warn(
+          `[ScarlettPlayer] use("${String(name)}") refused: unknown addon. ` +
+          `Accepted names: ${ADDON_NAMES.join(', ')}.`
+        );
+        return;
+      }
+      if (typeof creator !== 'function') {
+        console.warn(`[ScarlettPlayer] use("${name}") refused: the creator is not a function.`);
+        return;
+      }
+      if (builtIn.has(name)) {
+        console.warn(`[ScarlettPlayer] use("${name}") refused: ${name} is already provided by this build.`);
+        return;
+      }
+      if (pluginCreators[name]) {
+        console.warn(`[ScarlettPlayer] use("${name}") replaces an earlier registration.`);
+      }
+      if (initialisedCreators.has(pluginCreators)) {
+        console.warn(
+          `[ScarlettPlayer] use("${name}") after players were created: it applies only to ` +
+          'players created from now on. Load the addon before DOMContentLoaded, or register ' +
+          'it before calling initAll() / create().'
+        );
+      }
+      // The map setupAutoInit() and this API share by reference, so the next
+      // initAll() or create() sees the creator with no other plumbing.
+      pluginCreators[name] = creator;
+    },
 
     async create(options: EmbedPlayerOptions): Promise<ScarlettPlayer | null> {
       let container: HTMLElement | null = null;
@@ -427,19 +573,38 @@ export function createScarlettPlayerAPI(
 }
 
 /**
- * Setup auto-initialization on DOMContentLoaded
+ * Setup auto-initialization.
+ *
+ * Scans once the document's scripts have all run, not merely once parsing has
+ * finished. A `defer` or `type="module"` embed script executes when
+ * `readyState` is already `'interactive'` but BEFORE the deferred scripts
+ * after it, and the addon bundles (`embed.addon.<name>`) are exactly such
+ * scripts: scanning at that moment builds every player before the addons
+ * register, so none of them gets its chapters or clip control. Waiting for
+ * `DOMContentLoaded`, which fires after every deferred and module script in
+ * document order, keeps the documented load order working for all three
+ * script styles. `load` is the fallback for a script injected after
+ * `DOMContentLoaded` has already fired (`readyState` stays `'interactive'`
+ * until subresources finish); a script that runs at `'complete'` scans at
+ * once, as before.
  */
 export function setupAutoInit(
   pluginCreators: PluginCreators,
   availableTypes: PlayerType[]
 ): void {
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        initAll(pluginCreators, availableTypes);
-      });
-    } else {
-      initAll(pluginCreators, availableTypes);
-    }
+  if (typeof document === 'undefined') return;
+
+  if (document.readyState === 'complete') {
+    initAll(pluginCreators, availableTypes);
+    return;
   }
+
+  let scanned = false;
+  const scan = (): void => {
+    if (scanned) return;
+    scanned = true;
+    initAll(pluginCreators, availableTypes);
+  };
+  document.addEventListener('DOMContentLoaded', scan, { once: true });
+  window.addEventListener('load', scan, { once: true });
 }

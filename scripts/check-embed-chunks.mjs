@@ -37,9 +37,10 @@
  * `upload-cdn.sh` now uploads dist by glob rather than by hand list, so what
  * this script validates is exactly what gets published.
  *
- * Usage: node scripts/check-embed-chunks.mjs (after a full three-build
- * `pnpm --filter @scarlett-player/embed build`, which is what the expected set
- * of unprefixed chunks describes)
+ * Usage: node scripts/check-embed-chunks.mjs (after a full
+ * `pnpm --filter @scarlett-player/embed build`, which runs all five builds,
+ * three embed builds plus two addons, and is what the expected set of
+ * unprefixed chunks describes)
  * Exit code: 0 when every reference resolves and the unprefixed set matches,
  * 1 with the offending names.
  */
@@ -55,7 +56,17 @@ const DIST = join(REPO_ROOT, 'packages', 'embed', 'dist');
  * `chunkFileNames` puts on that build's chunks. Every file the three builds
  * write is expected to start with one of these, apart from SHARED_CHUNKS.
  */
-const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio'];
+const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio', 'embed.addon.chapters', 'embed.addon.clips'];
+
+/**
+ * The addon builds (`BUILD_ADDON=<name>`). Each is one self-contained file per
+ * format with `inlineDynamicImports`, so the only files one may write are its
+ * ESM and UMD bundles. A chunk carrying an addon's prefix means the inlining
+ * regressed and the CDN would have to serve a file nobody loads by hand.
+ * Every addon name also starts with `embed.`, which is why the unprefixed
+ * check below cannot see an addon chunk and this list has to.
+ */
+const ADDON_BASE_NAMES = ['embed.addon.chapters', 'embed.addon.clips'];
 
 /**
  * The chunk names `chunkFileNames` deliberately leaves unprefixed, kept in
@@ -176,3 +187,28 @@ if (unexpected.length > 0 || absent.length > 0) {
 }
 
 console.log(`OK: the only unprefixed chunks in dist are ${SHARED_CHUNKS.join(' and ')}.`);
+
+// Third assertion: each addon emitted exactly its two bundles and no chunk.
+const addonProblems = [];
+for (const base of ADDON_BASE_NAMES) {
+  const expected = [`${base}.js`, `${base}.umd.cjs`];
+  const written = bundles.filter((name) => name.startsWith(`${base}.`));
+  for (const name of written) {
+    if (!expected.includes(name)) addonProblems.push(`unexpected addon chunk: ${name}`);
+  }
+  for (const name of expected) {
+    if (!written.includes(name)) addonProblems.push(`missing addon bundle: ${name}`);
+  }
+}
+
+if (addonProblems.length > 0) {
+  console.error('');
+  console.error('Addon output in dist is not one ESM and one UMD file per addon:');
+  for (const problem of addonProblems) console.error(`  ${problem}`);
+  console.error('');
+  console.error('The addon builds set inlineDynamicImports in packages/embed/vite.config.ts;');
+  console.error('a missing bundle usually means only part of the build ran.');
+  process.exit(1);
+}
+
+console.log(`OK: each addon (${ADDON_BASE_NAMES.join(', ')}) is one ESM and one UMD file.`);

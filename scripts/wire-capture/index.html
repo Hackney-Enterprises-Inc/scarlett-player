@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Read by the clips endpoint's headers() the way a Laravel page exposes it -->
+  <meta name="csrf-token" content="wire-csrf-token">
+  <title>Wire fixture capture</title>
+  <style>
+    body { margin: 0; background: #000; }
+    #player { width: 640px; height: 360px; }
+  </style>
+</head>
+<body>
+  <div id="player"></div>
+  <!-- Served by scripts/capture-wire-fixtures.mjs from its temp directory -->
+  <script src="/__wire/page.js"></script>
+</body>
+</html>

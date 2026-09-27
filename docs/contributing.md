@@ -421,6 +421,11 @@ ffmpeg, generates the HLS fixture with `node scripts/hls-fixture.mjs`, and runs
 `node scripts/verify-browser.mjs` against a freshly built demo bundle, which it
 discards afterwards. It is gated to `main` because the harness takes minutes and
 several scenarios assert against fixed waits tuned on a developer machine.
+After it, the same leg runs `node scripts/capture-wire-fixtures.mjs --smoke`,
+which captures the real analytics and clips requests in headless Chromium and
+fails if any breaks the wire contract; a full run (without `--smoke`) writes
+those requests as the Laravel package's test fixtures, so its output belongs to
+that package, never to this repo.
 
 `pnpm validate` covers everything except the two post-build guards (3 and 4);
 run those by hand after `pnpm build` when you touch a package manifest or the

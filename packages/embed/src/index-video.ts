@@ -10,12 +10,15 @@
  * Does NOT include: Audio UI, Analytics, Playlist, Media Session
  * Use embed.js for full features or embed.audio.js for audio.
  *
+ * Chapters and clips are addons: load `embed.addon.chapters` /
+ * `embed.addon.clips` after this file and they register through `use()`.
+ *
  * @packageDocumentation
  */
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
-import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
+import { uiPlugin, accentTextTone, registerControl, unregisterControl } from '@scarlett-player/ui';
 import { createWatermarkPlugin } from '@scarlett-player/watermark';
 import { createCaptionsPlugin } from '@scarlett-player/captions';
 import { createGesturesPlugin } from '@scarlett-player/gestures';
@@ -56,7 +59,10 @@ const pluginCreators: PluginCreators = {
 const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
   pluginCreators,
   AVAILABLE_TYPES,
-  VERSION
+  VERSION,
+  // The addon runtime hands addons THIS bundle's control registry, so a
+  // control an addon registers lands in this build's control bar.
+  { registerControl, unregisterControl }
 );
 
 if (typeof window !== 'undefined') {

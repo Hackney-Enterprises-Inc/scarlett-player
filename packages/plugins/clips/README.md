@@ -12,6 +12,8 @@ pnpm add @scarlett-player/core @scarlett-player/clips
 
 `@scarlett-player/core` is a required peer. `@scarlett-player/ui` is an optional peer: when it is installed the plugin registers a `clip` control for the control bar, and a host places it by naming that id in the control layout. Everything else - the whole imperative API, the events and the state keys - works without the UI package.
 
+On a page using the CDN embed, load the `embed.addon.clips` addon after the embed and set `data-clips-endpoint` with `data-clips-csrf="meta"` instead; see the [embed README's Addons section](../../embed/README.md#addons).
+
 ## Usage
 
 ```ts

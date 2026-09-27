@@ -346,6 +346,55 @@ describe('Analytics Plugin', () => {
       expect(metrics.qualityChanges).toBe(1);
       expect(metrics.maxBitrate).toBe(5000000);
     });
+
+    // SCAR-HLS-3: drive the real HLS provider event map on the same bus, so
+    // this fails if the provider's quality:change payload stops matching the
+    // `qualities[].id` form analytics resolves against.
+    it('should record an hls.js level switch as a bitrate change', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      // Analytics has no dependency on the hls package; the provider's event
+      // map is loaded from the workspace source instead. The specifier is a
+      // variable so tsc does not pull hls sources into this package's program
+      // (TS6059, outside rootDir); vitest resolves it at run time.
+      const hlsEventMap = '../../hls/src/event-map';
+      const { setupHlsEventHandlers } = await import(/* @vite-ignore */ hlsEventMap);
+
+      const hlsHandlers = new Map<string, Function>();
+      const hls = {
+        levels: [
+          { width: 1920, height: 1080, bitrate: 5000000 },
+          { width: 1280, height: 720, bitrate: 2500000 },
+          { width: 854, height: 480, bitrate: 1000000 },
+        ],
+        currentLevel: -1,
+        autoLevelEnabled: true,
+        on: (event: string, handler: Function) => hlsHandlers.set(event, handler),
+        off: () => {},
+      };
+      setupHlsEventHandlers(hls as any, api, { getIsAutoQuality: () => true });
+
+      hlsHandlers.get('hlsManifestParsed')!('hlsManifestParsed', { levels: hls.levels });
+      beacons = [];
+      hlsHandlers.get('hlsLevelSwitched')!('hlsLevelSwitched', { level: 1 });
+
+      const qualityEvent = beacons.find((b) => b.event === 'qualityChange');
+      expect(qualityEvent).toBeDefined();
+      expect(qualityEvent?.bitrate).toBe(2500000);
+      expect(qualityEvent?.width).toBe(1280);
+      expect(qualityEvent?.height).toBe(720);
+      expect(qualityEvent?.auto).toBe(true);
+
+      const metrics = plugin.getMetrics();
+      expect(metrics.qualityChanges).toBe(1);
+      expect(metrics.bitrateHistory).toHaveLength(1);
+      expect(metrics.bitrateHistory?.[0]).toMatchObject({ bitrate: 2500000, width: 1280, height: 720 });
+      expect(metrics.maxBitrate).toBe(2500000);
+    });
   });
 
   describe('Error Tracking', () => {
@@ -385,6 +434,105 @@ describe('Analytics Plugin', () => {
       const viewEndEvent = beacons.find((b) => b.event === 'viewEnd');
       expect(viewEndEvent).toBeDefined();
       expect(viewEndEvent?.exitType).toBe('error');
+    });
+
+    // SCAR-ANALYTICS-5: providers emit `error` as a plain PlayerError-shaped
+    // object (the HLS provider's fatal path), not an Error instance.
+    it('should record a structured fatal error from the error event', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+      beacons = [];
+
+      (api as any)._trigger('error', {
+        code: 'MEDIA_NETWORK_ERROR',
+        message: 'HLS error: manifestLoadError (max retries exceeded)',
+        fatal: true,
+        timestamp: Date.now(),
+        detail: { type: 'network', httpStatus: 404 },
+      });
+
+      const errorEvent = beacons.find((b) => b.event === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent?.errorType).toBe('MEDIA_NETWORK_ERROR');
+      expect(errorEvent?.errorCode).toBe('MEDIA_NETWORK_ERROR');
+      expect(errorEvent?.errorMessage).toBe('HLS error: manifestLoadError (max retries exceeded)');
+      expect(errorEvent?.fatal).toBe(true);
+
+      expect(plugin.getMetrics().errorCount).toBe(1);
+      const viewEndEvent = beacons.find((b) => b.event === 'viewEnd');
+      expect(viewEndEvent?.exitType).toBe('error');
+      expect(viewEndEvent?.errorCount).toBe(1);
+    });
+
+    it('should keep recording an Error on the error event as before, adding its code', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+      beacons = [];
+
+      const originalError = new TypeError('Plugin init failed');
+      (api as any)._trigger('error', {
+        code: 'PLUGIN_INIT_FAILED',
+        message: 'wrapped',
+        fatal: false,
+        timestamp: Date.now(),
+        originalError,
+      });
+
+      const errorEvent = beacons.find((b) => b.event === 'error');
+      expect(errorEvent?.errorType).toBe('TypeError');
+      expect(errorEvent?.errorMessage).toBe('Plugin init failed');
+      expect(errorEvent?.errorCode).toBe('PLUGIN_INIT_FAILED');
+      expect(errorEvent?.fatal).toBe(false);
+      expect(beacons.find((b) => b.event === 'viewEnd')).toBeUndefined();
+
+      beacons = [];
+      (api as any)._trigger('error', new Error('bare'));
+      const bare = beacons.find((b) => b.event === 'error');
+      expect(bare?.errorType).toBe('Error');
+      expect(bare?.errorMessage).toBe('bare');
+      expect(bare?.errorCode).toBeUndefined();
+      expect(plugin.getMetrics().errorCount).toBe(2);
+    });
+
+    it('should not put a structured name or message from a payload into the beacon', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      // Hand-built payloads, deliberately outside the PlayerError type.
+      (api as any)._trigger('error', { code: 'MEDIA_NETWORK_ERROR', message: { nested: true }, name: 42, fatal: false });
+      (api as any)._trigger('error', { message: 'plain message', name: { not: 'a string' } });
+
+      const errors = beacons.filter((b) => b.event === 'error');
+      expect(errors).toHaveLength(2);
+      expect(errors[0]).toMatchObject({
+        errorType: 'MEDIA_NETWORK_ERROR',
+        errorCode: 'MEDIA_NETWORK_ERROR',
+        errorMessage: 'Unknown core error',
+      });
+      expect(errors[1]).toMatchObject({ errorType: 'CoreError', errorMessage: 'plain message' });
+      expect(errors[1]?.errorCode).toBeUndefined();
+    });
+
+    it('should ignore an error payload with neither code nor message', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+      beacons = [];
+
+      (api as any)._trigger('error', { fatal: true });
+      (api as any)._trigger('error', { code: 42 });
+
+      expect(beacons).toHaveLength(0);
+      expect(plugin.getMetrics().errorCount).toBe(0);
     });
   });
 

@@ -59,6 +59,9 @@ const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
   pluginCreators,
   AVAILABLE_TYPES,
   VERSION
+  // No UI functions: this build ships no @scarlett-player/ui. `use()` and
+  // `addonRuntime` still exist, so an addon loaded beside it registers and
+  // createEmbedPlayer then warns that the addon needs a video build.
 );
 
 if (typeof window !== 'undefined') {

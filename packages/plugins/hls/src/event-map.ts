@@ -225,9 +225,11 @@ export function setupHlsEventHandlers(
       });
     }
 
-    // Emit quality change event
+    // Emit quality change event. `quality` is the level id (`level-<index>`,
+    // the form core emits and `qualities[].id` holds), never the display
+    // label: analytics resolves it against that list.
     api.emit('quality:change', {
-      quality: level ? formatLevel(level) : 'auto',
+      quality: level ? `level-${data.level}` : 'auto',
       auto: isAuto,
     });
 

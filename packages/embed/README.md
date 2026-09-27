@@ -14,6 +14,7 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 - **Unified API** - Single API for video, audio, and compact audio players
 - **iframe Support** - Helper page for URL-based iframe embeds
 - **Sharing** - Opt-in share button on video: OS share sheet, copy link, embed code
+- **Addons** - Chapters and viewer clips as separate CDN files, loaded only by the pages that use them, see [Addons](#addons)
 
 ## Installation
 
@@ -28,6 +29,10 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 
 <!-- Audio-only build (audio + playlist + media-session) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
+
+<!-- Optional addons, after a full or video build (see Addons) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
 ```
 
 ### NPM Installation
@@ -173,6 +178,29 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-analytics-video-id` | string | Video identifier sent with every beacon |
 | `data-analytics-api-key` | string | Optional API key |
 
+#### Captions, Chapters and Clips Attributes
+
+| Attribute | Type | Builds | Description |
+|-----------|------|--------|-------------|
+| `data-captions` | JSON | Full, Video | Array of `{ language, label, src, kind?, default? }`: WebVTT subtitle or caption tracks. `kind` is `subtitles` (default) or `captions`; `default: true` selects that track on load. Invalid JSON, or JSON that is not an array, logs a warning and is ignored. The audio build warns that captions need a video build |
+| `data-chapters` | JSON or URL | Full, Video, with the [chapters addon](#addons) | A value starting with `[` is a JSON array of `{ time, label, endTime?, subtitle?, thumbnail? }` (seconds); anything else is the URL of a WebVTT chapters file (cross-origin needs CORS). Invalid JSON logs a warning and is ignored. Without the addon: one warning naming the addon file, nothing installed |
+| `data-clips-endpoint` | string | Full, Video, with the [clips addon](#addons) | URL the viewer's clip is POSTed to. **Inert without `data-clips-csrf="meta"`**: the player warns once and installs nothing, see [Clips and your CSRF token](#clips-and-your-csrf-token). Without the addon: the addon warning instead |
+| `data-clips-csrf` | string | as above | `meta`, the only accepted value: send your page's `<meta name="csrf-token">` as `X-CSRF-TOKEN` with each submission. Any other value logs a warning and counts as absent |
+| `data-clips-media-id` | string | as above | Id of the media being clipped, sent with each clip. Falls back to `data-analytics-video-id`, then `data-src` |
+| `data-clips-max-duration` | number | as above | Longest clip a viewer can select (seconds). Optional; your server should enforce its own limit regardless |
+| `data-clips-min-duration` | number | as above | Shortest clip a viewer can select (seconds). Optional |
+
+```html
+<div data-scarlett-player
+  data-src="https://example.com/event.m3u8"
+  data-captions='[{"language":"en","label":"English","src":"/subs/en.vtt","default":true}]'
+  data-chapters="https://example.com/event/chapters.vtt"
+  data-clips-endpoint="/api/scarlett/clips"
+  data-clips-csrf="meta"
+  data-clips-media-id="abc123"
+></div>
+```
+
 The auto-initializer also accepts `data-sp` in place of `data-scarlett-player`.
 
 ### 2. Programmatic API
@@ -254,7 +282,15 @@ console.log(ScarlettPlayer.version);
 
 // Check available player types in this build
 console.log(ScarlettPlayer.availableTypes); // ['video', 'audio', 'audio-mini']
+
+// Register an addon's plugin. The addon files call this themselves;
+// host code does not need to. See Addons.
+ScarlettPlayer.use('chapters', createChaptersPlugin);
 ```
+
+`ScarlettPlayer.addonRuntime` is also on the global. It is the embed's own copy of the few functions the addon files share with it, frozen, and not an API for host code.
+
+To drive clips from script (`player.getPlugin('clips').open()`), call `player.play()` first: the clips plugin refuses to open until the media duration is known, and the HLS provider fetches nothing before the first play.
 
 ### 3. iframe Embed
 
@@ -412,17 +448,47 @@ All builds are available at `https://assets.thestreamplatform.com/scarlett-playe
 
 | Build | Files | Features |
 |-------|-------|----------|
-| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session + Sharing |
-| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight), Sharing |
+| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session + Sharing + Captions |
+| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight), Sharing, Captions |
 | **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session, on `hls.js/light` (no ID3, no sharing) |
+| **Addons** | `embed.addon.chapters.*` / `embed.addon.clips.*` | Chapters, Clips; loaded after a Full or Video build, see [Addons](#addons) |
 
 **Which build should I use?**
 
 - Use **Full** (`embed.umd.cjs`) if you need both video and audio, or want analytics
 - Use **Video** (`embed.video.umd.cjs`) for video-only sites to reduce bundle size
 - Use **Audio** (`embed.audio.umd.cjs`) for audio-only sites (podcasts, music streaming). It is built on `hls.js/light`, so it cannot read ID3 timed metadata: see [Audio build: hls.js/light](#audio-build-hlsjslight)
+- Add an **addon** (`embed.addon.chapters.umd.cjs`, `embed.addon.clips.umd.cjs`) after the Full or Video build when a page needs chapters or viewer clips
 
 **Note:** Using a build without support for a player type will throw an error. For example, using the Video build and setting `data-type="audio"` will fail with a helpful error message.
+
+## Addons
+
+The embed builds stay as they are: what a build carries today it keeps, and anything new ships as an **addon**, a separate file a page loads only when it wants the feature. An addon registers its plugin with the embed already on the page through `ScarlettPlayer.use()`, and uses that embed's own UI, so its control appears in the embed's control bar.
+
+| Addon | Files | Adds | Enables |
+|-------|-------|------|---------|
+| Chapters | `embed.addon.chapters.js` / `embed.addon.chapters.umd.cjs` | Chapter markers on the progress bar, a chapter list control, seek to chapter | `data-chapters` |
+| Clips | `embed.addon.clips.js` / `embed.addon.clips.umd.cjs` | A clip control: the viewer picks a range with two handles, previews it and submits it to your endpoint | `data-clips-*` |
+
+```html
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
+
+<div data-scarlett-player data-src="https://example.com/event.m3u8"
+  data-chapters="https://example.com/event/chapters.vtt"
+  data-clips-endpoint="/api/scarlett/clips" data-clips-csrf="meta" data-clips-media-id="abc123"></div>
+```
+
+- **Builds.** Addons work beside the Full and Video builds, on video players. Beside the Audio build, or on an audio player, the attribute is ignored with a warning.
+- **Load order.** The embed first, then the addons. Plain, `defer` or `type="module"` `<script>` tags in that order all run before the embed auto-initialises players (it scans at `DOMContentLoaded`, after every deferred and module script), so nothing else is needed. An addon loaded before the embed logs an error and does nothing; an addon registered after players were created applies only to players created afterwards (`ScarlettPlayer.create()` or a later `initAll()`), and the embed warns about it. Pages using `type="module"` import the ESM files (`embed.js`, then `embed.addon.<name>.js`) in the same order.
+- **Versions.** Pin both files to the same `v<version>/` directory, or load both from `latest/`; never mix. An addon refuses to register with an embed of a different version and logs both versions, because a cached `latest/` file beside a newer one is exactly how a mismatched pair happens.
+- **Without the addon**, `data-chapters` or `data-clips-endpoint` logs one warning naming the addon file and installs nothing; the rest of the player is unaffected.
+
+### Clips and your CSRF token
+
+A clip is a POST to your server on the viewer's behalf, sent with the page's cookies (`credentials: 'same-origin'`), so a Laravel-style backend expects a CSRF token with it. The embed can read one from your page's `<meta name="csrf-token">`, but a third-party script reading your page's token is behaviour you should ask for rather than get by default. So `data-clips-endpoint` does nothing on its own: add `data-clips-csrf="meta"` to allow it, and every submission then carries `X-CSRF-TOKEN` with the meta tag's current content. A page without the tag sends an empty header, and your server's rejection (for example a 419) is shown to the viewer in the clips overlay.
 
 ## Development
 

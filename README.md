@@ -228,6 +228,11 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
 
 <!-- Or pin a version: .../scarlett-player/v1.15.1/embed.umd.cjs -->
 
+<!-- Optional addons, after the embed and from the same version directory:
+     chapters (data-chapters) and viewer clips (data-clips-*) -->
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
+
 <!-- Video player via data attributes -->
 <div data-scarlett-player
      data-type="video"
@@ -402,7 +407,15 @@ python3 -m http.server 8899 --bind 127.0.0.1   # from repo root, separate shell
 node scripts/verify-browser.mjs                # playback scenarios, exits non-zero on failure
 node scripts/verify-site.mjs                   # site pages: overflow 320-1440, player placement, asset resolution, no media before Play
 node scripts/hls-fixture.mjs                   # (re)generate the HLS fixture only
+node scripts/capture-wire-fixtures.mjs --smoke # wire-contract capture; starts its own servers, needs openssl too
 ```
+
+`capture-wire-fixtures.mjs` records the requests the real analytics and clips
+transports send (one JSON per event and transport, plus a `manifest.json`),
+checks them against the wire contract, and writes them only if every check
+passes; the output belongs to the Laravel package
+(`tests/Fixtures/wire/<version>/` in `laravel-scarlett-player`), not to this
+repo, and `--smoke` writes to a temp directory instead.
 
 `verify-browser.mjs` drives the source demo at `/demo/`; `verify-site.mjs`
 covers the homepage (`/docs/`) and both demo routes (`/docs/demo/` is what

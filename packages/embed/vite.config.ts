@@ -35,18 +35,49 @@ const SHARED_CHUNK_NAMES = new Set([HLS_CHUNK_NAME, HLS_LIGHT_CHUNK_NAME]);
  * - Default: Full build with all features (embed.js)
  * - BUILD_VIDEO=true: Video-only build (embed.video.js)
  * - BUILD_AUDIO=true: Audio-only build (embed.audio.js)
+ * - BUILD_ADDON=chapters|clips: addon (embed.addon.<name>.js), see below
  *
- * All builds expose window.ScarlettPlayer
+ * All embed builds expose window.ScarlettPlayer; addons register into it
  */
 
 const isVideo = process.env.BUILD_VIDEO === 'true';
 const isAudio = process.env.BUILD_AUDIO === 'true';
 
+/**
+ * Addon builds: BUILD_ADDON=chapters|clips (embed.addon.<name>.js).
+ *
+ * An addon is loaded beside an embed build and registers its plugin through
+ * `ScarlettPlayer.use()`. It must not carry its own `@scarlett-player/core` or
+ * `@scarlett-player/ui`: the UI control registry is a module-level Map, so a
+ * second copy would register the addon's control where the embed's bar never
+ * looks. Both specifiers are aliased to shims that delegate, at call time, to
+ * the embed's `window.ScarlettPlayer.addonRuntime` (src/addons/runtime.ts).
+ */
+const ADDONS = ['chapters', 'clips'] as const;
+const addon = process.env.BUILD_ADDON as (typeof ADDONS)[number] | undefined;
+if (addon !== undefined && !ADDONS.includes(addon)) {
+  throw new Error(`BUILD_ADDON must be one of ${ADDONS.join(', ')}; got "${addon}"`);
+}
+
+/**
+ * Exact-match aliases for an addon build. Anchored so a subpath such as
+ * `@scarlett-player/ui/something` is never silently redirected to a shim.
+ */
+const addonAliases = addon
+  ? [
+      { find: /^@scarlett-player\/core$/, replacement: resolve(__dirname, 'src/addons/core-shim.ts') },
+      { find: /^@scarlett-player\/ui$/, replacement: resolve(__dirname, 'src/addons/ui-shim.ts') },
+    ]
+  : [];
+
 // Determine entry point and output name
 let entry: string;
 let baseName: string;
 
-if (isVideo) {
+if (addon) {
+  entry = resolve(__dirname, `src/addons/${addon}.ts`);
+  baseName = `embed.addon.${addon}`;
+} else if (isVideo) {
   entry = resolve(__dirname, 'src/index-video.ts');
   baseName = 'embed.video';
 } else if (isAudio) {
@@ -197,10 +228,15 @@ const guardSharedChunks = (): Plugin => {
 
 export default defineConfig({
   plugins: [guardSharedChunks()],
+  resolve: { alias: addonAliases },
   build: {
     lib: {
       entry,
-      name: 'ScarlettPlayer', // All builds use same global name
+      // Every embed build owns window.ScarlettPlayer. An addon must NOT use that
+      // name: its UMD wrapper would assign its own (empty) exports over the
+      // embed API it is about to call. scripts/verify-browser.mjs scenario 12
+      // pins window.ScarlettPlayer.create after both addons load.
+      name: addon ? `ScarlettPlayerAddon${addon[0].toUpperCase()}${addon.slice(1)}` : 'ScarlettPlayer',
       formats: ['es', 'umd'],
       fileName,
     },
@@ -217,6 +253,10 @@ export default defineConfig({
         exports: 'named',
         // Stable chunk names for CDN deployment (no hash). See chunkFileNames.
         chunkFileNames,
+        // An addon is one file per format: the plugins' dynamic
+        // import('@scarlett-player/ui') resolves to the ui shim and is inlined
+        // rather than emitted as a chunk the CDN would have to serve.
+        ...(addon ? { inlineDynamicImports: true } : {}),
         assetFileNames: (assetInfo) => {
           if (assetInfo.name === 'style.css') {
             return `${baseName}.css`;
