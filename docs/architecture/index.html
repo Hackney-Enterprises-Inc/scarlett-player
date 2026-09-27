@@ -284,9 +284,10 @@ auto-initialisation exists.</p>
 <p>Two listeners are installed by <code>wireLifecycleListeners()</code>:</p>
 <ul>
 <li><code>media:load-request</code> (emitted by the playlist plugin, among others): loads the
-requested source, then plays unless the payload says <code>autoplay: false</code>. It
-returns early while Chromecast is active, because the Chromecast plugin owns
-loading then.</li>
+requested source, handing the payload&#39;s <code>autoplay</code> to <code>load()</code> as an override
+of the <code>autoplay</code> option for that load, so it plays unless the payload says
+<code>autoplay: false</code>, whatever the option. It returns early while Chromecast is
+active, because the Chromecast plugin owns loading then.</li>
 <li><code>error:retry</code> (emitted by the UI error overlay&#39;s Try Again button): reloads
 through the normal provider path, then restores position, live streams at the
 live edge through <code>seekToLive()</code>, VOD at the previous <code>currentTime</code>.</li>
@@ -319,7 +320,8 @@ exception.</li>
 initialised lazily, per source; every other plugin was initialised in step 4.</li>
 <li>Writes <code>source</code> state (<code>src</code> plus the MIME type derived by the private
 <code>detectMimeType()</code>), calls the provider&#39;s <code>loadSource()</code>, and plays when the
-<code>autoplay</code> state key is set.</li>
+<code>autoplay</code> state key is set, unless the caller passed an <code>autoplay</code>
+override (<code>load(src, { autoplay })</code>), which decides for that load alone.</li>
 </ol>
 <p>Failures inside <code>load()</code> are reported, never thrown at the caller: when the
 error state is already populated (a provider that emitted a structured fatal
@@ -374,8 +376,11 @@ There is no priority table and no scoring: registration order is the priority,
 so a host that wants HLS to win registers <code>createHLSPlugin()</code> before
 <code>createNativePlugin()</code>.</p>
 <ul>
-<li><code>@scarlett-player/hls</code>: <code>canPlay()</code> requires hls.js support or native HLS, and
-a source whose path ends in <code>.m3u8</code> or whose URL carries an mpegurl MIME hint.</li>
+<li><code>@scarlett-player/hls</code>: <code>canPlay()</code> accepts a source whose path ends in
+<code>.m3u8</code> or whose URL carries an mpegurl MIME hint, regardless of browser
+support. A browser with neither hls.js (MSE) nor native HLS gets
+<code>ErrorCode.SOURCE_NOT_SUPPORTED</code> from <code>load()</code>, with the support probe
+results in the error message and under <code>context.probes</code>.</li>
 <li><code>@scarlett-player/native</code>: <code>canPlay()</code> requires a known extension and a
 positive <code>HTMLMediaElement.canPlayType()</code> answer for the mapped MIME type.</li>
 </ul>
@@ -705,9 +710,9 @@ version number.</li>
 <li>Vitest per package, with jsdom. <code>pnpm test</code> fans out over the workspace.</li>
 <li>Typechecking is a separate gate: vitest transpiles without type-checking, so a
 test that exercises a type contract proves nothing unless <code>tsc</code> also sees the
-file. Every build <code>tsconfig.json</code> scopes the program to <code>src</code>, so several
-packages carry a <code>tsconfig.typecheck.json</code> that adds the type-contract tests
-back in; core&#39;s copy documents the trap that <code>exclude</code> is inherited from the
+file. Every build <code>tsconfig.json</code> scopes the program to <code>src</code>, so every
+package carries a <code>tsconfig.typecheck.json</code> that adds its whole <code>tests/</code>
+tree back in; core&#39;s copy documents the trap that <code>exclude</code> is inherited from the
 extended config and filters <code>include</code>, so it has to be restated.
 <code>scripts/check-package-scripts.mjs</code> fails the build when a workspace package
 declares no <code>typecheck</code> or <code>test</code> script, which is how the gap that left ten

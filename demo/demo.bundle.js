@@ -1983,11 +1983,7 @@
           });
           this.eventBus.on("media:load-request", async ({ src, autoplay }) => {
             if (this.stateManager.getValue("chromecastActive")) return;
-            await this.load(src);
-            if (this.destroyed) return;
-            if (autoplay !== false) {
-              await this.play();
-            }
+            await this.load(src, { autoplay: autoplay !== false });
           });
           this.eventBus.on("error:retry", async ({ src }) => {
             const was_live = this.stateManager.getValue("live");
@@ -2040,15 +2036,23 @@
          * with it: clearing it here would blank the image over exactly the gap it
          * exists to cover, while the next source loads.
          *
+         * Plays once the provider has loaded when the `autoplay` state key is set,
+         * unless `options.autoplay` is given: then that value decides for this load
+         * only and the state key is left as it is. The `media:load-request` handler
+         * passes the request's `autoplay` through here.
+         *
          * @param source - Media source URL
+         * @param options - Per-load options
+         * @param options.autoplay - Overrides the `autoplay` option for this load
          * @returns Promise that resolves when source is loaded
          *
          * @example
          * ```ts
          * await player.load('video.m3u8');
+         * await player.load('next.m3u8', { autoplay: false });
          * ```
          */
-        async load(source) {
+        async load(source, options) {
           this.checkDestroyed();
           this.initialSrcLoaded = true;
           const generation = ++this.loadGeneration;
@@ -2104,7 +2108,8 @@
               this.logger.info("Load superseded by newer load call", { source });
               return;
             }
-            if (this.stateManager.getValue("autoplay")) {
+            const shouldPlay = options?.autoplay ?? this.stateManager.getValue("autoplay");
+            if (shouldPlay) {
               await this.play();
             }
           } catch (error) {
@@ -37259,6 +37264,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   function getVideo(container) {
     return container.querySelector("video");
   }
+  function clearChildren(el) {
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+  }
   function setHTML(el, html) {
     if (lastHTML.get(el) === html) return false;
     el.innerHTML = html;
@@ -37371,14 +37381,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          */
         constructor(api, isOverlayVisible) {
           /**
-           * Latched on the first `playing`.
+           * Latched on the first `playing` OF THE CURRENT SOURCE, cleared when the
+           * `source` state object changes.
            *
            * "Hidden from the first playing onward" cannot be read off `currentTime`
            * alone: a viewer who pauses in the first fraction of a second is still
            * mid-playback, and the button reappearing over live video would cover the
-           * picture.
+           * picture. It is per source because a later source that loads and sits
+           * paused (a paused playlist advance, a host's second `load()`) needs the
+           * play affordance again.
            */
           this.hasStarted = false;
+          /**
+           * The `source` state object the latch belongs to, compared by identity:
+           * `load()` writes a fresh object per load.
+           */
+          this.lastSource = void 0;
           this.clickHandler = () => {
             this.start();
           };
@@ -37405,10 +37423,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          */
         update() {
           const playing = this.api.getState("playing");
-          const ended = this.hasEnded();
+          const video = getVideo(this.api.container);
+          const ended = this.hasEnded(video);
           const currentTime = this.api.getState("currentTime");
           const playbackState = this.api.getState("playbackState");
           const error = this.api.getState("error");
+          const source = this.api.getState("source");
+          if (source !== this.lastSource) {
+            this.lastSource = source;
+            this.hasStarted = false;
+          }
           if (playing) {
             this.hasStarted = true;
           }
@@ -37417,7 +37441,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             visible = false;
           } else if (playbackState === "loading") {
             visible = false;
-          } else if (playing) {
+          } else if (playing || video && !video.paused) {
             visible = false;
           } else if (ended) {
             visible = true;
@@ -37440,9 +37464,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          * end. Trusting the key would leave this button sitting over playing video,
          * and would make a later pause bring it back as Replay. The key is the
          * fallback for the window before a provider has created an element.
+         *
+         * @param video - The container's media element, if a provider created one
+         * @returns Whether playback has ended
          */
-        hasEnded() {
-          const video = getVideo(this.api.container);
+        hasEnded(video) {
           return video ? video.ended : Boolean(this.api.getState("ended"));
         }
         /**
@@ -37770,7 +37796,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             this.extension = null;
             this.setExtensionDragging(false);
             this.setExtensionEditing(false);
-            this.extensionLayer.replaceChildren();
+            clearChildren(this.extensionLayer);
           }
           if (!factory) return;
           const surface = {
@@ -40216,7 +40242,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       entries = [];
       timeEntry = null;
       tray = null;
-      controlBar.replaceChildren();
+      clearChildren(controlBar);
       lastFitSignature = null;
       fitPending = true;
       populateControlBar();
@@ -40639,6 +40665,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_controls();
       init_control_registry();
       init_version2();
+      init_utils();
       init_control_registry();
       init_timeline_registry();
       init_icons();
@@ -40696,6 +40723,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var hls_loader_exports = {};
   __export(hls_loader_exports, {
     createHlsInstance: () => createHlsInstance,
+    describeSupport: () => describeSupport,
     getHlsConstructor: () => getHlsConstructor,
     isHLSSupported: () => isHLSSupported,
     isHlsJsSupported: () => isHlsJsSupported,
@@ -40705,10 +40733,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
   var hlsConstructor = null;
   var loadingPromise = null;
+  var HLS_MIME_TYPES = ["application/vnd.apple.mpegurl", "application/x-mpegURL"];
   function supportsNativeHLS() {
     if (typeof document === "undefined") return false;
     const video = document.createElement("video");
-    return video.canPlayType("application/vnd.apple.mpegurl") !== "";
+    return HLS_MIME_TYPES.some((type) => video.canPlayType(type) !== "");
   }
   function isHlsJsSupported() {
     if (hlsConstructor) {
@@ -40719,6 +40748,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
   function isHLSSupported() {
     return supportsNativeHLS() || isHlsJsSupported();
+  }
+  function describeSupport() {
+    const video = typeof document === "undefined" ? null : document.createElement("video");
+    const answer = (type) => video ? video.canPlayType(type) : "";
+    const win = typeof window === "undefined" ? {} : window;
+    return {
+      canPlayType: {
+        "application/vnd.apple.mpegurl": answer("application/vnd.apple.mpegurl"),
+        "application/x-mpegURL": answer("application/x-mpegURL")
+      },
+      MediaSource: typeof win.MediaSource,
+      ManagedMediaSource: typeof win.ManagedMediaSource,
+      WebKitMediaSource: typeof win.WebKitMediaSource,
+      hlsJsLoaded: hlsConstructor !== null,
+      hlsJsSupported: hlsConstructor ? hlsConstructor.isSupported() : null,
+      userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent
+    };
   }
   async function loadHlsJs() {
     if (hlsConstructor) {
@@ -41423,6 +41469,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PKG_VERSION2 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/hls/src/create-hls-plugin.ts
+  function summarizeSupport(probes) {
+    const native = `'${probes.canPlayType["application/vnd.apple.mpegurl"]}'/'${probes.canPlayType["application/x-mpegURL"]}'`;
+    const hlsJs = probes.hlsJsLoaded ? `isSupported ${String(probes.hlsJsSupported)}` : "not loaded";
+    return [
+      `native: ${native}`,
+      `MediaSource: ${probes.MediaSource}`,
+      `ManagedMediaSource: ${probes.ManagedMediaSource}`,
+      `WebKitMediaSource: ${probes.WebKitMediaSource}`,
+      `hls.js: ${hlsJs}`
+    ].join(", ");
+  }
   var DEFAULT_CONFIG = {
     debug: false,
     autoStartLoad: true,
@@ -42198,8 +42255,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PKG_VERSION2,
       type: "provider",
       description: variant.description,
+      /**
+       * Claim a source by its shape: an `.m3u8` path or an mpegurl MIME hint.
+       *
+       * Deliberately NOT gated on browser support. Support is loadSource()'s
+       * question: a browser with neither hls.js (MSE) nor native HLS must fail
+       * as HLS, with SOURCE_NOT_SUPPORTED and the probe values, not as core's
+       * undiagnosable PROVIDER_NOT_FOUND (Sentry TSP-WEB-2JP).
+       *
+       * @param src - Source URL
+       * @returns Whether this provider owns the source
+       */
       canPlay(src) {
-        if (!loader.isHLSSupported()) return false;
         const url = src.toLowerCase();
         const urlWithoutQuery = url.split("?")[0].split("#")[0];
         if (urlWithoutQuery.endsWith(".m3u8")) return true;
@@ -42392,7 +42459,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.logger.info("Using native HLS playback (hls.js not supported)");
           await loadNative(src);
         } else {
-          throw new Error("HLS playback not supported in this browser");
+          const probes = loader.describeSupport();
+          const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
+          api.setState("playbackState", "error");
+          api.setState("buffering", false);
+          api.emit("error", {
+            code: "SOURCE_NOT_SUPPORTED" /* SOURCE_NOT_SUPPORTED */,
+            message,
+            fatal: true,
+            timestamp: Date.now(),
+            context: { probes }
+          });
+          throw new Error(message);
         }
         if (session !== loadSession) return;
         if (video) {
@@ -43958,9 +44036,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let api;
     let video = null;
     let unsubMediaLoaded = null;
+    let destroyed = false;
     let availabilityWatch = null;
     let watchGeneration = 0;
     const handleAvailabilityChange = (e) => {
+      if (destroyed) return;
       const event = e;
       const available = event.availability === "available";
       api.setState("airplayAvailable", available);
@@ -43978,17 +44058,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.logger.info(`AirPlay ${active ? "connected" : "disconnected"}, switching to ${target}`);
       providerSwitchInFlight = true;
       (active ? hlsPlugin.switchToNative() : hlsPlugin.switchToHlsJs()).then(() => {
+        if (destroyed) return;
         attachToVideo();
       }).catch((err) => {
         api.logger.warn(`Failed to switch to ${target} for AirPlay`, { error: err });
       }).finally(() => {
         providerSwitchInFlight = false;
+        if (destroyed) return;
         if (api.getState("airplayActive") === true !== active) {
           syncProviderToAirPlay();
         }
       });
     };
     const handleTargetChange = () => {
+      if (destroyed) return;
       const active = video?.webkitCurrentPlaybackTargetIsWireless === true;
       const wasActive = api.getState("airplayActive") === true;
       api.setState("airplayActive", active);
@@ -44036,6 +44119,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.logger.debug("AirPlay: RemotePlayback API available");
         const generation = watchGeneration;
         remote.watchAvailability((available) => {
+          if (destroyed) return;
           api.logger.debug("AirPlay: RemotePlayback availability", { available });
           if (available) {
             api.setState("airplayAvailable", true);
@@ -44060,6 +44144,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PKG_VERSION6,
       async init(pluginApi) {
         api = pluginApi;
+        destroyed = false;
         api.setState("airplayAvailable", false);
         api.setState("airplayActive", false);
         if (!isAirPlaySupported2()) {
@@ -44073,6 +44158,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.logger.debug("AirPlay plugin initialized");
       },
       async destroy() {
+        destroyed = true;
         unsubMediaLoaded?.();
         unsubMediaLoaded = null;
         detachFromVideo();
@@ -44092,9 +44178,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         video.webkitShowPlaybackTargetPicker?.();
       },
       isAvailable() {
+        if (destroyed) return false;
         return api?.getState("airplayAvailable") === true;
       },
       isActive() {
+        if (destroyed) return false;
         return api?.getState("airplayActive") === true;
       },
       stop() {
@@ -44193,6 +44281,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/chromecast/src/index.ts
   function chromecastPlugin() {
     let api;
+    let destroyed = false;
     let castContext = null;
     let currentSession = null;
     let remotePlayer = null;
@@ -44239,12 +44328,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.logger.debug("Cast API initialized", { available });
     };
     const handleCastStateChange = (event) => {
+      if (destroyed) return;
       const available = event.castState !== window.cast.framework.CastState.NO_DEVICES_AVAILABLE;
       api.setState("chromecastAvailable", available);
       api.emit(available ? "chromecast:available" : "chromecast:unavailable", void 0);
       api.logger.debug("Cast state changed", { castState: event.castState, available });
     };
     const handleSessionStateChange = (event) => {
+      if (destroyed) return;
       const SessionState = window.cast.framework.SessionState;
       switch (event.sessionState) {
         case SessionState.SESSION_STARTED:
@@ -44325,14 +44416,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       request.autoplay = true;
       try {
         await currentSession.loadMedia(request);
+        if (destroyed) return;
         api.logger.debug("Media loaded on Chromecast", { src, startTime });
       } catch (error) {
+        if (destroyed) return;
         api.logger.error("Failed to load media on Chromecast", { error });
         api.emit("chromecast:error", { error });
       }
     };
     const handleRemotePlayerChange = () => {
-      if (!remotePlayer) return;
+      if (destroyed || !remotePlayer) return;
       if (!api.getState("chromecastActive")) return;
       const mediaSession = currentSession?.getMediaSession();
       if (mediaSession?.playerState === "IDLE" && mediaSession?.idleReason === "FINISHED") {
@@ -44353,32 +44446,37 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PKG_VERSION7,
       async init(pluginApi) {
         api = pluginApi;
+        destroyed = false;
         api.setState("chromecastAvailable", false);
         api.setState("chromecastActive", false);
         const unsubLoadRequest = api.on("media:load-request", async ({ src }) => {
-          if (!api.getState("chromecastActive")) return;
+          if (destroyed || !api.getState("chromecastActive")) return;
           await loadMediaOnCast(src, 0);
         });
         const unsubPlay = api.on("playback:play", () => {
-          if (!api.getState("chromecastActive")) return;
+          if (destroyed || !api.getState("chromecastActive")) return;
           if (remotePlayer?.isPaused && remotePlayerController) {
             remotePlayerController.playOrPause();
           }
         });
         const unsubPause = api.on("playback:pause", () => {
-          if (!api.getState("chromecastActive")) return;
+          if (destroyed || !api.getState("chromecastActive")) return;
           if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
             remotePlayerController.playOrPause();
           }
         });
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
-          if (!api.getState("chromecastActive")) return;
+          if (destroyed || !api.getState("chromecastActive")) return;
           if (remotePlayer && remotePlayerController) {
             remotePlayer.currentTime = time;
             remotePlayerController.seek();
           }
         });
+        const unsubPlayerDestroy = api.on("player:destroy", () => {
+          destroyed = true;
+        });
         api.onDestroy(() => {
+          unsubPlayerDestroy();
           unsubLoadRequest();
           unsubPlay();
           unsubPause();
@@ -44390,14 +44488,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         try {
           await loadCastSDK();
+          if (destroyed) return;
           initCastApi();
           api.logger.debug("Chromecast plugin initialized");
         } catch (error) {
+          if (destroyed) return;
           api.logger.warn("Failed to load Cast SDK", { error });
           api.emit("chromecast:error", { error });
         }
       },
       async destroy() {
+        destroyed = true;
         if (currentSession) {
           try {
             currentSession.endSession(false);
@@ -44452,9 +44553,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       },
       isAvailable() {
+        if (destroyed) return false;
         return api?.getState("chromecastAvailable") === true;
       },
       isConnected() {
+        if (destroyed) return false;
         return api?.getState("chromecastActive") === true;
       },
       getDeviceName() {
@@ -44984,15 +45087,36 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (shuffle && tracks.length > 0 && shuffleOrder.length !== tracks.length) {
           generateShuffleOrder();
         }
+        let viewerPlaying = api.getState("playing") === true;
+        const unsubState = api.subscribeToState((event) => {
+          if (event.key === "playing" && event.value === true) {
+            viewerPlaying = true;
+          } else if (event.key === "source") {
+            viewerPlaying = false;
+          }
+        });
+        const unsubPause = api.on("playback:pause", () => {
+          const el = api?.container.querySelector("video, audio");
+          let atEnd;
+          if (el) {
+            atEnd = el.ended;
+          } else {
+            const duration = Number(api?.getState("duration")) || 0;
+            const currentTime = Number(api?.getState("currentTime")) || 0;
+            atEnd = duration > 0 && currentTime >= duration;
+          }
+          if (!atEnd) viewerPlaying = false;
+        });
         let advanceTimeout = null;
         const unsubEnded = api.on("playback:ended", () => {
           if (!mergedConfig.autoAdvance) return;
           const nextIdx = getNextIndex();
           if (nextIdx >= 0) {
-            const wasPlaying = !api?.getState("paused");
+            const wasPlaying = viewerPlaying;
             const advance = () => {
               api?.logger.debug("Auto-advancing to next track", { nextIdx });
               setCurrentTrack(nextIdx, { autoplay: wasPlaying });
+              viewerPlaying = false;
             };
             if (mergedConfig.advanceDelay) {
               if (advanceTimeout) clearTimeout(advanceTimeout);
@@ -45051,6 +45175,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         document.addEventListener("keydown", onKeyDown);
         api.onDestroy(() => {
           unsubEnded();
+          unsubPause();
+          unsubState();
           document.removeEventListener("keydown", onKeyDown);
           if (advanceTimeout) {
             clearTimeout(advanceTimeout);
@@ -54961,6 +55087,7 @@ Cada trampa se prueba una sola vez.
     window.whepPlugin = whepPlugin;
     window.audioPlayer = audioPlayer;
     window.miniPlayer = miniPlayer;
+    window.createPlaylistPlugin = createPlaylistPlugin;
     const ready = {
       video: player.init().catch((err) => console.error("Player init failed:", err)),
       audio: audioPlayer.init().catch((err) => console.error("Audio player init failed:", err)),

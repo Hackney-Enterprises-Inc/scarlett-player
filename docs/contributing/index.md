@@ -85,7 +85,7 @@ package/
 │   └── *.test.ts         # Test files
 ├── package.json
 ├── tsconfig.json         # Build config; excludes tests
-├── tsconfig.typecheck.json  # Optional: adds type-contract tests to the program
+├── tsconfig.typecheck.json  # `typecheck` program: src plus every test file
 ├── vitest.config.ts
 └── README.md
 ```
