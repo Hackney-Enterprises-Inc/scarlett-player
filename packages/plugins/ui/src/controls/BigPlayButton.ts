@@ -2,7 +2,8 @@
  * Big Play Button
  *
  * The centred play affordance shown over the poster before playback starts,
- * and again as Replay once it has ended.
+ * again whenever a new source is loaded and sits paused, and as Replay once
+ * playback has ended.
  *
  * It exists because a poster with no visible play affordance is worse for the
  * viewer than no poster at all: before this control, a mouse click on the
@@ -37,14 +38,22 @@ export class BigPlayButton implements Control {
    */
   private hasOverlayProbe: boolean;
   /**
-   * Latched on the first `playing`.
+   * Latched on the first `playing` OF THE CURRENT SOURCE, cleared when the
+   * `source` state object changes.
    *
    * "Hidden from the first playing onward" cannot be read off `currentTime`
    * alone: a viewer who pauses in the first fraction of a second is still
    * mid-playback, and the button reappearing over live video would cover the
-   * picture.
+   * picture. It is per source because a later source that loads and sits
+   * paused (a paused playlist advance, a host's second `load()`) needs the
+   * play affordance again.
    */
   private hasStarted = false;
+  /**
+   * The `source` state object the latch belongs to, compared by identity:
+   * `load()` writes a fresh object per load.
+   */
+  private lastSource: unknown = undefined;
 
   private clickHandler = (): void => {
     this.start();
@@ -84,10 +93,17 @@ export class BigPlayButton implements Control {
    */
   update(): void {
     const playing = this.api.getState('playing');
-    const ended = this.hasEnded();
+    const video = getVideo(this.api.container);
+    const ended = this.hasEnded(video);
     const currentTime = this.api.getState('currentTime');
     const playbackState = this.api.getState('playbackState');
     const error = this.api.getState('error');
+    const source = this.api.getState('source');
+
+    if (source !== this.lastSource) {
+      this.lastSource = source;
+      this.hasStarted = false;
+    }
 
     if (playing) {
       this.hasStarted = true;
@@ -105,7 +121,10 @@ export class BigPlayButton implements Control {
       // The spinner owns this state; two things fighting over the middle of
       // the picture reads as a glitch.
       visible = false;
-    } else if (playing) {
+    } else if (playing || (video && !video.paused)) {
+      // A play() in flight counts: the element unpauses synchronously inside
+      // play(), frames before `playing` arrives, and an autoplay load would
+      // otherwise flash the button between `ready` and `playing`.
       visible = false;
     } else if (ended) {
       visible = true;
@@ -132,10 +151,11 @@ export class BigPlayButton implements Control {
    * end. Trusting the key would leave this button sitting over playing video,
    * and would make a later pause bring it back as Replay. The key is the
    * fallback for the window before a provider has created an element.
+   *
+   * @param video - The container's media element, if a provider created one
+   * @returns Whether playback has ended
    */
-  private hasEnded(): boolean {
-    const video = getVideo(this.api.container);
-
+  private hasEnded(video: HTMLVideoElement | null): boolean {
     return video ? video.ended : Boolean(this.api.getState('ended'));
   }
 

@@ -192,7 +192,8 @@ describe('Logger', () => {
         })
       );
 
-      const timestamp = handler.mock.calls[0][0].timestamp;
+      expect(handler.mock.calls[0]).toBeDefined();
+      const timestamp = handler.mock.calls[0]![0].timestamp;
       expect(timestamp).toBeGreaterThanOrEqual(beforeTime);
       expect(timestamp).toBeLessThanOrEqual(afterTime);
     });

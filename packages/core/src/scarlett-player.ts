@@ -352,15 +352,10 @@ export class ScarlettPlayer {
       // When Chromecast is active, the Chromecast plugin handles loading
       if (this.stateManager.getValue('chromecastActive')) return;
 
-      await this.load(src);
-
-      // Same post-await window as error:retry below: an unawaited async
-      // closure calling play() on a destroyed player throws into nothing.
-      if (this.destroyed) return;
-
-      if (autoplay !== false) {
-        await this.play();
-      }
+      // The request's flag overrides the autoplay option for this load, so
+      // load() decides once: `autoplay: false` stays paused on a player built
+      // with `autoplay: true`, and `autoplay: true` never plays twice.
+      await this.load(src, { autoplay: autoplay !== false });
     });
 
     // Listen for retry requests (e.g., the UI error overlay's "Try Again").
@@ -444,15 +439,23 @@ export class ScarlettPlayer {
    * with it: clearing it here would blank the image over exactly the gap it
    * exists to cover, while the next source loads.
    *
+   * Plays once the provider has loaded when the `autoplay` state key is set,
+   * unless `options.autoplay` is given: then that value decides for this load
+   * only and the state key is left as it is. The `media:load-request` handler
+   * passes the request's `autoplay` through here.
+   *
    * @param source - Media source URL
+   * @param options - Per-load options
+   * @param options.autoplay - Overrides the `autoplay` option for this load
    * @returns Promise that resolves when source is loaded
    *
    * @example
    * ```ts
    * await player.load('video.m3u8');
+   * await player.load('next.m3u8', { autoplay: false });
    * ```
    */
-  async load(source: string): Promise<void> {
+  async load(source: string, options?: { autoplay?: boolean }): Promise<void> {
     this.checkDestroyed();
 
     // A source is now the host's business: a later init() must not overwrite
@@ -541,8 +544,9 @@ export class ScarlettPlayer {
         return;
       }
 
-      // Auto-play if enabled
-      if (this.stateManager.getValue('autoplay')) {
+      // Auto-play if enabled, or if this load's caller asked for it
+      const shouldPlay = options?.autoplay ?? this.stateManager.getValue('autoplay');
+      if (shouldPlay) {
         await this.play();
       }
     } catch (error) {

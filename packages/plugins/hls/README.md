@@ -166,6 +166,16 @@ documents. Hosts that need progress listen to `error:reconnecting`,
 `error:recovered` and fatal `error`; a host that needs a hard bound sets a
 shorter `reconnectWindowMs` or races the promise itself.
 
+### Unsupported browsers
+
+`canPlay()` accepts a source whose path ends in `.m3u8` or whose URL carries an
+mpegurl MIME hint, regardless of browser support, so an HLS source is never
+reported as `PROVIDER_NOT_FOUND`. A browser with neither hls.js (MSE) nor
+native HLS gets a fatal `SOURCE_NOT_SUPPORTED` from `load()`: the error
+message summarises the support probes (both `canPlayType()` answers,
+`MediaSource`, `ManagedMediaSource`, `WebKitMediaSource`, hls.js), and
+`context.probes` carries them in full along with the user agent.
+
 ## Light Build
 
 `@scarlett-player/hls/light` uses hls.js/light (roughly 35% smaller, no

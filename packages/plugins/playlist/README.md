@@ -57,7 +57,7 @@ If you do pass `src` to `createPlayer()` for the first track, set `initialIndex:
 | `tracks` | `PlaylistTrack[]` | `[]` | Initial queue. Tracks without an `id` get a generated one |
 | `autoAdvance` | `boolean` | `true` | Select the next track on `playback:ended` |
 | `advanceDelay` | `number` | `0` | Milliseconds to wait before auto-advancing |
-| `autoLoad` | `boolean` | `true` | Emit `media:load-request` with `autoplay: true` whenever the current track changes, so the player loads it. Set to `false` to load from `playlist:change` yourself |
+| `autoLoad` | `boolean` | `true` | Emit `media:load-request` whenever the current track changes, so the player loads it. A manual selection carries `autoplay: true`; an auto-advance carries whether the viewer had playback running, so a paused playlist stays paused, including on a player constructed with `autoplay: true`. Set to `false` to load from `playlist:change` yourself |
 | `shuffle` | `boolean` | `false` | Initial shuffle state |
 | `repeat` | `'none' \| 'one' \| 'all'` | `'none'` | Initial repeat mode |
 | `initialIndex` | `number` | `-1` | Index of the track already loaded by the player. `-1` means no track is active. Out-of-range values fall back to `-1` |

@@ -46,6 +46,22 @@ export { loadCastSDK, isCastSDKLoaded, isCastSupported } from './cast-loader';
  */
 export function chromecastPlugin(): IChromecastPlugin {
   let api: IPluginAPI;
+
+  /**
+   * True once the player is being destroyed.
+   *
+   * Core destroys the StateManager right after the plugins, and any read or
+   * write after that throws `Manager is destroyed` on purpose. The SDK can
+   * still deliver a queued callback after destroy() removed its listener, and
+   * a host can poll the getters late, so every path that can run after
+   * teardown checks this before touching state (same guard as the AirPlay
+   * plugin, Sentry TSP-WEB-2HT).
+   *
+   * Set by destroy(), and also by `player:destroy`: a player destroyed while
+   * init() still awaits the SDK never calls destroy() on this plugin (core's
+   * PluginManager skips a plugin that is not `ready` yet).
+   */
+  let destroyed = false;
   let castContext: CastFramework.CastContext | null = null;
   let currentSession: CastFramework.CastSession | null = null;
   let remotePlayer: CastFramework.RemotePlayer | null = null;
@@ -122,6 +138,7 @@ export function chromecastPlugin(): IChromecastPlugin {
    * Handle cast device availability changes.
    */
   const handleCastStateChange = (event: CastFramework.CastStateEventData): void => {
+    if (destroyed) return;
     const available = event.castState !== window.cast!.framework.CastState.NO_DEVICES_AVAILABLE;
     api.setState('chromecastAvailable', available);
     api.emit(available ? 'chromecast:available' : 'chromecast:unavailable', undefined);
@@ -132,6 +149,7 @@ export function chromecastPlugin(): IChromecastPlugin {
    * Handle session state changes (connect/disconnect).
    */
   const handleSessionStateChange = (event: CastFramework.SessionStateEventData): void => {
+    if (destroyed) return;
     const SessionState = window.cast!.framework.SessionState;
 
     switch (event.sessionState) {
@@ -268,8 +286,11 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     try {
       await currentSession.loadMedia(request);
+      if (destroyed) return;
       api.logger.debug('Media loaded on Chromecast', { src, startTime });
     } catch (error) {
+      // No chromecast:error for a player that is gone.
+      if (destroyed) return;
       api.logger.error('Failed to load media on Chromecast', { error });
       api.emit('chromecast:error', { error: error as Error } as ChromecastErrorEvent);
     }
@@ -280,7 +301,7 @@ export function chromecastPlugin(): IChromecastPlugin {
    * Detects media ended via playerState == 'IDLE' with idleReason == 'FINISHED'.
    */
   const handleRemotePlayerChange = (): void => {
-    if (!remotePlayer) return;
+    if (destroyed || !remotePlayer) return;
 
     // Only sync state when connected
     if (!api.getState('chromecastActive')) return;
@@ -310,6 +331,7 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
+      destroyed = false;
 
       // Initialize state
       api.setState('chromecastAvailable', false);
@@ -317,36 +339,46 @@ export function chromecastPlugin(): IChromecastPlugin {
 
       // Listen for media:load-request - when Chromecast is active, load on Cast device
       const unsubLoadRequest = api.on('media:load-request', async ({ src }) => {
-        if (!api.getState('chromecastActive')) return;
+        if (destroyed || !api.getState('chromecastActive')) return;
         await loadMediaOnCast(src, 0);
       });
 
       // Command interception: when Chromecast is active, route play/pause/seek
       // to the remote player instead of the local element.
       const unsubPlay = api.on('playback:play', () => {
-        if (!api.getState('chromecastActive')) return;
+        if (destroyed || !api.getState('chromecastActive')) return;
         if (remotePlayer?.isPaused && remotePlayerController) {
           remotePlayerController.playOrPause();
         }
       });
 
       const unsubPause = api.on('playback:pause', () => {
-        if (!api.getState('chromecastActive')) return;
+        if (destroyed || !api.getState('chromecastActive')) return;
         if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
           remotePlayerController.playOrPause();
         }
       });
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
-        if (!api.getState('chromecastActive')) return;
+        if (destroyed || !api.getState('chromecastActive')) return;
         if (remotePlayer && remotePlayerController) {
           remotePlayer.currentTime = time;
           remotePlayerController.seek();
         }
       });
 
-      // Register cleanup for listeners
+      // Subscribed before the await below: a player destroyed while the SDK
+      // is still loading never calls this plugin's destroy(), and this is
+      // the only signal that reaches it. Core emits it before tearing
+      // anything down.
+      const unsubPlayerDestroy = api.on('player:destroy', () => {
+        destroyed = true;
+      });
+
+      // Register cleanup for listeners (when the player is destroyed during
+      // init this never runs, and the event bus teardown drops them instead)
       api.onDestroy(() => {
+        unsubPlayerDestroy();
         unsubLoadRequest();
         unsubPlay();
         unsubPause();
@@ -361,9 +393,14 @@ export function chromecastPlugin(): IChromecastPlugin {
 
       try {
         await loadCastSDK();
+        // The player went away while the SDK loaded: install nothing, and
+        // touch no state.
+        if (destroyed) return;
         initCastApi();
         api.logger.debug('Chromecast plugin initialized');
       } catch (error) {
+        // A load that fails after the player is gone concerns nobody.
+        if (destroyed) return;
         // Cast SDK failed to load - not a fatal error
         api.logger.warn('Failed to load Cast SDK', { error });
         api.emit('chromecast:error', { error: error as Error } as ChromecastErrorEvent);
@@ -371,6 +408,9 @@ export function chromecastPlugin(): IChromecastPlugin {
     },
 
     async destroy(): Promise<void> {
+      // First, so an SDK callback fired by the teardown below is already gated.
+      destroyed = true;
+
       // End session gracefully — let the TV continue playback rather than
       // forcibly stopping it. The viewer may want to keep watching on the big
       // screen after navigating away from the player page.
@@ -445,10 +485,14 @@ export function chromecastPlugin(): IChromecastPlugin {
     },
 
     isAvailable(): boolean {
+      // A torn-down plugin answers "no" rather than throwing from the
+      // destroyed StateManager.
+      if (destroyed) return false;
       return api?.getState('chromecastAvailable') === true;
     },
 
     isConnected(): boolean {
+      if (destroyed) return false;
       return api?.getState('chromecastActive') === true;
     },
 

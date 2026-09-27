@@ -221,10 +221,10 @@ export interface IChromecastPlugin extends Plugin {
    */
   endSession(): void;
 
-  /** Check if Chromecast devices are available */
+  /** Check if Chromecast devices are available. False once the player is destroyed. */
   isAvailable(): boolean;
 
-  /** Check if currently connected to a Chromecast */
+  /** Check if currently connected to a Chromecast. False once the player is destroyed. */
   isConnected(): boolean;
 
   /** Get the connected device name */

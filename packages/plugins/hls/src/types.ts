@@ -275,3 +275,34 @@ export interface HlsConstructor {
   /** hls.js default config (provides the base loader class for pLoader wrapping) */
   DefaultConfig?: Record<string, unknown>;
 }
+
+/**
+ * What the support probes answered in this browser, from a loader's
+ * `describeSupport()`.
+ *
+ * Carried under `context.probes` on the `SOURCE_NOT_SUPPORTED` fatal so an
+ * HLS failure on a browser that should play HLS says why both probes failed
+ * (Sentry TSP-WEB-2JP: Chrome on iOS, a WebKit browser that plays HLS natively).
+ */
+export interface HlsSupportProbes {
+  /** `canPlayType()` answers for both HLS MIME strings ('' means no) */
+  canPlayType: {
+    'application/vnd.apple.mpegurl': string;
+    'application/x-mpegURL': string;
+  };
+  /** `typeof window.MediaSource` */
+  MediaSource: string;
+  /**
+   * `typeof window.ManagedMediaSource` (iPhone, iOS 17.1+). Recorded only:
+   * the pre-load hls.js probe does not accept it (Tarnock decision #148).
+   */
+  ManagedMediaSource: string;
+  /** `typeof window.WebKitMediaSource` */
+  WebKitMediaSource: string;
+  /** Whether the hls.js module has been fetched */
+  hlsJsLoaded: boolean;
+  /** hls.js's own `isSupported()`, or null before it has been fetched */
+  hlsJsSupported: boolean | null;
+  /** `navigator.userAgent`, or '' outside a browser */
+  userAgent: string;
+}

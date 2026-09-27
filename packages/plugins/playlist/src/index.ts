@@ -496,6 +496,54 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
         generateShuffleOrder();
       }
 
+      // Whether the CURRENT source actually played and the viewer has not
+      // paused it since. Auto-advance hands this to the next load request.
+      //
+      // `paused` cannot be read at `ended` instead: at the end of the media
+      // the element fires `pause` (setting `paused: true`) and only THEN
+      // `ended`, so a viewer who was playing reads as paused there and every
+      // advance would load the next track paused.
+      //
+      // Set from the `playing` state key, not `playback:play`: core emits that
+      // before the element plays, so a play() refused by autoplay policy would
+      // leave the flag true with nothing playing.
+      //
+      // Seeded from state, not false: a plugin registered and initialised
+      // (player.init()) while the media is already playing sees no `playing`
+      // change through the subscription below, which only reports future
+      // writes. load() resets `playing` before initialising late plugins, so
+      // that path reads false here either way.
+      let viewerPlaying = api.getState('playing') === true;
+
+      const unsubState = api.subscribeToState((event) => {
+        if (event.key === 'playing' && event.value === true) {
+          viewerPlaying = true;
+        } else if (event.key === 'source') {
+          // A host load() mid-track emits no playback:pause (core resets
+          // `playing` through a state update, and the provider drops its
+          // element listeners before pausing), so a new source is the only
+          // sign that the old one's playback is gone.
+          viewerPlaying = false;
+        }
+      });
+
+      const unsubPause = api.on('playback:pause', () => {
+        // The element's own end-of-media pause is not the viewer pausing.
+        const el = api?.container.querySelector<HTMLMediaElement>('video, audio');
+        let atEnd: boolean;
+        if (el) {
+          atEnd = el.ended;
+        } else {
+          // No element to ask (a provider that renders none): the end steps
+          // fire `timeupdate` before `pause`, so the position in state is
+          // current here.
+          const duration = Number(api?.getState('duration')) || 0;
+          const currentTime = Number(api?.getState('currentTime')) || 0;
+          atEnd = duration > 0 && currentTime >= duration;
+        }
+        if (!atEnd) viewerPlaying = false;
+      });
+
       // Listen for playback ended to auto-advance
       let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
       const unsubEnded = api.on('playback:ended', () => {
@@ -503,13 +551,14 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
         const nextIdx = getNextIndex();
         if (nextIdx >= 0) {
-          // `ended` has already flipped `playing` false, so ask whether the
-          // viewer had paused this playlist rather than reading it now.
-          const wasPlaying = !api?.getState('paused');
+          // Read, not reset: two `ended` events inside advanceDelay must both
+          // see the viewer's real intent. advance() consumes the flag.
+          const wasPlaying = viewerPlaying;
 
           const advance = () => {
             api?.logger.debug('Auto-advancing to next track', { nextIdx });
             setCurrentTrack(nextIdx, { autoplay: wasPlaying });
+            viewerPlaying = false;
           };
 
           if (mergedConfig.advanceDelay) {
@@ -604,6 +653,8 @@ export function createPlaylistPlugin(config?: Partial<PlaylistPluginConfig>): IP
 
       api.onDestroy(() => {
         unsubEnded();
+        unsubPause();
+        unsubState();
         document.removeEventListener('keydown', onKeyDown);
         if (advanceTimeout) {
           clearTimeout(advanceTimeout);

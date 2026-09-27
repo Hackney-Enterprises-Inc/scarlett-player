@@ -437,6 +437,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   (window as any).whepPlugin = whepPlugin;
   (window as any).audioPlayer = audioPlayer;
   (window as any).miniPlayer = miniPlayer;
+  // Harness scenario 11 registers a playlist on the video player with this.
+  (window as any).createPlaylistPlugin = createPlaylistPlugin;
 
   // init() is what createPlayer() does after construction: it initialises
   // the plugins and, for the video player, loads the initial source. Started

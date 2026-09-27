@@ -941,7 +941,7 @@ describe('PluginAPI', () => {
 
   describe('getPlugin()', () => {
     it('should call getPlugin function', () => {
-      const getPluginMock = vi.fn(() => ({ id: 'other' }));
+      const getPluginMock = vi.fn(() => ({ id: 'other' })) as unknown as IPluginAPI['getPlugin'];
       pluginAPI = new PluginAPI('test-plugin', {
         stateManager,
         eventBus,

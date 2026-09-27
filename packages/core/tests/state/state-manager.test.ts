@@ -285,10 +285,10 @@ describe('StateManager', () => {
       state.set('volume', 0.5);
 
       expect(events).toHaveLength(2);
-      expect(events[0].key).toBe('playing');
-      expect(events[0].value).toBe(true);
-      expect(events[1].key).toBe('volume');
-      expect(events[1].value).toBe(0.5);
+      expect(events[0]!.key).toBe('playing');
+      expect(events[0]!.value).toBe(true);
+      expect(events[1]!.key).toBe('volume');
+      expect(events[1]!.value).toBe(0.5);
     });
 
     it('should return unsubscribe function', () => {
@@ -712,7 +712,8 @@ describe('StateManager - previousValue on change events', () => {
 
     const seen: Array<[unknown, unknown]> = [];
     state.subscribe(event => {
-      if (event.key === 'customKey') seen.push([event.previousValue, event.value]);
+      // A plugin-defined key is not in keyof StateStore; compare as strings on purpose.
+      if ((event.key as string) === ('customKey' as string)) seen.push([event.previousValue, event.value]);
     });
 
     state.set('customKey' as never, 'b' as never);

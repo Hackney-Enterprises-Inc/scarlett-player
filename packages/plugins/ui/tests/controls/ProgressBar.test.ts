@@ -4,6 +4,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProgressBar } from '../../src/controls/ProgressBar';
+import {
+  registerTimelineExtension,
+  unregisterTimelineExtension,
+} from '../../src/timeline-registry';
 import type { MockPluginAPI } from '../mock-api';
 
 function createMockApi(overrides: Record<string, unknown> = {}): MockPluginAPI {
@@ -360,6 +364,36 @@ describe('ProgressBar', () => {
     expect(removedEvents).toContain('touchcancel');
 
     removeSpy.mockRestore();
+  });
+
+  // Fails today: remounting a timeline extension cleared the layer with
+  // Element.replaceChildren(), which LG NetCast TVs lack (Sentry
+  // TSP-WEB-2JN; Chrome 86 / Safari 14, the documented floor is Chrome 80).
+  it('replaces a timeline extension on an engine without replaceChildren', () => {
+    const mount = (): { handle: HTMLElement; destroy: ReturnType<typeof vi.fn> } => {
+      const handle = document.createElement('span');
+      const destroy = vi.fn();
+      registerTimelineExtension(api.container, (surface) => {
+        surface.element.appendChild(handle);
+        return { update: vi.fn(), onSeekStart: vi.fn(), onSeekEnd: vi.fn(), destroy };
+      });
+      return { handle, destroy };
+    };
+
+    const first = mount();
+    const original = Element.prototype.replaceChildren;
+    try {
+      delete (Element.prototype as { replaceChildren?: unknown }).replaceChildren;
+      const mounted: Array<ReturnType<typeof mount>> = [];
+      expect(() => mounted.push(mount())).not.toThrow();
+
+      expect(first.destroy).toHaveBeenCalledTimes(1);
+      expect(first.handle.parentNode).toBeNull();
+      expect(mounted[0]?.handle.parentNode).not.toBeNull();
+    } finally {
+      Element.prototype.replaceChildren = original;
+      unregisterTimelineExtension(api.container);
+    }
   });
 });
 

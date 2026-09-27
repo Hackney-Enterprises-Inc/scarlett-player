@@ -236,6 +236,49 @@ describe('UI Plugin', () => {
     });
   });
 
+  // LG NetCast TVs (Sentry TSP-WEB-2JN) have no Element.replaceChildren(),
+  // which is Chrome 86 / Safari 14 while the documented floor is Chrome 80.
+  // jsdom implements it, so the engine gap is reproduced by removing it.
+  describe('engines without replaceChildren', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      resetControlRegistry();
+    });
+
+    // Fails today: rebuildControlBar() threw `replaceChildren is not a
+    // function` inside the queued rebuild.
+    it('rebuilds the control bar after a late registration', async () => {
+      const queued: Array<() => void> = [];
+      vi.stubGlobal('queueMicrotask', (cb: () => void) => {
+        queued.push(cb);
+      });
+
+      const plugin = uiPlugin({ controls: ['play', 'spacer', 'example', 'fullscreen'] });
+      await plugin.init(api);
+
+      registerControl('example', () => {
+        const el = document.createElement('button');
+        el.className = 'sp-control sp-example';
+
+        return { render: () => el, update: () => {}, destroy: () => el.remove() };
+      });
+
+      const original = Element.prototype.replaceChildren;
+      try {
+        delete (Element.prototype as { replaceChildren?: unknown }).replaceChildren;
+        expect(() => queued.forEach((cb) => cb())).not.toThrow();
+      } finally {
+        Element.prototype.replaceChildren = original;
+      }
+
+      const controlBar = api.container.querySelector('.sp-controls');
+      expect(controlBar?.querySelectorAll('.sp-play')).toHaveLength(1);
+      expect(controlBar?.querySelector('.sp-example')).not.toBeNull();
+
+      await plugin.destroy();
+    });
+  });
+
   describe('show/hide controls', () => {
     it('should hide controls', async () => {
       const plugin = uiPlugin();
@@ -784,6 +827,26 @@ describe('UI Plugin', () => {
       // Replay: the element leaves the end, the state key does not.
       Object.defineProperty(video, 'ended', { value: false, configurable: true });
       setState('playing', true);
+
+      expect(isVisible()).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    // Preservation: the latch resets per source, not per pause. A viewer who
+    // paused mid-video on the same source must not get the button over the
+    // picture.
+    it('stays hidden for a paused viewer on the same source', async () => {
+      setState('source', { src: 'a.mp4', type: 'video/mp4' });
+      const plugin = uiPlugin();
+      await plugin.init(api);
+
+      setState('playing', true);
+      setState('playbackState', 'playing');
+      setState('currentTime', 12);
+      setState('playing', false);
+      setState('paused', true);
+      setState('playbackState', 'paused');
 
       expect(isVisible()).toBe(false);
 

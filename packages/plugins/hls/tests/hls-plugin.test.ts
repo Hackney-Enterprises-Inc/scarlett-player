@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHLSPlugin } from '../src/index';
 import type { IPluginAPI } from '@scarlett-player/core';
 import * as hlsLoader from '../src/hls-loader';
+import * as hlsLoaderLight from '../src/hls-loader-light';
 import {
   formatLevel,
   formatBitrate,
@@ -150,11 +151,6 @@ describe('HLSPlugin', () => {
     it('should detect MIME type hints', () => {
       expect(plugin.canPlay('stream?type=application/x-mpegurl')).toBe(true);
       expect(plugin.canPlay('stream?type=application/vnd.apple.mpegurl')).toBe(true);
-    });
-
-    it('should return false when HLS is not supported', () => {
-      vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(false);
-      expect(plugin.canPlay('video.m3u8')).toBe(false);
     });
   });
 
@@ -508,6 +504,50 @@ describe('HLSPlugin', () => {
       await plugin.loadSource('http://example.com/stream.m3u8');
 
       expect(plugin.getHlsInstance()).toBeNull();
+    });
+  });
+
+  describe('loadSource() on a browser without HLS support', () => {
+    // Fails today: the last branch threw a bare Error with no `error` emit, so
+    // the failure carried no code and no probe values (Sentry TSP-WEB-2JP).
+    it('emits a SOURCE_NOT_SUPPORTED fatal carrying the probes, then rejects', async () => {
+      delete (window as any).MediaSource;
+      delete (window as any).WebKitMediaSource;
+      HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
+      await plugin.init(api);
+
+      await expect(plugin.loadSource('http://example.com/stream.m3u8')).rejects.toThrow(
+        'HLS playback not supported in this browser'
+      );
+
+      const errors = (api.emit as any).mock.calls.filter(([event]: [string]) => event === 'error');
+      expect(errors).toHaveLength(1);
+      const [, payload] = errors[0];
+      expect(payload).toMatchObject({
+        code: 'SOURCE_NOT_SUPPORTED',
+        fatal: true,
+        timestamp: expect.any(Number),
+      });
+      // tsp-web logs only the code, `fatal` and the message, so the probe
+      // summary has to be in the message itself.
+      expect(payload.message).toContain('HLS playback not supported in this browser');
+      expect(payload.message).toContain('MediaSource: undefined');
+      expect(payload.message).toContain('ManagedMediaSource: undefined');
+      expect(payload.message).toContain('hls.js: not loaded');
+      expect(payload.context.probes).toMatchObject({
+        canPlayType: {
+          'application/vnd.apple.mpegurl': '',
+          'application/x-mpegURL': '',
+        },
+        MediaSource: 'undefined',
+        ManagedMediaSource: 'undefined',
+        WebKitMediaSource: 'undefined',
+        hlsJsLoaded: false,
+        hlsJsSupported: null,
+        userAgent: expect.any(String),
+      });
+      expect(api.setState).toHaveBeenCalledWith('playbackState', 'error');
+      expect(api.setState).toHaveBeenLastCalledWith('buffering', false);
     });
   });
 
@@ -1493,6 +1533,51 @@ describe('hls-loader', () => {
       delete (window as any).WebKitMediaSource;
       HTMLVideoElement.prototype.canPlayType = vi.fn<HTMLVideoElement['canPlayType']>(() => '');
       expect(hlsLoader.isHLSSupported()).toBe(false);
+    });
+  });
+
+  // Both loaders carry the same probes (the light one only imports a smaller
+  // hls.js), so every probe test runs against each of them.
+  describe.each([
+    ['hls-loader', hlsLoader],
+    ['hls-loader-light', hlsLoaderLight],
+  ] as const)('%s support probes', (_name, loader) => {
+    afterEach(() => {
+      delete (window as any).ManagedMediaSource;
+      loader.resetLoader();
+    });
+
+    // Fails today: only application/vnd.apple.mpegurl was asked.
+    it('treats application/x-mpegURL as native HLS', () => {
+      HTMLVideoElement.prototype.canPlayType = vi.fn((type: string) =>
+        type === 'application/x-mpegURL' ? 'maybe' : ''
+      );
+
+      expect(loader.supportsNativeHLS()).toBe(true);
+    });
+
+    // Fails today: describeSupport() did not exist, so a PROVIDER_NOT_FOUND
+    // on a WebKit browser (Sentry TSP-WEB-2JP) said nothing about why.
+    it('describes every support probe', () => {
+      delete (window as any).MediaSource;
+      delete (window as any).WebKitMediaSource;
+      (window as any).ManagedMediaSource = vi.fn();
+      HTMLVideoElement.prototype.canPlayType = vi.fn((type: string) =>
+        type === 'application/vnd.apple.mpegurl' ? 'maybe' : ''
+      );
+
+      expect(loader.describeSupport()).toEqual({
+        canPlayType: {
+          'application/vnd.apple.mpegurl': 'maybe',
+          'application/x-mpegURL': '',
+        },
+        MediaSource: 'undefined',
+        ManagedMediaSource: 'function',
+        WebKitMediaSource: 'undefined',
+        hlsJsLoaded: false,
+        hlsJsSupported: null,
+        userAgent: navigator.userAgent,
+      });
     });
   });
 });

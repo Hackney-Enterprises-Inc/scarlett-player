@@ -27,6 +27,7 @@ import type {
   IHLSPlugin,
   HlsInstance,
   HlsConstructor,
+  HlsSupportProbes,
 } from './types';
 import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
 import type { PlaybackGate } from './event-map';
@@ -55,12 +56,34 @@ export interface HlsLoaderModule {
   isHLSSupported(): boolean;
   /** Whether hls.js (MSE) is supported */
   isHlsJsSupported(): boolean;
+  /** What every support probe answers, for the SOURCE_NOT_SUPPORTED fatal */
+  describeSupport(): HlsSupportProbes;
   /** Lazily load the hls.js constructor */
   loadHlsJs(): Promise<HlsConstructor>;
   /** Create an hls.js instance (loader must be loaded first) */
   createHlsInstance(config?: Record<string, unknown>): HlsInstance;
   /** Cached hls.js constructor, or null before loadHlsJs() resolves */
   getHlsConstructor(): HlsConstructor | null;
+}
+
+/**
+ * One-line summary of the support probes for an error message.
+ *
+ * @param probes - A loader's describeSupport() result
+ * @returns e.g. `native: ''/'', MediaSource: undefined, ManagedMediaSource:
+ *   function, WebKitMediaSource: undefined, hls.js: not loaded`
+ */
+function summarizeSupport(probes: HlsSupportProbes): string {
+  const native = `'${probes.canPlayType['application/vnd.apple.mpegurl']}'/'${probes.canPlayType['application/x-mpegURL']}'`;
+  const hlsJs = probes.hlsJsLoaded ? `isSupported ${String(probes.hlsJsSupported)}` : 'not loaded';
+
+  return [
+    `native: ${native}`,
+    `MediaSource: ${probes.MediaSource}`,
+    `ManagedMediaSource: ${probes.ManagedMediaSource}`,
+    `WebKitMediaSource: ${probes.WebKitMediaSource}`,
+    `hls.js: ${hlsJs}`,
+  ].join(', ');
 }
 
 /** Build-variant labels for plugin metadata and log lines. */
@@ -1437,9 +1460,18 @@ export function createHLSPluginWith(
     type: 'provider' as PluginType,
     description: variant.description,
 
+    /**
+     * Claim a source by its shape: an `.m3u8` path or an mpegurl MIME hint.
+     *
+     * Deliberately NOT gated on browser support. Support is loadSource()'s
+     * question: a browser with neither hls.js (MSE) nor native HLS must fail
+     * as HLS, with SOURCE_NOT_SUPPORTED and the probe values, not as core's
+     * undiagnosable PROVIDER_NOT_FOUND (Sentry TSP-WEB-2JP).
+     *
+     * @param src - Source URL
+     * @returns Whether this provider owns the source
+     */
     canPlay(src: string): boolean {
-      if (!loader.isHLSSupported()) return false;
-
       // Check file extension (strip query strings and fragments first)
       const url = src.toLowerCase();
       const urlWithoutQuery = url.split('?')[0].split('#')[0];
@@ -1732,7 +1764,23 @@ export function createHLSPluginWith(
         api.logger.info('Using native HLS playback (hls.js not supported)');
         await loadNative(src);
       } else {
-        throw new Error('HLS playback not supported in this browser');
+        const probes = loader.describeSupport();
+        const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
+
+        // Reported the way emitReconnectExhausted() reports: core's load()
+        // catch sees `error` already set and only logs, so the code stays
+        // SOURCE_NOT_SUPPORTED. The summary is in the message because hosts
+        // that log only code and message (tsp-web) would otherwise drop it.
+        api.setState('playbackState', 'error');
+        api.setState('buffering', false);
+        api.emit('error', {
+          code: ErrorCode.SOURCE_NOT_SUPPORTED,
+          message,
+          fatal: true,
+          timestamp: Date.now(),
+          context: { probes },
+        });
+        throw new Error(message);
       }
 
       // Superseded between the load settling and this continuation running

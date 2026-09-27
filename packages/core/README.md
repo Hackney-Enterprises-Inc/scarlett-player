@@ -48,6 +48,7 @@ const player = await createPlayer({
 ```typescript
 player.init()                  // Initialise plugins and load `src` (createPlayer calls this)
 player.load(src)               // Load a source (initialises the player first if needed)
+player.load(src, { autoplay }) // Same, with `autoplay` overriding the option for this load
 player.play()                  // Start playback
 player.pause()                 // Pause playback
 player.seek(time)              // Seek to time in seconds
