@@ -1,3 +1,5 @@
+import type { AddonCreator, AddonName, AddonRuntime } from './addons/runtime';
+
 /**
  * Player type determines which UI to use
  */
@@ -115,6 +117,18 @@ export interface EmbedConfig {
   watermark?: WatermarkConfig;
   /** Captions configuration */
   captions?: CaptionsConfig;
+  /**
+   * Chapters, from `data-chapters`: an inline list or a WebVTT chapters URL.
+   * Needs the `embed.addon.chapters` addon and a video player; without them
+   * the embed warns and installs nothing.
+   */
+  chapters?: EmbedChaptersConfig;
+  /**
+   * Viewer-created clips, from the `data-clips-*` attributes. Needs the
+   * `embed.addon.clips` addon, a video player and `csrf: 'meta'`; without
+   * any of them the embed warns and installs nothing.
+   */
+  clips?: EmbedClipsConfig;
 }
 
 /**
@@ -161,10 +175,64 @@ export interface CaptionsConfig {
     label: string;
     src: string;
     kind?: 'subtitles' | 'captions';
+    /** Select this track when the player loads */
+    default?: boolean;
   }>;
   extractFromHLS?: boolean;
   autoSelect?: boolean;
   defaultLanguage?: string;
+}
+
+/**
+ * One chapter, in the chapters plugin's own shape (`Chapter` in
+ * `@scarlett-player/core`), restated here so the embed's types stand alone.
+ */
+export interface EmbedChapter {
+  /** Start time in seconds */
+  time: number;
+  /** Chapter title */
+  label: string;
+  /** End time in seconds, exclusive. Omit to run until the next chapter */
+  endTime?: number;
+  /** Secondary line under the label in the chapter list */
+  subtitle?: string;
+  /** Thumbnail URL */
+  thumbnail?: string;
+  /** Free-form chapter metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Chapters configuration for embed: an inline list or a WebVTT chapters URL,
+ * never both. `data-chapters` produces the first when its trimmed value
+ * starts with `[` and the second otherwise.
+ */
+export type EmbedChaptersConfig = { chapters: EmbedChapter[] } | { src: string };
+
+/**
+ * Clips configuration for embed, from the `data-clips-*` attributes.
+ *
+ * The embed turns this into the clips plugin's own config: `endpoint` becomes
+ * `endpoint.url`, and `csrf: 'meta'` adds an `X-CSRF-TOKEN` header read from
+ * the host page's `<meta name="csrf-token">` on every submission.
+ */
+export interface EmbedClipsConfig {
+  /** URL the clip is POSTed to (`data-clips-endpoint`) */
+  endpoint: string;
+  /**
+   * The host's opt-in to reading its CSRF meta tag (`data-clips-csrf`).
+   * `'meta'` is the only accepted value; without it the endpoint is inert.
+   */
+  csrf?: 'meta';
+  /**
+   * Id of the media being clipped (`data-clips-media-id`). When absent the
+   * embed falls back to the analytics video id, then the source URL.
+   */
+  mediaId?: string;
+  /** Longest clip allowed, in seconds (`data-clips-max-duration`) */
+  maxDuration?: number;
+  /** Shortest clip allowed, in seconds (`data-clips-min-duration`) */
+  minDuration?: number;
 }
 
 /**
@@ -187,6 +255,16 @@ export interface ScarlettPlayerGlobal {
   version: string;
   /** Available player types in this build */
   availableTypes: PlayerType[];
+  /**
+   * Register a plugin creator an addon provides. Call before players
+   * initialise; a player created earlier does not pick it up.
+   */
+  use(name: AddonName, creator: AddonCreator): void;
+  /**
+   * The embed's own instances of the functions addons need. Frozen. For addon
+   * bundles only, not a public API for host code.
+   */
+  addonRuntime: AddonRuntime;
 }
 
 declare global {

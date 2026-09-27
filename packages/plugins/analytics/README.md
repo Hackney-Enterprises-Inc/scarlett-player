@@ -122,8 +122,8 @@ The plugin automatically tracks these events:
 | `seeking` | User seeked | seekTo, seekCount |
 | `rebufferStart` | Buffering started | rebufferCount |
 | `rebufferEnd` | Buffering ended | duration, totalRebufferTime |
-| `qualityChange` | Quality level changed | bitrate, width, height |
-| `error` | Error occurred | errorType, errorMessage, fatal |
+| `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
+| `error` | Error occurred: a media element error, or a player `error` event (including a provider's fatal error such as an HLS manifest 404) | errorType, errorMessage, errorCode, fatal. `errorType` is the `Error` name when there is one, otherwise the player error code; `errorCode` is the player error code (for example `MEDIA_NETWORK_ERROR`), absent when there is none |
 | `viewEnd` | View session ended | all metrics, exitType, QoE score |
 
 ### Exit Types

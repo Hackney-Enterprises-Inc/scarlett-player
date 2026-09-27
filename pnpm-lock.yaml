@@ -96,6 +96,12 @@ importers:
       '@scarlett-player/captions':
         specifier: workspace:*
         version: link:../plugins/captions
+      '@scarlett-player/chapters':
+        specifier: workspace:*
+        version: link:../plugins/chapters
+      '@scarlett-player/clips':
+        specifier: workspace:*
+        version: link:../plugins/clips
       '@scarlett-player/gestures':
         specifier: workspace:*
         version: link:../plugins/gestures

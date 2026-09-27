@@ -652,17 +652,39 @@ export function createAnalyticsPlugin(
    *
    * Core errors (e.g. provider not found, plugin init failure) are not
    * reported through media:error but should still be counted and sent.
+   *
+   * The payload is a `PlayerError`, a plain object: core's ErrorHandler may
+   * wrap an `Error` in `originalError`, while providers (the HLS fatal path)
+   * emit `{ code, message, fatal }` with no `Error` at all. An `Error` keeps
+   * its `name` as the error type; a structured error without one reports its
+   * `code`. Either way `errorCode` carries the code when there is one. A
+   * payload with neither a string `code` nor a string `message` is ignored.
    */
   function onCoreError(err: any): void {
     if (!err) return;
-    const error = err.originalError || err;
-    if (!(error instanceof Error)) return;
+    const original = err.originalError || err;
+    const code: string | undefined =
+      typeof err.code === 'string' ? err.code
+        : typeof original.code === 'string' ? original.code
+          : undefined;
+
+    let type: string;
+    let message: string;
+    if (original instanceof Error) {
+      type = original.name || 'CoreError';
+      message = original.message || 'Unknown core error';
+    } else if (code !== undefined || typeof err.message === 'string') {
+      type = code || err.name || 'CoreError';
+      message = err.message || 'Unknown core error';
+    } else {
+      return;
+    }
 
     session.errorCount++;
     const errorEvent: ErrorEvent = {
       time: Date.now(),
-      type: error.name || 'CoreError',
-      message: error.message || 'Unknown core error',
+      type,
+      message,
       fatal: err.fatal ?? false,
     };
 
@@ -674,6 +696,7 @@ export function createAnalyticsPlugin(
     sendBeacon('error', {
       errorType: errorEvent.type,
       errorMessage: errorEvent.message,
+      errorCode: code,
       fatal: errorEvent.fatal,
     });
 

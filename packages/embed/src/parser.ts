@@ -1,4 +1,4 @@
-import type { EmbedConfig, PlayerType } from './types';
+import type { EmbedClipsConfig, EmbedConfig, PlayerType } from './types';
 
 /**
  * Helper to get attribute with fallback aliases
@@ -203,7 +203,103 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     };
   }
 
+  // Captions (JSON array of sources). Installed by the captions plugin in the
+  // full and video builds; the audio builds warn in createEmbedPlayer().
+  const captions = element.getAttribute('data-captions');
+  if (captions) {
+    const sources = parseJsonArray(captions, 'data-captions');
+    if (sources) {
+      config.captions = { sources };
+    }
+  }
+
+  // Chapters: a JSON array when the value starts with `[`, otherwise a WebVTT
+  // chapters URL. Needs the chapters addon; createEmbedPlayer() warns without it.
+  const chapters = element.getAttribute('data-chapters')?.trim();
+  if (chapters) {
+    if (chapters.startsWith('[')) {
+      const list = parseJsonArray(chapters, 'data-chapters');
+      if (list) {
+        config.chapters = { chapters: list };
+      }
+    } else {
+      config.chapters = { src: chapters };
+    }
+  }
+
+  // Clips. Parsed whenever an endpoint is set; createEmbedPlayer() keeps it
+  // inert unless the host also opted in with data-clips-csrf="meta", so a
+  // programmatic create() without the opt-in gets the same rule.
+  const clipsEndpoint = element.getAttribute('data-clips-endpoint');
+  if (clipsEndpoint) {
+    const clips: EmbedClipsConfig = { endpoint: clipsEndpoint };
+
+    const csrf = element.getAttribute('data-clips-csrf');
+    if (csrf === 'meta') {
+      clips.csrf = 'meta';
+    } else if (csrf !== null) {
+      console.warn(`[ScarlettPlayer] Invalid data-clips-csrf "${csrf}": the only accepted value is "meta"`);
+    }
+
+    // data-analytics-video-id is read here as the fallback because it only
+    // reaches config.analytics when a beacon URL is set too; a page that names
+    // its video without enabling analytics must still clip under that id.
+    // createEmbedPlayer() adds the fallback to config.analytics.videoId (the
+    // programmatic path) and then to the source.
+    const mediaId =
+      element.getAttribute('data-clips-media-id') ||
+      element.getAttribute('data-analytics-video-id');
+    if (mediaId) {
+      clips.mediaId = mediaId;
+    }
+
+    const maxDuration = parseNumber(element.getAttribute('data-clips-max-duration'));
+    if (maxDuration !== undefined) {
+      clips.maxDuration = maxDuration;
+    }
+
+    const minDuration = parseNumber(element.getAttribute('data-clips-min-duration'));
+    if (minDuration !== undefined) {
+      clips.minDuration = minDuration;
+    }
+
+    config.clips = clips;
+  }
+
   return config;
+}
+
+/**
+ * Parse an attribute holding a JSON array.
+ *
+ * Invalid JSON, or JSON that is not an array, warns and yields `undefined`
+ * so the caller leaves the config key out (the `data-playlist` precedent).
+ *
+ * @param value - The attribute value
+ * @param attribute - The attribute name, for the warning
+ * @returns The parsed array, or `undefined` when it is not one
+ */
+function parseJsonArray(value: string, attribute: string): any[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // fall through to the warning
+  }
+  console.warn(`[ScarlettPlayer] Invalid ${attribute} JSON: expected an array`);
+  return undefined;
+}
+
+/**
+ * Parse a numeric attribute.
+ *
+ * @param value - The attribute value, or `null` when absent
+ * @returns The number, or `undefined` when absent or not a number
+ */
+function parseNumber(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? undefined : parsed;
 }
 
 /**

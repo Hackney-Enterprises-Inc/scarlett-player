@@ -620,7 +620,12 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     });
     player.on('media:loadedmetadata', ({ duration }) => log(role, 'info', 'metadata', `duration ${formatTime(duration)}`));
     player.on('quality:levels', ({ levels }) => log(role, 'info', 'quality:levels', levels.map((l) => l.label).join(', ')));
-    player.on('quality:change', ({ quality, auto }) => log(role, 'info', 'quality:change', `${quality}${auto ? ' (auto)' : ''}`));
+    // The payload carries the level id (`level-2`); show its label when the
+    // qualities state knows it.
+    player.on('quality:change', ({ quality, auto }) => {
+      const label = player.getState().qualities.find((q) => q.id === quality)?.label ?? quality;
+      log(role, 'info', 'quality:change', `${label}${auto ? ' (auto)' : ''}`);
+    });
     player.on('track:text', ({ trackId }) => log(role, 'info', 'captions', trackId ?? 'off'));
     player.on('error', (error) => {
       const code = 'code' in error ? String(error.code) : 'Error';

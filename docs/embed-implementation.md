@@ -15,9 +15,11 @@ pnpm --filter @scarlett-player/embed dev     # Vite dev server over demo.html
 ```
 
 The build is `rimraf dist && tsc && vite build && BUILD_VIDEO=true vite build &&
-BUILD_AUDIO=true vite build`: `tsc` emits the declarations, then Vite writes
-three bundles into the same `dist`. `emptyOutDir` is pinned to `false` because
-the three builds share that directory and the declarations are already in it.
+BUILD_AUDIO=true vite build && BUILD_ADDON=chapters vite build &&
+BUILD_ADDON=clips vite build`: `tsc` emits the declarations, then Vite writes
+the three builds and the two addons into the same `dist`. `emptyOutDir` is
+pinned to `false` because the runs share that directory and the declarations
+are already in it.
 
 ### Simplest integration
 
@@ -38,10 +40,13 @@ packages/embed/
 │   ├── index.ts           # Full build entry: global API + auto-init
 │   ├── index-video.ts     # Video-only build entry
 │   ├── index-audio.ts     # Audio-only build entry
-│   ├── create-embed.ts    # Player creation, global API, auto-init scan
+│   ├── create-embed.ts    # Player creation, global API (incl. use()), auto-init scan
+│   ├── control-layout.ts  # Video control-bar layout when share, clip or chapters is on
 │   ├── parser.ts          # Data attribute parsing
 │   ├── types.ts           # EmbedConfig, ScarlettPlayerGlobal, PlayerType
-│   └── version.ts         # __PKG_VERSION__, replaced at build time
+│   ├── version.ts         # __PKG_VERSION__, replaced at build time
+│   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
+│                          # lookup and the core/ui shims they build against
 ├── templates/
 │   ├── laravel-embed.blade.php  # Laravel Blade template for /v/{id}
 │   └── EmbedController.php      # Example Laravel controller
@@ -58,6 +63,8 @@ dist/ (generated)
 ├── embed.js / embed.umd.cjs                    # Full build (ESM / UMD)
 ├── embed.video.js / embed.video.umd.cjs        # Video-only build
 ├── embed.audio.js / embed.audio.umd.cjs        # Audio-only build
+├── embed.addon.chapters.js / .umd.cjs          # Chapters addon
+├── embed.addon.clips.js / .umd.cjs             # Clips addon
 ├── hls.<version>.js                            # Shared hls.js chunk (ESM only)
 ├── hls.light.<version>.js                      # Shared hls.js/light chunk
 ├── *.d.ts                                      # Declarations, emitted by tsc
@@ -71,12 +78,19 @@ dist/ (generated)
 | Full (`embed`) | `src/index.ts` | hls, native, ui, audio-ui, analytics, playlist, media-session, watermark, captions, gestures, share |
 | Video (`embed.video`) | `src/index-video.ts` | hls, native, ui, watermark, captions, gestures, share |
 | Audio (`embed.audio`) | `src/index-audio.ts` | hls/light, native, audio-ui, playlist, media-session |
+| Addons (`embed.addon.chapters`, `embed.addon.clips`) | `src/addons/chapters.ts`, `src/addons/clips.ts` | chapters, clips; each registers into the embed already on the page |
 
-Chapters and clips are not in any embed build; a host that wants them installs
-the packages and builds its own bundle.
+Chapters and clips are not in any embed build; they ship as addons, separate
+files a page loads after a Full or Video build. An addon registers its plugin
+through `ScarlettPlayer.use()` and reaches core and the UI only through the
+embed's frozen `ScarlettPlayer.addonRuntime`, so its control lands in the
+embed's own control bar (the UI control registry is per module copy). The
+builds stay as they are; new features are addons. Load order, the version rule
+and the clips CSRF opt-in are in the
+[embed README's Addons section](../packages/embed/README.md#addons).
 
-All three assign the same `window.ScarlettPlayer` global, so a page loads
-exactly one of them.
+All three builds assign the same `window.ScarlettPlayer` global, so a page
+loads exactly one of them, plus any addons.
 
 ### Why the hls.js chunks carry the version
 
@@ -149,6 +163,8 @@ The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 | `initAll()` | `Promise<void>` | Re-scan the DOM for player elements |
 | `version` | `string` | The embed package version |
 | `availableTypes` | `PlayerType[]` | Which of `video` / `audio` this build ships |
+| `use(name, creator)` | `void` | Register an addon's plugin creator (`chapters` or `clips`); the addon files call it themselves |
+| `addonRuntime` | `AddonRuntime` | Frozen: the embed's version and its own `injectSharedStyles`, `registerControl`, `unregisterControl`, for addon bundles only |
 
 ### 3. iframe embed (isolated)
 
@@ -449,7 +465,7 @@ table, and watch what Vite prints during `pnpm build`.
 ```bash
 pnpm install
 pnpm --filter @scarlett-player/embed dev        # Vite dev server
-pnpm --filter @scarlett-player/embed build      # all three builds
+pnpm --filter @scarlett-player/embed build      # all three builds and both addons
 pnpm --filter @scarlett-player/embed test       # vitest
 pnpm --filter @scarlett-player/embed typecheck
 ```

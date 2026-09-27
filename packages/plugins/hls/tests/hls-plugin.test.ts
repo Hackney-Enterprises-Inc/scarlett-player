@@ -857,6 +857,32 @@ describe('event-map', () => {
       expect(onLevelSwitched).toHaveBeenCalledWith(1);
     });
 
+    // SCAR-HLS-3: the payload carries the quality id core emits and the
+    // `qualities` state uses (`level-<index>`), not the display label,
+    // so analytics can resolve it to a level.
+    it('should emit quality:change with the level id, not the label', () => {
+      mockHls.levels.push({ width: 854, height: 480, bitrate: 1000000 });
+      setupHlsEventHandlers(mockHls, mockApi, { getIsAutoQuality: () => true });
+
+      mockHls.trigger('hlsLevelSwitched', { level: 2 });
+
+      expect(mockApi.emit).toHaveBeenCalledWith('quality:change', {
+        quality: 'level-2',
+        auto: true,
+      });
+    });
+
+    it('should emit quality:change with auto when the switched level is unknown', () => {
+      setupHlsEventHandlers(mockHls, mockApi, { getIsAutoQuality: () => true });
+
+      mockHls.trigger('hlsLevelSwitched', { level: -1 });
+
+      expect(mockApi.emit).toHaveBeenCalledWith('quality:change', {
+        quality: 'auto',
+        auto: true,
+      });
+    });
+
     it('should handle frag buffered event', () => {
       const onBufferUpdate = vi.fn();
       setupHlsEventHandlers(mockHls, mockApi, { onBufferUpdate });

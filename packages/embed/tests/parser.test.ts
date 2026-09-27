@@ -2,7 +2,7 @@
  * Parser Tests - Data attribute parsing and styling
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseDataAttributes,
   applyContainerStyles,
@@ -295,6 +295,150 @@ describe('parseDataAttributes', () => {
       const config = parseDataAttributes(element);
       expect(config.hideDelay).toBeUndefined();
       expect(config.playbackRate).toBeUndefined();
+    });
+  });
+
+  describe('captions attribute parsing', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('should parse data-captions into captions.sources, keeping default', () => {
+      const sources = [
+        { language: 'en', label: 'English', src: '/en.vtt', kind: 'subtitles', default: true },
+        { language: 'es', label: 'Español', src: '/es.vtt' },
+      ];
+      element.setAttribute('data-captions', JSON.stringify(sources));
+      const config = parseDataAttributes(element);
+      expect(config.captions).toEqual({ sources });
+    });
+
+    it('should warn and drop invalid data-captions JSON', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-captions', '[{ language: en }');
+      const config = parseDataAttributes(element);
+      expect(config.captions).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith('[ScarlettPlayer] Invalid data-captions JSON: expected an array');
+    });
+
+    it('should warn and drop data-captions JSON that is not an array', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-captions', '{"language":"en","label":"English","src":"/en.vtt"}');
+      expect(parseDataAttributes(element).captions).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('chapters attribute parsing', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('should parse an inline JSON list into chapters.chapters', () => {
+      const chapters = [
+        { time: 0, label: 'Walkouts' },
+        { time: 312, label: 'Fight 1', endTime: 900, subtitle: 'Main card' },
+      ];
+      element.setAttribute('data-chapters', `  ${JSON.stringify(chapters)}\n`);
+      expect(parseDataAttributes(element).chapters).toEqual({ chapters });
+    });
+
+    it('should parse any other value as a WebVTT URL into chapters.src', () => {
+      element.setAttribute('data-chapters', ' https://cdn.example.com/event/chapters.vtt ');
+      expect(parseDataAttributes(element).chapters).toEqual({
+        src: 'https://cdn.example.com/event/chapters.vtt',
+      });
+    });
+
+    it('should warn and drop invalid data-chapters JSON', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-chapters', '[{"time": 0, "label": }]');
+      expect(parseDataAttributes(element).chapters).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith('[ScarlettPlayer] Invalid data-chapters JSON: expected an array');
+    });
+
+    it('should ignore an empty data-chapters', () => {
+      element.setAttribute('data-chapters', '   ');
+      expect(parseDataAttributes(element).chapters).toBeUndefined();
+    });
+  });
+
+  describe('clips attribute parsing', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('should parse every data-clips-* attribute', () => {
+      element.setAttribute('data-src', 'https://example.com/video.m3u8');
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      element.setAttribute('data-clips-csrf', 'meta');
+      element.setAttribute('data-clips-media-id', 'abc123');
+      element.setAttribute('data-clips-max-duration', '90');
+      element.setAttribute('data-clips-min-duration', '2.5');
+
+      expect(parseDataAttributes(element).clips).toEqual({
+        endpoint: '/api/scarlett/clips',
+        csrf: 'meta',
+        mediaId: 'abc123',
+        maxDuration: 90,
+        minDuration: 2.5,
+      });
+    });
+
+    // createEmbedPlayer() owns the "inert without the opt-in" rule, so a
+    // programmatic create() gets it too; the parser only reports what it saw.
+    it('should parse data-clips-endpoint without data-clips-csrf, leaving csrf unset', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      element.setAttribute('data-clips-media-id', 'abc123');
+      const clips = parseDataAttributes(element).clips;
+      expect(clips).toEqual({ endpoint: '/api/scarlett/clips', mediaId: 'abc123' });
+      expect(clips).not.toHaveProperty('csrf');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should warn and leave csrf unset for any value but meta', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      element.setAttribute('data-clips-csrf', 'cookie');
+      expect(parseDataAttributes(element).clips).not.toHaveProperty('csrf');
+      expect(warn).toHaveBeenCalledWith(
+        '[ScarlettPlayer] Invalid data-clips-csrf "cookie": the only accepted value is "meta"'
+      );
+    });
+
+    it('should not produce clips without data-clips-endpoint', () => {
+      element.setAttribute('data-clips-csrf', 'meta');
+      element.setAttribute('data-clips-media-id', 'abc123');
+      expect(parseDataAttributes(element).clips).toBeUndefined();
+    });
+
+    // data-analytics-video-id only reaches config.analytics when a beacon URL
+    // is set, so the parser resolves that attribute here; the fallback to the
+    // source lives in createEmbedPlayer() so programmatic create() gets it too.
+    it('should fall back to data-analytics-video-id for mediaId even without analytics', () => {
+      element.setAttribute('data-src', 'https://example.com/video.m3u8');
+      element.setAttribute('data-analytics-video-id', 'vid-42');
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      const config = parseDataAttributes(element);
+      expect(config.analytics).toBeUndefined();
+      expect(config.clips?.mediaId).toBe('vid-42');
+    });
+
+    it('should prefer data-clips-media-id over data-analytics-video-id', () => {
+      element.setAttribute('data-analytics-video-id', 'vid-42');
+      element.setAttribute('data-clips-media-id', 'abc123');
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      expect(parseDataAttributes(element).clips?.mediaId).toBe('abc123');
+    });
+
+    it('should leave mediaId unset without either attribute', () => {
+      element.setAttribute('data-src', 'https://example.com/video.m3u8');
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      expect(parseDataAttributes(element).clips).not.toHaveProperty('mediaId');
+    });
+
+    it('should drop non-numeric durations', () => {
+      element.setAttribute('data-clips-endpoint', '/api/scarlett/clips');
+      element.setAttribute('data-clips-max-duration', 'long');
+      element.setAttribute('data-clips-min-duration', '');
+      const clips = parseDataAttributes(element).clips;
+      expect(clips).not.toHaveProperty('maxDuration');
+      expect(clips).not.toHaveProperty('minDuration');
     });
   });
 

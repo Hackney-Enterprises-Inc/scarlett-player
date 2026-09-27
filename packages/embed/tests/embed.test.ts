@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createEmbedPlayer, initElement, initAll, createScarlettPlayerAPI, type PluginCreators } from '../src/create-embed';
+import { createEmbedPlayer, initElement, initAll, createScarlettPlayerAPI, type PluginCreators, setupAutoInit } from '../src/create-embed';
 import type { PlayerType } from '../src/types';
 import { createPlayer, type Plugin, type PlayerOptions, type ScarlettPlayer } from '@scarlett-player/core';
 
@@ -118,6 +118,8 @@ const uiConfigOf = (creator: unknown): Record<string, unknown> => {
 // Mock the core dependencies
 vi.mock('@scarlett-player/core', () => ({
   ScarlettPlayer: vi.fn(),
+  // The addon runtime hands this to addons; the embed itself never calls it.
+  injectSharedStyles: vi.fn(),
   createPlayer: vi.fn(async (config) => {
     return {
       container: config.container,
@@ -987,3 +989,344 @@ describe('createScarlettPlayerAPI', () => {
     expect(fullPluginCreators.audioUI).toHaveBeenCalled();
   });
 });
+
+describe('addons: use() and addonRuntime', () => {
+  const chaptersPlugin = mockPlugin('chapters', 'Chapters');
+  const clipsPlugin = mockPlugin('clips', 'Clips');
+  let container: HTMLElement;
+
+  /** A fresh creators map per test: use() mutates the one it is given. */
+  const freshVideoCreators = (): PluginCreators => ({
+    hls: vi.fn(() => mockHLSPlugin),
+    native: vi.fn(() => mockNativePlugin),
+    videoUI: vi.fn(() => mockVideoUIPlugin),
+    captions: vi.fn(() => mockPlugin('captions', 'Captions')),
+    share: vi.fn(() => mockSharePlugin),
+  });
+
+  const freshAudioCreators = (): PluginCreators => ({
+    hls: vi.fn(() => mockHLSPlugin),
+    native: vi.fn(() => mockNativePlugin),
+    audioUI: vi.fn(() => mockAudioUIPlugin),
+  });
+
+  const uiFns = { registerControl: vi.fn(), unregisterControl: vi.fn(() => true) };
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    container.remove();
+    document.head.querySelector('meta[name="csrf-token"]')?.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('writes into the creators map that create() and initAll() read', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0-video', uiFns);
+    const chapters = vi.fn(() => chaptersPlugin);
+
+    api.use('chapters', chapters);
+    expect(creators.chapters).toBe(chapters);
+
+    const player = await api.create({ container, src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    expect(pluginsOf(player)).toContain(chaptersPlugin);
+    expect(chapters).toHaveBeenCalledWith({ src: 'c.vtt' });
+
+    // initAll() goes through the same map.
+    const el = document.createElement('div');
+    el.setAttribute('data-scarlett-player', '');
+    el.setAttribute('data-src', 'v.m3u8');
+    el.setAttribute('data-chapters', '[{"time":0,"label":"Intro"}]');
+    document.body.appendChild(el);
+    await api.initAll();
+    el.remove();
+    expect(chapters).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a name the build already provides', () => {
+    const provided = vi.fn(() => chaptersPlugin);
+    const creators = { ...freshVideoCreators(), chapters: provided };
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+    expect(creators.chapters).toBe(provided);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('chapters is already provided by this build'));
+  });
+
+  it('refuses an unknown name and lists the accepted ones', () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+
+    api.use('share' as never, vi.fn(() => mockSharePlugin));
+    expect(creators.share).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Accepted names: chapters, clips'));
+  });
+
+  it('replaces an earlier use() with a warning', () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    const second = vi.fn(() => clipsPlugin);
+
+    api.use('clips', vi.fn(() => clipsPlugin));
+    expect(console.warn).not.toHaveBeenCalled();
+    api.use('clips', second);
+    expect(creators.clips).toBe(second);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('replaces an earlier registration'));
+  });
+
+  it('warns that a use() after players exist applies only to later players', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    await api.create({ container, src: 'v.m3u8' });
+
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+    expect(creators.chapters).toBeDefined();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('initAll()'));
+  });
+
+  it('exposes a frozen addonRuntime with the bare package version and the build\'s UI functions', async () => {
+    const api = createScarlettPlayerAPI(freshVideoCreators(), videoOnlyTypes, '9.9.9-video', uiFns);
+    const { injectSharedStyles } = await import('@scarlett-player/core');
+    const { PKG_VERSION } = await import('../src/version');
+
+    expect(Object.isFrozen(api.addonRuntime)).toBe(true);
+    expect(api.addonRuntime.version).toBe(PKG_VERSION);
+    expect(api.addonRuntime.version).not.toContain('-video');
+    expect(api.addonRuntime.registerControl).toBe(uiFns.registerControl);
+    expect(api.addonRuntime.unregisterControl).toBe(uiFns.unregisterControl);
+    expect(api.addonRuntime.injectSharedStyles).toBe(injectSharedStyles);
+  });
+
+  it('gives an audio build use() and an addonRuntime whose UI functions refuse', () => {
+    const api = createScarlettPlayerAPI(freshAudioCreators(), ['audio', 'audio-mini'], '1.0.0-audio');
+    expect(typeof api.use).toBe('function');
+    expect(() => api.addonRuntime.registerControl('x', () => null)).toThrow(/no video UI/);
+  });
+
+  it('installs chapters from either form when the addon is registered, and adds the control', async () => {
+    const creators = { ...freshVideoCreators(), chapters: vi.fn(() => chaptersPlugin) };
+    const inline = [{ time: 0, label: 'Intro' }];
+
+    await createEmbedPlayer(container, { src: 'v.m3u8', chapters: { chapters: inline } }, creators, videoOnlyTypes);
+    await createEmbedPlayer(container, { src: 'v.m3u8', chapters: { src: 'c.vtt' } }, creators, videoOnlyTypes);
+
+    expect(creators.chapters).toHaveBeenNthCalledWith(1, { chapters: inline });
+    expect(creators.chapters).toHaveBeenNthCalledWith(2, { src: 'c.vtt' });
+    expect(uiConfigOf(creators.videoUI).controls).toContain('chapters');
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('installs clips only with the csrf opt-in, with headers() reading the meta tag', async () => {
+    const creators = { ...freshVideoCreators(), clips: vi.fn(() => clipsPlugin) };
+    const meta = document.createElement('meta');
+    meta.name = 'csrf-token';
+    meta.content = 'tok-123';
+    document.head.appendChild(meta);
+
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'v.m3u8', clips: { endpoint: '/api/clips', csrf: 'meta', mediaId: 'abc', maxDuration: 60 } },
+      creators,
+      videoOnlyTypes
+    );
+
+    expect(pluginsOf(player)).toContain(clipsPlugin);
+    const cfg = uiConfigOf(creators.clips) as unknown as {
+      endpoint: { url: string; headers: () => Record<string, string> };
+      mediaId: string;
+      maxDuration: number;
+    };
+    expect(cfg.endpoint.url).toBe('/api/clips');
+    expect(cfg.mediaId).toBe('abc');
+    expect(cfg.maxDuration).toBe(60);
+    expect(cfg).not.toHaveProperty('minDuration');
+    // Read per request, not captured at creation.
+    meta.content = 'tok-456';
+    expect(cfg.endpoint.headers()).toEqual({ 'X-CSRF-TOKEN': 'tok-456' });
+    meta.remove();
+    expect(cfg.endpoint.headers()).toEqual({ 'X-CSRF-TOKEN': '' });
+    expect(uiConfigOf(creators.videoUI).controls).toContain('clip');
+  });
+
+  it('falls back to analytics.videoId, then src, for the clips mediaId', async () => {
+    const creators = { ...freshVideoCreators(), clips: vi.fn(() => clipsPlugin) };
+
+    await createEmbedPlayer(
+      container,
+      { src: 'v.m3u8', analytics: { videoId: 'vid-42' }, clips: { endpoint: '/x', csrf: 'meta' } },
+      creators,
+      videoOnlyTypes
+    );
+    await createEmbedPlayer(container, { src: 'v.m3u8', clips: { endpoint: '/x', csrf: 'meta' } }, creators, videoOnlyTypes);
+
+    const calls = vi.mocked(creators.clips).mock.calls as unknown as Array<[{ mediaId: string }]>;
+    expect(calls[0]?.[0].mediaId).toBe('vid-42');
+    expect(calls[1]?.[0].mediaId).toBe('v.m3u8');
+  });
+
+  it('installs nothing and warns once without the csrf opt-in', async () => {
+    const creators = { ...freshVideoCreators(), clips: vi.fn(() => clipsPlugin) };
+    await createEmbedPlayer(container, { src: 'v.m3u8', clips: { endpoint: '/api/clips' } }, creators, videoOnlyTypes);
+
+    expect(creators.clips).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('data-clips-csrf="meta"'));
+    expect(uiConfigOf(creators.videoUI)).not.toHaveProperty('controls');
+  });
+
+  it('warns with the addon file name when the addon is not loaded', async () => {
+    const creators = freshVideoCreators();
+    await createEmbedPlayer(
+      container,
+      { src: 'v.m3u8', chapters: { src: 'c.vtt' }, clips: { endpoint: '/x', csrf: 'meta' } },
+      creators,
+      videoOnlyTypes
+    );
+
+    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.chapters.js'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.clips.js'));
+    expect(uiConfigOf(creators.videoUI)).not.toHaveProperty('controls');
+  });
+
+  it('builds the layout in the agreed order when share, clip and chapters are all on', async () => {
+    const creators = {
+      ...freshVideoCreators(),
+      chapters: vi.fn(() => chaptersPlugin),
+      clips: vi.fn(() => clipsPlugin),
+    };
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'v.m3u8',
+        shareUrl: 'https://example.com/w',
+        chapters: { src: 'c.vtt' },
+        clips: { endpoint: '/x', csrf: 'meta', mediaId: 'm' },
+      },
+      creators,
+      videoOnlyTypes
+    );
+
+    const controls = uiConfigOf(creators.videoUI).controls as string[];
+    const at = (id: string) => controls.indexOf(id);
+    expect(at('spacer')).toBeLessThan(at('share'));
+    expect(at('share')).toBeLessThan(at('clip'));
+    expect(at('clip')).toBeLessThan(at('chapters'));
+    expect(at('chapters')).toBeLessThan(at('settings'));
+  });
+
+  it('warns in an audio build that captions, chapters and clips need a video build, installing nothing', async () => {
+    const creators = freshAudioCreators();
+    const api = createScarlettPlayerAPI(creators, ['audio', 'audio-mini'], '1.0.0-audio');
+    const chapters = vi.fn(() => chaptersPlugin);
+    const clips = vi.fn(() => clipsPlugin);
+    api.use('chapters', chapters);
+    api.use('clips', clips);
+
+    const player = await api.create({
+      container,
+      type: 'audio',
+      src: 'a.mp3',
+      captions: { sources: [{ language: 'en', label: 'English', src: 'en.vtt' }] },
+      chapters: { src: 'c.vtt' },
+      clips: { endpoint: '/x', csrf: 'meta' },
+    });
+
+    expect(chapters).not.toHaveBeenCalled();
+    expect(clips).not.toHaveBeenCalled();
+    expect(pluginsOf(player)).toEqual([mockHLSPlugin, mockNativePlugin, mockAudioUIPlugin]);
+    const warnings = vi.mocked(console.warn).mock.calls.map((c) => String(c[0]));
+    expect(warnings).toHaveLength(3);
+    expect(warnings.every((w) => /video build/.test(w))).toBe(true);
+  });
+
+  it('leaves config and plugin list byte-identical for an embed with no new attributes and no addon', async () => {
+    const before = freshVideoCreators();
+    const withUse = freshVideoCreators();
+    // An API with use() available but never called, beside a plain creators map.
+    createScarlettPlayerAPI(withUse, videoOnlyTypes, '1.0.0', uiFns);
+
+    const config = { src: 'v.m3u8', title: 'T', shareUrl: 'https://example.com/w' };
+    const a = await createEmbedPlayer(container, { ...config }, before, videoOnlyTypes);
+    const b = await createEmbedPlayer(container, { ...config }, withUse, videoOnlyTypes);
+
+    expect(JSON.stringify(pluginsOf(a))).toBe(JSON.stringify(pluginsOf(b)));
+    expect(JSON.stringify(uiConfigOf(before.videoUI))).toBe(JSON.stringify(uiConfigOf(withUse.videoUI)));
+    // share-only keeps the pre-addon layout exactly.
+    expect(uiConfigOf(before.videoUI).controls).toEqual([
+      'play', 'skip-backward', 'skip-forward', 'volume', 'time', 'live-indicator',
+      'bandwidth-indicator', 'spacer', 'share', 'settings', 'captions', 'chromecast',
+      'airplay', 'pip', 'fullscreen',
+    ]);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('setupAutoInit', () => {
+  /** A player element the scan will pick up; initialised means the marker attribute was set. */
+  const mount = () => {
+    const el = document.createElement('div');
+    el.setAttribute('data-scarlett-player', '');
+    el.setAttribute('data-src', 'https://example.com/video.m3u8');
+    document.body.appendChild(el);
+    return el;
+  };
+  const initialised = (el: HTMLElement) => el.hasAttribute('data-scarlett-initialized');
+  const setReadyState = (value: DocumentReadyState) =>
+    Object.defineProperty(document, 'readyState', { value, configurable: true });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    setReadyState('complete');
+  });
+
+  it('waits for DOMContentLoaded while the document is loading', () => {
+    setReadyState('loading');
+    const el = mount();
+    setupAutoInit(videoOnlyPluginCreators, videoOnlyTypes);
+    expect(initialised(el)).toBe(false);
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(initialised(el)).toBe(true);
+  });
+
+  // `defer` and `type="module"` scripts run after parsing, when readyState is
+  // already 'interactive' but before DOMContentLoaded. Initialising right
+  // then would run before the addon scripts that follow the embed in document
+  // order, so those players would never see the addon's registration.
+  it('waits for DOMContentLoaded when run from a deferred or module script (readyState interactive)', () => {
+    setReadyState('interactive');
+    const el = mount();
+    setupAutoInit(videoOnlyPluginCreators, videoOnlyTypes);
+    expect(initialised(el)).toBe(false);
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(initialised(el)).toBe(true);
+  });
+
+  it('falls back to the load event when DOMContentLoaded has already fired', () => {
+    setReadyState('interactive');
+    const el = mount();
+    setupAutoInit(videoOnlyPluginCreators, videoOnlyTypes);
+    expect(initialised(el)).toBe(false);
+    window.dispatchEvent(new Event('load'));
+    expect(initialised(el)).toBe(true);
+    // Only once: a later DOMContentLoaded must not scan again.
+    el.removeAttribute('data-scarlett-initialized');
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(initialised(el)).toBe(false);
+  });
+
+  it('initialises immediately once the document is complete', () => {
+    setReadyState('complete');
+    const el = mount();
+    setupAutoInit(videoOnlyPluginCreators, videoOnlyTypes);
+    expect(initialised(el)).toBe(true);
+  });
+});
+

@@ -164,6 +164,18 @@ jobs:
           node scripts/verify-site.mjs
           kill "$(cat /tmp/http.pid)"
 
+      # The wire-contract tripwire (SCAR-TOOL-5): captures the real analytics
+      # and clips requests in headless Chromium and fails if any contradicts
+      # the contract the Laravel package's fixtures rest on. --smoke writes
+      # only to a temp directory. It bundles the page from package sources and
+      # starts its own servers, so it needs neither the demo build nor :8899;
+      # it needs the Chromium and ffmpeg installed above, plus openssl for the
+      # beacon origin's certificate, which the ubuntu-24.04 image ships
+      # (/usr/bin/openssl), so nothing extra is installed for it.
+      - name: Run wire-fixture capture smoke
+        if: github.event_name == 'push'
+        run: node scripts/capture-wire-fixtures.mjs --smoke
+
       # The harnesses need a built demo, and CI's demo commit belongs to
       # release.yml alone. Leaving the rebuild in the working tree here would
       # let a later step pick it up. Covers every TRACKED path build.cjs

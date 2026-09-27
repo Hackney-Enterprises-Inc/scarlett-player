@@ -12,6 +12,8 @@ pnpm add @scarlett-player/core @scarlett-player/chapters
 
 `@scarlett-player/core` is a peer dependency. `@scarlett-player/ui` is an optional peer: when it is installed the plugin registers a `chapters` control, and a host places it by naming that id in the control layout. Everything else works without the UI package.
 
+On a page using the CDN embed, load the `embed.addon.chapters` addon after the embed and set `data-chapters` instead; see the [embed README's Addons section](../../embed/README.md#addons).
+
 ## Usage
 
 ```ts

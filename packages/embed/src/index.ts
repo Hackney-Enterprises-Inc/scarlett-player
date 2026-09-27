@@ -11,12 +11,15 @@
  * - Media Session (lock screen controls)
  * - Sharing (video, opt in via `shareUrl`)
  *
+ * Chapters and clips are addons: load `embed.addon.chapters` /
+ * `embed.addon.clips` after this file and they register through `use()`.
+ *
  * @packageDocumentation
  */
 
 import { createHLSPlugin } from '@scarlett-player/hls';
 import { createNativePlugin } from '@scarlett-player/native';
-import { uiPlugin, accentTextTone } from '@scarlett-player/ui';
+import { uiPlugin, accentTextTone, registerControl, unregisterControl } from '@scarlett-player/ui';
 import { createAudioUIPlugin } from '@scarlett-player/audio-ui';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
 import { createPlaylistPlugin } from '@scarlett-player/playlist';
@@ -61,7 +64,10 @@ const pluginCreators: PluginCreators = {
 const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
   pluginCreators,
   AVAILABLE_TYPES,
-  VERSION
+  VERSION,
+  // The addon runtime hands addons THIS bundle's control registry, so a
+  // control an addon registers lands in this build's control bar.
+  { registerControl, unregisterControl }
 );
 
 if (typeof window !== 'undefined') {
