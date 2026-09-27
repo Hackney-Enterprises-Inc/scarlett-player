@@ -851,6 +851,29 @@ describe('Chromecast Plugin', () => {
 
       container.remove();
     });
+
+    // Fails today: the SDK-load rejection handler logged and emitted for a
+    // player that was destroyed while the SDK was still loading.
+    it('ignores a Cast SDK load failure that lands after the player was destroyed', async () => {
+      delete (window as any).cast;
+      delete (window as any).chrome;
+      resetCastLoader();
+
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+
+      const initPromise = plugin.init(api);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await plugin.destroy();
+
+      // The SDK script reports itself unavailable, so loadCastSDK() rejects.
+      window.__onGCastApiAvailable?.(false);
+      await initPromise;
+
+      expect(api.logger.warn).not.toHaveBeenCalledWith('Failed to load Cast SDK', expect.anything());
+      const errors = vi.mocked(api.emit).mock.calls.filter(([event]) => event === 'chromecast:error');
+      expect(errors).toEqual([]);
+    });
   });
 
   describe('graceful degradation', () => {

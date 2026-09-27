@@ -399,6 +399,8 @@ export function chromecastPlugin(): IChromecastPlugin {
         initCastApi();
         api.logger.debug('Chromecast plugin initialized');
       } catch (error) {
+        // A load that fails after the player is gone concerns nobody.
+        if (destroyed) return;
         // Cast SDK failed to load - not a fatal error
         api.logger.warn('Failed to load Cast SDK', { error });
         api.emit('chromecast:error', { error: error as Error } as ChromecastErrorEvent);
