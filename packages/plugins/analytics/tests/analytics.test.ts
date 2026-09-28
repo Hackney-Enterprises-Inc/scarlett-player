@@ -1257,6 +1257,56 @@ describe('Analytics Plugin', () => {
       await plugin.destroy();
     });
 
+    it('does not hand a pending track a load of another source', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+      startPlayback();
+
+      // The current entry is removed: the next track is pending, not loaded
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-2', videoId: 'next-track', src: 'next.m3u8' },
+        index: 1,
+      });
+      // A token refresh of the video still playing
+      loadSource('current.m3u8?token=new');
+
+      expect(plugin.getViewId()).toBe(viewId);
+      expect(beacons.every((b) => b.videoId === mockConfig.videoId)).toBe(true);
+
+      // The pending track's own source, signed, does commit it
+      loadSource('next.m3u8?token=abc');
+      expect(plugin.getViewId()).not.toBe(viewId);
+      expect(beacons[beacons.length - 1]).toMatchObject({ event: 'viewStart', videoId: 'next-track' });
+
+      await plugin.destroy();
+    });
+
+    it('gives a second track its own view even before the first one played', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playlist:change', { track: { id: 'item-0', src: 'one.m3u8' }, index: 0 });
+      loadSource('one.m3u8');
+      const firstTrackViewId = plugin.getViewId();
+
+      // Skipped before playing: same fallback videoId, different track
+      (api as any)._trigger('playlist:change', { track: { id: 'item-1', src: 'two.m3u8' }, index: 1 });
+      loadSource('two.m3u8');
+
+      expect(plugin.getViewId()).not.toBe(firstTrackViewId);
+      expect(beacons.filter((b) => b.event === 'viewStart')).toHaveLength(2);
+
+      await plugin.destroy();
+    });
+
     it('lets setVideo() win over a playlist track still waiting to load', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,

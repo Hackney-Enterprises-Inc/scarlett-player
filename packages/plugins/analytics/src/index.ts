@@ -140,7 +140,7 @@ export function createAnalyticsPlugin(
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
   // A playlist track that has not been loaded yet (see onPlaylistChange)
-  let pendingTrack: { trackId: string; video: AnalyticsVideo } | null = null;
+  let pendingTrack: { trackId: string; src: string | null; video: AnalyticsVideo } | null = null;
   // The playlist track the current view is about, null outside a playlist
   let currentTrackId: string | null = null;
   let cleanupFns: Array<() => void> = [];
@@ -650,7 +650,7 @@ export function createAnalyticsPlugin(
    * @param payload - The current track, or null when the playlist is empty
    */
   function onPlaylistChange(
-    payload: { track: { id: string; videoId?: unknown; title?: unknown } | null }
+    payload: { track: { id: string; src?: unknown; videoId?: unknown; title?: unknown } | null }
   ): void {
     const track = payload?.track;
     if (!track || typeof track.id !== 'string' || track.id === '' || track.id === currentTrackId) {
@@ -658,29 +658,57 @@ export function createAnalyticsPlugin(
       return;
     }
 
-    pendingTrack = { trackId: track.id, video: trackVideo(track) };
+    pendingTrack = {
+      trackId: track.id,
+      src: typeof track.src === 'string' && track.src !== '' ? track.src : null,
+      video: trackVideo(track),
+    };
   }
 
   /**
-   * Start the view for a pending playlist track once a source is loaded.
+   * A URL without its query string and fragment.
+   *
+   * A signed or refreshed URL for the same media differs only there, so two
+   * URLs that agree without them are the same track's source.
+   *
+   * @param url - Media source URL
+   * @returns The URL up to its query string or fragment
+   */
+  function sourceKey(url: string): string {
+    return url.split(/[?#]/, 1)[0];
+  }
+
+  /**
+   * Start the view for a pending playlist track once its source loads.
    *
    * Core writes the `source` state in `load()` before the provider loads, so
    * the new view exists before that source's play request and metadata.
    *
+   * Only the pending track's own source commits it. Any other load, such as
+   * a token refresh of the track still playing after its entry was removed,
+   * leaves the view and the pending track as they are. A host that loads a
+   * track from a URL other than its `src` names the video with `setVideo()`.
+   *
    * Every track gets its own view, including two tracks that report the same
    * `videoId` (both falling back to the configured one, say). The exception is
-   * a view nothing has happened in yet, where the track's video is the one it
-   * already reports: the track takes that view over rather than ending it
-   * empty, so a playlist announcing its first track does not cost a view.
+   * the first track of a view no track owns yet, before anything has
+   * happened in it, when it reports the video that view already reports: it
+   * takes that view over rather than ending it empty, so a playlist
+   * announcing its first track does not cost a view.
+   *
+   * @param src - URL of the source now loading
    */
-  function onSourceChange(): void {
+  function onSourceChange(src: string): void {
     if (!pendingTrack) return;
+    if (pendingTrack.src !== null && sourceKey(pendingTrack.src) !== sourceKey(src)) return;
 
     const { trackId, video: next } = pendingTrack;
+    const ownedByTrack = currentTrackId !== null;
     pendingTrack = null;
     currentTrackId = trackId;
 
     const untouched =
+      !ownedByTrack &&
       session.viewEnd === null &&
       session.playRequestTime === null &&
       session.firstFrameTime === null;
@@ -757,7 +785,8 @@ export function createAnalyticsPlugin(
     }
 
     if (event.key === 'source' && event.value) {
-      onSourceChange();
+      const src = (event.value as { src?: unknown }).src;
+      onSourceChange(typeof src === 'string' ? src : '');
       return;
     }
 

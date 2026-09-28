@@ -247,13 +247,17 @@ positional in the embed (`item-0`) and generated for a track without one.
 
 - Every track that loads gets its own view, even two that report the same
   `videoId`. Re-loading the current track (a token refresh) keeps its view.
-- The switch waits for the load because the event alone does not mean another
-  track is playing. Removing the current track moves the playlist onto the
-  next one without loading it, so the view stays with the track still on
-  screen.
+- The switch waits for that track's own source to load, because the event
+  alone does not mean another track is playing. Removing the current track
+  moves the playlist onto the next one without loading it, so the view stays
+  with the track still on screen, including through a token refresh of it.
+  The load matches on the track's `src` without its query string, so a signed
+  URL for the track counts; a host that loads a track from another URL names
+  it with `setVideo()`.
 - A playlist announcing its first track before anything has played takes over
   the first view when it reports the same video, rather than ending it empty,
-  and the view carries the track's title from then on. A first track reporting
+  and the view carries the track's title from then on. Only the first track
+  does this; a later one always gets its own view. A first track reporting
   another video ends that view and starts its own.
 - It works whether the playlist loads the track itself (`autoLoad`) or your
   code calls `player.load()`, and `setVideo()` overrides a track still waiting
