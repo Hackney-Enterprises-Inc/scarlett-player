@@ -215,6 +215,8 @@ export async function createEmbedPlayer(
         tracks: config.playlist.map((item, index) => ({
           id: `item-${index}`,
           src: item.src,
+          // Analytics reports this for the item's view; `id` is positional
+          ...(typeof item.videoId === 'string' && item.videoId !== '' ? { videoId: item.videoId } : {}),
           title: item.title,
           artist: item.artist,
           poster: item.poster || item.artwork,
@@ -315,11 +317,29 @@ export async function createEmbedPlayer(
 
     // Add analytics plugin if available and configured
     if (pluginCreators.analytics && config.analytics?.beaconUrl) {
-      plugins.push(pluginCreators.analytics({
+      const analytics = pluginCreators.analytics({
         beaconUrl: config.analytics.beaconUrl,
         apiKey: config.analytics.apiKey,
         videoId: config.analytics.videoId || config.src || 'unknown',
-      }));
+      });
+
+      // The first playlist item is loaded as the player's src below, not
+      // through the playlist, so no playlist:change ever carries its videoId.
+      // Name it before init; the configured videoId stays the fallback for
+      // later items without one.
+      const first = config.playlist?.[0];
+      const firstIsInitialSource = first !== undefined && (!config.src || config.src === first.src);
+      if (
+        firstIsInitialSource &&
+        typeof first.videoId === 'string' &&
+        first.videoId !== '' &&
+        typeof (analytics as { setVideo?: unknown }).setVideo === 'function'
+      ) {
+        (analytics as unknown as { setVideo(video: { videoId: string; videoTitle?: string }): void })
+          .setVideo({ videoId: first.videoId, videoTitle: first.title });
+      }
+
+      plugins.push(analytics);
     }
 
     // Add UI plugin based on type

@@ -117,14 +117,17 @@ export function createAnalyticsPlugin(
   // Merge with defaults
   const mergedConfig = { ...DEFAULT_CONFIG, ...config } as AnalyticsConfig;
 
-  // The video the current view is about. Starts as the configured one and is
-  // replaced by setVideo() or a playlist track change, each of which starts a
-  // new view.
-  let video: AnalyticsVideo = {
+  // The configured video: the first view's, and the one a playlist track
+  // without its own `videoId` reports.
+  const configuredVideo: AnalyticsVideo = {
     videoId: mergedConfig.videoId,
     videoTitle: mergedConfig.videoTitle,
     isLive: mergedConfig.isLive,
   };
+
+  // The video the current view is about. Replaced by setVideo() or a playlist
+  // track loading, each of which starts a new view.
+  let video: AnalyticsVideo = { ...configuredVideo };
 
   // Plugin state
   let api: IPluginAPI | null = null;
@@ -137,7 +140,9 @@ export function createAnalyticsPlugin(
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
   // A playlist track that has not been loaded yet (see onPlaylistChange)
-  let pendingPlaylistVideo: AnalyticsVideo | null = null;
+  let pendingTrack: { trackId: string; video: AnalyticsVideo } | null = null;
+  // The playlist track the current view is about, null outside a playlist
+  let currentTrackId: string | null = null;
   let cleanupFns: Array<() => void> = [];
   // Live latency, accumulated at constant memory across the whole session.
   // Reset alongside the session so a second view does not inherit the first
@@ -584,6 +589,18 @@ export function createAnalyticsPlugin(
       return;
     }
 
+    beginView(next);
+  }
+
+  /**
+   * End the current view if it is still open and start one for `next`,
+   * whether or not `next` has the same `videoId`.
+   *
+   * @param next - The video the new view is about
+   */
+  function beginView(next: AnalyticsVideo): void {
+    if (!api) return;
+
     if (session.viewEnd === null) {
       session.exitType = session.exitType || 'abandoned';
       sendViewEnd();
@@ -592,50 +609,90 @@ export function createAnalyticsPlugin(
     video = { ...next };
     startView();
 
-    api.logger.debug('Analytics view switched to a new video', {
+    api.logger.debug('Analytics started a view', {
       viewId: session.viewId,
       videoId: video.videoId,
     });
   }
 
   /**
-   * Handle a playlist track change: remember the track, switch on its load.
+   * The video a playlist track reports.
    *
-   * The event alone does not mean another video is playing. Removing the
-   * current track moves the playlist onto the next one without loading it,
-   * so the removed video keeps playing. The track is held as pending and
-   * becomes the video at the next source load (`onSourceChange`), which
-   * covers the playlist's own `media:load-request` and a host that loads the
-   * track itself. A change back to the current video, or an empty playlist,
-   * drops anything pending.
+   * The track's own `videoId` when the host gave one. Otherwise the configured
+   * video, never the track's `id`: that is the playlist's internal identity,
+   * positional in the embed (`item-0`) and generated for a track without one
+   * (`track-<time>-<random>`), and no backend can map it to a video.
    *
-   * @param payload - The current track, or null when the playlist is empty
+   * @param track - The playlist track
+   * @returns The video for the track's view
    */
-  function onPlaylistChange(payload: { track: { id: string; title?: unknown } | null }): void {
-    const track = payload?.track;
-    if (!track || typeof track.id !== 'string' || track.id === '' || track.id === video.videoId) {
-      pendingPlaylistVideo = null;
-      return;
+  function trackVideo(track: { videoId?: unknown; title?: unknown }): AnalyticsVideo {
+    const title = typeof track.title === 'string' && track.title !== '' ? track.title : undefined;
+
+    if (typeof track.videoId === 'string' && track.videoId !== '') {
+      return { videoId: track.videoId, videoTitle: title };
     }
 
-    pendingPlaylistVideo = {
-      videoId: track.id,
-      videoTitle: typeof track.title === 'string' ? track.title : undefined,
-    };
+    return { ...configuredVideo, videoTitle: title ?? configuredVideo.videoTitle };
   }
 
   /**
-   * Commit a pending playlist track once a source is loaded.
+   * Handle a playlist track change: remember the track, switch on its load.
+   *
+   * The event alone does not mean another track is playing. Removing the
+   * current track moves the playlist onto the next one without loading it,
+   * so the removed track keeps playing. The track is held as pending and
+   * starts its view at the next source load (`onSourceChange`), which covers
+   * the playlist's own `media:load-request` and a host that loads the track
+   * itself. A change back to the current track, or an empty playlist, drops
+   * anything pending.
+   *
+   * @param payload - The current track, or null when the playlist is empty
+   */
+  function onPlaylistChange(
+    payload: { track: { id: string; videoId?: unknown; title?: unknown } | null }
+  ): void {
+    const track = payload?.track;
+    if (!track || typeof track.id !== 'string' || track.id === '' || track.id === currentTrackId) {
+      pendingTrack = null;
+      return;
+    }
+
+    pendingTrack = { trackId: track.id, video: trackVideo(track) };
+  }
+
+  /**
+   * Start the view for a pending playlist track once a source is loaded.
    *
    * Core writes the `source` state in `load()` before the provider loads, so
    * the new view exists before that source's play request and metadata.
+   *
+   * Every track gets its own view, including two tracks that report the same
+   * `videoId` (both falling back to the configured one, say). The exception is
+   * a view nothing has happened in yet, where the track's video is the one it
+   * already reports: the track takes that view over rather than ending it
+   * empty, so a playlist announcing its first track does not cost a view.
    */
   function onSourceChange(): void {
-    if (!pendingPlaylistVideo) return;
+    if (!pendingTrack) return;
 
-    const next = pendingPlaylistVideo;
-    pendingPlaylistVideo = null;
-    switchVideo(next);
+    const { trackId, video: next } = pendingTrack;
+    pendingTrack = null;
+    currentTrackId = trackId;
+
+    const untouched =
+      session.viewEnd === null &&
+      session.playRequestTime === null &&
+      session.firstFrameTime === null;
+
+    if (untouched && next.videoId === video.videoId) {
+      // Same view, but the track's metadata from here on: its title is the
+      // one the rest of the view should carry.
+      video = { ...next };
+      return;
+    }
+
+    beginView(next);
   }
 
   // === Event Handlers ===
@@ -1153,7 +1210,12 @@ export function createAnalyticsPlugin(
       }
       // The host named the video; a playlist track still waiting to load
       // must not replace it at the next load.
-      pendingPlaylistVideo = null;
+      pendingTrack = null;
+      // Moving to another video leaves the playlist track behind, so loading
+      // that track again is a return to it, not a reload of the current one.
+      if (next.videoId !== video.videoId) {
+        currentTrackId = null;
+      }
       switchVideo(next);
     },
 

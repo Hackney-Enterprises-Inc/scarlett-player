@@ -14,6 +14,13 @@ export interface PlaylistTrack {
   /** Media source URL */
   src: string;
 
+  /**
+   * The video ID analytics reports for this track's view. Omitted, analytics
+   * reports its configured `videoId`; `id` is the playlist's own identity and
+   * is never reported.
+   */
+  videoId?: string;
+
   /** Track title */
   title?: string;
 
