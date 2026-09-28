@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.18.0
+
+### Patch Changes
+
+- Updated dependencies [[`b29d9ba`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b29d9ba2a378fc94601b0166bfec54aa87c15c85), [`b29d9ba`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b29d9ba2a378fc94601b0166bfec54aa87c15c85)]:
+  - @scarlett-player/core@1.18.0
+
 ## 1.17.0
 
 ### Minor Changes
