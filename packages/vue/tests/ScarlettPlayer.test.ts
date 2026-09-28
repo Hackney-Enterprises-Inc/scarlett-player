@@ -294,4 +294,33 @@ describe('ScarlettPlayer.vue load()', () => {
     expect(mockPlayer.load).toHaveBeenCalledTimes(1);
     expect(mockPlayer.load.mock.calls[0]).toEqual(['https://cdn.test/second.m3u8']);
   });
+
+  it('lets an explicit load() consume the src change made in the same update', async () => {
+    const { src, exposed } = await mountWithRef('https://cdn.test/first.m3u8');
+
+    src.value = 'https://cdn.test/second.m3u8';
+    const loading = exposed.value!.load('https://cdn.test/second.m3u8', { autoplay: false });
+    await nextTick();
+    await loading;
+
+    expect(mockPlayer.load).toHaveBeenCalledTimes(1);
+    expect(mockPlayer.load).toHaveBeenCalledWith('https://cdn.test/second.m3u8', {
+      autoplay: false,
+    });
+  });
+
+  it('consumes the matching src change once, so a later prop change loads again', async () => {
+    const { src, exposed } = await mountWithRef('https://cdn.test/first.m3u8');
+
+    await exposed.value!.load('https://cdn.test/second.m3u8', { autoplay: false });
+    src.value = 'https://cdn.test/second.m3u8';
+    await nextTick();
+    src.value = 'https://cdn.test/third.m3u8';
+    await nextTick();
+
+    expect(mockPlayer.load.mock.calls).toEqual([
+      ['https://cdn.test/second.m3u8', { autoplay: false }],
+      ['https://cdn.test/third.m3u8'],
+    ]);
+  });
 });

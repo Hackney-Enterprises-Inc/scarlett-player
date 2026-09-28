@@ -6,8 +6,11 @@
 Vue hosts can pass load options. The component's exposed `load(src, options)`
 and `useScarlettPlayer().load(src, options)` now forward `options` to core's
 `load()`, so `load(src, { autoplay: false })` (added to core in 1.16.3) is
-reachable from Vue. The `src` prop watcher is unchanged and still follows the
-`autoplay` prop.
+reachable from Vue. The `src` prop watcher still loads without options, so the
+player's autoplay state decides there. When a host sets the `src` prop and
+calls `load()` with that same source in one update, the watcher now consumes
+the prop change instead of loading the source a second time without the
+options.
 
 Core exports the `LoadOptions` type (`{ autoplay?: boolean }`) and uses it in
 `load()`'s signature. Types only; no runtime change.

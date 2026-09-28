@@ -267,7 +267,7 @@ playerRef.value.requestFullscreen();
 - `play()` - Start playback
 - `pause()` - Pause playback
 - `seek(time: number)` - Seek to time in seconds
-- `load(src: string, options?: LoadOptions)` - Load new source. `options.autoplay` plays (`true`) or stays paused (`false`) for this load only; omitted, the `autoplay` prop decides
+- `load(src: string, options?: LoadOptions)` - Load new source. `options.autoplay` plays (`true`) or stays paused (`false`) for this load only; omitted, the player's current autoplay state decides (the `autoplay` prop sets it). Setting the `src` prop to the same source in the same update does not load it a second time
 - `setVolume(volume: number)` - Set volume (0-1)
 - `setMuted(muted: boolean)` - Set muted state
 - `setPoster(url: string)` - Set the poster ('' clears it)
