@@ -52592,6 +52592,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       throw new Error("Analytics plugin requires videoId");
     }
     const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
+    let video = {
+      videoId: mergedConfig.videoId,
+      videoTitle: mergedConfig.videoTitle,
+      isLive: mergedConfig.isLive
+    };
     let api = null;
     let session;
     let heartbeatTimer = null;
@@ -52600,6 +52605,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let rebufferStartTime = null;
     let pauseStartTime = null;
     let playRequestPending = false;
+    let pendingPlaylistVideo = null;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
     function initSession() {
@@ -52632,7 +52638,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       };
     }
     function resolveIsLive() {
-      return mergedConfig.isLive ?? session.lastKnownIsLive;
+      return video.isLive ?? session.lastKnownIsLive;
     }
     function sendBeacon(eventType, data = {}) {
       if (mergedConfig.disableInDev && isDevelopment()) {
@@ -52650,8 +52656,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         sessionId: session.sessionId,
         viewerId: session.viewerId,
         // Video context
-        videoId: mergedConfig.videoId,
-        videoTitle: mergedConfig.videoTitle,
+        videoId: video.videoId,
+        videoTitle: video.videoTitle,
         isLive: resolveIsLive(),
         // Player context
         playerVersion: PLUGIN_VERSION,
@@ -52715,8 +52721,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         viewId: session.viewId,
         sessionId: session.sessionId,
         viewerId: session.viewerId,
-        videoId: mergedConfig.videoId,
-        videoTitle: mergedConfig.videoTitle,
+        videoId: video.videoId,
+        videoTitle: video.videoTitle,
         isLive: resolveIsLive(),
         playerVersion: PLUGIN_VERSION,
         playerName: PLUGIN_NAME,
@@ -52837,8 +52843,62 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ...latencySampler.summary() ?? {}
       });
     }
+    function startView(lastKnownIsLive = null) {
+      session = initSession();
+      session.lastKnownIsLive = lastKnownIsLive;
+      lastHeartbeatTime = Date.now();
+      isRebuffering = false;
+      rebufferStartTime = null;
+      pauseStartTime = null;
+      playRequestPending = false;
+      sendBeacon("viewStart");
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
+      heartbeatTimer = setInterval(
+        sendHeartbeat,
+        mergedConfig.heartbeatInterval || 1e4
+      );
+    }
+    function switchVideo(next) {
+      if (next.videoId === video.videoId) return;
+      if (!api) {
+        video = { ...next };
+        return;
+      }
+      if (session.viewEnd === null) {
+        session.exitType = session.exitType || "abandoned";
+        sendViewEnd();
+      }
+      video = { ...next };
+      startView();
+      api.logger.debug("Analytics view switched to a new video", {
+        viewId: session.viewId,
+        videoId: video.videoId
+      });
+    }
+    function onPlaylistChange(payload) {
+      const track = payload?.track;
+      if (!track || typeof track.id !== "string" || track.id === "" || track.id === video.videoId) {
+        pendingPlaylistVideo = null;
+        return;
+      }
+      pendingPlaylistVideo = {
+        videoId: track.id,
+        videoTitle: typeof track.title === "string" ? track.title : void 0
+      };
+    }
+    function onSourceChange() {
+      if (!pendingPlaylistVideo) return;
+      const next = pendingPlaylistVideo;
+      pendingPlaylistVideo = null;
+      switchVideo(next);
+    }
     function onPlayRequest() {
       if (playRequestPending) return;
+      if (session.viewEnd !== null && api) {
+        startView(session.lastKnownIsLive);
+      }
       playRequestPending = true;
       session.playRequestTime = Date.now();
       sendBeacon("playRequest");
@@ -52859,6 +52919,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (event.key === "playing" && event.value === true) {
         playRequestPending = false;
         onFirstFrame();
+        return;
+      }
+      if (event.key === "source" && event.value) {
+        onSourceChange();
         return;
       }
       if (event.key === "live" && event.value === true) {
@@ -53066,9 +53130,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       description: "Quality of Experience and engagement analytics",
       async init(pluginApi) {
         api = pluginApi;
-        session = initSession();
-        lastHeartbeatTime = Date.now();
-        sendBeacon("viewStart");
+        startView();
         const unsubPlay = api.on("playback:play", onPlayEvent);
         const unsubState = api.subscribeToState(onStateChange);
         const unsubMetadata = api.on("media:loadedmetadata", onLoadedMetadata);
@@ -53081,6 +53143,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubQuality = api.on("quality:change", onQualityChange);
         const unsubLatency = api.on("live:latency", onLiveLatency);
         const unsubLowLatency = api.on("live:lowlatency", onLowLatencyChange);
+        const unsubPlaylist = api.on("playlist:change", onPlaylistChange);
         cleanupFns.push(
           unsubPlay,
           unsubState,
@@ -53093,7 +53156,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubCoreError,
           unsubQuality,
           unsubLatency,
-          unsubLowLatency
+          unsubLowLatency,
+          unsubPlaylist
         );
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("beforeunload", onBeforeUnload);
@@ -53103,13 +53167,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           window.removeEventListener("beforeunload", onBeforeUnload);
           window.removeEventListener("pagehide", onBeforeUnload);
         });
-        heartbeatTimer = setInterval(
-          sendHeartbeat,
-          mergedConfig.heartbeatInterval || 1e4
-        );
         api.logger.info("Analytics plugin initialized", {
           viewId: session.viewId,
-          videoId: mergedConfig.videoId
+          videoId: video.videoId
         });
       },
       async destroy() {
@@ -53138,6 +53198,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       getMetrics() {
         return { ...session };
+      },
+      setVideo(next) {
+        if (!next || typeof next.videoId !== "string" || next.videoId === "") {
+          throw new Error("Analytics setVideo() requires videoId");
+        }
+        pendingPlaylistVideo = null;
+        switchVideo(next);
       },
       trackEvent(name, data = {}) {
         sendBeacon(`custom:${name}`, data);
