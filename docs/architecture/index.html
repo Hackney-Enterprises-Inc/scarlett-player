@@ -546,7 +546,8 @@ playback and media (<code>PLAYBACK_FAILED</code>, <code>MEDIA_DECODE_ERROR</code
 <code>PLAYLIST_INVALID</code>) and <code>UNKNOWN_ERROR</code>. <code>SOURCE_NOT_SUPPORTED</code>,
 <code>PROVIDER_NOT_FOUND</code> and <code>MEDIA_DECODE_ERROR</code> are classified fatal by default.</p>
 <p>Providers attach diagnostics through <code>PlayerErrorDetail</code>: <code>type</code>,
-<code>retriesExhausted</code>, <code>attempts</code>, <code>reconnectExhausted</code>, <code>httpStatus</code> and <code>url</code>.
+<code>retriesExhausted</code>, <code>attempts</code>, <code>reconnectExhausted</code>, <code>httpStatus</code>, <code>url</code>,
+<code>mediaErrorCode</code>, <code>mediaErrorMessage</code> and <code>timedOut</code>.
 <code>url</code> must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported <code>sanitizeUrl()</code>, which strips the query string and the
 fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
@@ -560,6 +561,15 @@ budgets apply on the hls.js branch and, through <code>handleNativeFatalError()</
 the native Safari branch, where recovery means reloading the source and
 restoring the position captured at the first failure. The budgets reset once
 media flows again, so a long event&#39;s transient blips never accumulate.</li>
+<li>The native first load spends the same budgets inside <code>loadNative()</code>, before
+<code>loadedmetadata</code>: <code>MEDIA_ERR_DECODE</code> is a media error and every other code
+a network one, since Safari reports a failed manifest as
+<code>MEDIA_ERR_SRC_NOT_SUPPORTED</code>. After <code>loadedmetadata</code>, only
+<code>MEDIA_ERR_NETWORK</code> is a network error. <code>loadTimeoutMs</code> is one ceiling over
+the whole load and wins over any budget left. Every terminal outcome goes
+through <code>emitFatalError()</code> before the load rejects, with the element&#39;s
+<code>mediaErrorCode</code> and <code>mediaErrorMessage</code> (and <code>timedOut</code> for the watchdog)
+in <code>detail</code>, so core&#39;s <code>load()</code> keeps the provider&#39;s code.</li>
 <li><code>emitFatalError()</code> emits the fatal <code>error</code> and then calls
 <code>maybeScheduleReconnect()</code>, which hands over to the auto-reconnect scheduler
 only when playback had already started and the failure was a network or media

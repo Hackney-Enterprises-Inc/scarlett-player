@@ -41511,6 +41511,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "manifestLoadTimeOut",
     "manifestParsingError"
   ];
+  var LOAD_TIMEOUT_MESSAGE = "Video took too long to load (network timeout)";
+  function nativeMediaError(mediaError, phase) {
+    const code = mediaError?.code;
+    const is_network = phase === "initial" ? code !== MediaError.MEDIA_ERR_DECODE : code === MediaError.MEDIA_ERR_NETWORK;
+    const error = {
+      type: is_network ? "network" : "media",
+      details: mediaError?.message || (phase === "initial" ? "Failed to load HLS source" : "Native HLS playback error"),
+      fatal: true
+    };
+    if (typeof code === "number" && code > 0) {
+      error.mediaErrorCode = code;
+    }
+    if (mediaError?.message) {
+      error.mediaErrorMessage = mediaError.message;
+    }
+    return error;
+  }
   function createHLSPluginWith(loader, variant, config) {
     const mergedConfig = { ...DEFAULT_CONFIG, ...config };
     let api = null;
@@ -41718,12 +41735,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
     const buildErrorDetail = (error, retriesExhausted) => {
-      const attempts = error.type === "network" ? networkRetryCount : error.type === "media" ? mediaRetryCount : 0;
+      const attempts = error.attempts ?? (error.type === "network" ? networkRetryCount : error.type === "media" ? mediaRetryCount : 0);
       const detail = {
         type: error.type,
         retriesExhausted,
         attempts
       };
+      if (error.mediaErrorCode !== void 0) {
+        detail.mediaErrorCode = error.mediaErrorCode;
+      }
+      if (error.mediaErrorMessage !== void 0) {
+        detail.mediaErrorMessage = error.mediaErrorMessage;
+      }
+      if (error.timedOut) {
+        detail.timedOut = true;
+      }
       if (typeof error.response?.code === "number" && error.response.code > 0) {
         detail.httpStatus = error.response.code;
       }
@@ -41733,8 +41759,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return detail;
     };
-    const emitFatalError = (error, retriesExhausted) => {
-      const message = retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`;
+    const emitFatalError = (error, retriesExhausted, messageOverride) => {
+      const message = messageOverride ?? (retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`);
       api?.logger.error(message, { type: error.type, details: error.details });
       api?.setState("playbackState", "error");
       api?.setState("buffering", false);
@@ -41876,7 +41902,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         handleNativeFatalError(error, resumePosition);
       }
     };
-    const loadNative = async (src) => {
+    const loadNative = async (src, initial = false) => {
       const session = loadSession;
       const videoEl = getOrCreateVideo();
       isNative = true;
@@ -41888,6 +41914,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return new Promise((resolve2, reject) => {
         let watchdog = null;
         let settled = false;
+        let last_error = null;
         const settle = () => {
           settled = true;
           if (abortPendingLoad2 === abort) {
@@ -41915,14 +41942,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           settle();
           hasPlayedContent = true;
+          if (initial) {
+            networkRetryCount = 0;
+            mediaRetryCount = 0;
+          }
           const onFatalVideoError = () => {
-            const media_error = videoEl.error;
-            const hls_error = {
-              type: media_error?.code === MediaError.MEDIA_ERR_NETWORK ? "network" : "media",
-              details: media_error?.message || "Native HLS playback error",
-              fatal: true
-            };
-            handleNativeFatalError(hls_error);
+            handleNativeFatalError(nativeMediaError(videoEl.error, "playback"));
           };
           videoEl.addEventListener("error", onFatalVideoError);
           const onPlayingResetBudget = () => {
@@ -41948,16 +41973,78 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         };
         const onError = () => {
           if (settled) return;
-          settle();
-          const error = videoEl.error;
-          reject(new Error(error?.message || "Failed to load HLS source"));
+          if (!initial || session !== loadSession) {
+            settle();
+            reject(new Error(videoEl.error?.message || "Failed to load HLS source"));
+            return;
+          }
+          const error = nativeMediaError(videoEl.error, "initial");
+          last_error = error;
+          const is_network = error.type === "network";
+          const max_retries = is_network ? mergedConfig.maxNetworkRetries ?? 3 : mergedConfig.maxMediaRetries ?? 2;
+          const used = is_network ? networkRetryCount : mediaRetryCount;
+          if (used >= max_retries) {
+            settle();
+            api?.logger.error(`Native HLS load failed after ${used} ${error.type} retries`, {
+              src: sanitizeUrl(src)
+            });
+            emitFatalError(error, true);
+            reject(new Error(error.details));
+            return;
+          }
+          if (is_network) {
+            networkRetryCount++;
+          } else {
+            mediaRetryCount++;
+          }
+          const delay = getRetryDelay2(used);
+          api?.logger.info(
+            `Retrying native HLS load after ${error.type} error (attempt ${used + 1}/${max_retries}) in ${delay}ms`
+          );
+          api?.emit(is_network ? "error:network" : "error:media", {
+            error: new Error(error.details)
+          });
+          if (retryTimeout) {
+            clearTimeout(retryTimeout);
+          }
+          retryTimeout = setTimeout(() => {
+            retryTimeout = null;
+            if (settled || session !== loadSession) return;
+            videoEl.src = src;
+            videoEl.load();
+          }, delay);
         };
         const timeout_ms = mergedConfig.loadTimeoutMs ?? 3e4;
         if (timeout_ms > 0) {
           watchdog = setTimeout(() => {
             if (settled || session !== loadSession) return;
             settle();
-            reject(new Error("Video took too long to load (network timeout)"));
+            if (!initial) {
+              reject(new Error(LOAD_TIMEOUT_MESSAGE));
+              return;
+            }
+            if (retryTimeout) {
+              clearTimeout(retryTimeout);
+              retryTimeout = null;
+            }
+            api?.logger.error(`Native HLS load timed out after ${timeout_ms}ms`, {
+              src: sanitizeUrl(src)
+            });
+            const timeout_error = {
+              type: "network",
+              details: LOAD_TIMEOUT_MESSAGE,
+              fatal: true,
+              timedOut: true,
+              attempts: networkRetryCount + mediaRetryCount
+            };
+            if (last_error?.mediaErrorCode !== void 0) {
+              timeout_error.mediaErrorCode = last_error.mediaErrorCode;
+            }
+            if (last_error?.mediaErrorMessage !== void 0) {
+              timeout_error.mediaErrorMessage = last_error.mediaErrorMessage;
+            }
+            emitFatalError(timeout_error, false, LOAD_TIMEOUT_MESSAGE);
+            reject(new Error(LOAD_TIMEOUT_MESSAGE));
           }, timeout_ms);
         }
         videoEl.addEventListener("loadedmetadata", onLoaded);
@@ -42451,13 +42538,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.setState("buffering", true);
         if (api.getState("airplayActive") && loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS (AirPlay active)");
-          await loadNative(src);
+          await loadNative(src, true);
         } else if (loader.isHlsJsSupported()) {
           api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
           await loadWithHlsJs(src);
         } else if (loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS playback (hls.js not supported)");
-          await loadNative(src);
+          await loadNative(src, true);
         } else {
           const probes = loader.describeSupport();
           const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
@@ -52512,6 +52599,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let isRebuffering = false;
     let rebufferStartTime = null;
     let pauseStartTime = null;
+    let playRequestPending = false;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
     function initSession() {
@@ -52539,8 +52627,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         maxBitrate: 0,
         avgBitrate: 0,
         playbackState: "loading",
-        exitType: null
+        exitType: null,
+        lastKnownIsLive: null
       };
+    }
+    function resolveIsLive() {
+      return mergedConfig.isLive ?? session.lastKnownIsLive;
     }
     function sendBeacon(eventType, data = {}) {
       if (mergedConfig.disableInDev && isDevelopment()) {
@@ -52560,7 +52652,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         // Video context
         videoId: mergedConfig.videoId,
         videoTitle: mergedConfig.videoTitle,
-        isLive: mergedConfig.isLive ?? api?.getState("live") ?? false,
+        isLive: resolveIsLive(),
         // Player context
         playerVersion: PLUGIN_VERSION,
         playerName: PLUGIN_NAME,
@@ -52625,7 +52717,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         viewerId: session.viewerId,
         videoId: mergedConfig.videoId,
         videoTitle: mergedConfig.videoTitle,
-        isLive: mergedConfig.isLive ?? api?.getState("live") ?? false,
+        isLive: resolveIsLive(),
         playerVersion: PLUGIN_VERSION,
         playerName: PLUGIN_NAME,
         browser: getBrowserInfo().name,
@@ -52746,18 +52838,48 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     }
     function onPlayRequest() {
+      if (playRequestPending) return;
+      playRequestPending = true;
       session.playRequestTime = Date.now();
       sendBeacon("playRequest");
     }
+    function onPlayEvent() {
+      if (!api?.getState("playing")) {
+        onPlayRequest();
+      }
+      onPlaying();
+    }
+    function onStateChange(event) {
+      if (event.key === "paused") {
+        if (event.previousValue === true && event.value === false && !api?.getState("playing")) {
+          onPlayRequest();
+        }
+        return;
+      }
+      if (event.key === "playing" && event.value === true) {
+        playRequestPending = false;
+        onFirstFrame();
+        return;
+      }
+      if (event.key === "live" && event.value === true) {
+        session.lastKnownIsLive = true;
+      }
+    }
+    function onLoadedMetadata() {
+      if (!api) return;
+      session.lastKnownIsLive = api.getState("live") === true;
+    }
+    function onFirstFrame() {
+      if (session.firstFrameTime !== null) return;
+      const now2 = Date.now();
+      session.firstFrameTime = now2;
+      session.startupTime = session.playRequestTime !== null ? now2 - session.playRequestTime : null;
+      sendBeacon("videoStart", {
+        startupTime: session.startupTime
+      });
+    }
     function onPlaying() {
       const now2 = Date.now();
-      if (session.firstFrameTime === null) {
-        session.firstFrameTime = now2;
-        session.startupTime = session.playRequestTime ? now2 - session.playRequestTime : null;
-        sendBeacon("videoStart", {
-          startupTime: session.startupTime
-        });
-      }
       if (isRebuffering && rebufferStartTime) {
         const rebufferDuration = now2 - rebufferStartTime;
         session.rebufferDuration += rebufferDuration;
@@ -52777,6 +52899,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onPause() {
       if (!api) return;
+      playRequestPending = false;
       session.pauseCount++;
       session.playbackState = "paused";
       pauseStartTime = Date.now();
@@ -52946,10 +53069,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         session = initSession();
         lastHeartbeatTime = Date.now();
         sendBeacon("viewStart");
-        const unsubPlay = api.on("playback:play", () => {
-          onPlayRequest();
-          onPlaying();
-        });
+        const unsubPlay = api.on("playback:play", onPlayEvent);
+        const unsubState = api.subscribeToState(onStateChange);
+        const unsubMetadata = api.on("media:loadedmetadata", onLoadedMetadata);
         const unsubPause = api.on("playback:pause", onPause);
         const unsubWaiting = api.on("media:waiting", onWaiting);
         const unsubSeeking = api.on("playback:seeking", onSeeking);
@@ -52961,6 +53083,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubLowLatency = api.on("live:lowlatency", onLowLatencyChange);
         cleanupFns.push(
           unsubPlay,
+          unsubState,
+          unsubMetadata,
           unsubPause,
           unsubWaiting,
           unsubSeeking,

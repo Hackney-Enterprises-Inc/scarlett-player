@@ -430,7 +430,8 @@ playback and media (`PLAYBACK_FAILED`, `MEDIA_DECODE_ERROR`,
 `PROVIDER_NOT_FOUND` and `MEDIA_DECODE_ERROR` are classified fatal by default.
 
 Providers attach diagnostics through `PlayerErrorDetail`: `type`,
-`retriesExhausted`, `attempts`, `reconnectExhausted`, `httpStatus` and `url`.
+`retriesExhausted`, `attempts`, `reconnectExhausted`, `httpStatus`, `url`,
+`mediaErrorCode`, `mediaErrorMessage` and `timedOut`.
 `url` must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported `sanitizeUrl()`, which strips the query string and the
 fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
@@ -445,6 +446,15 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   the native Safari branch, where recovery means reloading the source and
   restoring the position captured at the first failure. The budgets reset once
   media flows again, so a long event's transient blips never accumulate.
+- The native first load spends the same budgets inside `loadNative()`, before
+  `loadedmetadata`: `MEDIA_ERR_DECODE` is a media error and every other code
+  a network one, since Safari reports a failed manifest as
+  `MEDIA_ERR_SRC_NOT_SUPPORTED`. After `loadedmetadata`, only
+  `MEDIA_ERR_NETWORK` is a network error. `loadTimeoutMs` is one ceiling over
+  the whole load and wins over any budget left. Every terminal outcome goes
+  through `emitFatalError()` before the load rejects, with the element's
+  `mediaErrorCode` and `mediaErrorMessage` (and `timedOut` for the watchdog)
+  in `detail`, so core's `load()` keeps the provider's code.
 - `emitFatalError()` emits the fatal `error` and then calls
   `maybeScheduleReconnect()`, which hands over to the auto-reconnect scheduler
   only when playback had already started and the failure was a network or media
