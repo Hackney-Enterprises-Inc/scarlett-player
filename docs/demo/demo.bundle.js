@@ -52592,11 +52592,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       throw new Error("Analytics plugin requires videoId");
     }
     const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
-    let video = {
+    const configuredVideo = {
       videoId: mergedConfig.videoId,
       videoTitle: mergedConfig.videoTitle,
       isLive: mergedConfig.isLive
     };
+    let video = { ...configuredVideo };
     let api = null;
     let session;
     let heartbeatTimer = null;
@@ -52605,7 +52606,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let rebufferStartTime = null;
     let pauseStartTime = null;
     let playRequestPending = false;
-    let pendingPlaylistVideo = null;
+    let pendingTrack = null;
+    let currentTrackId = null;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
     function initSession() {
@@ -52866,33 +52868,56 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         video = { ...next };
         return;
       }
+      beginView(next);
+    }
+    function beginView(next) {
+      if (!api) return;
       if (session.viewEnd === null) {
         session.exitType = session.exitType || "abandoned";
         sendViewEnd();
       }
       video = { ...next };
       startView();
-      api.logger.debug("Analytics view switched to a new video", {
+      api.logger.debug("Analytics started a view", {
         viewId: session.viewId,
         videoId: video.videoId
       });
     }
+    function trackVideo(track) {
+      const title = typeof track.title === "string" && track.title !== "" ? track.title : void 0;
+      if (typeof track.videoId === "string" && track.videoId !== "") {
+        return { videoId: track.videoId, videoTitle: title };
+      }
+      return { ...configuredVideo, videoTitle: title ?? configuredVideo.videoTitle };
+    }
     function onPlaylistChange(payload) {
       const track = payload?.track;
-      if (!track || typeof track.id !== "string" || track.id === "" || track.id === video.videoId) {
-        pendingPlaylistVideo = null;
+      if (!track || typeof track.id !== "string" || track.id === "" || track.id === currentTrackId) {
+        pendingTrack = null;
         return;
       }
-      pendingPlaylistVideo = {
-        videoId: track.id,
-        videoTitle: typeof track.title === "string" ? track.title : void 0
+      pendingTrack = {
+        trackId: track.id,
+        src: typeof track.src === "string" && track.src !== "" ? track.src : null,
+        video: trackVideo(track)
       };
     }
-    function onSourceChange() {
-      if (!pendingPlaylistVideo) return;
-      const next = pendingPlaylistVideo;
-      pendingPlaylistVideo = null;
-      switchVideo(next);
+    function sourceKey(url) {
+      return url.split(/[?#]/, 1)[0];
+    }
+    function onSourceChange(src) {
+      if (!pendingTrack) return;
+      if (pendingTrack.src !== null && sourceKey(pendingTrack.src) !== sourceKey(src)) return;
+      const { trackId, video: next } = pendingTrack;
+      const ownedByTrack = currentTrackId !== null;
+      pendingTrack = null;
+      currentTrackId = trackId;
+      const untouched = !ownedByTrack && session.viewEnd === null && session.playRequestTime === null && session.firstFrameTime === null;
+      if (untouched && next.videoId === video.videoId) {
+        video = { ...next };
+        return;
+      }
+      beginView(next);
     }
     function onPlayRequest() {
       if (playRequestPending) return;
@@ -52922,7 +52947,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       if (event.key === "source" && event.value) {
-        onSourceChange();
+        const src = event.value.src;
+        onSourceChange(typeof src === "string" ? src : "");
         return;
       }
       if (event.key === "live" && event.value === true) {
@@ -53203,7 +53229,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (!next || typeof next.videoId !== "string" || next.videoId === "") {
           throw new Error("Analytics setVideo() requires videoId");
         }
-        pendingPlaylistVideo = null;
+        pendingTrack = null;
+        if (next.videoId !== video.videoId) {
+          currentTrackId = null;
+        }
         switchVideo(next);
       },
       trackEvent(name, data = {}) {
