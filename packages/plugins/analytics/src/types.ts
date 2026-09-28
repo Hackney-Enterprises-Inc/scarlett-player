@@ -336,6 +336,27 @@ export type BeaconFunction = (
 ) => void | Promise<void>;
 
 /**
+ * The video a view is about: what `setVideo()` takes.
+ *
+ * A different `videoId` from the current one ends the current view and starts
+ * a new one; the same `videoId` (a token refresh, a re-signed URL) changes
+ * nothing.
+ */
+export interface AnalyticsVideo {
+  /** Unique video identifier */
+  videoId: string;
+
+  /** Human-readable video title */
+  videoTitle?: string;
+
+  /**
+   * Whether this video is live. Omitted, the view classifies the source from
+   * the player's `live` state, as it does without `config.isLive`.
+   */
+  isLive?: boolean;
+}
+
+/**
  * Public API exposed by Analytics plugin.
  */
 export interface IAnalyticsPlugin {
@@ -376,6 +397,25 @@ export interface IAnalyticsPlugin {
    * @returns Partial view session data
    */
   getMetrics(): Partial<ViewSession>;
+
+  /**
+   * Switch the view to another video.
+   *
+   * A different `videoId` ends the current view (`viewEnd`, exit type
+   * `abandoned` unless it already ended) and starts a new one with a new view
+   * ID, a `viewStart` for the new video and a fresh heartbeat. The same
+   * `videoId` is a no-op, so re-loading a refreshed URL for the video already
+   * playing never splits its view. Call it before `player.load()` so the new
+   * view sees the source's metadata. Before `init()`, it only replaces the
+   * video the first view will report.
+   *
+   * A playlist does this by itself: `playlist:change` switches to the track's
+   * `id` and `title`.
+   *
+   * @param video - The video now playing
+   * @throws Error if `videoId` is empty
+   */
+  setVideo(video: AnalyticsVideo): void;
 
   /**
    * Track a custom event.

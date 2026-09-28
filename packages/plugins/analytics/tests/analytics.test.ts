@@ -1137,6 +1137,211 @@ describe('Analytics Plugin', () => {
     });
   });
 
+  // A new video is a new view. Until 1.19 the view was bound to config.videoId
+  // for the plugin's lifetime: a pre-roll's `ended` sent viewEnd and stopped
+  // the heartbeat, so the main video that followed ran with no heartbeat, no
+  // watch time and no final beacon (pagehide saw viewEnd already set).
+  describe('Track changes', () => {
+    /** Play the current source through to its first frame. */
+    const startPlayback = (): void => {
+      (api as any)._updateState({ ended: false });
+      (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+    };
+
+    /** The current source plays to its end. */
+    const endPlayback = (): void => {
+      (api as any)._updateState({ playing: false, paused: true, ended: true });
+      (api as any)._trigger('playback:ended');
+    };
+
+    it('measures the main video after a pre-roll ends: new view, heartbeat, final beacon', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        videoId: 'preroll',
+        videoTitle: 'Pre-roll',
+        isLive: undefined,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const prerollViewId = plugin.getViewId();
+
+      startPlayback();
+      vi.advanceTimersByTime(1500);
+      endPlayback();
+
+      const prerollEnd = beacons.find((b) => b.event === 'viewEnd');
+      expect(prerollEnd?.viewId).toBe(prerollViewId);
+      expect(prerollEnd?.videoId).toBe('preroll');
+      expect(prerollEnd?.exitType).toBe('completed');
+
+      // The playlist advances to the main video
+      beacons = [];
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'main-video', src: 'main.m3u8', title: 'Main Video' },
+        index: 1,
+      });
+
+      const mainViewId = plugin.getViewId();
+      expect(mainViewId).not.toBe(prerollViewId);
+      // The pre-roll view already ended; it is not ended twice
+      expect(beacons.filter((b) => b.event === 'viewEnd')).toHaveLength(0);
+      expect(beacons[0]).toMatchObject({
+        event: 'viewStart',
+        viewId: mainViewId,
+        videoId: 'main-video',
+        videoTitle: 'Main Video',
+      });
+
+      startPlayback();
+      vi.advanceTimersByTime(1000);
+
+      const heartbeats = beacons.filter((b) => b.event === 'heartbeat');
+      expect(heartbeats).toHaveLength(1);
+      expect(heartbeats[0]).toMatchObject({ viewId: mainViewId, videoId: 'main-video' });
+      // Counted from the main view's start, none of the pre-roll's time
+      expect(heartbeats[0].watchTime).toBe(1000);
+      expect(heartbeats[0].playTime).toBe(1000);
+
+      // The viewer leaves
+      window.dispatchEvent(new Event('pagehide'));
+
+      const finalBeacon = beacons[beacons.length - 1];
+      expect(finalBeacon).toMatchObject({
+        event: 'viewEnd',
+        viewId: mainViewId,
+        videoId: 'main-video',
+        watchTime: 1000,
+        exitType: 'abandoned',
+      });
+
+      await plugin.destroy();
+    });
+
+    it('does not start a new view on a token refresh of the same video', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+      startPlayback();
+      beacons = [];
+
+      // The host re-loads a freshly signed URL for the same video
+      plugin.setVideo({ videoId: mockConfig.videoId });
+      (api as any)._updateState({ playing: false, paused: true, currentTime: 0 });
+      (api as any)._trigger('media:loaded', { src: 'main.m3u8?token=new', type: 'hls' });
+      startPlayback();
+      // A playlist edit re-emits the current track unchanged
+      (api as any)._trigger('playlist:change', {
+        track: { id: mockConfig.videoId, src: 'main.m3u8?token=new' },
+        index: 0,
+      });
+
+      vi.advanceTimersByTime(1000);
+
+      expect(plugin.getViewId()).toBe(viewId);
+      expect(beacons.filter((b) => b.event === 'viewStart' || b.event === 'viewEnd')).toHaveLength(0);
+      expect(beacons.filter((b) => b.event === 'heartbeat')).toHaveLength(1);
+      expect(beacons.every((b) => b.viewId === viewId)).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('ends a view still playing when setVideo() names another video', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const firstViewId = plugin.getViewId();
+      startPlayback();
+      vi.advanceTimersByTime(500);
+      beacons = [];
+
+      plugin.setVideo({ videoId: 'next-video', videoTitle: 'Next', isLive: true });
+
+      expect(beacons.map((b) => b.event)).toEqual(['viewEnd', 'viewStart']);
+      expect(beacons[0]).toMatchObject({
+        viewId: firstViewId,
+        videoId: mockConfig.videoId,
+        exitType: 'abandoned',
+      });
+      expect(beacons[1]).toMatchObject({
+        videoId: 'next-video',
+        videoTitle: 'Next',
+        isLive: true,
+      });
+      expect(beacons[1].viewId).not.toBe(firstViewId);
+
+      // One heartbeat timer, not one per view
+      beacons = [];
+      vi.advanceTimersByTime(1000);
+      expect(beacons.filter((b) => b.event === 'heartbeat')).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it('measures a replay after the video ends as a new view of the same video', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const firstViewId = plugin.getViewId();
+      startPlayback();
+      vi.advanceTimersByTime(1000);
+      endPlayback();
+
+      beacons = [];
+      startPlayback();
+
+      const replayViewId = plugin.getViewId();
+      expect(replayViewId).not.toBe(firstViewId);
+      expect(beacons.map((b) => b.event)).toEqual(['viewStart', 'playRequest', 'videoStart']);
+      expect(beacons.every((b) => b.videoId === mockConfig.videoId)).toBe(true);
+
+      vi.advanceTimersByTime(1000);
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat).toMatchObject({ viewId: replayViewId, watchTime: 1000 });
+
+      await plugin.destroy();
+    });
+
+    it('reports the video set before init() in the first view', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      plugin.setVideo({ videoId: 'chosen-later' });
+      await plugin.init(api);
+
+      expect(beacons).toHaveLength(1);
+      expect(beacons[0]).toMatchObject({ event: 'viewStart', videoId: 'chosen-later' });
+
+      await plugin.destroy();
+    });
+
+    it('rejects setVideo() without a videoId', () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      expect(() => plugin.setVideo({ videoId: '' })).toThrow('requires videoId');
+    });
+  });
+
   describe('Environment Detection', () => {
     it('should detect browser and OS', async () => {
       const plugin = createAnalyticsPlugin({
@@ -1166,6 +1371,7 @@ describe('Analytics Plugin', () => {
       expect(typeof plugin.getQoEScore).toBe('function');
       expect(typeof plugin.getMetrics).toBe('function');
       expect(typeof plugin.trackEvent).toBe('function');
+      expect(typeof plugin.setVideo).toBe('function');
     });
 
     it('should return metrics', async () => {

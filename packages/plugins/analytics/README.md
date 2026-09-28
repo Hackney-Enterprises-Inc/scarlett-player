@@ -114,7 +114,7 @@ The plugin automatically tracks these events:
 
 | Event | Description | Data |
 |-------|-------------|------|
-| `viewStart` | Player initialized | viewId, sessionId, environment |
+| `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment |
 | `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
 | `heartbeat` | Periodic update (10s default) | watchTime, playTime, QoE score |
@@ -124,12 +124,12 @@ The plugin automatically tracks these events:
 | `rebufferEnd` | Buffering ended | duration, totalRebufferTime |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
 | `error` | Error occurred: a media element error, or a player `error` event (including a provider's fatal error such as an HLS manifest 404) | errorType, errorMessage, errorCode, fatal. `errorType` is the `Error` name when there is one, otherwise the player error code; `errorCode` is the player error code (for example `MEDIA_NETWORK_ERROR`), absent when there is none |
-| `viewEnd` | View session ended | all metrics, exitType, QoE score |
+| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | all metrics, exitType, QoE score |
 
 ### Exit Types
 
 - `completed` - Video played to the end
-- `abandoned` - User left before completion
+- `abandoned` - User left before completion, or moved to another video
 - `error` - Fatal error stopped playback
 - `background` - Tab/window was backgrounded
 
@@ -212,11 +212,55 @@ known classification, taken from the player's `live` state:
   and merge the view's beacons true-wins.
 - It becomes `true` or `false` at the source's `media:loadedmetadata`, or
   `true` as soon as the provider reports the stream live.
-- It lags a playlist advance. The view survives a source change, and the
-  previous item's value is kept until the new item's metadata classifies it.
+- Another video starts a new view, which starts unknown again. A `load()`
+  that keeps the same video (a token refresh) keeps the view, and with it the
+  last classification until the new source's metadata replaces it.
+- `setVideo({ isLive })` sets it for that video the way `config.isLive` does
+  for the first one.
 
 Before 1.18, `isLive` was `false` rather than `null` while unknown, so a live
 view's `viewStart` said `false`.
+
+## Views and track changes
+
+A view is one video played from start to finish or exit. It has its own
+`viewId`, `viewStart`, heartbeat and `viewEnd`, and its watch time counts from
+its own `viewStart`.
+
+- **Another video** starts a new view. The current one ends with exit type
+  `abandoned` (or keeps the `viewEnd` it already sent, such as a pre-roll that
+  played to the end), and the new one starts with a new `viewId` and the new
+  `videoId`. The heartbeat carries on for the new view.
+- **The same video re-loaded** (a token refresh, a re-signed URL) is not a new
+  view. The plugin only knows the video changed when told its ID, never from
+  the URL.
+- **Playing again after the view ended** (a replay after `ended`, a retry
+  after a fatal error) starts a new view of the same video.
+
+A playlist tells the plugin by itself: on `playlist:change` the track's `id`
+becomes the `videoId` and its `title` the `videoTitle`. The playlist re-emits
+that event for edits that keep the current track (adding, removing,
+shuffling), and those change nothing.
+
+A host that calls `player.load()` itself, a pre-roll followed by the main video
+for instance, names the video with `setVideo()` before loading it:
+
+```typescript
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
+
+// Pre-roll ended: the main video gets its own view
+analytics.setVideo({ videoId: 'event-123', videoTitle: 'Main Event' });
+await player.load(mainUrl);
+
+// Token refresh on the same video: same videoId, same view
+analytics.setVideo({ videoId: 'event-123' });
+await player.load(refreshedUrl);
+```
+
+`setVideo()` before the plugin initialises only changes the video the first
+view reports. Before 1.19, the view was bound to `config.videoId` for the
+plugin's lifetime: after a pre-roll's `viewEnd` the main video ran with no
+heartbeat and no final beacon, and a replay after `ended` was not measured.
 
 ## Quality of Experience (QoE) Score
 
