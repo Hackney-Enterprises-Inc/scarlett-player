@@ -65,7 +65,7 @@ If you do pass `src` to `createPlayer()` for the first track, set `initialIndex:
 | `persistKey` | `string` | `'scarlett-playlist'` | localStorage key used by `persist` |
 | `preloadNext` | `boolean` | `true` | Warm the next track when the current one starts: a detached media element with `preload="metadata"`, so DNS, TLS and the container header are done before the viewer gets there. Nothing is downloaded ahead beyond that, and the end of a non-repeating playlist warms nothing |
 
-A `PlaylistTrack` is `{ id, src, title?, artist?, album?, artwork?, duration?, type?, mimeType?, metadata? }` plus any extra properties you want to carry. `type` defaults to `'audio'` in player state when omitted.
+A `PlaylistTrack` is `{ id, src, videoId?, title?, artist?, album?, artwork?, duration?, type?, mimeType?, metadata? }` plus any extra properties you want to carry. `videoId` is what `@scarlett-player/analytics` reports for the track's view (each track that loads gets its own view); without it analytics reports its configured `videoId`, never `id`. `type` defaults to `'audio'` in player state when omitted.
 
 ## Plugin API
 

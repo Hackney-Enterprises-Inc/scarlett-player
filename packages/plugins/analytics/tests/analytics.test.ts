@@ -1185,7 +1185,7 @@ describe('Analytics Plugin', () => {
       // The playlist advances to the main video and loads it
       beacons = [];
       (api as any)._trigger('playlist:change', {
-        track: { id: 'main-video', src: 'main.m3u8', title: 'Main Video' },
+        track: { id: 'item-1', videoId: 'main-video', src: 'main.m3u8', title: 'Main Video' },
         index: 1,
       });
       loadSource('main.m3u8');
@@ -1240,7 +1240,7 @@ describe('Analytics Plugin', () => {
 
       // playlist.remove(current): the next track becomes current, nothing loads
       (api as any)._trigger('playlist:change', {
-        track: { id: 'next-track', src: 'next.m3u8' },
+        track: { id: 'item-2', videoId: 'next-track', src: 'next.m3u8' },
         index: 0,
       });
       vi.advanceTimersByTime(1000);
@@ -1257,6 +1257,56 @@ describe('Analytics Plugin', () => {
       await plugin.destroy();
     });
 
+    it('does not hand a pending track a load of another source', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+      startPlayback();
+
+      // The current entry is removed: the next track is pending, not loaded
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-2', videoId: 'next-track', src: 'next.m3u8' },
+        index: 1,
+      });
+      // A token refresh of the video still playing
+      loadSource('current.m3u8?token=new');
+
+      expect(plugin.getViewId()).toBe(viewId);
+      expect(beacons.every((b) => b.videoId === mockConfig.videoId)).toBe(true);
+
+      // The pending track's own source, signed, does commit it
+      loadSource('next.m3u8?token=abc');
+      expect(plugin.getViewId()).not.toBe(viewId);
+      expect(beacons[beacons.length - 1]).toMatchObject({ event: 'viewStart', videoId: 'next-track' });
+
+      await plugin.destroy();
+    });
+
+    it('gives a second track its own view even before the first one played', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playlist:change', { track: { id: 'item-0', src: 'one.m3u8' }, index: 0 });
+      loadSource('one.m3u8');
+      const firstTrackViewId = plugin.getViewId();
+
+      // Skipped before playing: same fallback videoId, different track
+      (api as any)._trigger('playlist:change', { track: { id: 'item-1', src: 'two.m3u8' }, index: 1 });
+      loadSource('two.m3u8');
+
+      expect(plugin.getViewId()).not.toBe(firstTrackViewId);
+      expect(beacons.filter((b) => b.event === 'viewStart')).toHaveLength(2);
+
+      await plugin.destroy();
+    });
+
     it('lets setVideo() win over a playlist track still waiting to load', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,
@@ -1265,7 +1315,7 @@ describe('Analytics Plugin', () => {
 
       await plugin.init(api);
       (api as any)._trigger('playlist:change', {
-        track: { id: 'queued-track', src: 'queued.m3u8' },
+        track: { id: 'item-1', videoId: 'queued-track', src: 'queued.m3u8' },
         index: 1,
       });
       plugin.setVideo({ videoId: 'host-video' });
@@ -1295,11 +1345,6 @@ describe('Analytics Plugin', () => {
       loadSource('main.m3u8?token=new');
       (api as any)._trigger('media:loaded', { src: 'main.m3u8?token=new', type: 'hls' });
       startPlayback();
-      // A playlist edit re-emits the current track unchanged
-      (api as any)._trigger('playlist:change', {
-        track: { id: mockConfig.videoId, src: 'main.m3u8?token=new' },
-        index: 0,
-      });
 
       vi.advanceTimersByTime(1000);
 
@@ -1307,6 +1352,112 @@ describe('Analytics Plugin', () => {
       expect(beacons.filter((b) => b.event === 'viewStart' || b.event === 'viewEnd')).toHaveLength(0);
       expect(beacons.filter((b) => b.event === 'heartbeat')).toHaveLength(1);
       expect(beacons.every((b) => b.viewId === viewId)).toBe(true);
+
+      await plugin.destroy();
+    });
+
+    it('reports the configured videoId for tracks without one, never the internal track id', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const firstViewId = plugin.getViewId();
+      startPlayback();
+      vi.advanceTimersByTime(1000);
+
+      // The embed's positional ids: item-0 is playing, item-1 comes next
+      beacons = [];
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-1', src: 'two.m3u8', title: 'Part Two' },
+        index: 1,
+      });
+      loadSource('two.m3u8');
+
+      const secondViewId = plugin.getViewId();
+      expect(secondViewId).not.toBe(firstViewId);
+      expect(beacons.map((b) => b.event)).toEqual(['viewEnd', 'viewStart']);
+      expect(beacons[1]).toMatchObject({ videoId: mockConfig.videoId, videoTitle: 'Part Two' });
+      expect(beacons.some((b) => String(b.videoId).startsWith('item-'))).toBe(false);
+
+      // A playlist edit re-emits the current track, then its URL is refreshed
+      beacons = [];
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-1', src: 'two.m3u8?token=new', title: 'Part Two' },
+        index: 1,
+      });
+      loadSource('two.m3u8?token=new');
+      expect(plugin.getViewId()).toBe(secondViewId);
+      expect(beacons.filter((b) => b.event === 'viewStart' || b.event === 'viewEnd')).toHaveLength(0);
+
+      await plugin.destroy();
+    });
+
+    it('lets the first playlist track take over an untouched view of the same video', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-0', src: 'one.m3u8', title: 'Track title' },
+        index: 0,
+      });
+      loadSource('one.m3u8');
+
+      expect(plugin.getViewId()).toBe(viewId);
+      expect(beacons.map((b) => b.event)).toEqual(['viewStart']);
+      // The track's title carries on from here, in the same view
+      plugin.trackEvent('probe');
+      expect(beacons[beacons.length - 1]).toMatchObject({
+        viewId,
+        videoId: mockConfig.videoId,
+        videoTitle: 'Track title',
+      });
+
+      // Once that track has played, the next track is a new view (same videoId)
+      startPlayback();
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'item-1', src: 'two.m3u8' },
+        index: 1,
+      });
+      loadSource('two.m3u8');
+      expect(plugin.getViewId()).not.toBe(viewId);
+
+      await plugin.destroy();
+    });
+
+    it('returns to a playlist track after setVideo() moved to another video', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const track = { id: 'item-0', videoId: 'track-video', src: 'one.m3u8' };
+
+      (api as any)._trigger('playlist:change', { track, index: 0 });
+      loadSource('one.m3u8');
+      startPlayback();
+
+      plugin.setVideo({ videoId: 'host-video' });
+      loadSource('host.m3u8');
+      startPlayback();
+
+      (api as any)._trigger('playlist:change', { track, index: 0 });
+      loadSource('one.m3u8');
+
+      plugin.trackEvent('probe');
+      expect(beacons[beacons.length - 1].videoId).toBe('track-video');
+      const starts = beacons.filter((b) => b.event === 'viewStart').map((b) => b.videoId);
+      // The track reports another video than the configured one, so it starts
+      // its own view; then the host video; then the track again
+      expect(starts).toEqual([mockConfig.videoId, 'track-video', 'host-video', 'track-video']);
 
       await plugin.destroy();
     });

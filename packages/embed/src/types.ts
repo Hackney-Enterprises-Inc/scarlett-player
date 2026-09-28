@@ -136,6 +136,11 @@ export interface EmbedConfig {
  */
 export interface PlaylistItem {
   src: string;
+  /**
+   * Video ID analytics reports for this item's view. Omitted, the item
+   * reports `data-analytics-video-id`.
+   */
+  videoId?: string;
   title?: string;
   artist?: string;
   poster?: string;

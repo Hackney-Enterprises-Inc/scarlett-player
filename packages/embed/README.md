@@ -168,7 +168,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-artist` | string | Artist/creator name |
 | `data-album` | string | Album name |
 | `data-artwork` | string | Album art / cover image URL |
-| `data-playlist` | JSON | Array of `{ src, title?, artist?, poster?, artwork?, duration? }` (Full and Audio builds) |
+| `data-playlist` | JSON | Array of `{ src, videoId?, title?, artist?, poster?, artwork?, duration? }` (Full and Audio builds). Each item that loads is its own analytics view, reported under its `videoId`, or under `data-analytics-video-id` when it has none. The first item's `videoId` applies from the first view unless `data-src` names a different source |
 
 #### Analytics Attributes (Full build)
 

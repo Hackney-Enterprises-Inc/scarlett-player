@@ -669,6 +669,22 @@ describe('createEmbedPlayer', () => {
 
     expect(fullPluginCreators.playlist).toHaveBeenCalled();
   });
+
+  it('should pass each playlist item videoId through to its track', async () => {
+    await createEmbedPlayer(
+      container,
+      {
+        src: 'video.m3u8',
+        playlist: [{ src: 'video1.m3u8', videoId: 'vid-1' }, { src: 'video2.m3u8' }],
+      },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    const { tracks } = (fullPluginCreators.playlist as any).mock.calls.at(-1)[0];
+    expect(tracks[0]).toMatchObject({ id: 'item-0', videoId: 'vid-1' });
+    expect(tracks[1]).not.toHaveProperty('videoId');
+  });
 });
 
 describe('initElement', () => {

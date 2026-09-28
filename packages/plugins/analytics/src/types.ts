@@ -410,8 +410,9 @@ export interface IAnalyticsPlugin {
    * video the first view will report.
    *
    * A playlist does this by itself: after `playlist:change`, the next source
-   * load switches to the track's `id` and `title`. Calling `setVideo()`
-   * drops a playlist track still waiting to load.
+   * load starts a view for that track, reporting its `videoId` (or the
+   * configured one when it has none) and `title`. Calling `setVideo()` drops
+   * a playlist track still waiting to load.
    *
    * @param video - The video now playing
    * @throws Error if `videoId` is empty
