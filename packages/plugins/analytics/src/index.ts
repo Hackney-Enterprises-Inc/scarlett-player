@@ -22,6 +22,7 @@ import type {
   BeaconPayload,
   IAnalyticsPlugin,
   AnalyticsEventType,
+  AnalyticsVideo,
 } from './types';
 import {
   generateId,
@@ -50,6 +51,7 @@ export type {
   BeaconPayload,
   IAnalyticsPlugin,
   AnalyticsEventType,
+  AnalyticsVideo,
 } from './types';
 
 /**
@@ -115,6 +117,15 @@ export function createAnalyticsPlugin(
   // Merge with defaults
   const mergedConfig = { ...DEFAULT_CONFIG, ...config } as AnalyticsConfig;
 
+  // The video the current view is about. Starts as the configured one and is
+  // replaced by setVideo() or a playlist track change, each of which starts a
+  // new view.
+  let video: AnalyticsVideo = {
+    videoId: mergedConfig.videoId,
+    videoTitle: mergedConfig.videoTitle,
+    isLive: mergedConfig.isLive,
+  };
+
   // Plugin state
   let api: IPluginAPI | null = null;
   let session: ViewSession;
@@ -125,6 +136,8 @@ export function createAnalyticsPlugin(
   let pauseStartTime: number | null = null;
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
+  // A playlist track that has not been loaded yet (see onPlaylistChange)
+  let pendingPlaylistVideo: AnalyticsVideo | null = null;
   let cleanupFns: Array<() => void> = [];
   // Live latency, accumulated at constant memory across the whole session.
   // Reset alongside the session so a second view does not inherit the first
@@ -168,14 +181,15 @@ export function createAnalyticsPlugin(
   /**
    * The `isLive` a beacon carries.
    *
-   * `config.isLive` when the host set it, otherwise the view's last known
+   * The current video's `isLive` when the host set it (`config.isLive`, or
+   * `setVideo()`), otherwise the view's last known
    * classification: `null` until the provider has classified the source, so
    * a consumer can tell "not yet known" from VOD.
    *
    * @returns Whether the view is live, or null while unknown
    */
   function resolveIsLive(): boolean | null {
-    return mergedConfig.isLive ?? session.lastKnownIsLive;
+    return video.isLive ?? session.lastKnownIsLive;
   }
 
   /**
@@ -206,8 +220,8 @@ export function createAnalyticsPlugin(
       viewerId: session.viewerId,
 
       // Video context
-      videoId: mergedConfig.videoId,
-      videoTitle: mergedConfig.videoTitle,
+      videoId: video.videoId,
+      videoTitle: video.videoTitle,
       isLive: resolveIsLive(),
 
       // Player context
@@ -337,8 +351,8 @@ export function createAnalyticsPlugin(
       viewId: session.viewId,
       sessionId: session.sessionId,
       viewerId: session.viewerId,
-      videoId: mergedConfig.videoId,
-      videoTitle: mergedConfig.videoTitle,
+      videoId: video.videoId,
+      videoTitle: video.videoTitle,
       isLive: resolveIsLive(),
       playerVersion: PLUGIN_VERSION,
       playerName: PLUGIN_NAME,
@@ -520,6 +534,110 @@ export function createAnalyticsPlugin(
     });
   }
 
+  /**
+   * Start a view: new view ID, `viewStart`, and a heartbeat counted from now.
+   *
+   * Used for the first view at init and for every one after it (another
+   * video, or a replay after the previous view ended). Per-view trackers are
+   * reset with the session so the new view inherits nothing from the last.
+   *
+   * @param lastKnownIsLive - Classification to carry over. A replay of the
+   *   same source passes the ended view's value, because nothing reloads the
+   *   source to classify it again; another video starts unknown.
+   */
+  function startView(lastKnownIsLive: boolean | null = null): void {
+    session = initSession();
+    session.lastKnownIsLive = lastKnownIsLive;
+    lastHeartbeatTime = Date.now();
+    isRebuffering = false;
+    rebufferStartTime = null;
+    pauseStartTime = null;
+    playRequestPending = false;
+
+    sendBeacon('viewStart');
+
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
+    heartbeatTimer = setInterval(
+      sendHeartbeat,
+      mergedConfig.heartbeatInterval || 10000
+    );
+  }
+
+  /**
+   * Move to another video: end the current view if it is still open, then
+   * start one for `next`.
+   *
+   * The same `videoId` does nothing. That is what keeps a token refresh, which
+   * re-loads a new URL for the video already playing, inside its view.
+   *
+   * @param next - The video now playing
+   */
+  function switchVideo(next: AnalyticsVideo): void {
+    if (next.videoId === video.videoId) return;
+
+    if (!api) {
+      // Not initialised: the first view has not started, so it simply
+      // reports the new video.
+      video = { ...next };
+      return;
+    }
+
+    if (session.viewEnd === null) {
+      session.exitType = session.exitType || 'abandoned';
+      sendViewEnd();
+    }
+
+    video = { ...next };
+    startView();
+
+    api.logger.debug('Analytics view switched to a new video', {
+      viewId: session.viewId,
+      videoId: video.videoId,
+    });
+  }
+
+  /**
+   * Handle a playlist track change: remember the track, switch on its load.
+   *
+   * The event alone does not mean another video is playing. Removing the
+   * current track moves the playlist onto the next one without loading it,
+   * so the removed video keeps playing. The track is held as pending and
+   * becomes the video at the next source load (`onSourceChange`), which
+   * covers the playlist's own `media:load-request` and a host that loads the
+   * track itself. A change back to the current video, or an empty playlist,
+   * drops anything pending.
+   *
+   * @param payload - The current track, or null when the playlist is empty
+   */
+  function onPlaylistChange(payload: { track: { id: string; title?: unknown } | null }): void {
+    const track = payload?.track;
+    if (!track || typeof track.id !== 'string' || track.id === '' || track.id === video.videoId) {
+      pendingPlaylistVideo = null;
+      return;
+    }
+
+    pendingPlaylistVideo = {
+      videoId: track.id,
+      videoTitle: typeof track.title === 'string' ? track.title : undefined,
+    };
+  }
+
+  /**
+   * Commit a pending playlist track once a source is loaded.
+   *
+   * Core writes the `source` state in `load()` before the provider loads, so
+   * the new view exists before that source's play request and metadata.
+   */
+  function onSourceChange(): void {
+    if (!pendingPlaylistVideo) return;
+
+    const next = pendingPlaylistVideo;
+    pendingPlaylistVideo = null;
+    switchVideo(next);
+  }
+
   // === Event Handlers ===
 
   /**
@@ -533,6 +651,14 @@ export function createAnalyticsPlugin(
    */
   function onPlayRequest(): void {
     if (playRequestPending) return;
+
+    // Playing again after the view ended (a replay after `ended`, a retry
+    // after a fatal error) is a new view of the same video, not a request
+    // inside one that already sent its viewEnd.
+    if (session.viewEnd !== null && api) {
+      startView(session.lastKnownIsLive);
+    }
+
     playRequestPending = true;
     session.playRequestTime = Date.now();
     sendBeacon('playRequest');
@@ -573,6 +699,11 @@ export function createAnalyticsPlugin(
       return;
     }
 
+    if (event.key === 'source' && event.value) {
+      onSourceChange();
+      return;
+    }
+
     // Only a change to true classifies. Core writes `live: false` on every
     // load(), which is a reset rather than a classification: the next
     // media:loadedmetadata re-classifies.
@@ -595,8 +726,9 @@ export function createAnalyticsPlugin(
   /**
    * Send `videoStart` on the first frame of the view.
    *
-   * The first `playing: true` the view sees, so a resume after pause or a
-   * second item is not a second start.
+   * The first `playing: true` the view sees, so a resume after pause is not a
+   * second start. Another video, or a replay after `ended`, is a new view
+   * with a start of its own.
    */
   function onFirstFrame(): void {
     if (session.firstFrameTime !== null) return;
@@ -920,11 +1052,9 @@ export function createAnalyticsPlugin(
 
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
-      session = initSession();
-      lastHeartbeatTime = Date.now();
 
-      // Send view start
-      sendBeacon('viewStart');
+      // First view: viewStart and the heartbeat
+      startView();
 
       // Subscribe to player events
       const unsubPlay = api.on('playback:play', onPlayEvent);
@@ -942,6 +1072,8 @@ export function createAnalyticsPlugin(
       // keys stay out of its beacons entirely.
       const unsubLatency = api.on('live:latency', onLiveLatency);
       const unsubLowLatency = api.on('live:lowlatency', onLowLatencyChange);
+      // A playlist track change is a new video once its source loads
+      const unsubPlaylist = api.on('playlist:change', onPlaylistChange);
 
       cleanupFns.push(
         unsubPlay,
@@ -955,7 +1087,8 @@ export function createAnalyticsPlugin(
         unsubCoreError,
         unsubQuality,
         unsubLatency,
-        unsubLowLatency
+        unsubLowLatency,
+        unsubPlaylist
       );
 
       // Page lifecycle events
@@ -969,15 +1102,9 @@ export function createAnalyticsPlugin(
         window.removeEventListener('pagehide', onBeforeUnload);
       });
 
-      // Start heartbeat
-      heartbeatTimer = setInterval(
-        sendHeartbeat,
-        mergedConfig.heartbeatInterval || 10000
-      );
-
       api.logger.info('Analytics plugin initialized', {
         viewId: session.viewId,
-        videoId: mergedConfig.videoId,
+        videoId: video.videoId,
       });
     },
 
@@ -1018,6 +1145,16 @@ export function createAnalyticsPlugin(
 
     getMetrics(): Partial<ViewSession> {
       return { ...session };
+    },
+
+    setVideo(next: AnalyticsVideo): void {
+      if (!next || typeof next.videoId !== 'string' || next.videoId === '') {
+        throw new Error('Analytics setVideo() requires videoId');
+      }
+      // The host named the video; a playlist track still waiting to load
+      // must not replace it at the next load.
+      pendingPlaylistVideo = null;
+      switchVideo(next);
     },
 
     trackEvent(name: string, data: Record<string, unknown> = {}): void {

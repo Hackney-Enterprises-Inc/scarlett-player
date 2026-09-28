@@ -129,7 +129,7 @@ Weighted average of 4 factors (0-100 scale):
 
 | Event | Trigger | Data Included |
 |-------|---------|---------------|
-| `viewStart` | Player init | Environment, identifiers |
+| `viewStart` | Player init, another video, or a replay after `ended` | Environment, identifiers |
 | `playRequest` | User clicks play | Timestamp |
 | `videoStart` | First frame | Startup time |
 | `heartbeat` | Periodic (10s) | All metrics, QoE score |
