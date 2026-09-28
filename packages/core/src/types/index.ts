@@ -47,3 +47,6 @@ export type {
   EventBus,
   EventEmitterOptions,
 } from './events';
+
+// Load Types
+export type { LoadOptions } from './load';

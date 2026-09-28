@@ -18,6 +18,14 @@ import { createMockAPI, installMediaStubs, flush, fireVideoError } from './helpe
 /** MediaError codes used by the native classifier */
 const MEDIA_ERR_NETWORK = 2;
 const MEDIA_ERR_DECODE = 3;
+const MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
+
+/** Shape of the fatal `error` payload the assertions read. */
+interface FatalPayload {
+  fatal?: boolean;
+  message?: string;
+  detail?: Record<string, unknown>;
+}
 
 describe('native HLS retry budget', () => {
   let api: IPluginAPI;
@@ -81,6 +89,41 @@ describe('native HLS retry budget', () => {
     (api.emit as ReturnType<typeof vi.fn>).mock.calls.some(
       ([event, payload]) => event === 'error' && (payload as { fatal?: boolean })?.fatal
     );
+
+  /** Every fatal `error` payload emitted so far. */
+  const fatalErrors = (): FatalPayload[] =>
+    (api.emit as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([event, payload]) => event === 'error' && (payload as FatalPayload)?.fatal)
+      .map(([, payload]) => payload as FatalPayload);
+
+  /** How many times the element was told to (re)load its source. */
+  const loadCalls = (): number =>
+    (HTMLVideoElement.prototype.load as ReturnType<typeof vi.fn>).mock.calls.length;
+
+  /**
+   * Start a native load without completing it.
+   *
+   * @param config - Plugin configuration overrides
+   * @returns The plugin and a record of how the load promise settled
+   */
+  const startNativeLoad = async (config: Record<string, unknown> = {}) => {
+    const plugin = createHLSPlugin({ autoReconnect: false, ...config });
+    await plugin.init(api);
+    const outcome: { status: 'pending' | 'resolved' | 'rejected'; error?: Error } = {
+      status: 'pending',
+    };
+    plugin.loadSource(SRC).then(
+      () => {
+        outcome.status = 'resolved';
+      },
+      (error: Error) => {
+        outcome.status = 'rejected';
+        outcome.error = error;
+      }
+    );
+    await flush();
+    return { plugin, outcome };
+  };
 
   /**
    * Load a source natively and settle the initial load.
@@ -284,5 +327,327 @@ describe('native HLS retry budget', () => {
     expect(video.src).toContain('/other.m3u8');
 
     await plugin.destroy();
+  });
+
+  it('keeps MEDIA_ERR_SRC_NOT_SUPPORTED on the media budget once playing', async () => {
+    vi.useFakeTimers();
+    const plugin = await loadNatively({ maxNetworkRetries: 0, maxMediaRetries: 2 });
+
+    fireVideoError(getVideo(), MEDIA_ERR_SRC_NOT_SUPPORTED, 'segment unsupported');
+    await flush();
+
+    expect(fatalErrorEmitted()).toBe(false);
+    expect(api.emit).toHaveBeenCalledWith('error:media', expect.anything());
+
+    await plugin.destroy();
+  });
+
+  /**
+   * SCAR-HLS-4: an error BEFORE `loadedmetadata` used to reject the load with
+   * a plain Error on the first element error, so the budgets above never
+   * applied to the first load and core filed it as SOURCE_LOAD_FAILED with
+   * the MediaError code lost (Sentry TSP-WEB-2JJ, TSP-WEB-2JS).
+   */
+  describe('initial load', () => {
+    it('retries MEDIA_ERR_NETWORK up to maxNetworkRetries, then emits one structured fatal', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ maxNetworkRetries: 3 });
+      const video = getVideo();
+      expect(loadCalls()).toBe(1);
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(loadCalls()).toBe(2);
+      expect(video.src).toContain('/live/stream.m3u8');
+      expect(outcome.status).toBe('pending');
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(loadCalls()).toBe(3);
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(4100);
+      expect(loadCalls()).toBe(4);
+      expect(fatalErrors()).toHaveLength(0);
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({
+          type: 'network',
+          mediaErrorCode: MEDIA_ERR_NETWORK,
+          mediaErrorMessage: 'manifest 503',
+          attempts: 3,
+          retriesExhausted: true,
+        })
+      );
+      expect(outcome.status).toBe('rejected');
+      expect(loadCalls()).toBe(4);
+
+      await plugin.destroy();
+    });
+
+    it('spends the network budget on MEDIA_ERR_SRC_NOT_SUPPORTED: fatal at once with none', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        maxNetworkRetries: 0,
+        maxMediaRetries: 2,
+      });
+
+      fireVideoError(getVideo(), MEDIA_ERR_SRC_NOT_SUPPORTED, 'manifest 403');
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(loadCalls()).toBe(1);
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({
+          type: 'network',
+          mediaErrorCode: MEDIA_ERR_SRC_NOT_SUPPORTED,
+          retriesExhausted: true,
+        })
+      );
+      expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
+
+    it('spends the network budget on MEDIA_ERR_SRC_NOT_SUPPORTED: retries twice with two', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        maxNetworkRetries: 2,
+        maxMediaRetries: 0,
+      });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_SRC_NOT_SUPPORTED, 'manifest 403');
+      await vi.advanceTimersByTimeAsync(1100);
+      fireVideoError(video, MEDIA_ERR_SRC_NOT_SUPPORTED, 'manifest 403');
+      await vi.advanceTimersByTimeAsync(2100);
+
+      expect(loadCalls()).toBe(3);
+      expect(fatalErrors()).toHaveLength(0);
+      expect(api.emit).toHaveBeenCalledWith('error:network', expect.anything());
+
+      fireVideoError(video, MEDIA_ERR_SRC_NOT_SUPPORTED, 'manifest 403');
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(1);
+      expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
+
+    it('spends the media budget on MEDIA_ERR_DECODE: fatal at once with none', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        maxNetworkRetries: 2,
+        maxMediaRetries: 0,
+      });
+
+      fireVideoError(getVideo(), MEDIA_ERR_DECODE, 'bad init segment');
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(loadCalls()).toBe(1);
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({
+          type: 'media',
+          mediaErrorCode: MEDIA_ERR_DECODE,
+          mediaErrorMessage: 'bad init segment',
+          retriesExhausted: true,
+        })
+      );
+      expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
+
+    it('spends the media budget on MEDIA_ERR_DECODE: retries twice with two', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        maxNetworkRetries: 0,
+        maxMediaRetries: 2,
+      });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_DECODE, 'bad init segment');
+      await vi.advanceTimersByTimeAsync(1100);
+      fireVideoError(video, MEDIA_ERR_DECODE, 'bad init segment');
+      await vi.advanceTimersByTimeAsync(2100);
+
+      expect(loadCalls()).toBe(3);
+      expect(fatalErrors()).toHaveLength(0);
+      expect(api.emit).toHaveBeenCalledWith('error:media', expect.anything());
+
+      fireVideoError(video, MEDIA_ERR_DECODE, 'bad init segment');
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(1);
+      expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
+
+    it('resolves when a retry succeeds and leaves the budgets reset', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ maxNetworkRetries: 1 });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(1100);
+      video.dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+
+      expect(outcome.status).toBe('resolved');
+      expect(fatalErrors()).toHaveLength(0);
+
+      // The one network retry was spent on the load; playback starts fresh
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'network dropped');
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(0);
+
+      await plugin.destroy();
+    });
+
+    it('cancels the pending retry when a new load supersedes it', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ maxNetworkRetries: 3 });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await flush();
+      expect(outcome.status).toBe('pending');
+
+      const next = plugin.loadSource('http://example.com/other.m3u8');
+      next.catch(() => {});
+      await flush();
+      expect(loadCalls()).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(loadCalls()).toBe(2);
+      expect(video.src).toContain('/other.m3u8');
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(0);
+
+      await plugin.destroy();
+    });
+
+    it('cancels the pending retry on destroy', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ maxNetworkRetries: 3 });
+
+      fireVideoError(getVideo(), MEDIA_ERR_NETWORK, 'manifest 503');
+      await flush();
+      expect(outcome.status).toBe('pending');
+
+      await plugin.destroy();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(loadCalls()).toBe(1);
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(0);
+    });
+
+    it('lets the watchdog win during a backoff: no further attempt, one structured timeout', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        maxNetworkRetries: 3,
+        retryDelayMs: 4000,
+        loadTimeoutMs: 2000,
+      });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(outcome.status).toBe('rejected');
+      expect(outcome.error?.message).toBe('Video took too long to load (network timeout)');
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].message).toBe('Video took too long to load (network timeout)');
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({
+          timedOut: true,
+          attempts: 1,
+          mediaErrorCode: MEDIA_ERR_NETWORK,
+          mediaErrorMessage: 'manifest 503',
+        })
+      );
+
+      const src_after_timeout = video.src;
+      await vi.advanceTimersByTimeAsync(10000);
+
+      expect(loadCalls()).toBe(1);
+      expect(video.src).toBe(src_after_timeout);
+      expect(fatalErrors()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it('reports a watchdog timeout before any error without media error fields', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ loadTimeoutMs: 2000 });
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(1);
+      const detail = fatalErrors()[0].detail;
+      expect(detail).toEqual(expect.objectContaining({ timedOut: true, attempts: 0 }));
+      expect(detail).not.toHaveProperty('mediaErrorCode');
+      expect(detail).not.toHaveProperty('mediaErrorMessage');
+
+      await plugin.destroy();
+    });
+
+    it('never emits the fatal twice when a mid-play recovery reload fails', async () => {
+      vi.useFakeTimers();
+      const plugin = await loadNatively({ maxMediaRetries: 1, maxNetworkRetries: 1 });
+      const video = getVideo();
+
+      // Mid-play error: recovery reloads through loadNative()
+      fireVideoError(video, MEDIA_ERR_DECODE, 'decode hiccup');
+      await vi.advanceTimersByTimeAsync(1200);
+
+      // The reload itself fails before metadata, which spends what is left
+      fireVideoError(video, MEDIA_ERR_DECODE, 'decode hiccup');
+      await vi.advanceTimersByTimeAsync(10000);
+
+      expect(fatalErrors()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it('still rejects promptly when a live failure hands off to auto-reconnect', async () => {
+      vi.useFakeTimers();
+      live_state = true;
+      // Deliver the `live` state write so the plugin treats the source as
+      // classified live, which is what lets reconnect run before first play
+      const listeners: Array<(event: { key: string }) => void> = [];
+      (api.subscribeToState as ReturnType<typeof vi.fn>).mockImplementation(
+        (listener: (event: { key: string }) => void) => {
+          listeners.push(listener);
+          return vi.fn();
+        }
+      );
+
+      const { plugin, outcome } = await startNativeLoad({
+        autoReconnect: true,
+        maxNetworkRetries: 0,
+      });
+      listeners.forEach((listener) => listener({ key: 'live' }));
+
+      fireVideoError(getVideo(), MEDIA_ERR_NETWORK, 'manifest 404');
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(1);
+      expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+      expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
   });
 });

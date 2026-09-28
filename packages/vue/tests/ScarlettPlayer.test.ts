@@ -227,3 +227,71 @@ describe('ScarlettPlayer.vue typed event payloads', () => {
     if (failure instanceof Error) expect(emitted).toBe(failure);
   });
 });
+
+describe('ScarlettPlayer.vue load()', () => {
+  let host: HTMLDivElement;
+  let app: ReturnType<typeof createApp> | null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    app = null;
+  });
+
+  afterEach(() => {
+    app?.unmount();
+    host.remove();
+  });
+
+  /**
+   * Mount the component with a reactive src and a template ref on it.
+   *
+   * @param initial - Source the player is constructed with
+   */
+  const mountWithRef = async (initial?: string) => {
+    const { default: ScarlettPlayerComponent } = await import('../src/ScarlettPlayer.vue');
+    const src = ref<string | undefined>(initial);
+    const exposed = ref<InstanceType<typeof ScarlettPlayerComponent> | null>(null);
+
+    app = createApp(
+      defineComponent({
+        setup() {
+          return () => h(ScarlettPlayerComponent, { ref: exposed, src: src.value });
+        },
+      })
+    );
+    app.mount(host);
+    await settle();
+
+    return { src, exposed };
+  };
+
+  it('forwards load options from the exposed load()', async () => {
+    const { exposed } = await mountWithRef();
+
+    await exposed.value!.load('https://cdn.test/next.m3u8', { autoplay: false });
+
+    expect(mockPlayer.load).toHaveBeenCalledWith('https://cdn.test/next.m3u8', {
+      autoplay: false,
+    });
+  });
+
+  it('calls load() with the source alone when no options are given', async () => {
+    const { exposed } = await mountWithRef();
+
+    await exposed.value!.load('https://cdn.test/next.m3u8');
+
+    expect(mockPlayer.load).toHaveBeenLastCalledWith('https://cdn.test/next.m3u8', undefined);
+  });
+
+  it('keeps the src watcher loading without options, so the autoplay prop decides', async () => {
+    const { src } = await mountWithRef('https://cdn.test/first.m3u8');
+
+    src.value = 'https://cdn.test/second.m3u8';
+    await nextTick();
+
+    expect(mockPlayer.load).toHaveBeenCalledTimes(1);
+    expect(mockPlayer.load.mock.calls[0]).toEqual(['https://cdn.test/second.m3u8']);
+  });
+});

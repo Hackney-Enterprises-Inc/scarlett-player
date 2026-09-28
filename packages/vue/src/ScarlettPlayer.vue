@@ -6,7 +6,13 @@
 // `defineExpose` is a compiler macro, not a runtime export: importing it made
 // the SFC compiler warn on every build and every test run.
 import { ref, shallowRef, markRaw, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
-import type { ScarlettPlayer, PlayerOptions, Plugin, PlayerEventMap } from '@scarlett-player/core';
+import type {
+  ScarlettPlayer,
+  PlayerOptions,
+  Plugin,
+  PlayerEventMap,
+  LoadOptions,
+} from '@scarlett-player/core';
 
 // Props
 const props = defineProps({
@@ -353,9 +359,10 @@ defineExpose({
     playerInstance.value?.registerPlugin(plugin);
   },
 
-  // Load source
-  async load(src: string) {
-    await playerInstance.value?.load(src);
+  // Load source. `options.autoplay` decides for this load only; the src
+  // watcher passes none, so there the autoplay prop decides.
+  async load(src: string, options?: LoadOptions) {
+    await playerInstance.value?.load(src, options);
   },
 
   // Destroy

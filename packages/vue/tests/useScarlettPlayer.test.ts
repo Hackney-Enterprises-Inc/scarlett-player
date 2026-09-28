@@ -200,3 +200,44 @@ describe('useScarlettPlayer setPoster', () => {
     );
   });
 });
+
+describe('useScarlettPlayer load', () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+    vi.clearAllMocks();
+  });
+
+  it('forwards load options to the player', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    const result = useScarlettPlayer({
+      container: ref<HTMLElement | null>(container),
+      autoInit: false,
+    });
+
+    await result.init();
+    await result.load('https://example.com/next.m3u8', { autoplay: false });
+
+    expect(result.player.value?.load).toHaveBeenCalledWith('https://example.com/next.m3u8', {
+      autoplay: false,
+    });
+  });
+
+  it('is a no-op before init', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    const result = useScarlettPlayer({
+      container: ref<HTMLElement | null>(container),
+      autoInit: false,
+    });
+
+    await expect(result.load('https://example.com/next.m3u8')).resolves.toBeUndefined();
+  });
+});

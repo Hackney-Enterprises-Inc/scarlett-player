@@ -15,6 +15,11 @@
  * each @scarlett-player/* name at the package directory - the resolution a real
  * consumer performs. Run it after a full build.
  *
+ * Compiling `import * as pkg` proves the declarations compile, not that a
+ * named API a consumer relies on exists with the right signature. A package
+ * listed in `CONSUMER_SNIPPETS` also gets its snippet appended to the
+ * consumer, so a missing export or a narrowed parameter fails here too.
+ *
  * `skipLibCheck` is deliberately OFF for the packages' own declarations: with
  * it on, TypeScript suppresses errors reported inside .d.ts files, which is
  * exactly where an unresolvable import shows up.
@@ -52,6 +57,33 @@ function packageDirs() {
 
   return dirs;
 }
+
+/**
+ * Extra consumer code per package, compiled after the namespace import.
+ *
+ * Each snippet uses the public API the way a host does, against the built
+ * declarations. It may import only the package itself and what the package
+ * declares (see `dependencyClosure`).
+ */
+const CONSUMER_SNIPPETS = {
+  '@scarlett-player/core': `
+import type { LoadOptions, ScarlettPlayer } from '@scarlett-player/core';
+declare const player: ScarlettPlayer;
+const loadOptions: LoadOptions = { autoplay: false };
+export const loaded: Promise<void> = player.load('x.m3u8', loadOptions);
+`,
+  '@scarlett-player/vue': `
+import type { LoadOptions } from '@scarlett-player/core';
+import ScarlettPlayerComponent, { useScarlettPlayer } from '@scarlett-player/vue';
+import { ref } from 'vue';
+declare const exposed: InstanceType<typeof ScarlettPlayerComponent>;
+const loadOptions: LoadOptions = { autoplay: false };
+export const viaComponent: Promise<void> = exposed.load('x.m3u8', loadOptions);
+export const viaComposable: Promise<void> = useScarlettPlayer({
+  container: ref<HTMLElement | null>(null),
+}).load('x.m3u8', { autoplay: false });
+`,
+};
 
 const workspacePackages = packageDirs()
   .map((dir) => ({ dir, manifest: JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) }))
@@ -131,12 +163,21 @@ try {
       })
     );
 
-    // Peer dependencies a consumer would have installed themselves.
-    if (external.has('vue')) paths.vue = [join(ROOT, 'node_modules', 'vue')];
+    // Peer dependencies a consumer would have installed themselves. pnpm
+    // installs `vue` under the declaring package, not at the root, so a
+    // consumer snippet importing it needs the package's copy.
+    if (external.has('vue')) {
+      paths.vue = [...workspace]
+        .map((name) => byName.get(name))
+        .filter((dep) => dep && existsSync(join(dep.dir, 'node_modules', 'vue')))
+        .map((dep) => join(dep.dir, 'node_modules', 'vue'))
+        .concat(join(ROOT, 'node_modules', 'vue'));
+    }
 
     writeFileSync(
       join(scratch, file),
-      `import * as pkg from '${manifest.name}';\nexport const used: unknown = pkg;\n`
+      `import * as pkg from '${manifest.name}';\nexport const used: unknown = pkg;\n` +
+        (CONSUMER_SNIPPETS[manifest.name] ?? '')
     );
 
     const config = {

@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createAnalyticsPlugin } from '../src/index';
 import { isHttpsUrl } from '../src/helpers';
+import { EventBus, StateManager } from '@scarlett-player/core';
 import type { IPluginAPI } from '@scarlett-player/core';
 import type { BeaconPayload, AnalyticsConfig } from '../src/types';
 
@@ -22,6 +23,12 @@ const mockConfig: AnalyticsConfig = {
   disableInDev: false,
 };
 
+// Analytics has no dependency on the hls package; the provider's event map is
+// loaded from the workspace source instead. The specifier is a variable so tsc
+// does not pull hls sources into this package's program (TS6059, outside
+// rootDir); vitest resolves it at run time.
+const hlsEventMap = '../../hls/src/event-map';
+
 // Collected beacons
 let beacons: BeaconPayload[] = [];
 
@@ -30,22 +37,17 @@ const mockBeacon = (url: string, payload: BeaconPayload) => {
   beacons.push(payload);
 };
 
-// Mock PluginAPI
+/**
+ * Plugin API over core's real StateManager and EventBus.
+ *
+ * `subscribeToState` was a no-op until SCAR-ANALYTICS-4, so anything analytics
+ * derived from state changes passed or failed for the wrong reason. The real
+ * store dispatches `{ key, value, previousValue }` only on an actual change,
+ * which is the contract a state-driven listener depends on.
+ */
 function createMockAPI(): IPluginAPI {
-  // Typed as an index signature on purpose: the mock's getState/setState take a
-  // plain string key, and a bare object literal has no index signature, so both
-  // accesses below were implicit `any` (TS7053) once the package started
-  // type-checking its tests on 2026-09-02.
-  const state: Record<string, unknown> = {
-    currentTime: 0,
-    duration: 100,
-    playing: false,
-    paused: true,
-    live: false,
-    qualities: [],
-  };
-
-  const eventHandlers = new Map<string, Set<Function>>();
+  const state = new StateManager({ duration: 100 });
+  const bus = new EventBus();
 
   return {
     pluginId: 'analytics',
@@ -56,35 +58,21 @@ function createMockAPI(): IPluginAPI {
       warn: vi.fn(),
       error: vi.fn(),
     },
-    getState: vi.fn((key: string) => state[key]),
-    setState: vi.fn((key: string, value: any) => {
-      state[key] = value;
-    }),
-    on: vi.fn((event: string, handler: Function) => {
-      if (!eventHandlers.has(event)) {
-        eventHandlers.set(event, new Set());
-      }
-      eventHandlers.get(event)!.add(handler);
-      return () => {
-        eventHandlers.get(event)?.delete(handler);
-      };
-    }),
-    off: vi.fn((event: string, handler: Function) => {
-      eventHandlers.get(event)?.delete(handler);
-    }),
-    emit: vi.fn((event: string, payload: any) => {
-      eventHandlers.get(event)?.forEach((handler) => handler(payload));
-    }),
+    getState: vi.fn((key: any) => state.getValue(key)),
+    setState: vi.fn((key: any, value: any) => state.set(key, value)),
+    on: vi.fn((event: any, handler: any) => bus.on(event, handler)),
+    off: vi.fn((event: any, handler: any) => bus.off(event, handler)),
+    emit: vi.fn((event: any, payload: any) => bus.emit(event, payload)),
     getPlugin: vi.fn(() => null),
     onDestroy: vi.fn(),
-    subscribeToState: vi.fn(() => () => {}),
+    subscribeToState: vi.fn((callback: any) => state.subscribe(callback)),
     // Helper to trigger events
-    _trigger(event: string, payload?: any) {
-      eventHandlers.get(event)?.forEach((handler) => handler(payload));
+    _trigger(event: any, payload?: any) {
+      bus.emit(event, payload);
     },
     // Helper to update state
     _updateState(updates: Record<string, any>) {
-      Object.assign(state, updates);
+      state.update(updates);
     },
   } as any;
 }
@@ -181,7 +169,7 @@ describe('Analytics Plugin', () => {
       expect(beacons.find(b => b.event === 'playRequest')).toBeDefined();
     });
 
-    it('should track video start and calculate startup time', async () => {
+    it('should send videoStart with the startup time at the first frame', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,
         customBeacon: mockBeacon,
@@ -190,24 +178,17 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
       beacons = [];
 
+      // The request alone is not a start: until 1.18 `playback:play` sent
+      // videoStart from the same handler as playRequest, so startupTime was
+      // always about 0 and the QoE startup factor always 100.
       (api as any)._trigger('playback:play');
+      expect(beacons.find((b) => b.event === 'videoStart')).toBeUndefined();
+
+      vi.advanceTimersByTime(400);
+      (api as any)._updateState({ paused: false, playing: true });
 
       const videoStartEvent = beacons.find((b) => b.event === 'videoStart');
-      expect(videoStartEvent).toBeDefined();
-
-      // The previous assertion here was `toBeDefined()`, which passes for null
-      // as readily as for a number: it could not tell a working metric from a
-      // broken one, and the metric is in fact degenerate.
-      //
-      // `playback:play` runs onPlayRequest() and onPlaying() back to back in
-      // one handler, so the two Date.now() reads that bracket the measurement
-      // are one synchronous tick apart no matter how long startup actually
-      // took. startupTime therefore measures the handler, not the viewer's
-      // wait. Asserted as a real number in single-digit milliseconds rather
-      // than waved through, so that wiring videoStart to an actual first-frame
-      // signal fails here and this expectation gets updated with it.
-      expect(typeof videoStartEvent?.startupTime).toBe('number');
-      expect(videoStartEvent?.startupTime).toBeLessThan(10);
+      expect(videoStartEvent?.startupTime).toBe(400);
     });
 
     it('should send exactly one videoStart per view', async () => {
@@ -220,8 +201,11 @@ describe('Analytics Plugin', () => {
       beacons = [];
 
       (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._updateState({ paused: true, playing: false });
       (api as any)._trigger('playback:pause');
       (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
 
       expect(beacons.filter((b) => b.event === 'videoStart')).toHaveLength(1);
     });
@@ -280,6 +264,300 @@ describe('Analytics Plugin', () => {
     });
   });
 
+  // SCAR-ANALYTICS-4: startupTime is the first frame (the first `playing: true`
+  // of the view) minus the earliest request signal. Driven through the real HLS
+  // element handlers on the analytics bus, so the order of state writes and
+  // bus emits is the provider's own.
+  describe('Startup time', () => {
+    let video: HTMLVideoElement;
+    let gate: { corePlayRequested: boolean; corePauseRequested: boolean };
+
+    /** Dispatch an element event on the test video. */
+    const fire = (type: string) => video.dispatchEvent(new Event(type));
+
+    /** Beacons of one event type sent so far. */
+    const sent = (event: string) => beacons.filter((b) => b.event === event);
+
+    /**
+     * What `ScarlettPlayer.play()` does: emit `playback:play` synchronously,
+     * which the HLS plugin answers by arming the gate before `video.play()`.
+     */
+    const corePlay = (target: IPluginAPI = api) => {
+      target.emit('playback:play', undefined);
+      gate.corePlayRequested = true;
+    };
+
+    /** Mount the real HLS element handlers on `target`'s bus and state. */
+    const mountHls = async (target: IPluginAPI = api) => {
+      const { setupVideoEventHandlers } = await import(/* @vite-ignore */ hlsEventMap);
+      video = document.createElement('video');
+      gate = { corePlayRequested: false, corePauseRequested: false };
+      setupVideoEventHandlers(video, target, undefined, gate);
+    };
+
+    beforeEach(async () => {
+      await mountHls();
+    });
+
+    it('measures from the core play request, not from the element play event', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      corePlay();
+      vi.advanceTimersByTime(50);
+      fire('play');
+      vi.advanceTimersByTime(100);
+      fire('playing');
+
+      expect(sent('videoStart')).toHaveLength(1);
+      expect(sent('videoStart')[0]?.startupTime).toBe(150);
+      expect(sent('playRequest')).toHaveLength(1);
+      expect(plugin.getMetrics().startupTime).toBe(150);
+    });
+
+    it('measures a direct video.play() from the element play event', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      fire('play');
+      vi.advanceTimersByTime(120);
+      fire('playing');
+
+      expect(sent('videoStart')).toHaveLength(1);
+      expect(sent('videoStart')[0]?.startupTime).toBe(120);
+      // The provider emits playback:play at `playing` for an element-driven
+      // start; that is the same request arriving late, not a second one.
+      expect(sent('playRequest')).toHaveLength(1);
+    });
+
+    it('measures an autoplay start the same way', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      // The provider's own video.play() once the source is ready: no core
+      // request, no gate.
+      video.autoplay = true;
+      fire('loadedmetadata');
+      fire('play');
+      vi.advanceTimersByTime(300);
+      fire('playing');
+
+      expect(sent('videoStart')).toHaveLength(1);
+      expect(sent('videoStart')[0]?.startupTime).toBe(300);
+      expect(sent('playRequest')).toHaveLength(1);
+    });
+
+    it('sends no second videoStart on a resume after pause', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      fire('play');
+      vi.advanceTimersByTime(120);
+      fire('playing');
+      vi.advanceTimersByTime(1000);
+      fire('pause');
+      vi.advanceTimersByTime(2000);
+      fire('play');
+      vi.advanceTimersByTime(80);
+      fire('playing');
+
+      expect(sent('videoStart')).toHaveLength(1);
+      expect(plugin.getMetrics().startupTime).toBe(120);
+      // One per start and one per resume, as before
+      expect(sent('playRequest')).toHaveLength(2);
+      expect(plugin.getMetrics().pauseCount).toBe(1);
+    });
+
+    it('still ends a rebuffer on the playback:play the element emits after a stall', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+
+      fire('play');
+      vi.advanceTimersByTime(120);
+      fire('playing');
+      beacons = [];
+
+      // `playing` stays true across a stall, so only the bus event can end it
+      fire('waiting');
+      vi.advanceTimersByTime(1000);
+      fire('playing');
+
+      expect(sent('rebufferStart')).toHaveLength(1);
+      expect(sent('rebufferEnd')).toHaveLength(1);
+      expect(sent('rebufferEnd')[0]?.duration).toBe(1000);
+      expect(plugin.getMetrics().rebufferCount).toBe(1);
+      // Recovering from a stall is not a play request
+      expect(sent('playRequest')).toHaveLength(0);
+      expect(sent('videoStart')).toHaveLength(0);
+    });
+
+    it('lets a slow start lower the QoE score', async () => {
+      const fastPlugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await fastPlugin.init(api);
+      fire('play');
+      vi.advanceTimersByTime(100);
+      fire('playing');
+
+      const slowApi = createMockAPI();
+      await mountHls(slowApi);
+      const slowPlugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await slowPlugin.init(slowApi);
+      fire('play');
+      vi.advanceTimersByTime(5000);
+      fire('playing');
+
+      expect(slowPlugin.getMetrics().startupTime).toBe(5000);
+      expect(slowPlugin.getQoEScore()).toBeLessThan(fastPlugin.getQoEScore());
+    });
+  });
+
+  // SCAR-ANALYTICS-6 (decision #159): a view carries its last known live
+  // classification, null until one is known. Classification arrives through
+  // the real HLS element handlers; core's `load()` reset is replayed on the
+  // real state store, which is what makes the playlist cases meaningful.
+  describe('isLive classification', () => {
+    let video: HTMLVideoElement;
+    let duration = NaN;
+    const unknownConfig = { ...mockConfig, isLive: undefined, customBeacon: mockBeacon };
+
+    /** Send a probe beacon and return the isLive it carried. */
+    const probe = (plugin: ReturnType<typeof createAnalyticsPlugin>) => {
+      plugin.trackEvent('probe');
+      return beacons.at(-1)?.isLive;
+    };
+
+    /** The element reports its duration: VOD with a number, live with Infinity. */
+    const metadata = (value: number) => {
+      duration = value;
+      video.dispatchEvent(new Event('durationchange'));
+    };
+
+    /** What core's `load()` writes before the next source's provider runs. */
+    const coreLoadReset = () => {
+      (api as any)._updateState({
+        playing: false,
+        paused: true,
+        ended: false,
+        buffering: true,
+        currentTime: 0,
+        duration: 0,
+        bufferedAmount: 0,
+        playbackState: 'loading',
+        error: null,
+        live: false,
+      });
+    };
+
+    beforeEach(async () => {
+      const { setupVideoEventHandlers } = await import(/* @vite-ignore */ hlsEventMap);
+      video = document.createElement('video');
+      duration = NaN;
+      Object.defineProperty(video, 'duration', { configurable: true, get: () => duration });
+      setupVideoEventHandlers(video, api);
+    });
+
+    it('sends null on viewStart and false once VOD metadata has loaded', async () => {
+      const plugin = createAnalyticsPlugin(unknownConfig);
+      await plugin.init(api);
+
+      expect(beacons[0]?.event).toBe('viewStart');
+      expect(beacons[0]?.isLive).toBeNull();
+      expect(probe(plugin)).toBeNull();
+
+      metadata(60);
+      expect(probe(plugin)).toBe(false);
+    });
+
+    it('sends null on viewStart and true once live metadata has loaded', async () => {
+      const plugin = createAnalyticsPlugin(unknownConfig);
+      await plugin.init(api);
+
+      expect(beacons[0]?.isLive).toBeNull();
+
+      metadata(Infinity);
+      expect(probe(plugin)).toBe(true);
+    });
+
+    it('sends true as soon as live turns true, before any metadata', async () => {
+      const plugin = createAnalyticsPlugin(unknownConfig);
+      await plugin.init(api);
+
+      expect(probe(plugin)).toBeNull();
+      // hls.js classifies at hlsLevelLoaded, ahead of the element's metadata
+      api.setState('live', true);
+      expect(probe(plugin)).toBe(true);
+    });
+
+    it('lets config.isLive win, false included', async () => {
+      const vod = createAnalyticsPlugin({ ...unknownConfig, isLive: false });
+      await vod.init(api);
+      expect(beacons[0]?.isLive).toBe(false);
+      metadata(Infinity);
+      expect(probe(vod)).toBe(false);
+      await vod.destroy();
+
+      beacons = [];
+      api = createMockAPI();
+      const live = createAnalyticsPlugin({ ...unknownConfig, isLive: true });
+      await live.init(api);
+      expect(beacons[0]?.isLive).toBe(true);
+      api.emit('media:loadedmetadata', { duration: 60 });
+      expect(probe(live)).toBe(true);
+    });
+
+    it('keeps a live item classified live across the load reset until the next item has metadata', async () => {
+      const plugin = createAnalyticsPlugin(unknownConfig);
+      await plugin.init(api);
+      metadata(Infinity);
+      expect(probe(plugin)).toBe(true);
+
+      // Playlist advance: the view survives, core resets `live` to false
+      coreLoadReset();
+      expect(probe(plugin)).toBe(true);
+
+      // The next item is VOD
+      metadata(60);
+      expect(api.getState('live')).toBe(false);
+      expect(probe(plugin)).toBe(false);
+    });
+
+    it('keeps a VOD item classified VOD across the load reset until the next item is classified live', async () => {
+      const plugin = createAnalyticsPlugin(unknownConfig);
+      await plugin.init(api);
+      metadata(60);
+      expect(probe(plugin)).toBe(false);
+
+      coreLoadReset();
+      expect(probe(plugin)).toBe(false);
+
+      metadata(Infinity);
+      expect(probe(plugin)).toBe(true);
+    });
+
+    it('carries the classification on the unload beacon too', async () => {
+      const sent: BeaconPayload[] = [];
+      const plugin = createAnalyticsPlugin({
+        ...unknownConfig,
+        customBeacon: (_url: string, payload: BeaconPayload) => {
+          sent.push(payload);
+        },
+      });
+      await plugin.init(api);
+      metadata(Infinity);
+      coreLoadReset();
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      const viewEnd = sent.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.isLive).toBe(true);
+      await plugin.destroy();
+    });
+  });
+
   describe('Rebuffering', () => {
     it('should track rebuffer events', async () => {
       const plugin = createAnalyticsPlugin({
@@ -291,7 +569,7 @@ describe('Analytics Plugin', () => {
 
       // Start playback first
       (api as any)._trigger('playback:play');
-      (api as any)._trigger('playback:play'); // playing
+      (api as any)._updateState({ paused: false, playing: true });
       beacons = [];
 
       // Start rebuffer
@@ -357,11 +635,6 @@ describe('Analytics Plugin', () => {
       });
       await plugin.init(api);
 
-      // Analytics has no dependency on the hls package; the provider's event
-      // map is loaded from the workspace source instead. The specifier is a
-      // variable so tsc does not pull hls sources into this package's program
-      // (TS6059, outside rootDir); vitest resolves it at run time.
-      const hlsEventMap = '../../hls/src/event-map';
       const { setupHlsEventHandlers } = await import(/* @vite-ignore */ hlsEventMap);
 
       const hlsHandlers = new Map<string, Function>();

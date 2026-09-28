@@ -10,6 +10,9 @@ Vue 3 component wrapper for Scarlett Player.
 npm install @scarlett-player/vue @scarlett-player/core
 ```
 
+Requires `@scarlett-player/core` 1.18.0 or later (peer range `^1.18.0`), and
+Vue 3.3 or later.
+
 ## Quick Start
 
 ### Basic Component Usage
@@ -264,7 +267,7 @@ playerRef.value.requestFullscreen();
 - `play()` - Start playback
 - `pause()` - Pause playback
 - `seek(time: number)` - Seek to time in seconds
-- `load(src: string)` - Load new source
+- `load(src: string, options?: LoadOptions)` - Load new source. `options.autoplay` plays (`true`) or stays paused (`false`) for this load only; omitted, the `autoplay` prop decides
 - `setVolume(volume: number)` - Set volume (0-1)
 - `setMuted(muted: boolean)` - Set muted state
 - `setPoster(url: string)` - Set the poster ('' clears it)
@@ -331,6 +334,17 @@ Inside a component's `setup()` the composable mounts the player for you
 else (a store, a plain module, a test), there is no component lifecycle to
 hook, so it registers none: call `init()` yourself and destroy the player
 through `player.value.destroy()` when you are done with it.
+
+`load(src, options?)` forwards its options to core's `load()`, so
+`load(src, { autoplay: false })` keeps the next source paused whatever the
+`autoplay` option says, for that load only. It does nothing before `init()`.
+
+```typescript
+import type { LoadOptions } from '@scarlett-player/core';
+
+const next: LoadOptions = { autoplay: false };
+await load('https://cdn.example.com/next.m3u8', next);
+```
 
 ## Global Plugin Installation
 

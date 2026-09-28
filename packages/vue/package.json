@@ -46,7 +46,7 @@
   },
   "homepage": "https://scarlettplayer.com",
   "peerDependencies": {
-    "@scarlett-player/core": "^1.8.0",
+    "@scarlett-player/core": "^1.18.0",
     "vue": "^3.3.0"
   },
   "devDependencies": {

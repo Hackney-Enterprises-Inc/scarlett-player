@@ -227,6 +227,16 @@ export interface ViewSession {
 
   /** How the view ended */
   exitType: ExitType;
+
+  // === Classification ===
+  /**
+   * Last known live classification: null until the provider has classified
+   * the source, then set at each `media:loadedmetadata` and whenever `live`
+   * turns true. Core's `live: false` reset on `load()` is ignored, so after a
+   * playlist advance this keeps the previous item's value until the new
+   * item's metadata.
+   */
+  lastKnownIsLive: boolean | null;
 }
 
 /**
@@ -257,8 +267,12 @@ export interface BeaconPayload {
   /** Video title */
   videoTitle?: string;
 
-  /** Whether video is live */
-  isLive?: boolean;
+  /**
+   * Whether the video is live: `config.isLive` when set, otherwise the view's
+   * last known classification. `null` means not yet known (every `viewStart`
+   * without `config.isLive`); treat it as absent and merge true-wins.
+   */
+  isLive?: boolean | null;
 
   // === Player Context ===
   /** Player version */

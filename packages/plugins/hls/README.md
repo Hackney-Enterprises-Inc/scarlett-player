@@ -159,6 +159,26 @@ automatically (emitting `error:reconnecting` and `error:recovered` for the
 UI), and reconnects immediately when the browser comes back online. Only after
 the reconnect window closes does the viewer see the retry UI.
 
+`maxNetworkRetries` and `maxMediaRetries` also cover the first load on native
+HLS (Safari, iOS). A media element error before `loadedmetadata` re-requests
+the source on the same backoff instead of failing at once. On that first load,
+`MEDIA_ERR_DECODE` spends the media budget and every other code spends the
+network budget, including `MEDIA_ERR_SRC_NOT_SUPPORTED`, which is how Safari
+reports a manifest that answered 4xx or 5xx. Set `maxNetworkRetries: 0` to fail
+on the first error. `loadTimeoutMs` stays one ceiling over the whole load,
+retries included, and a timeout ends the load even with budget left.
+
+A load that fails for good emits a fatal `error` with a structured code
+(`MEDIA_NETWORK_ERROR` or `MEDIA_DECODE_ERROR`) before `load()` settles, so the
+host never sees a generic `SOURCE_LOAD_FAILED` for it. Its `detail` carries
+`type`, `attempts` and `retriesExhausted`, and on the native path also:
+
+| Field | Meaning |
+|---|---|
+| `mediaErrorCode` | `MediaError.code` of the element error (1 aborted, 2 network, 3 decode, 4 source not supported) |
+| `mediaErrorMessage` | `MediaError.message`, when the browser gave one |
+| `timedOut` | `true` when `loadTimeoutMs` ended the load. The message stays `Video took too long to load (network timeout)`, and the media error fields describe the last error seen, if any |
+
 `player.load(url)` resolves when the manifest has been parsed and the source is
 playable, and stays pending while that reconnect window is open rather than
 rejecting on the first failure inside it - the same contract the WHEP provider

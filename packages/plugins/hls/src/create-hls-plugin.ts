@@ -140,6 +140,72 @@ const MANIFEST_PHASE_ERRORS = [
   'manifestParsingError',
 ];
 
+/** Message of a load that hit `loadTimeoutMs`. Sentry groups on it (TSP-WEB-2FJ). */
+const LOAD_TIMEOUT_MESSAGE = 'Video took too long to load (network timeout)';
+
+/**
+ * When a native media element error arrived: before `loadedmetadata`
+ * (`initial`) or once the source had loaded (`playback`).
+ */
+type NativeErrorPhase = 'initial' | 'playback';
+
+/**
+ * An HLS error plus the diagnostics only the native path has: the element's
+ * MediaError, and for a load watchdog the timeout and its attempt count.
+ */
+interface NativeHLSError extends HLSError {
+  mediaErrorCode?: number;
+  mediaErrorMessage?: string;
+  timedOut?: boolean;
+  attempts?: number;
+}
+
+/** Fatal error `detail` with the native diagnostics added by SCAR-HLS-4. */
+interface HLSErrorDetail extends PlayerErrorDetail {
+  /** `MediaError.code` of the element error behind the failure */
+  mediaErrorCode?: number;
+  /** `MediaError.message` of the element error behind the failure */
+  mediaErrorMessage?: string;
+  /** True when the load watchdog (`loadTimeoutMs`) ended the load */
+  timedOut?: boolean;
+}
+
+/**
+ * Turn a native media element error into an HLSError on a retry budget.
+ *
+ * The phase decides the budget. During playback only MEDIA_ERR_NETWORK is a
+ * network error. During the initial load everything except MEDIA_ERR_DECODE
+ * is: Safari reports a 4xx/5xx manifest as MEDIA_ERR_SRC_NOT_SUPPORTED, and a
+ * missing code or MEDIA_ERR_ABORTED says nothing about the media (decision
+ * #161).
+ *
+ * @param mediaError - The element's `error`, if any
+ * @param phase - Whether the source had loaded when the error arrived
+ * @returns Fatal HLSError carrying the MediaError code and message
+ */
+function nativeMediaError(mediaError: MediaError | null, phase: NativeErrorPhase): NativeHLSError {
+  const code = mediaError?.code;
+  const is_network =
+    phase === 'initial'
+      ? code !== MediaError.MEDIA_ERR_DECODE
+      : code === MediaError.MEDIA_ERR_NETWORK;
+
+  const error: NativeHLSError = {
+    type: is_network ? 'network' : 'media',
+    details:
+      mediaError?.message ||
+      (phase === 'initial' ? 'Failed to load HLS source' : 'Native HLS playback error'),
+    fatal: true,
+  };
+  if (typeof code === 'number' && code > 0) {
+    error.mediaErrorCode = code;
+  }
+  if (mediaError?.message) {
+    error.mediaErrorMessage = mediaError.message;
+  }
+  return error;
+}
+
 /**
  * Create an HLS Provider Plugin instance bound to a loader module and
  * build-variant labels. Not part of the public API: consumers use the
@@ -574,20 +640,37 @@ export function createHLSPluginWith(
    * 2026-08-29 origin outage: no HTTP status, no URL, no attempt count, so
    * diagnosis meant correlating timestamps across viewers. The URL goes
    * through sanitizeUrl() because signed-URL tokens live in the query.
+   * Native errors add the element's MediaError code and message, and a
+   * load watchdog adds `timedOut` with its own attempt count.
+   *
+   * @param error - Parsed HLS error, or a native one with its diagnostics
+   * @param retriesExhausted - Whether the retry budget ran out
+   * @returns Detail block for the fatal error event
    */
-  const buildErrorDetail = (error: HLSError, retriesExhausted: boolean): PlayerErrorDetail => {
+  const buildErrorDetail = (error: NativeHLSError, retriesExhausted: boolean): HLSErrorDetail => {
     const attempts =
-      error.type === 'network'
+      error.attempts ??
+      (error.type === 'network'
         ? networkRetryCount
         : error.type === 'media'
           ? mediaRetryCount
-          : 0;
+          : 0);
 
-    const detail: PlayerErrorDetail = {
+    const detail: HLSErrorDetail = {
       type: error.type,
       retriesExhausted,
       attempts,
     };
+
+    if (error.mediaErrorCode !== undefined) {
+      detail.mediaErrorCode = error.mediaErrorCode;
+    }
+    if (error.mediaErrorMessage !== undefined) {
+      detail.mediaErrorMessage = error.mediaErrorMessage;
+    }
+    if (error.timedOut) {
+      detail.timedOut = true;
+    }
 
     // Only network failures carry a request; a synthetic playlist-validation
     // error reports code 0, which is not an HTTP status
@@ -614,11 +697,18 @@ export function createHLSPluginWith(
    * @param error - Parsed HLS error
    * @param retriesExhausted - Whether the retry budget ran out (adds the
    *        "(max retries exceeded)" message suffix)
+   * @param messageOverride - Exact message to emit instead of the built one
    */
-  const emitFatalError = (error: HLSError, retriesExhausted: boolean) => {
-    const message = retriesExhausted
-      ? `HLS error: ${error.details} (max retries exceeded)`
-      : `HLS error: ${error.details}`;
+  const emitFatalError = (
+    error: NativeHLSError,
+    retriesExhausted: boolean,
+    messageOverride?: string
+  ) => {
+    const message =
+      messageOverride ??
+      (retriesExhausted
+        ? `HLS error: ${error.details} (max retries exceeded)`
+        : `HLS error: ${error.details}`);
 
     api?.logger.error(message, { type: error.type, details: error.details });
     api?.setState('playbackState', 'error');
@@ -864,8 +954,27 @@ export function createHLSPluginWith(
     }
   };
 
-  /** Load source using native HLS */
-  const loadNative = async (src: string): Promise<void> => {
+  /**
+   * Load source using native HLS.
+   *
+   * On an initial load (a user `loadSource()`), an element error before
+   * `loadedmetadata` spends the same network/media budget as playback,
+   * re-setting `src` on the retry backoff inside this one promise. Once the
+   * budget is spent the failure is emitted as a structured fatal `error`
+   * before the promise rejects, so core keeps its code. `loadTimeoutMs` stays
+   * one ceiling over the whole load, retries included, and wins over any
+   * budget left.
+   *
+   * Recovery, reconnect and AirPlay-switch reloads are not initial: they
+   * reject on the first error, as the caller runs its own budget, and a
+   * timeout rejects without emitting.
+   *
+   * @param src - Source URL
+   * @param initial - Whether this is the first load of a user `loadSource()`
+   * @returns Resolves on `loadedmetadata`
+   * @throws Error when the load fails, times out, or is superseded
+   */
+  const loadNative = async (src: string, initial = false): Promise<void> => {
     const session = loadSession;
     const videoEl = getOrCreateVideo();
     isNative = true;
@@ -887,6 +996,8 @@ export function createHLSPluginWith(
     return new Promise((resolve, reject) => {
       let watchdog: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
+      // Last element error of an initial load, reported if the watchdog wins
+      let last_error: NativeHLSError | null = null;
 
       const settle = () => {
         settled = true;
@@ -923,18 +1034,19 @@ export function createHLSPluginWith(
 
         hasPlayedContent = true;
 
+        // Retries spent getting the source up must not shorten playback's
+        // budget; a recovery reload keeps its count so it can still run out
+        if (initial) {
+          networkRetryCount = 0;
+          mediaRetryCount = 0;
+        }
+
         // Native HLS has no hls.js error channel. Route subsequent fatal
         // video element errors through the native retry budget so a
         // transient hiccup is absorbed, and only a genuinely dead stream
         // reaches the error overlay (and auto-reconnect) on Safari.
         const onFatalVideoError = () => {
-          const media_error = videoEl.error;
-          const hls_error: HLSError = {
-            type: media_error?.code === MediaError.MEDIA_ERR_NETWORK ? 'network' : 'media',
-            details: media_error?.message || 'Native HLS playback error',
-            fatal: true,
-          };
-          handleNativeFatalError(hls_error);
+          handleNativeFatalError(nativeMediaError(videoEl.error, 'playback'));
         };
         videoEl.addEventListener('error', onFatalVideoError);
 
@@ -969,20 +1081,98 @@ export function createHLSPluginWith(
 
       const onError = () => {
         if (settled) return;
-        settle();
 
-        const error = videoEl.error;
-        reject(new Error(error?.message || 'Failed to load HLS source'));
+        if (!initial || session !== loadSession) {
+          settle();
+          reject(new Error(videoEl.error?.message || 'Failed to load HLS source'));
+          return;
+        }
+
+        const error = nativeMediaError(videoEl.error, 'initial');
+        last_error = error;
+
+        const is_network = error.type === 'network';
+        const max_retries = is_network
+          ? (mergedConfig.maxNetworkRetries ?? 3)
+          : (mergedConfig.maxMediaRetries ?? 2);
+        const used = is_network ? networkRetryCount : mediaRetryCount;
+
+        if (used >= max_retries) {
+          settle();
+          api?.logger.error(`Native HLS load failed after ${used} ${error.type} retries`, {
+            src: sanitizeUrl(src),
+          });
+          emitFatalError(error, true);
+          reject(new Error(error.details));
+          return;
+        }
+
+        if (is_network) {
+          networkRetryCount++;
+        } else {
+          mediaRetryCount++;
+        }
+
+        const delay = getRetryDelay(used);
+        api?.logger.info(
+          `Retrying native HLS load after ${error.type} error (attempt ${used + 1}/${max_retries}) in ${delay}ms`
+        );
+        api?.emit(is_network ? 'error:network' : 'error:media', {
+          error: new Error(error.details),
+        });
+
+        if (retryTimeout) {
+          clearTimeout(retryTimeout);
+        }
+        // teardownPipeline() clears this on a new load or destroy, and the
+        // watchdog clears it when it ends the load
+        retryTimeout = setTimeout(() => {
+          retryTimeout = null;
+          if (settled || session !== loadSession) return;
+          videoEl.src = src;
+          videoEl.load();
+        }, delay);
       };
 
       // Watchdog: a load must terminate. Without this, a request that never
-      // errors and never produces metadata pins the viewer on a spinner.
+      // errors and never produces metadata pins the viewer on a spinner. On an
+      // initial load it is one ceiling over every retry, and it wins over any
+      // budget left: the pending retry is cancelled and the timeout reported.
       const timeout_ms = mergedConfig.loadTimeoutMs ?? 30000;
       if (timeout_ms > 0) {
         watchdog = setTimeout(() => {
           if (settled || session !== loadSession) return;
           settle();
-          reject(new Error('Video took too long to load (network timeout)'));
+
+          if (!initial) {
+            reject(new Error(LOAD_TIMEOUT_MESSAGE));
+            return;
+          }
+
+          if (retryTimeout) {
+            clearTimeout(retryTimeout);
+            retryTimeout = null;
+          }
+
+          api?.logger.error(`Native HLS load timed out after ${timeout_ms}ms`, {
+            src: sanitizeUrl(src),
+          });
+
+          const timeout_error: NativeHLSError = {
+            type: 'network',
+            details: LOAD_TIMEOUT_MESSAGE,
+            fatal: true,
+            timedOut: true,
+            attempts: networkRetryCount + mediaRetryCount,
+          };
+          if (last_error?.mediaErrorCode !== undefined) {
+            timeout_error.mediaErrorCode = last_error.mediaErrorCode;
+          }
+          if (last_error?.mediaErrorMessage !== undefined) {
+            timeout_error.mediaErrorMessage = last_error.mediaErrorMessage;
+          }
+          emitFatalError(timeout_error, false, LOAD_TIMEOUT_MESSAGE);
+          reject(new Error(LOAD_TIMEOUT_MESSAGE));
         }, timeout_ms);
       }
 
@@ -1756,13 +1946,13 @@ export function createHLSPluginWith(
       // Force native HLS when AirPlay is active (required for wireless playback)
       if (api.getState('airplayActive') && loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS (AirPlay active)');
-        await loadNative(src);
+        await loadNative(src, true);
       } else if (loader.isHlsJsSupported()) {
         api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
         await loadWithHlsJs(src);
       } else if (loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS playback (hls.js not supported)');
-        await loadNative(src);
+        await loadNative(src, true);
       } else {
         const probes = loader.describeSupport();
         const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;

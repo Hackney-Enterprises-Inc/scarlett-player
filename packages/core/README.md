@@ -75,6 +75,16 @@ player.once(event, handler)    // Subscribe for one emission
 player.destroy()               // Cleanup and destroy
 ```
 
+The second argument of `load()` is exported as the `LoadOptions` type
+(`{ autoplay?: boolean }`), for hosts and wrappers that pass it along:
+
+```typescript
+import type { LoadOptions } from '@scarlett-player/core';
+
+const next: LoadOptions = { autoplay: false }; // stay paused for this load only
+await player.load('next.m3u8', next);
+```
+
 ### State getters
 
 ```typescript

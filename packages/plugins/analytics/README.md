@@ -115,8 +115,8 @@ The plugin automatically tracks these events:
 | Event | Description | Data |
 |-------|-------------|------|
 | `viewStart` | Player initialized | viewId, sessionId, environment |
-| `playRequest` | User clicked play | timestamp |
-| `videoStart` | First frame rendered | startupTime |
+| `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
+| `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
 | `heartbeat` | Periodic update (10s default) | watchTime, playTime, QoE score |
 | `pause` | Playback paused | currentTime, pauseCount |
 | `seeking` | User seeked | seekTo, seekCount |
@@ -180,7 +180,7 @@ Every beacon sent includes:
   // Video context
   videoId: string;
   videoTitle?: string;
-  isLive?: boolean;
+  isLive: boolean | null;     // null until known (see below)
 
   // Player context
   playerVersion: string;
@@ -201,6 +201,22 @@ Every beacon sent includes:
   ...eventData
 }
 ```
+
+### `isLive`
+
+`isLive` is `config.isLive` when you set it. Otherwise it is the view's last
+known classification, taken from the player's `live` state:
+
+- `null` means not yet known. Every `viewStart` without `config.isLive` carries
+  `null`, because it leaves before any manifest is read. Treat `null` as absent
+  and merge the view's beacons true-wins.
+- It becomes `true` or `false` at the source's `media:loadedmetadata`, or
+  `true` as soon as the provider reports the stream live.
+- It lags a playlist advance. The view survives a source change, and the
+  previous item's value is kept until the new item's metadata classifies it.
+
+Before 1.18, `isLive` was `false` rather than `null` while unknown, so a live
+view's `viewStart` said `false`.
 
 ## Quality of Experience (QoE) Score
 

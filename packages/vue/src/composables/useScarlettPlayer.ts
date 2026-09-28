@@ -14,7 +14,7 @@ import {
   getCurrentInstance,
   type Ref,
 } from 'vue';
-import type { ScarlettPlayer, PlayerOptions } from '@scarlett-player/core';
+import type { ScarlettPlayer, PlayerOptions, LoadOptions } from '@scarlett-player/core';
 
 export interface UseScarlettPlayerOptions extends Omit<PlayerOptions, 'container'> {
   /**
@@ -194,9 +194,16 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     }
   }
 
-  async function load(src: string) {
+  /**
+   * Load a new source into the player. A no-op before `init()`.
+   *
+   * @param src - Media source URL
+   * @param options - Per-load options; `autoplay` overrides the `autoplay`
+   *   option for this load only
+   */
+  async function load(src: string, options?: LoadOptions) {
     if (player.value) {
-      await player.value.load(src);
+      await player.value.load(src, options);
     }
   }
 
