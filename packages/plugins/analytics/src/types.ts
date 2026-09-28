@@ -409,8 +409,9 @@ export interface IAnalyticsPlugin {
    * view sees the source's metadata. Before `init()`, it only replaces the
    * video the first view will report.
    *
-   * A playlist does this by itself: `playlist:change` switches to the track's
-   * `id` and `title`.
+   * A playlist does this by itself: after `playlist:change`, the next source
+   * load switches to the track's `id` and `title`. Calling `setVideo()`
+   * drops a playlist track still waiting to load.
    *
    * @param video - The video now playing
    * @throws Error if `videoId` is empty

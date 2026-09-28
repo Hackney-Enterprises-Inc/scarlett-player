@@ -136,6 +136,8 @@ export function createAnalyticsPlugin(
   let pauseStartTime: number | null = null;
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
+  // A playlist track that has not been loaded yet (see onPlaylistChange)
+  let pendingPlaylistVideo: AnalyticsVideo | null = null;
   let cleanupFns: Array<() => void> = [];
   // Live latency, accumulated at constant memory across the whole session.
   // Reset alongside the session so a second view does not inherit the first
@@ -538,9 +540,14 @@ export function createAnalyticsPlugin(
    * Used for the first view at init and for every one after it (another
    * video, or a replay after the previous view ended). Per-view trackers are
    * reset with the session so the new view inherits nothing from the last.
+   *
+   * @param lastKnownIsLive - Classification to carry over. A replay of the
+   *   same source passes the ended view's value, because nothing reloads the
+   *   source to classify it again; another video starts unknown.
    */
-  function startView(): void {
+  function startView(lastKnownIsLive: boolean | null = null): void {
     session = initSession();
+    session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
     isRebuffering = false;
     rebufferStartTime = null;
@@ -592,22 +599,43 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle a playlist track change: the track's `id` becomes the video.
+   * Handle a playlist track change: remember the track, switch on its load.
    *
-   * The playlist emits `playlist:change` for other edits too (adding,
-   * removing, shuffling), with the current track unchanged; those carry the
-   * same `id` and are ignored by `switchVideo()`.
+   * The event alone does not mean another video is playing. Removing the
+   * current track moves the playlist onto the next one without loading it,
+   * so the removed video keeps playing. The track is held as pending and
+   * becomes the video at the next source load (`onSourceChange`), which
+   * covers the playlist's own `media:load-request` and a host that loads the
+   * track itself. A change back to the current video, or an empty playlist,
+   * drops anything pending.
    *
    * @param payload - The current track, or null when the playlist is empty
    */
   function onPlaylistChange(payload: { track: { id: string; title?: unknown } | null }): void {
     const track = payload?.track;
-    if (!track || typeof track.id !== 'string' || track.id === '') return;
+    if (!track || typeof track.id !== 'string' || track.id === '' || track.id === video.videoId) {
+      pendingPlaylistVideo = null;
+      return;
+    }
 
-    switchVideo({
+    pendingPlaylistVideo = {
       videoId: track.id,
       videoTitle: typeof track.title === 'string' ? track.title : undefined,
-    });
+    };
+  }
+
+  /**
+   * Commit a pending playlist track once a source is loaded.
+   *
+   * Core writes the `source` state in `load()` before the provider loads, so
+   * the new view exists before that source's play request and metadata.
+   */
+  function onSourceChange(): void {
+    if (!pendingPlaylistVideo) return;
+
+    const next = pendingPlaylistVideo;
+    pendingPlaylistVideo = null;
+    switchVideo(next);
   }
 
   // === Event Handlers ===
@@ -628,7 +656,7 @@ export function createAnalyticsPlugin(
     // after a fatal error) is a new view of the same video, not a request
     // inside one that already sent its viewEnd.
     if (session.viewEnd !== null && api) {
-      startView();
+      startView(session.lastKnownIsLive);
     }
 
     playRequestPending = true;
@@ -668,6 +696,11 @@ export function createAnalyticsPlugin(
     if (event.key === 'playing' && event.value === true) {
       playRequestPending = false;
       onFirstFrame();
+      return;
+    }
+
+    if (event.key === 'source' && event.value) {
+      onSourceChange();
       return;
     }
 
@@ -1039,7 +1072,7 @@ export function createAnalyticsPlugin(
       // keys stay out of its beacons entirely.
       const unsubLatency = api.on('live:latency', onLiveLatency);
       const unsubLowLatency = api.on('live:lowlatency', onLowLatencyChange);
-      // A playlist track change is a new video, so a new view
+      // A playlist track change is a new video once its source loads
       const unsubPlaylist = api.on('playlist:change', onPlaylistChange);
 
       cleanupFns.push(
@@ -1118,6 +1151,9 @@ export function createAnalyticsPlugin(
       if (!next || typeof next.videoId !== 'string' || next.videoId === '') {
         throw new Error('Analytics setVideo() requires videoId');
       }
+      // The host named the video; a playlist track still waiting to load
+      // must not replace it at the next load.
+      pendingPlaylistVideo = null;
       switchVideo(next);
     },
 

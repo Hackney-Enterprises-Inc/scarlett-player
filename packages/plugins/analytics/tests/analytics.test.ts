@@ -1149,6 +1149,11 @@ describe('Analytics Plugin', () => {
       (api as any)._updateState({ paused: false, playing: true });
     };
 
+    /** Core's load(): writes the `source` state before the provider loads. */
+    const loadSource = (src: string): void => {
+      (api as any)._updateState({ source: { src, type: 'application/x-mpegurl' } });
+    };
+
     /** The current source plays to its end. */
     const endPlayback = (): void => {
       (api as any)._updateState({ playing: false, paused: true, ended: true });
@@ -1177,12 +1182,13 @@ describe('Analytics Plugin', () => {
       expect(prerollEnd?.videoId).toBe('preroll');
       expect(prerollEnd?.exitType).toBe('completed');
 
-      // The playlist advances to the main video
+      // The playlist advances to the main video and loads it
       beacons = [];
       (api as any)._trigger('playlist:change', {
         track: { id: 'main-video', src: 'main.m3u8', title: 'Main Video' },
         index: 1,
       });
+      loadSource('main.m3u8');
 
       const mainViewId = plugin.getViewId();
       expect(mainViewId).not.toBe(prerollViewId);
@@ -1220,6 +1226,57 @@ describe('Analytics Plugin', () => {
       await plugin.destroy();
     });
 
+    it('keeps the view when the current playlist track is removed without a load', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 1000,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+      startPlayback();
+      beacons = [];
+
+      // playlist.remove(current): the next track becomes current, nothing loads
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'next-track', src: 'next.m3u8' },
+        index: 0,
+      });
+      vi.advanceTimersByTime(1000);
+
+      expect(plugin.getViewId()).toBe(viewId);
+      expect(beacons.every((b) => b.videoId === mockConfig.videoId)).toBe(true);
+      expect(beacons.filter((b) => b.event === 'viewStart' || b.event === 'viewEnd')).toHaveLength(0);
+
+      // When that track does load, it becomes the video
+      loadSource('next.m3u8');
+      expect(plugin.getViewId()).not.toBe(viewId);
+      expect(beacons.find((b) => b.event === 'viewStart')?.videoId).toBe('next-track');
+
+      await plugin.destroy();
+    });
+
+    it('lets setVideo() win over a playlist track still waiting to load', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playlist:change', {
+        track: { id: 'queued-track', src: 'queued.m3u8' },
+        index: 1,
+      });
+      plugin.setVideo({ videoId: 'host-video' });
+      loadSource('host.m3u8');
+
+      const starts = beacons.filter((b) => b.event === 'viewStart').map((b) => b.videoId);
+      expect(starts).toEqual([mockConfig.videoId, 'host-video']);
+
+      await plugin.destroy();
+    });
+
     it('does not start a new view on a token refresh of the same video', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,
@@ -1235,6 +1292,7 @@ describe('Analytics Plugin', () => {
       // The host re-loads a freshly signed URL for the same video
       plugin.setVideo({ videoId: mockConfig.videoId });
       (api as any)._updateState({ playing: false, paused: true, currentTime: 0 });
+      loadSource('main.m3u8?token=new');
       (api as any)._trigger('media:loaded', { src: 'main.m3u8?token=new', type: 'hls' });
       startPlayback();
       // A playlist edit re-emits the current track unchanged
@@ -1285,6 +1343,31 @@ describe('Analytics Plugin', () => {
       beacons = [];
       vi.advanceTimersByTime(1000);
       expect(beacons.filter((b) => b.event === 'heartbeat')).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it('keeps the source classification on a replay, which does not reload it', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: undefined,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('media:loadedmetadata', { duration: 100 });
+      startPlayback();
+      endPlayback();
+
+      beacons = [];
+      startPlayback();
+
+      expect(beacons[0].event).toBe('viewStart');
+      expect(beacons.every((b) => b.isLive === false)).toBe(true);
+
+      // Another video starts unknown until its own metadata
+      plugin.setVideo({ videoId: 'other-video' });
+      expect(beacons[beacons.length - 1]).toMatchObject({ event: 'viewStart', isLive: null });
 
       await plugin.destroy();
     });

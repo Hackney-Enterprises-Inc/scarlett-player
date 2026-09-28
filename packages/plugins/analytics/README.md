@@ -235,12 +235,18 @@ its own `viewStart`.
   view. The plugin only knows the video changed when told its ID, never from
   the URL.
 - **Playing again after the view ended** (a replay after `ended`, a retry
-  after a fatal error) starts a new view of the same video.
+  after a fatal error) starts a new view of the same video. A replay keeps
+  the ended view's `isLive`, since nothing reloads the source to classify it
+  again.
 
-A playlist tells the plugin by itself: on `playlist:change` the track's `id`
-becomes the `videoId` and its `title` the `videoTitle`. The playlist re-emits
-that event for edits that keep the current track (adding, removing,
-shuffling), and those change nothing.
+A playlist tells the plugin by itself. After `playlist:change`, the next
+source load makes the track's `id` the `videoId` and its `title` the
+`videoTitle`; the switch waits for the load because the event alone does not
+mean another video is playing. Removing the current track moves the playlist
+onto the next one without loading it, so the view stays with the video still
+on screen. The switch happens whether the playlist loads the track itself
+(`autoLoad`) or your code calls `player.load()`, and `setVideo()` overrides a
+track still waiting to load.
 
 A host that calls `player.load()` itself, a pre-roll followed by the main video
 for instance, names the video with `setVideo()` before loading it:
