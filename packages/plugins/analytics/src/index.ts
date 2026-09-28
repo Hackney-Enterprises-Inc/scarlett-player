@@ -13,7 +13,7 @@
  * - Persistent viewer identification
  */
 
-import type { IPluginAPI, Plugin, QualityLevel } from '@scarlett-player/core';
+import type { IPluginAPI, Plugin, QualityLevel, StateChangeEvent } from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
   ViewSession,
@@ -123,6 +123,8 @@ export function createAnalyticsPlugin(
   let isRebuffering = false;
   let rebufferStartTime: number | null = null;
   let pauseStartTime: number | null = null;
+  // A play request is waiting for its first frame (see onPlayRequest)
+  let playRequestPending = false;
   let cleanupFns: Array<() => void> = [];
   // Live latency, accumulated at constant memory across the whole session.
   // Reset alongside the session so a second view does not inherit the first
@@ -159,7 +161,21 @@ export function createAnalyticsPlugin(
       avgBitrate: 0,
       playbackState: 'loading',
       exitType: null,
+      lastKnownIsLive: null,
     };
+  }
+
+  /**
+   * The `isLive` a beacon carries.
+   *
+   * `config.isLive` when the host set it, otherwise the view's last known
+   * classification: `null` until the provider has classified the source, so
+   * a consumer can tell "not yet known" from VOD.
+   *
+   * @returns Whether the view is live, or null while unknown
+   */
+  function resolveIsLive(): boolean | null {
+    return mergedConfig.isLive ?? session.lastKnownIsLive;
   }
 
   /**
@@ -192,7 +208,7 @@ export function createAnalyticsPlugin(
       // Video context
       videoId: mergedConfig.videoId,
       videoTitle: mergedConfig.videoTitle,
-      isLive: mergedConfig.isLive ?? api?.getState('live') ?? false,
+      isLive: resolveIsLive(),
 
       // Player context
       playerVersion: PLUGIN_VERSION,
@@ -323,7 +339,7 @@ export function createAnalyticsPlugin(
       viewerId: session.viewerId,
       videoId: mergedConfig.videoId,
       videoTitle: mergedConfig.videoTitle,
-      isLive: mergedConfig.isLive ?? api?.getState('live') ?? false,
+      isLive: resolveIsLive(),
       playerVersion: PLUGIN_VERSION,
       playerName: PLUGIN_NAME,
       browser: getBrowserInfo().name,
@@ -507,11 +523,93 @@ export function createAnalyticsPlugin(
   // === Event Handlers ===
 
   /**
-   * Handle play request (user clicks play).
+   * Record a play request: the start of a startup-time measurement.
+   *
+   * Two signals can announce the same request. Core's `play()` emits
+   * `playback:play` synchronously, before the element's `play` event; a
+   * control or autoplay calling `video.play()` directly is seen first as the
+   * `paused` key going false. Whichever arrives first wins, and the other is
+   * absorbed until the request settles at the next `playing: true` or pause.
    */
   function onPlayRequest(): void {
+    if (playRequestPending) return;
+    playRequestPending = true;
     session.playRequestTime = Date.now();
     sendBeacon('playRequest');
+  }
+
+  /**
+   * Handle `playback:play`.
+   *
+   * A request unless playback is already running: an element-driven start
+   * reaches the bus only at `playing`, after the `paused` key announced it,
+   * and a stall ending emits it again while `playing` never went false. It
+   * still ends a rebuffer, which no state key can do, because `playing` does
+   * not change across a stall.
+   */
+  function onPlayEvent(): void {
+    if (!api?.getState('playing')) {
+      onPlayRequest();
+    }
+    onPlaying();
+  }
+
+  /**
+   * Handle a player state change.
+   *
+   * @param event - The change, dispatched only when the value actually changed
+   */
+  function onStateChange(event: StateChangeEvent): void {
+    if (event.key === 'paused') {
+      if (event.previousValue === true && event.value === false && !api?.getState('playing')) {
+        onPlayRequest();
+      }
+      return;
+    }
+
+    if (event.key === 'playing' && event.value === true) {
+      playRequestPending = false;
+      onFirstFrame();
+      return;
+    }
+
+    // Only a change to true classifies. Core writes `live: false` on every
+    // load(), which is a reset rather than a classification: the next
+    // media:loadedmetadata re-classifies.
+    if (event.key === 'live' && event.value === true) {
+      session.lastKnownIsLive = true;
+    }
+  }
+
+  /**
+   * Classify the source once its metadata has loaded.
+   *
+   * Every provider has written `live` by then: hls.js at `hlsLevelLoaded`,
+   * native HLS at `durationchange`, WHEP before `media:loaded`.
+   */
+  function onLoadedMetadata(): void {
+    if (!api) return;
+    session.lastKnownIsLive = api.getState('live') === true;
+  }
+
+  /**
+   * Send `videoStart` on the first frame of the view.
+   *
+   * The first `playing: true` the view sees, so a resume after pause or a
+   * second item is not a second start.
+   */
+  function onFirstFrame(): void {
+    if (session.firstFrameTime !== null) return;
+
+    const now = Date.now();
+    session.firstFrameTime = now;
+    session.startupTime = session.playRequestTime !== null
+      ? now - session.playRequestTime
+      : null;
+
+    sendBeacon('videoStart', {
+      startupTime: session.startupTime,
+    });
   }
 
   /**
@@ -519,18 +617,6 @@ export function createAnalyticsPlugin(
    */
   function onPlaying(): void {
     const now = Date.now();
-
-    // First frame?
-    if (session.firstFrameTime === null) {
-      session.firstFrameTime = now;
-      session.startupTime = session.playRequestTime
-        ? now - session.playRequestTime
-        : null;
-
-      sendBeacon('videoStart', {
-        startupTime: session.startupTime,
-      });
-    }
 
     // End rebuffer?
     if (isRebuffering && rebufferStartTime) {
@@ -561,6 +647,8 @@ export function createAnalyticsPlugin(
   function onPause(): void {
     if (!api) return;
 
+    // A pause settles any request still waiting for its first frame
+    playRequestPending = false;
     session.pauseCount++;
     session.playbackState = 'paused';
     pauseStartTime = Date.now();
@@ -839,10 +927,9 @@ export function createAnalyticsPlugin(
       sendBeacon('viewStart');
 
       // Subscribe to player events
-      const unsubPlay = api.on('playback:play', () => {
-        onPlayRequest();
-        onPlaying();
-      });
+      const unsubPlay = api.on('playback:play', onPlayEvent);
+      const unsubState = api.subscribeToState(onStateChange);
+      const unsubMetadata = api.on('media:loadedmetadata', onLoadedMetadata);
       const unsubPause = api.on('playback:pause', onPause);
       const unsubWaiting = api.on('media:waiting', onWaiting);
       const unsubSeeking = api.on('playback:seeking', onSeeking);
@@ -858,6 +945,8 @@ export function createAnalyticsPlugin(
 
       cleanupFns.push(
         unsubPlay,
+        unsubState,
+        unsubMetadata,
         unsubPause,
         unsubWaiting,
         unsubSeeking,

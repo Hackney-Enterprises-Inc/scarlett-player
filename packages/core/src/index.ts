@@ -117,4 +117,6 @@ export type {
   EventEmitterOptions,
   // Playlist Track (minimal interface for core events)
   PlaylistTrack,
+  // Load Types
+  LoadOptions,
 } from './types/index';

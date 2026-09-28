@@ -35,10 +35,11 @@ best effort; everything else is required.
 The live scenario plays `/__wire/live.m3u8`, a rolling playlist the page
 server builds over the same 2 s segments (six-segment window, no `ENDLIST`,
 standard latency, so `lowLatency` is `false`). The page never configures
-`isLive`; analytics reads it from player state. On live, `viewStart` leaves
-before hls.js has parsed the manifest and carries `isLive: false` while every
-later beacon says `true`; the manifest's `scenarios.live.isLiveByEvent` records
-that per event rather than asserting it away.
+`isLive`; analytics classifies from player state. `viewStart` leaves before
+any manifest is parsed and carries `isLive: null` (not yet known) on every
+scenario; later beacons carry the classification, `false` on VOD and `true`
+on live. Each scenario's `isLiveByEvent` in the manifest records the value per
+event.
 
 The page plays a one-variant master playlist the runner serves over the
 shared fixture's `vod.m3u8` (`BANDWIDTH=264000,RESOLUTION=320x180`): the
@@ -53,7 +54,9 @@ produces a real stall. `trackEvent('wireCustom')` goes over the wire as
 `playerVersion`/`playerName` on every beacon; `X-API-Key` and the host header
 on every fetch beacon and only `?api_key=` on the unload beacon; the preflight
 names `x-api-key`; the unload `viewEnd` is the documented field subset of the
-ended one; a fatal error sends `error` (with `errorCode`) and then a `viewEnd`
+ended one; `videoStart.startupTime` is above zero on VOD; `isLive` is `null`
+on every `viewStart`, `false` on the VOD `videoStart` and ended `viewEnd`, and
+`true` on the live `videoStart`; a fatal error sends `error` (with `errorCode`) and then a `viewEnd`
 with `exitType: 'error'`; the live heartbeat and live unload `viewEnd` carry
 `isLive: true` and all five latency summary keys (`liveLatencySamples`,
 `liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`, `lowLatency`, which must

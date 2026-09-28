@@ -25,8 +25,8 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /**
  * The smallest API surface `init()` touches: it sends the viewStart beacon,
- * subscribes to seven player events and logs. Kept local so this file does not
- * depend on the fixture in analytics.test.ts.
+ * subscribes to player events and state changes, and logs. Kept local so this
+ * file does not depend on the fixture in analytics.test.ts.
  *
  * @returns A mock plugin API good enough to drive one beacon
  */
@@ -42,6 +42,7 @@ function createMinimalApi(): IPluginAPI {
     emit: vi.fn(),
     getPlugin: vi.fn(() => null),
     onDestroy: vi.fn(),
+    subscribeToState: vi.fn(() => vi.fn()),
   } as unknown as IPluginAPI;
 }
 

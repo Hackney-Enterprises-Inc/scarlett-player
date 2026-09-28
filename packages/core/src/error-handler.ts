@@ -70,6 +70,12 @@ export interface PlayerErrorDetail {
    * session ids live in query strings and must not reach telemetry.
    */
   url?: string;
+  /** `MediaError.code` of the media element error behind the failure, when there was one */
+  mediaErrorCode?: number;
+  /** `MediaError.message` of the media element error behind the failure, when there was one */
+  mediaErrorMessage?: string;
+  /** True when the provider's load watchdog ended the load, whatever budget was left */
+  timedOut?: boolean;
 }
 
 /**

@@ -17,6 +17,7 @@ import { sanitizeUrl } from './utils/url';
 import type { Plugin } from './types/plugin';
 import type { EventName, EventHandler as EventHandlerFn } from './types/events';
 import type { StateChangeEvent, StateStore } from './types/state';
+import type { LoadOptions } from './types/load';
 
 /**
  * Player configuration options.
@@ -455,7 +456,7 @@ export class ScarlettPlayer {
    * await player.load('next.m3u8', { autoplay: false });
    * ```
    */
-  async load(source: string, options?: { autoplay?: boolean }): Promise<void> {
+  async load(source: string, options?: LoadOptions): Promise<void> {
     this.checkDestroyed();
 
     // A source is now the host's business: a later init() must not overwrite

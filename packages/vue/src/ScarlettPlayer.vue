@@ -6,7 +6,13 @@
 // `defineExpose` is a compiler macro, not a runtime export: importing it made
 // the SFC compiler warn on every build and every test run.
 import { ref, shallowRef, markRaw, onMounted, onBeforeUnmount, watch, type PropType } from 'vue';
-import type { ScarlettPlayer, PlayerOptions, Plugin, PlayerEventMap } from '@scarlett-player/core';
+import type {
+  ScarlettPlayer,
+  PlayerOptions,
+  Plugin,
+  PlayerEventMap,
+  LoadOptions,
+} from '@scarlett-player/core';
 
 // Props
 const props = defineProps({
@@ -182,11 +188,20 @@ onBeforeUnmount(() => {
   }
 });
 
+// Source of the last exposed load(), until a src prop change consumes it. A
+// host that sets the prop and calls load(src, options) in the same update
+// already loaded that source with its options; reloading it here, without
+// them, would cancel that load and let the autoplay state decide instead.
+let explicitLoadSrc: string | null = null;
+
 // Watch for src changes
 watch(
   () => props.src,
   async (newSrc) => {
-    if (newSrc && playerInstance.value) {
+    const consumed = newSrc !== undefined && newSrc === explicitLoadSrc;
+    explicitLoadSrc = null;
+
+    if (!consumed && newSrc && playerInstance.value) {
       await playerInstance.value.load(newSrc);
     }
   }
@@ -353,9 +368,12 @@ defineExpose({
     playerInstance.value?.registerPlugin(plugin);
   },
 
-  // Load source
-  async load(src: string) {
-    await playerInstance.value?.load(src);
+  // Load source. `options.autoplay` decides for this load only; the src
+  // watcher passes none, so there the player's autoplay state decides. A src
+  // prop change to the same source is consumed rather than loaded twice.
+  async load(src: string, options?: LoadOptions) {
+    explicitLoadSrc = src;
+    await playerInstance.value?.load(src, options);
   },
 
   // Destroy

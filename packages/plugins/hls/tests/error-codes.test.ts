@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ErrorCode } from '@scarlett-player/core';
-import type { IPluginAPI } from '@scarlett-player/core';
+import { ErrorCode, ScarlettPlayer } from '@scarlett-player/core';
+import type { IPluginAPI, PlayerError } from '@scarlett-player/core';
 import { createHLSPlugin } from '../src/index';
 import * as hlsLoader from '../src/hls-loader';
 import {
@@ -20,6 +20,7 @@ import {
   installMediaStubs,
   flush,
   fireError,
+  fireVideoError,
 } from './helpers';
 
 describe('HLS fatal error code classification', () => {
@@ -152,5 +153,61 @@ describe('HLS fatal error code classification', () => {
     fireError(c, { type: 'mediaError', details: 'bufferAppendError', fatal: true });
     await flush();
     expectEmittedCode(ErrorCode.MEDIA_APPEND_ERROR);
+  });
+});
+
+/**
+ * SCAR-HLS-4 end to end through the real core: a native first load that
+ * fails must reach the host with the provider's code and MediaError detail.
+ * It used to reject a plain Error, which core's load() catch classified as
+ * SOURCE_LOAD_FAILED from the message, dropping the MediaError code.
+ */
+describe('native first-load failure through core load()', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hlsLoader.resetLoader();
+    installMediaStubs();
+    vi.spyOn(hlsLoader, 'supportsNativeHLS').mockReturnValue(true);
+    vi.spyOn(hlsLoader, 'isHlsJsSupported').mockReturnValue(false);
+    vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(true);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the provider's code instead of SOURCE_LOAD_FAILED", async () => {
+    const player = new ScarlettPlayer({
+      container,
+      plugins: [createHLSPlugin({ maxNetworkRetries: 0, autoReconnect: false })],
+    });
+
+    const loading = player.load('http://example.com/vod/stream.m3u8');
+    await flush();
+    await flush();
+
+    const video = container.querySelector('video') as HTMLVideoElement;
+    fireVideoError(video, 2, 'manifest 403');
+    await loading;
+
+    const error = player.getState().error as PlayerError | null;
+    expect(error?.code).toBe(ErrorCode.MEDIA_NETWORK_ERROR);
+    expect(error?.detail).toEqual(
+      expect.objectContaining({ type: 'network', retriesExhausted: true })
+    );
+    expect(error?.detail).toHaveProperty('mediaErrorCode', 2);
+
+    await player.destroy();
   });
 });

@@ -79,14 +79,18 @@ export interface HLSPluginConfig {
    * Max network error retries before giving up (default: 3).
    *
    * Governs both playback branches: hls.js retries the load, and the native
-   * (Safari/iOS) path reloads the source and restores position.
+   * (Safari/iOS) path reloads the source and restores position. The native
+   * first load spends it too, for every element error except
+   * MEDIA_ERR_DECODE, within the single `loadTimeoutMs` ceiling. Set 0 to
+   * fail the native first load on its first error.
    */
   maxNetworkRetries?: number;
   /**
    * Max media error retries before giving up (default: 2).
    *
    * Governs both playback branches: hls.js calls recoverMediaError(), and the
-   * native (Safari/iOS) path reloads the source and restores position.
+   * native (Safari/iOS) path reloads the source and restores position. The
+   * native first load spends it on MEDIA_ERR_DECODE.
    */
   maxMediaRetries?: number;
   /** Cap quality to player element dimensions (default: true) */

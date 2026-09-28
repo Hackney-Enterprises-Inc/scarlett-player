@@ -595,8 +595,8 @@ async function scenarioFullSession(browser, pageOrigin, beaconOrigin) {
     // rebufferStart arrives (or 12 s pass), then release them. The page's hls
     // config keeps only ~4 s ahead, so parked segments run playback dry
     // within seconds. Counted from here because a rebufferStart can already
-    // exist: play() through core emits playback:play before the first frame,
-    // so analytics counts the startup buffering as a rebuffer.
+    // exist: before 1.18 analytics took core's playback:play for the first
+    // frame and counted the startup buffering as a rebuffer.
     const rebuffersBefore = beaconsOf('full-session').filter((r) => eventOf(r) === 'rebufferStart').length;
     notes.startupRebuffer = rebuffersBefore > 0;
     segmentHold.start();
@@ -817,8 +817,8 @@ function selectFixtures(scenarioNotes) {
   }
   beaconFixture('full-session', 'heartbeat', { pick: 'last' });
   for (const event of ['rebufferStart', 'rebufferEnd']) {
-    // The last: the first can be the startup buffering analytics counts as
-    // a rebuffer when play() goes through core (see scenarioFullSession).
+    // The last: before 1.18 the first could be the startup buffering, which
+    // analytics counted as a rebuffer (see scenarioFullSession).
     beaconFixture('full-session', event, {
       pick: 'last',
       required: false,
@@ -943,6 +943,17 @@ function runAssertions(fixtures, absent, scenarioNotes) {
     if (ended.exitType !== 'completed') fail(`ended exitType ${ended.exitType}`);
   });
 
+  check('videoStart.startupTime is above zero on VOD (play request to first frame, SCAR-ANALYTICS-4)', () => {
+    const start = beaconsOf('full-session').find((r) => eventOf(r) === 'videoStart')?.body;
+    if (!start) fail('no videoStart in full-session');
+    // Until 1.18 the request and the "first frame" were the same handler, so
+    // this was always about 0 whatever the viewer actually waited.
+    if (!(typeof start.startupTime === 'number' && start.startupTime > 0)) {
+      fail(`startupTime ${JSON.stringify(start.startupTime)}`);
+    }
+    return `${start.startupTime} ms`;
+  });
+
   check('a fatal error sends an error beacon with errorCode, then a viewEnd with exitType error', () => {
     const error = body('error.fetch.json');
     const viewEnd = body('viewEnd.fetch.error.json');
@@ -1016,6 +1027,20 @@ function runAssertions(fixtures, absent, scenarioNotes) {
       if (leaked.length) fail(`${eventOf(r)} (${r.scenario}) carries ${leaked.join(', ')} on VOD`);
     }
     return `latency mean ${heartbeat.liveLatencyMean}s over ${heartbeat.liveLatencySamples} readings, lowLatency ${heartbeat.lowLatency}`;
+  });
+
+  check('isLive is null on every viewStart, then false on VOD and true on live (SCAR-ANALYTICS-6)', () => {
+    const ran = [...new Set(beacons.map((r) => r.scenario))];
+    for (const scenario of ran) {
+      const start = beaconsOf(scenario).find((r) => eventOf(r) === 'viewStart');
+      if (!start) fail(`no viewStart in ${scenario}`);
+      if (start.body.isLive !== null) fail(`viewStart (${scenario}) isLive ${JSON.stringify(start.body.isLive)}, expected null`);
+    }
+    const firstFrame = (scenario) => beaconsOf(scenario).find((r) => eventOf(r) === 'videoStart')?.body;
+    if (firstFrame('full-session')?.isLive !== false) fail(`VOD videoStart isLive ${JSON.stringify(firstFrame('full-session')?.isLive)}`);
+    if (body('viewEnd.fetch.ended.json')?.isLive !== false) fail(`VOD ended viewEnd isLive ${JSON.stringify(body('viewEnd.fetch.ended.json')?.isLive)}`);
+    if (firstFrame('live')?.isLive !== true) fail(`live videoStart isLive ${JSON.stringify(firstFrame('live')?.isLive)}`);
+    return `${ran.length} viewStart null`;
   });
 
   check('heartbeat watchTime and rebufferCount never decrease (sanity)', () => {
@@ -1115,12 +1140,10 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
           beacons: beaconsOf(name).length,
           pageErrors: notes.pageErrors ?? [],
           ...(notes.rebuffer ? { rebuffer: notes.rebuffer, startupRebuffer: notes.startupRebuffer } : {}),
-          // isLive per event as first sent: on live, viewStart leaves before
-          // the manifest is parsed, so it can say false where later beacons
-          // say true. Recorded, not asserted; the ingest decides what wins.
-          ...(name === 'live'
-            ? { isLiveByEvent: Object.fromEntries(beaconsOf(name).reverse().map((r) => [eventOf(r), r.body.isLive])) }
-            : {}),
+          // isLive per event as first sent. viewStart leaves before any
+          // manifest is parsed, so it is null on every scenario (asserted in
+          // runAssertions); later beacons carry the classification.
+          isLiveByEvent: Object.fromEntries(beaconsOf(name).reverse().map((r) => [eventOf(r), r.body.isLive])),
         },
       ])
     ),
