@@ -117,14 +117,14 @@ The plugin automatically tracks these events:
 | `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment |
 | `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
-| `heartbeat` | Periodic update (10s default) | watchTime, playTime, QoE score |
-| `pause` | Playback paused | currentTime, pauseCount |
-| `seeking` | User seeked | seekTo, seekCount |
+| `heartbeat` | Periodic update (10s default) | watchTime, playTime (only the time actually spent playing, not stalled or paused), QoE score |
+| `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
+| `seeking` | A seek started | seekTo: the seek target in seconds (not the position the seek left), seekCount |
 | `rebufferStart` | Buffering started | rebufferCount |
-| `rebufferEnd` | Buffering ended | duration, totalRebufferTime |
+| `rebufferEnd` | Buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
 | `error` | Error occurred: a media element error, or a player `error` event (including a provider's fatal error such as an HLS manifest 404) | errorType, errorMessage, errorCode, fatal. `errorType` is the `Error` name when there is one, otherwise the player error code; `errorCode` is the player error code (for example `MEDIA_NETWORK_ERROR`), absent when there is none |
-| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | all metrics, exitType, QoE score |
+| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | all metrics, exitType, QoE score. watchTime and playTime include the time since the last heartbeat. completionRate is 100 for a `completed` view; otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them |
 
 ### Exit Types
 
@@ -188,7 +188,7 @@ Every beacon sent includes:
 
   // Environment
   browser: string;            // 'Chrome', 'Safari', etc.
-  os: string;                 // 'Windows', 'macOS', etc.
+  os: string;                 // 'Windows', 'macOS', 'iOS' (iPhone, iPad), 'Android', etc.
   deviceType: string;         // 'desktop', 'mobile', 'tablet'
   screenSize: string;         // '1920x1080'
   playerSize: string;         // '1280x720'

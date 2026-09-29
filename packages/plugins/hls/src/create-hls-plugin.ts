@@ -1368,7 +1368,8 @@ export function createHLSPluginWith(
       (hls as any)?.levels?.[(hls as any)?.currentLevel]?.details?.targetduration ??
       0;
     const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
-    const checkInterval = Math.min(targetDuration, 30000);
+    // targetDuration is in seconds; setTimeout wants ms, so convert before capping.
+    const checkInterval = Math.min(targetDuration * 1000, 30000);
 
     const check = () => {
       if (!video || !api) return;

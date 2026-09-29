@@ -591,6 +591,86 @@ describe('Analytics Plugin', () => {
       const metrics = plugin.getMetrics();
       expect(metrics.rebufferCount).toBe(1);
     });
+
+    // SCAR-ANALYTICS-9: onPlaying() was the only place that ever closed a
+    // rebuffer, so a stall that ended any other way lost its time entirely -
+    // startView() resets isRebuffering/rebufferStartTime for the next view
+    // with nothing having added it to rebufferDuration.
+    it('closes an open rebuffer when the viewer pauses mid-stall, ordered before the pause beacon', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+
+      (api as any)._trigger('media:waiting');
+      vi.advanceTimersByTime(1000);
+      beacons = [];
+
+      (api as any)._trigger('playback:pause');
+
+      expect(beacons.filter((b) => b.event !== 'heartbeat').map((b) => b.event)).toEqual([
+        'rebufferEnd',
+        'pause',
+      ]);
+      const rebufferEnd = beacons.find((b) => b.event === 'rebufferEnd');
+      expect(rebufferEnd?.duration).toBe(1000);
+      expect(plugin.getMetrics().rebufferDuration).toBe(1000);
+
+      beacons = [];
+      await plugin.destroy();
+      const viewEnd = beacons.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.rebufferDuration).toBe(1000);
+    });
+
+    it('closes an open rebuffer when playback ends, so viewEnd reports its duration', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+
+      (api as any)._trigger('media:waiting');
+      vi.advanceTimersByTime(750);
+      beacons = [];
+
+      (api as any)._trigger('playback:ended');
+
+      expect(beacons.find((b) => b.event === 'rebufferEnd')?.duration).toBe(750);
+      const viewEnd = beacons.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.rebufferDuration).toBe(750);
+    });
+
+    it('closes an open rebuffer on unload without a separate rebufferEnd beacon', async () => {
+      const sent: BeaconPayload[] = [];
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: (_url: string, payload: BeaconPayload) => {
+          sent.push(payload);
+        },
+      });
+
+      await plugin.init(api);
+      (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+
+      (api as any)._trigger('media:waiting');
+      vi.advanceTimersByTime(600);
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(sent.some((b) => b.event === 'rebufferEnd')).toBe(false);
+      const viewEnd = sent.find((b) => b.event === 'viewEnd');
+      expect(viewEnd?.rebufferDuration).toBe(600);
+
+      await plugin.destroy();
+    });
   });
 
   describe('Quality Tracking', () => {
@@ -1573,6 +1653,324 @@ describe('Analytics Plugin', () => {
       });
 
       expect(() => plugin.setVideo({ videoId: '' })).toThrow('requires videoId');
+    });
+  });
+
+  // Production 1.19.1 beacons: a 16 s pre-roll under tsp-web's ~30 s heartbeat
+  // reported playTime 0, completionRate 0 and pauseCount 1 on every completed
+  // view.
+  describe('viewEnd accuracy', () => {
+    /** Request playback and reach the first frame. */
+    const play = (): void => {
+      (api as any)._updateState({ ended: false });
+      (api as any)._trigger('playback:play');
+      (api as any)._updateState({ paused: false, playing: true });
+    };
+
+    /** The element pauses. */
+    const pause = (): void => {
+      (api as any)._updateState({ playing: false, paused: true });
+      (api as any)._trigger('playback:pause');
+    };
+
+    const viewEnd = (): BeaconPayload | undefined =>
+      beacons.find((b) => b.event === 'viewEnd');
+
+    // SCAR-ANALYTICS-11
+    it('counts the time since the last heartbeat in the ended viewEnd', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 30000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      play();
+      vi.advanceTimersByTime(16000);
+      (api as any)._updateState({ playing: false, paused: true, ended: true });
+      (api as any)._trigger('playback:ended');
+
+      expect(viewEnd()).toMatchObject({ watchTime: 16000, playTime: 16000 });
+      await plugin.destroy();
+    });
+
+    it('counts the time since the last heartbeat in the unload viewEnd', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 30000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      play();
+      vi.advanceTimersByTime(16000);
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(viewEnd()).toMatchObject({
+        watchTime: 16000,
+        playTime: 16000,
+        exitType: 'abandoned',
+      });
+      await plugin.destroy();
+    });
+
+    it('keeps a mid-interval stall and pause out of play time', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 10000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      play(); // 0-3 s playing
+      vi.advanceTimersByTime(3000);
+      (api as any)._trigger('media:waiting'); // 3-5 s stalled
+      vi.advanceTimersByTime(2000);
+      (api as any)._trigger('playback:play'); // 5-6 s playing
+      vi.advanceTimersByTime(1000);
+      pause(); // 6-9 s paused
+      vi.advanceTimersByTime(3000);
+      play(); // 9-12 s playing, heartbeat at 10 s
+      vi.advanceTimersByTime(3000);
+
+      // Until SCAR-ANALYTICS-11 the heartbeat credited its whole interval
+      // because playback happened to be running at the tick
+      const heartbeat = beacons.find((b) => b.event === 'heartbeat');
+      expect(heartbeat).toMatchObject({ watchTime: 10000, playTime: 5000 });
+
+      (api as any)._updateState({ playing: false, paused: true, ended: true });
+      (api as any)._trigger('playback:ended');
+
+      expect(viewEnd()).toMatchObject({
+        watchTime: 12000,
+        playTime: 7000,
+        rebufferDuration: 2000,
+      });
+      await plugin.destroy();
+    });
+
+    // SCAR-ANALYTICS-12
+    it('reports completionRate 100 for a completed view whose state was already reset', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 30000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      vi.advanceTimersByTime(16000);
+      (api as any)._updateState({ currentTime: 16 });
+      // tsp-web's own playback:ended listener calls load() first, which zeroes
+      // currentTime and duration before analytics hears the event
+      (api as any)._updateState({ currentTime: 0, duration: 0 });
+      (api as any)._trigger('playback:ended');
+
+      expect(viewEnd()).toMatchObject({ exitType: 'completed', completionRate: 100 });
+      await plugin.destroy();
+    });
+
+    /** The provider's timeupdate: state first, then the bus event. */
+    const timeUpdate = (currentTime: number): void => {
+      (api as any)._updateState({ currentTime });
+      (api as any)._trigger('playback:timeupdate', { currentTime });
+    };
+
+    /** The part of core's load() reset that matters here: no timeupdate. */
+    const loadReset = (): void => {
+      (api as any)._updateState({
+        playing: false, paused: true, ended: false, currentTime: 0, duration: 0, live: false,
+      });
+    };
+
+    it('reports the last timeupdate position for a view switched away before any heartbeat', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 30000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      vi.advanceTimersByTime(8000);
+      timeUpdate(8);
+      loadReset();
+      plugin.setVideo({ videoId: 'next-video' });
+
+      expect(viewEnd()).toMatchObject({ exitType: 'abandoned', completionRate: 50 });
+      await plugin.destroy();
+    });
+
+    it('reports the latest timeupdate position, not the last heartbeat one', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        heartbeatInterval: 4000,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      vi.advanceTimersByTime(4000);
+      timeUpdate(4);
+      vi.advanceTimersByTime(4000); // heartbeat at 8 s sees 4 s
+      vi.advanceTimersByTime(3000);
+      timeUpdate(12);
+      loadReset();
+      plugin.setVideo({ videoId: 'next-video' });
+
+      expect(viewEnd()).toMatchObject({ exitType: 'abandoned', completionRate: 75 });
+      await plugin.destroy();
+    });
+
+    // SCAR-ANALYTICS-13
+    it('does not count the pause the element fires at the end of the media', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      (api as any)._updateState({ currentTime: 16 });
+      beacons = [];
+
+      // The element fires pause then ended in the same task
+      pause();
+      (api as any)._updateState({ ended: true });
+      (api as any)._trigger('playback:ended');
+      vi.advanceTimersByTime(0);
+
+      expect(beacons.find((b) => b.event === 'pause')).toBeUndefined();
+      expect(viewEnd()).toMatchObject({ pauseCount: 0, pauseDuration: 0 });
+      expect(plugin.getMetrics().pauseCount).toBe(0);
+      await plugin.destroy();
+    });
+
+    // Review of 1.19.2: the first fix took a position within 0.5 s of the end
+    // as proof of the end, discarding a viewer's real pause there.
+    it('counts a viewer pause in the final half-second and its duration on resume', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      (api as any)._updateState({ currentTime: 15.75 });
+      beacons = [];
+      pause();
+      vi.advanceTimersByTime(5000);
+      play();
+
+      expect(beacons.filter((b) => b.event === 'pause')).toEqual([
+        expect.objectContaining({ currentTime: 15.75 }),
+      ]);
+      expect(plugin.getMetrics()).toMatchObject({ pauseCount: 1, pauseDuration: 5000 });
+      await plugin.destroy();
+    });
+
+    it('counts a near-end pause that is still settling when the view is switched', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      (api as any)._updateState({ currentTime: 15.75 });
+      beacons = [];
+      pause();
+      plugin.setVideo({ videoId: 'next-video' });
+
+      expect(beacons.map((b) => b.event).slice(0, 3)).toEqual(['pause', 'viewEnd', 'viewStart']);
+      expect(beacons[0]).toMatchObject({ viewId, currentTime: 15.75 });
+      expect(viewEnd()).toMatchObject({ viewId, pauseCount: 1 });
+      // Nothing left to settle into the new view
+      vi.advanceTimersByTime(0);
+      expect(plugin.getMetrics().pauseCount).toBe(0);
+      await plugin.destroy();
+    });
+
+    it('counts a near-end pause that is still settling when the page unloads', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+      const viewId = plugin.getViewId();
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      (api as any)._updateState({ currentTime: 15.75 });
+      beacons = [];
+      pause();
+      window.dispatchEvent(new Event('pagehide'));
+
+      // pagehide reaches every plugin an earlier test left listening
+      const own = beacons.filter((b) => b.viewId === viewId);
+      expect(own.map((b) => b.event)).toEqual(['pause', 'viewEnd']);
+      expect(plugin.getMetrics().pauseCount).toBe(1);
+      await plugin.destroy();
+    });
+
+    it('does not count a pause while the ended state is set', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      play();
+      (api as any)._updateState({ ended: true });
+      beacons = [];
+      pause();
+
+      expect(beacons.find((b) => b.event === 'pause')).toBeUndefined();
+      expect(plugin.getMetrics().pauseCount).toBe(0);
+      await plugin.destroy();
+    });
+
+    it('still counts a mid-video pause', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 16, currentTime: 0 });
+      play();
+      (api as any)._updateState({ currentTime: 8 });
+      beacons = [];
+      pause();
+
+      expect(beacons.find((b) => b.event === 'pause')).toMatchObject({ currentTime: 8 });
+      expect(plugin.getMetrics().pauseCount).toBe(1);
+      await plugin.destroy();
+    });
+
+    it('still counts a pause at the live edge', async () => {
+      const plugin = createAnalyticsPlugin({
+        ...mockConfig,
+        isLive: true,
+        customBeacon: mockBeacon,
+      });
+      await plugin.init(api);
+
+      (api as any)._updateState({ duration: 100, currentTime: 99.9 });
+      play();
+      beacons = [];
+      pause();
+
+      expect(beacons.find((b) => b.event === 'pause')).toBeDefined();
+      expect(plugin.getMetrics().pauseCount).toBe(1);
+      await plugin.destroy();
     });
   });
 

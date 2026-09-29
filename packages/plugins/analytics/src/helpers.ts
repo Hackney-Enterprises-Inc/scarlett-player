@@ -131,7 +131,23 @@ export function getBrowserInfo(): BrowserInfo {
 }
 
 /**
+ * Whether this is iPadOS 13+ Safari in its default desktop mode, which sends a
+ * Macintosh UA indistinguishable from macOS. Macs report no touch points; an
+ * iPad reports several.
+ *
+ * @param ua - User agent string
+ * @returns True for a Macintosh UA on a multi-touch device
+ */
+function isDesktopModeIPad(ua: string): boolean {
+  return ua.includes('Macintosh') && (navigator.maxTouchPoints ?? 0) > 1;
+}
+
+/**
  * Detect operating system information from user agent.
+ *
+ * iOS is checked before macOS because iPhone, iPad and iPod UAs contain
+ * "like Mac OS X". An iPadOS desktop-mode UA (Macintosh with touch points) is
+ * reported as iOS with no version, since the UA carries only a macOS one.
  *
  * @returns OS info
  */
@@ -148,20 +164,25 @@ export function getOSInfo(): OSInfo {
     return { name: 'Windows' };
   }
 
+  // iOS (before macOS: iOS UAs contain "like Mac OS X")
+  if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) {
+    const match = ua.match(/OS (\d+)[._](\d+)/);
+    return {
+      name: 'iOS',
+      version: match ? `${match[1]}.${match[2]}` : undefined,
+    };
+  }
+
+  // iPadOS desktop mode (Macintosh UA on a touch device)
+  if (isDesktopModeIPad(ua)) {
+    return { name: 'iOS' };
+  }
+
   // macOS
   if (ua.includes('Mac OS X')) {
     const match = ua.match(/Mac OS X (\d+)[._](\d+)/);
     return {
       name: 'macOS',
-      version: match ? `${match[1]}.${match[2]}` : undefined,
-    };
-  }
-
-  // iOS
-  if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) {
-    const match = ua.match(/OS (\d+)[._](\d+)/);
-    return {
-      name: 'iOS',
       version: match ? `${match[1]}.${match[2]}` : undefined,
     };
   }
@@ -191,6 +212,8 @@ export function getOSInfo(): OSInfo {
 /**
  * Detect device type.
  *
+ * An iPadOS desktop-mode UA (Macintosh with touch points) counts as a tablet.
+ *
  * @returns Device type
  */
 export function getDeviceType(): DeviceType {
@@ -209,6 +232,7 @@ export function getDeviceType(): DeviceType {
   // Tablets
   if (
     ua.includes('iPad') ||
+    isDesktopModeIPad(ua) ||
     (ua.includes('Android') && !ua.includes('Mobile')) ||
     ua.includes('Tablet')
   ) {
