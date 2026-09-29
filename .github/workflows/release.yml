@@ -297,7 +297,7 @@ jobs:
       # main, not the last tagged version: before this, merging a player fix
       # without a version bump left scarlettplayer.com stale until the next
       # release unless the author hand-built the bundle and committed it.
-      # Contributors no longer need to do that, see CLAUDE.md.
+      # Contributors no longer need to do that, see AGENTS.md.
       - name: Update demo site
         id: demo
         continue-on-error: true

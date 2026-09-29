@@ -57,6 +57,7 @@ export class PlayButton implements Control {
 
     if (ended) {
       video.currentTime = 0;
+      this.api.emit('playback:seeking', { time: 0 });
       video.play().catch(() => {});
     } else if (!video.paused) {
       // Check video.paused directly for immediate response

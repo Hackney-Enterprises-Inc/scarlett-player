@@ -97,6 +97,7 @@ const player = await createPlayer({
 
   // Behavior
   heartbeatInterval?: number;     // Default: 10000ms (10 seconds)
+  rebufferGraceMs?: number;       // Default: 250ms; 0 opens synchronously; negative/non-finite uses 250
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
   apiKey?: string;                // HTTPS endpoints only: X-API-Key header, or ?api_key= on unload (see API key transport)
@@ -119,12 +120,75 @@ The plugin automatically tracks these events:
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
 | `heartbeat` | Periodic update (10s default) | watchTime, playTime (only the time actually spent playing, not stalled or paused), QoE score |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
-| `seeking` | A seek started | seekTo: the seek target in seconds (not the position the seek left), seekCount |
-| `rebufferStart` | Buffering started | rebufferCount |
-| `rebufferEnd` | Buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime |
+| `seeking` | A player-requested or element-driven seek started (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount, seekSource: `'player'` or `'element'` |
+| `rebufferStart` | Buffering persisted through `rebufferGraceMs` (250 ms default); duration is measured from the first eligible `waiting`, not this beacon's timestamp | rebufferCount |
+| `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
 | `error` | Error occurred: a media element error, or a player `error` event (including a provider's fatal error such as an HLS manifest 404) | errorType, errorMessage, errorCode, fatal. `errorType` is the `Error` name when there is one, otherwise the player error code; `errorCode` is the player error code (for example `MEDIA_NETWORK_ERROR`), absent when there is none |
 | `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | all metrics, exitType, QoE score. watchTime and playTime include the time since the last heartbeat. completionRate is 100 for a `completed` view; otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them |
+
+### Rebuffer grace and time accounting
+
+`rebufferGraceMs` defaults to **250 ms**. Waiting before the first frame or
+while seeking is not a rebuffer. After playback has started, an eligible
+`waiting` opens a pending stall; repeated waiting does not restart its timer.
+Resuming, pausing, seeking (either path below), ending or switching the view,
+unloading, or destroying the plugin during the grace cancels it without
+rebuffer beacons or an increase in `rebufferCount`.
+
+- `rebufferGraceMs: 0` restores immediate counting: `rebufferStart` is sent
+  synchronously on eligible waiting, without a timer.
+- Negative or non-finite values (`NaN`, `Infinity`, `-Infinity`) fall back to
+  250 ms; they do not disable tracking.
+- A confirmed stall sends `rebufferStart` after the grace. Its `timestamp` is
+  the send time (about 250 ms after waiting by default), **not backdated**.
+  `rebufferEnd.duration`, `totalRebufferTime` and the `rebufferDuration` metric
+  include the full stall from the original waiting, including the grace. Do
+  not derive stall duration by subtracting the two beacon timestamps.
+- `watchTime` includes elapsed time in the view, including pending waiting.
+  `playTime` accrues only while playing, with neither a pending nor a confirmed
+  stall. Even an 11 ms blip that is dropped from rebuffer metrics counts as
+  watch time but not play time; a heartbeat during the grace follows the same
+  rule. A 400 ms stall confirmed at 250 ms therefore excludes all 400 ms from
+  play time, not just the final 150 ms.
+
+This reduces short Safari post-seek rebuffer rows and counts without hiding
+the full duration of a real stall. This is a JavaScript analytics option;
+there is no embed data attribute for it.
+
+### Seek tracking
+
+While the view is open, both seek paths send `seeking` and increment `seekCount`:
+
+- **`seekSource: 'player'`**: a `playback:seeking { time }` bus request. This
+  includes core `player.seek()`, gesture seeks, media-session seek actions,
+  audio UI and playlist seek requests, and the video UI's progress-bar
+  presses/releases, keyboard arrows and Home/End on the focused progress bar,
+  and control-bar replay to zero. `seekTo` uses the requested target.
+- **`seekSource: 'element'`**: the provider reports `seeking` changing from
+  false to true without a recent pending bus echo. This covers browser/native
+  controls, OS seeks that reach the media element directly, and direct
+  `currentTime` writes (including the video UI's skip buttons and big-overlay
+  replay, which do not emit a seek request). HLS (including native Safari) and native providers
+  publish the element's new `currentTime` before setting `seeking: true`, so
+  `seekTo` is the target rather than the previous timeupdate position.
+
+`seekSource` identifies the path, not a particular input device: an OS action
+handled by media-session is `'player'`, not `'element'`. Analytics consumes
+pending bus echoes within 1000 ms (inclusive) to avoid double-counting; an echo
+after that window is treated as element-driven. Before a new bus request is
+recorded, expired pending echoes are discarded, so a coalesced or missing echo
+cannot be revived by the new request. The video progress bar emits on press
+and release (two bus requests for a drag), not each throttled mid-drag write.
+Mid-drag element transitions not absorbed as echoes can still count as element
+seeks. Providers do not re-emit `playback:seeking` from the element, which
+would feed back into their seek command handler. WHEP is not seekable.
+
+After `viewEnd`, both bus requests and element transitions are ignored for
+seek accounting until playback starts a new view. In particular, a replay's
+pre-play seek does not change the finalized view's `seekCount` or send a
+post-end `seeking` beacon. Seeking alone does not create a view; the replay's
+play request still starts exactly one new view with fresh counts and sequence.
 
 ### Exit Types
 
@@ -170,7 +234,7 @@ Every beacon sent includes:
 {
   // Event info
   event: string;              // Event type
-  timestamp: number;          // Unix timestamp
+  timestamp: number;          // Unix timestamp in milliseconds at send time
 
   // View context
   viewId: string;             // Unique per playback attempt
@@ -198,9 +262,30 @@ Every beacon sent includes:
   ...customDimensions,
 
   // Event-specific data
-  ...eventData
+  ...eventData,
+
+  beaconSeq: number;          // Reserved per-view sequence; cannot be overwritten by the spreads above
 }
 ```
+
+### Beacon ordering
+
+Every beacon carries `beaconSeq`, starting at **1 on `viewStart`** and
+increasing by one per dispatched beacon in that view. It restarts for a new
+view (including `setVideo()` changing the video, a playlist track change, or
+replay after `ended`). Heartbeats, custom events and the unload `viewEnd` all
+use the same counter, including when using `customBeacon`.
+
+The counter increments only after `disableInDev` and error-sampling filters:
+a suppressed beacon does not consume a number. Custom dimensions and event
+data cannot override `beaconSeq`. A receiver can nevertheless see gaps from
+transport loss or ingest filtering; an ingest that drops heartbeats from its
+raw event table **will see gaps**, which alone do not prove missing seeks.
+
+Within each `viewId`, sort by **`timestamp, beaconSeq`**, never by HTTP arrival
+order or database row ID. Requests can arrive out of order, and `beaconSeq`
+breaks ties when timestamps share a millisecond. `seekSource` is added by the
+plugin only to `seeking` beacons, not to the common fields of other events.
 
 ### `isLive`
 
@@ -344,6 +429,17 @@ console.log({
 ```
 
 ## Backend Integration
+
+### Laravel release prerequisite
+
+For `hei/laravel-scarlett-player` integrations, install **v0.3.0 before or
+together with player 1.19.3**. That ingest recognises `beaconSeq` and
+`seekSource` and adds the `seq` column. In tsp-web, update the Composer package,
+publish and run its new migration, then bump the npm player packages in the
+same deploy. Older ingests still accept the payload, but store the new keys
+as host custom dimensions in `scarlett_views.custom`, not as recognised
+ordering/source fields. Recapture the Laravel wire fixtures after the player
+release and repin their `player_version`.
 
 ### Endpoint Requirements
 

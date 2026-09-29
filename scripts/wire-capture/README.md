@@ -51,7 +51,12 @@ produces a real stall. `trackEvent('wireCustom')` goes over the wire as
 
 ## What it asserts before writing
 
-`playerVersion`/`playerName` on every beacon; `X-API-Key` and the host header
+`playerVersion`/`playerName` and a positive integer `beaconSeq` on every beacon;
+sequence starts at 1 on `viewStart` and strictly increases per view when sorted
+by `timestamp, beaconSeq` (not HTTP arrival), including custom and unload
+beacons; `seekSource` is `'player'` or `'element'` on every `seeking` and absent
+on other captured events; the runner's core seek to 20 s is `'player'`;
+`X-API-Key` and the host header
 on every fetch beacon and only `?api_key=` on the unload beacon; the preflight
 names `x-api-key`; the unload `viewEnd` is the documented field subset of the
 ended one; `videoStart.startupTime` is above zero on VOD; `isLive` is `null`
@@ -62,9 +67,18 @@ with `exitType: 'error'`; the live heartbeat and live unload `viewEnd` carry
 `liveLatencyMean`, `liveLatencyP95`, `liveLatencyMax`, `lowLatency`, which must
 be `false` on the standard-latency playlist) and no VOD beacon carries any; custom dimensions at the top level; clip create and retry share
 `clientRequestId` and body (`capturedAt` is minted per attempt) and carry the
-CSRF header; heartbeats never go backwards; every bus `quality:change` produced
+CSRF header; heartbeats never go backwards in payload timestamp/sequence order; every bus `quality:change` produced
 a matching `qualityChange` beacon; nothing left `127.0.0.1`. Any failure
 exits non-zero and writes nothing.
+
+The seek scenario uses core `player.seek()`, not UI or native controls, so it
+does not require an element-driven seek fixture (HLS may nevertheless seek
+the element internally). Sequence checks cover all
+captured beacon POSTs, not just the selected one-per-event fixtures. Rebuffer
+fixtures remain best effort: the default 250 ms grace can reduce their counts,
+but the runner still holds segments until a confirmed stall or its timeout.
+`_session.sequence.json` deliberately retains arrival order for diagnosing
+transport reordering.
 
 ## Traps a future edit could reintroduce
 

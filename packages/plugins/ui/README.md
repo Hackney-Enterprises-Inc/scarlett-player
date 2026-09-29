@@ -175,6 +175,29 @@ The UI package reads no plugin-specific state and gains no `IPluginAPI` surface 
 | Up Arrow | Volume +10% |
 | Down Arrow | Volume -10% |
 
+### Seek events
+
+Progress-bar mouse/touch presses and releases, its focused Arrow/Home/End
+keys, the player-wide arrow shortcuts, and the control-bar Replay button emit
+`playback:seeking { time }` immediately after writing the media element's
+`currentTime`. The payload carries the clamped target (zero for replay).
+Home/End on the focused bar seek to the VOD endpoints or live DVR boundaries.
+
+A drag emits on press and release, not on each throttled mid-drag write.
+With the analytics plugin these requests produce `seeking` beacons with
+`seekSource: 'player'`; recent element echoes are deduplicated. Native-control
+seeks are tracked separately through provider state as `'element'` seeks;
+they do not emit this bus command.
+
+The skip-backward/forward buttons and big-overlay replay still seek by writing
+`currentTime` without a bus request. Analytics observes these through the
+element path (`seekSource: 'element'` when not consumed as a recent bus echo),
+so the source field describes the path rather than proving native-control use.
+
+Analytics only counts seeks while a view is open: a replay's pre-play seek
+after `viewEnd` is ignored on both paths, without changing the finalized view
+or creating another view. The play request starts the replay view as usual.
+
 ## Theming
 
 ```typescript

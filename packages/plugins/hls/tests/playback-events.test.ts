@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import type { IPluginAPI } from '@scarlett-player/core';
+import { StateManager, type IPluginAPI } from '@scarlett-player/core';
 import { createHLSPlugin } from '../src/index';
 import { setupVideoEventHandlers, type PlaybackGate } from '../src/event-map';
 import * as hlsLoader from '../src/hls-loader';
@@ -206,6 +206,52 @@ describe.each([
     // selection ever stops honouring these loader stubs, both legs would run
     // hls.js and the native call site would go uncovered in silence.
     expect((hlsLoader.createHlsInstance as Mock).mock.calls.length > 0).toBe(!native);
+  });
+
+  it('publishes the element seek target before notifying seeking subscribers', () => {
+    const state = new StateManager({ currentTime: 10 });
+    api.getState = state.getValue.bind(state);
+    api.setState = state.set.bind(state);
+    const changes: unknown[] = [];
+    const unsubscribe = state.subscribe(({ key, value }) => {
+      if (key === 'currentTime' || key === 'seeking') {
+        changes.push([key, value, state.getValue('currentTime')]);
+      }
+    });
+
+    const video = getVideo();
+    video.currentTime = 75;
+    video.dispatchEvent(new Event('seeking'));
+
+    expect(changes).toEqual([
+      ['currentTime', 75, 75],
+      ['seeking', true, 75],
+    ]);
+    expect(emits('playback:seeking')).toBe(0);
+    unsubscribe();
+  });
+
+  it('notifies one seeking transition for the UI/provider double write', () => {
+    const state = new StateManager();
+    api.getState = state.getValue.bind(state);
+    api.setState = state.set.bind(state);
+    const changes = vi.fn();
+    const unsubscribe = state.subscribe((event) => {
+      if (event.key === 'seeking') changes(event);
+    });
+    const video = getVideo();
+    Object.defineProperty(video, 'duration', { value: 100, configurable: true });
+
+    video.currentTime = 75; // UI write.
+    busHandler('playback:seeking')({ time: 75 }); // Provider repeats the write.
+    expect(video.currentTime).toBe(75);
+    video.dispatchEvent(new Event('seeking'));
+    video.dispatchEvent(new Event('seeking'));
+
+    expect(changes).toHaveBeenCalledTimes(1);
+    expect(changes.mock.calls[0][0]).toMatchObject({ previousValue: false, value: true });
+    expect(emits('playback:seeking')).toBe(0);
+    unsubscribe();
   });
 
   it('emits playback:play when the element starts on its own', () => {

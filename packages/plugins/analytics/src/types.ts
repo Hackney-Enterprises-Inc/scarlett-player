@@ -102,6 +102,14 @@ export interface AnalyticsConfig {
   /** Heartbeat interval in milliseconds (default: 10000) */
   heartbeatInterval?: number;
 
+  /**
+   * Minimum waiting time before counting a rebuffer (ms, default: 250).
+   * Zero opens synchronously; negative or non-finite values use 250.
+   * Confirmed stalls include the grace in their duration, but rebufferStart's
+   * timestamp is its send time, not the original waiting time.
+   */
+  rebufferGraceMs?: number;
+
   /** Error sampling rate 0-1 (default: 1.0 = 100%) */
   errorSampleRate?: number;
 
@@ -157,6 +165,9 @@ export interface ViewSession {
   /** Unique view ID (one per playback attempt) */
   viewId: string;
 
+  /** Last dispatched beacon number in this view; starts at zero before viewStart. */
+  beaconSeq: number;
+
   /** Session ID (persists across views in same browsing session) */
   sessionId: string;
 
@@ -180,7 +191,7 @@ export interface ViewSession {
   /** Total time from viewStart to viewEnd (ms) */
   watchTime: number;
 
-  /** Actual playback time (excludes rebuffer/pause) (ms) */
+  /** Actual playback time (excludes waiting, including dropped grace, and pauses) (ms) */
   playTime: number;
 
   /** Number of times user paused */
@@ -249,6 +260,16 @@ export interface BeaconPayload {
 
   /** Event timestamp */
   timestamp: number;
+
+  /**
+   * Per-view dispatch order, starting at 1 on viewStart. Sampled-out errors
+   * and disabled analytics do not consume numbers. Ingests that drop events
+   * (such as heartbeats) will see gaps. Custom dimensions cannot override it.
+   */
+  beaconSeq: number;
+
+  /** On seeking beacons: a player bus request or an element/native-controls seek. */
+  seekSource?: 'player' | 'element';
 
   // === View Context ===
   /** Current view ID */

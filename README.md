@@ -268,7 +268,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
 | `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
 | `@scarlett-player/chromecast` | Chromecast - Google Cast SDK, session management, remote control |
-| `@scarlett-player/analytics` | Analytics - startup time, rebuffer ratio, bitrate tracking, engagement metrics, beacon transport |
+| `@scarlett-player/analytics` | Analytics - startup time, grace-filtered rebuffers, bitrate and engagement metrics, player/element seek tracking, per-view beacon sequence |
 | `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
 | `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
@@ -279,6 +279,17 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/clips` | Clips - two-handle in/out range selection, loop preview, submission through a host callback or a built-in POST. VOD only in v1; the player captures the range, the server produces the clip |
 | `@scarlett-player/vue` | Vue 3 - `<ScarlettPlayer>` component + `useScarlettPlayer()` composable |
 | `@scarlett-player/embed` | CDN embed - auto-init via data attributes, UMD + ESM bundles, video/audio/full entry points |
+
+## Analytics
+
+Analytics defaults to a 250 ms rebuffer grace (`rebufferGraceMs: 0` restores
+immediate counting). Confirmed stalls retain their full duration; short
+waiting still counts as watch time, not play time. Every beacon has a per-view
+`beaconSeq`, and `seeking` beacons identify the player or element path with
+`seekSource`. Seek accounting stops at `viewEnd`; pre-play replay seeks do not
+change the finalized view. See the [analytics README](./packages/plugins/analytics/README.md)
+for timing, ordering and the Laravel v0.3.0 ingest prerequisite for player
+1.19.3. No new embed data attribute is introduced.
 
 ## Keyboard Shortcuts
 

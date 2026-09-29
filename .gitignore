@@ -60,7 +60,7 @@ scripts/fixtures/
 # docs/demo/`: the rebuild step still stamped ?v=<version> onto index.html and
 # committed that, so scarlettplayer.com shipped a script tag pointing at a
 # bundle no longer in the repo, and the demo 404'd for every visitor. Branch
-# hygiene is a review concern, see the Release / PR Checklist in CLAUDE.md.
+# hygiene is a review concern, see "Releasing" in docs/contributing.md.
 demo/demo.bundle.js.map
 docs/demo/demo.bundle.js.map
 
