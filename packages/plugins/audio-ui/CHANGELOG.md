@@ -1,5 +1,7 @@
 # @scarlett-player/audio-ui
 
+## 1.19.2
+
 ## 1.19.1
 
 ## 1.19.0
