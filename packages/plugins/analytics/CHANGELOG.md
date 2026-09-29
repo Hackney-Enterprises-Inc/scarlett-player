@@ -1,5 +1,45 @@
 # @scarlett-player/analytics
 
+## 1.19.3
+
+### Patch Changes
+
+- [#129](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/129) [`886bc0d`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/886bc0d3cf16ea14b114a1c0b6492c738001258e) Thanks [@alexhackney](https://github.com/alexhackney)! - Add `beaconSeq` to every beacon, starting at 1 per view and incrementing only
+  after development and error-sampling filters, including custom events and
+  unload beacons. Custom dimensions cannot override it. Order each view by
+  `timestamp, beaconSeq`, not arrival order; ingests that drop heartbeats will
+  see sequence gaps. Add `seekSource: 'player' | 'element'` to `seeking` beacons
+  to distinguish bus requests from element-driven seeks.
+
+  Release prerequisite: install `hei/laravel-scarlett-player` 0.3.0 and publish/run
+  its new migration before or together with player 1.19.3 in tsp-web. That ingest
+  recognises both keys and has the `seq` column; older ingests accept them but
+  store them as host custom dimensions. Recapture and repin the Laravel wire
+  fixtures after the player release.
+
+- [#129](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/129) [`886bc0d`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/886bc0d3cf16ea14b114a1c0b6492c738001258e) Thanks [@alexhackney](https://github.com/alexhackney)! - Track progress-bar, keyboard and native/OS element seeks in open views
+  with `seeking` beacons and `seekCount`, deduplicating recent element echoes of
+  player seek requests without reviving expired echoes. Ignore seek accounting
+  after `viewEnd`, including pre-play replay seeks, so finalized metrics stay
+  unchanged. HLS and native providers publish the target `currentTime`
+  before `seeking: true`, so analytics reports the target, not the previous
+  timeupdate position.
+
+  The video UI now emits `playback:seeking { time }` after its direct seeks:
+  progress-bar press/release, keyboard and replay. Throttled mid-drag writes stay
+  silent on the bus; a drag emits at its two endpoints. Providers continue to
+  report element seeking through state rather than re-emitting the seek command.
+
+- [#129](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/129) [`886bc0d`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/886bc0d3cf16ea14b114a1c0b6492c738001258e) Thanks [@alexhackney](https://github.com/alexhackney)! - Filter short post-seek waiting blips with a 250 ms rebuffer grace, reducing
+  Safari `rebufferStart`/`rebufferEnd` rows and `rebufferCount`. A confirmed
+  `rebufferStart` is sent about 250 ms after waiting began; its timestamp is not
+  backdated, while the measured stall duration includes the full grace.
+
+  Set `rebufferGraceMs: 0` to restore synchronous, immediate counting. Negative
+  or non-finite values fall back to 250 ms. Pending waiting counts as watch time
+  but never play time, even when cancelled before it becomes a rebuffer. No
+  embed data attribute is added.
+
 ## 1.19.2
 
 ### Patch Changes
