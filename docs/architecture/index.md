@@ -346,6 +346,19 @@ by emitting `playback:play`, `playback:pause` or `playback:seeking`, which the
 active provider is subscribed to. That keeps plugins independent of which
 provider is loaded.
 
+`playback:seeking { time }` is a seek request, not a notification of every
+element seek. Core, gestures, media-session and UI controls can emit it. The
+video UI emits after its direct `currentTime` write: progress-bar press and
+release (not every throttled drag move), keyboard seeks and control-bar replay.
+HLS and native providers instead handle the element's `seeking` by publishing
+its target `currentTime` **before** `seeking: true`; they do not re-emit the
+command and create a feedback loop. Analytics observes both paths, consuming
+recent bus echoes to avoid double-counting, and labels its `seeking` beacons
+with `seekSource: 'player'` or `'element'`. The echo window includes 1000 ms;
+expired pending echoes are discarded before recording a new bus request.
+Both seek paths are ignored for analytics after `viewEnd` until a play request
+opens the next view, so replay preparation cannot alter a finalized view.
+
 `runCleanups()` and `getCleanupFns()` exist on the concrete `PluginAPI` for
 `PluginManager` to call; they are marked `@internal` and are not part of
 `IPluginAPI`.
@@ -402,6 +415,26 @@ caught and logged, so one bad listener cannot stop the others. An
 `EventInterceptor` runs before the handlers and can rewrite the payload or
 cancel the event by returning `null`; interceptors are enabled by default and
 can be turned off through `EventEmitterOptions`.
+
+## Analytics timing and ordering
+
+The analytics plugin waits `rebufferGraceMs` (250 ms by default) before counting
+an eligible post-first-frame stall. Zero counts synchronously; negative or
+non-finite values fall back to 250 ms. Resuming, pausing, seeking or closing
+the view during the grace cancels the pending rebuffer. Confirmed duration
+includes the grace, but `rebufferStart.timestamp` remains its send time, not
+the original waiting time. Pending waiting contributes to watch time, never
+play time, even when too short to count as a rebuffer.
+
+Every dispatched beacon has a per-view `beaconSeq`, starting at 1 on
+`viewStart`, assigned after development/error-sampling filters and protected
+from custom-data overrides. Custom events and unload beacons share the counter.
+Order each view by `timestamp, beaconSeq`, not arrival or row ID. An ingest
+that drops heartbeats sees sequence gaps. Laravel integrations require
+`hei/laravel-scarlett-player` v0.3.0 and its migration before or alongside
+player 1.19.3 to recognise the new ordering/source fields. See the
+[analytics README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md) for the full
+accounting and ingest contract; there is no new embed attribute.
 
 ## Error and reconnect model
 

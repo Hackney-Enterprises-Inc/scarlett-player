@@ -64,6 +64,7 @@
         <li><a href="#ipluginapi">IPluginAPI</a></li>
         <li><a href="#state">State</a></li>
         <li><a href="#events">Events</a></li>
+        <li><a href="#analytics-timing-and-ordering">Analytics timing and ordering</a></li>
         <li><a href="#error-and-reconnect-model">Error and reconnect model</a></li>
         <li><a href="#live-and-low-latency">Live and low latency</a></li>
         <li><a href="#fullscreen">Fullscreen</a></li>
@@ -478,6 +479,18 @@ functions every package ships.</p>
 by emitting <code>playback:play</code>, <code>playback:pause</code> or <code>playback:seeking</code>, which the
 active provider is subscribed to. That keeps plugins independent of which
 provider is loaded.</p>
+<p><code>playback:seeking { time }</code> is a seek request, not a notification of every
+element seek. Core, gestures, media-session and UI controls can emit it. The
+video UI emits after its direct <code>currentTime</code> write: progress-bar press and
+release (not every throttled drag move), keyboard seeks and control-bar replay.
+HLS and native providers instead handle the element&#39;s <code>seeking</code> by publishing
+its target <code>currentTime</code> <strong>before</strong> <code>seeking: true</code>; they do not re-emit the
+command and create a feedback loop. Analytics observes both paths, consuming
+recent bus echoes to avoid double-counting, and labels its <code>seeking</code> beacons
+with <code>seekSource: &#39;player&#39;</code> or <code>&#39;element&#39;</code>. The echo window includes 1000 ms;
+expired pending echoes are discarded before recording a new bus request.
+Both seek paths are ignored for analytics after <code>viewEnd</code> until a play request
+opens the next view, so replay preparation cannot alter a finalized view.</p>
 <p><code>runCleanups()</code> and <code>getCleanupFns()</code> exist on the concrete <code>PluginAPI</code> for
 <code>PluginManager</code> to call; they are marked <code>@internal</code> and are not part of
 <code>IPluginAPI</code>.</p>
@@ -525,6 +538,23 @@ caught and logged, so one bad listener cannot stop the others. An
 <code>EventInterceptor</code> runs before the handlers and can rewrite the payload or
 cancel the event by returning <code>null</code>; interceptors are enabled by default and
 can be turned off through <code>EventEmitterOptions</code>.</p>
+<h2 id="analytics-timing-and-ordering"><a class="anchor" href="#analytics-timing-and-ordering">Analytics timing and ordering</a></h2>
+<p>The analytics plugin waits <code>rebufferGraceMs</code> (250 ms by default) before counting
+an eligible post-first-frame stall. Zero counts synchronously; negative or
+non-finite values fall back to 250 ms. Resuming, pausing, seeking or closing
+the view during the grace cancels the pending rebuffer. Confirmed duration
+includes the grace, but <code>rebufferStart.timestamp</code> remains its send time, not
+the original waiting time. Pending waiting contributes to watch time, never
+play time, even when too short to count as a rebuffer.</p>
+<p>Every dispatched beacon has a per-view <code>beaconSeq</code>, starting at 1 on
+<code>viewStart</code>, assigned after development/error-sampling filters and protected
+from custom-data overrides. Custom events and unload beacons share the counter.
+Order each view by <code>timestamp, beaconSeq</code>, not arrival or row ID. An ingest
+that drops heartbeats sees sequence gaps. Laravel integrations require
+<code>hei/laravel-scarlett-player</code> v0.3.0 and its migration before or alongside
+player 1.19.3 to recognise the new ordering/source fields. See the
+<a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md">analytics README</a> for the full
+accounting and ingest contract; there is no new embed attribute.</p>
 <h2 id="error-and-reconnect-model"><a class="anchor" href="#error-and-reconnect-model">Error and reconnect model</a></h2>
 <p><code>ErrorHandler</code> normalises anything thrown into a <code>PlayerError</code>
 (<code>code</code>, <code>message</code>, <code>fatal</code>, <code>timestamp</code>, optional <code>context</code>, <code>originalError</code>

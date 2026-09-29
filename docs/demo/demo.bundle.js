@@ -37348,6 +37348,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const ended = this.api.getState("ended");
           if (ended) {
             video.currentTime = 0;
+            this.api.emit("playback:seeking", { time: 0 });
             video.play().catch(() => {
             });
           } else if (!video.paused) {
@@ -38028,7 +38029,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.handle.style.left = `${percent * 100}%`;
         }
         /**
-         * Apply one keyboard seek to the element.
+         * Apply one keyboard seek to the element, then emit `playback:seeking`.
          *
          * @param e - The key event (already known to be a seek key)
          * @param video - The player's media element
@@ -38077,6 +38078,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
                 break;
             }
           }
+          this.api.emit("playback:seeking", { time: video.currentTime });
         }
         seek(clientX, force = false) {
           const video = getVideo(this.api.container);
@@ -38089,6 +38091,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const time = this.getTimeFromPosition(clientX);
           if (time !== null && Number.isFinite(time)) {
             video.currentTime = time;
+            if (force) this.api.emit("playback:seeking", { time });
           }
         }
         destroy() {
@@ -40389,6 +40392,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           } else {
             video.currentTime = Math.max(0, video.currentTime - 5);
           }
+          api.emit("playback:seeking", { time: video.currentTime });
           showControls();
           break;
         case "ArrowRight":
@@ -40398,6 +40402,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           } else {
             video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
           }
+          api.emit("playback:seeking", { time: video.currentTime });
           showControls();
           break;
         case "ArrowUp":
@@ -41249,6 +41254,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     });
     addHandler("seeking", () => {
+      api.setState("currentTime", video.currentTime);
       api.setState("seeking", true);
       syncEndedFromElement();
     });
@@ -42924,6 +42930,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       });
       on("seeking", () => {
+        api?.setState("currentTime", videoEl.currentTime);
         api?.setState("seeking", true);
         syncEndedFromElement();
       });
@@ -52587,6 +52594,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PLUGIN_NAME = "scarlett-player";
   var DEFAULT_CONFIG5 = {
     heartbeatInterval: 1e4,
+    rebufferGraceMs: 250,
     errorSampleRate: 1,
     disableInDev: false
   };
@@ -52598,6 +52606,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       throw new Error("Analytics plugin requires videoId");
     }
     const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
+    const rebufferGraceMs = typeof mergedConfig.rebufferGraceMs === "number" && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0 ? mergedConfig.rebufferGraceMs : 250;
     const configuredVideo = {
       videoId: mergedConfig.videoId,
       videoTitle: mergedConfig.videoTitle,
@@ -52612,6 +52621,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let lastKnownDuration = 0;
     let isRebuffering = false;
     let rebufferStartTime = null;
+    let waitingSince = null;
+    let graceTimer = null;
+    let pendingEchoes = 0;
+    let lastBusSeekAt = 0;
     let pauseStartTime = null;
     let pendingPause = null;
     let playRequestPending = false;
@@ -52623,6 +52636,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       latencySampler = createLatencySampler();
       return {
         viewId: generateId2(),
+        beaconSeq: 0,
         sessionId: getSessionId(),
         viewerId: mergedConfig.viewerId || getAnonymousViewerId(),
         viewStart: Date.now(),
@@ -52683,7 +52697,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         // Custom dimensions
         ...mergedConfig.customDimensions,
         // Event-specific data
-        ...data
+        ...data,
+        // Reserved ordering field: neither dimensions nor event data may win.
+        beaconSeq: ++session.beaconSeq
       };
       if (mergedConfig.customBeacon) {
         mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
@@ -52744,7 +52760,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         playerSize: getPlayerSize(api?.container ?? null),
         connectionType: getConnectionType(),
         ...mergedConfig.customDimensions,
-        ...data
+        ...data,
+        beaconSeq: ++session.beaconSeq
       };
       if (mergedConfig.customBeacon) {
         mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
@@ -52780,7 +52797,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function accrueTime(now2 = Date.now()) {
       const elapsed = now2 - lastHeartbeatTime;
       session.watchTime += elapsed;
-      if (session.playbackState === "playing" && !isRebuffering) {
+      if (session.playbackState === "playing" && !isRebuffering && waitingSince === null) {
         session.playTime += elapsed;
       }
       lastHeartbeatTime = now2;
@@ -52874,6 +52891,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function startView(lastKnownIsLive = null) {
       commitPendingPause();
+      cancelPendingRebuffer();
       session = initSession();
       session.lastKnownIsLive = lastKnownIsLive;
       lastHeartbeatTime = Date.now();
@@ -52881,6 +52899,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastKnownDuration = 0;
       isRebuffering = false;
       rebufferStartTime = null;
+      pendingEchoes = 0;
+      lastBusSeekAt = 0;
       pauseStartTime = null;
       playRequestPending = false;
       sendBeacon("viewStart");
@@ -52965,6 +52985,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       onPlaying();
     }
     function onStateChange(event) {
+      if (event.key === "seeking" && event.previousValue === false && event.value === true) {
+        if (session.viewEnd !== null) return;
+        if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1e3) {
+          pendingEchoes--;
+          return;
+        }
+        pendingEchoes = 0;
+        cancelPendingRebuffer();
+        session.seekCount++;
+        sendBeacon("seeking", {
+          seekCount: session.seekCount,
+          seekTo: api?.getState("currentTime"),
+          seekSource: "element"
+        });
+        return;
+      }
       if (event.key === "paused") {
         if (event.previousValue === true && event.value === false && !api?.getState("playing")) {
           onPlayRequest();
@@ -52999,7 +53035,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     }
     function closeRebuffer(sendEndBeacon) {
-      if (!isRebuffering || !rebufferStartTime) return;
+      cancelPendingRebuffer();
+      if (!isRebuffering || rebufferStartTime === null) return;
       accrueTime();
       const rebufferDuration = Date.now() - rebufferStartTime;
       session.rebufferDuration += rebufferDuration;
@@ -53078,23 +53115,50 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onWaiting() {
       if (!api) return;
-      if (session.firstFrameTime !== null && !isRebuffering && !api.getState("seeking")) {
+      if (session.firstFrameTime !== null && !isRebuffering && waitingSince === null && !api.getState("seeking")) {
         accrueTime();
-        isRebuffering = true;
-        rebufferStartTime = Date.now();
-        session.rebufferCount++;
-        sendBeacon("rebufferStart", {
-          rebufferCount: session.rebufferCount,
-          currentTime: api.getState("currentTime")
-        });
+        waitingSince = Date.now();
+        if (rebufferGraceMs === 0) {
+          openRebuffer(waitingSince);
+          waitingSince = null;
+        } else {
+          graceTimer = setTimeout(() => {
+            if (waitingSince !== null && !api?.getState("seeking")) {
+              openRebuffer(waitingSince);
+            }
+            cancelPendingRebuffer();
+          }, rebufferGraceMs);
+        }
       }
     }
+    function openRebuffer(startedAt) {
+      accrueTime();
+      isRebuffering = true;
+      rebufferStartTime = startedAt;
+      session.rebufferCount++;
+      sendBeacon("rebufferStart", {
+        rebufferCount: session.rebufferCount,
+        currentTime: api?.getState("currentTime")
+      });
+    }
+    function cancelPendingRebuffer() {
+      if (waitingSince !== null) accrueTime();
+      if (graceTimer !== null) clearTimeout(graceTimer);
+      graceTimer = null;
+      waitingSince = null;
+    }
     function onSeeking(payload) {
-      if (!api) return;
+      if (!api || session.viewEnd !== null) return;
+      cancelPendingRebuffer();
+      const now2 = Date.now();
+      if (now2 - lastBusSeekAt > 1e3) pendingEchoes = 0;
+      pendingEchoes++;
+      lastBusSeekAt = now2;
       session.seekCount++;
       const target = payload?.time;
       sendBeacon("seeking", {
         seekCount: session.seekCount,
+        seekSource: "player",
         seekTo: typeof target === "number" && Number.isFinite(target) ? target : api.getState("currentTime")
       });
     }
@@ -53218,6 +53282,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       accrueTime();
       commitPendingPause();
       closeRebuffer(false);
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       session.viewEnd = Date.now();
       if (!session.exitType) {
         session.exitType = "abandoned";
@@ -53298,6 +53366,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           sendViewEnd();
         }
         discardPendingPause();
+        cancelPendingRebuffer();
         cleanupFns.forEach((fn) => fn());
         cleanupFns = [];
         api?.logger.info("Analytics plugin destroyed");

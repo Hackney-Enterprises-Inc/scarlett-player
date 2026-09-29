@@ -64,6 +64,28 @@ const unsubscribe = api.on('example:started', ({ at }) => { /* typed */ });
 
 `EventBus` never validates names at runtime, so a typo in an event name is silent. The state store is the opposite: it throws for a key nobody registered, which is why the next section exists.
 
+### Seek requests versus element notifications
+
+To request a seek, emit `playback:seeking { time }` with the target in seconds;
+the active provider applies it. Core, gestures, media-session and UI controls
+use this bus path. If your control also writes `currentTime` directly, emit
+the request immediately after the write, as the video UI does. Its progress
+bar emits on press/release rather than each throttled mid-drag write; keyboard
+seeks and control-bar replay also emit.
+
+A provider must not turn the element's `seeking` event back into this command,
+or it can loop. HLS and native publish the element's target `currentTime`
+first, then `seeking: true`, and clear `seeking` on completion. Analytics
+observes the false-to-true state transition as well as the bus: bus requests
+produce `seekSource: 'player'`, while native controls or direct element seeks
+produce `'element'` when not consumed as a recent bus echo (inclusive 1000 ms
+window). A new request discards expired pending echoes before adding its own.
+Both paths cancel pending rebuffer grace in an open view. After `viewEnd`,
+analytics ignores both seek paths until a play request starts the next view;
+a replay's pre-play seek does not mutate or beacon the finalized view. See the
+[analytics seek contract](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md#seek-tracking)
+for counting and drag semantics; do not assume bus events cover native controls.
+
 ## 2. State
 
 Two steps, because state is closed at runtime as well as in the type system - `getState`/`setState` throw for keys nobody registered, which catches typos on core keys.
