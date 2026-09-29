@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/watermark",
-  "version": "1.19.2",
+  "version": "1.19.3",
   "description": "Watermark Plugin for Scarlett Player - anti-piracy text/image overlay",
   "type": "module",
   "main": "dist/index.cjs",
