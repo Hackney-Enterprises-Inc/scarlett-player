@@ -581,6 +581,8 @@ export function setupVideoEventHandlers(
 
   // Seeking - only emit state update, not playback:seeking (which would cause a loop)
   addHandler('seeking', () => {
+    // Seeking subscribers need the target, not the last timeupdate position.
+    api.setState('currentTime', video.currentTime);
     api.setState('seeking', true);
     // A scrub back from the end never fires play or playing while paused, so
     // this is the only place the key can be cleared for a paused viewer.

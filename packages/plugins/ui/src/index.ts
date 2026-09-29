@@ -1122,6 +1122,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         } else {
           video.currentTime = Math.max(0, video.currentTime - 5);
         }
+        api.emit('playback:seeking', { time: video.currentTime });
         showControls();
         break;
       case 'ArrowRight':
@@ -1131,6 +1132,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         } else {
           video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
         }
+        api.emit('playback:seeking', { time: video.currentTime });
         showControls();
         break;
       case 'ArrowUp':

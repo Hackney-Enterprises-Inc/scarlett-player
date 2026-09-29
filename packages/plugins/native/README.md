@@ -43,6 +43,18 @@ The plugin claims a source by extension, then asks the browser whether it can
 play that MIME type, so an `.mkv` in a browser without Matroska support is
 declined rather than played into a black frame.
 
+## Seek state and events
+
+On the media element's `seeking` event, the provider publishes its new
+`currentTime` before setting `seeking: true`, for both video and audio. State
+subscribers therefore see the seek target before the next timeupdate.
+It does not emit `playback:seeking` from that handler: that event is an incoming
+seek command and re-emitting it would loop. On completion it sets
+`seeking: false` and emits `playback:seeked { time }`.
+The [analytics plugin](../analytics/README.md#seek-tracking) uses this state
+transition to track native/element-driven seeks without duplicating recent
+player-requested seeks.
+
 ## Configuration
 
 ```typescript

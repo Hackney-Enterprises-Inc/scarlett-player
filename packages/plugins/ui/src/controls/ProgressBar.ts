@@ -584,7 +584,7 @@ export class ProgressBar implements Control {
   };
 
   /**
-   * Apply one keyboard seek to the element.
+   * Apply one keyboard seek to the element, then emit `playback:seeking`.
    *
    * @param e - The key event (already known to be a seek key)
    * @param video - The player's media element
@@ -635,6 +635,7 @@ export class ProgressBar implements Control {
           break;
       }
     }
+    this.api.emit('playback:seeking', { time: video.currentTime });
   }
 
   private seek(clientX: number, force = false): void {
@@ -651,6 +652,8 @@ export class ProgressBar implements Control {
     const time = this.getTimeFromPosition(clientX);
     if (time !== null && Number.isFinite(time)) {
       video.currentTime = time;
+      // Count the gesture endpoints, not every throttled mid-drag write.
+      if (force) this.api.emit('playback:seeking', { time });
     }
   }
 

@@ -40,6 +40,18 @@ const player = await createPlayer({
 - Structured error codes (MEDIA_NETWORK_ERROR, MEDIA_APPEND_ERROR,
   MEDIA_BUFFER_FULL, PLAYLIST_INVALID, ...) so UIs can show accurate copy
 
+## Seek state and events
+
+On the media element's `seeking` event, the provider publishes its new
+`currentTime` before setting `seeking: true`. This applies to both hls.js and
+native Safari playback, and lets state subscribers read the seek target even
+before the next timeupdate. It does not emit `playback:seeking` from that
+handler: that event is an incoming seek command and re-emitting it would loop.
+On completion it sets `seeking: false` and emits `playback:seeked { time }`.
+The [analytics plugin](../analytics/README.md#seek-tracking) uses this state
+transition to track native/element-driven seeks without duplicating recent
+player-requested seeks.
+
 ## Configuration
 
 All options are optional; defaults shown.

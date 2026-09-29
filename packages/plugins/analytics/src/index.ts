@@ -71,6 +71,7 @@ const PLUGIN_NAME = 'scarlett-player';
  */
 const DEFAULT_CONFIG: Partial<AnalyticsConfig> = {
   heartbeatInterval: 10000,
+  rebufferGraceMs: 250,
   errorSampleRate: 1.0,
   disableInDev: false,
 };
@@ -116,6 +117,10 @@ export function createAnalyticsPlugin(
 
   // Merge with defaults
   const mergedConfig = { ...DEFAULT_CONFIG, ...config } as AnalyticsConfig;
+  const rebufferGraceMs = typeof mergedConfig.rebufferGraceMs === 'number'
+    && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0
+    ? mergedConfig.rebufferGraceMs
+    : 250;
 
   // The configured video: the first view's, and the one a playlist track
   // without its own `videoId` reports.
@@ -142,6 +147,12 @@ export function createAnalyticsPlugin(
   let lastKnownDuration = 0;
   let isRebuffering = false;
   let rebufferStartTime: number | null = null;
+  let waitingSince: number | null = null;
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bus seeks precede asynchronous element events. Keep one echo per request,
+  // expiring the batch so a coalesced/missing echo cannot hide a later seek.
+  let pendingEchoes = 0;
+  let lastBusSeekAt = 0;
   let pauseStartTime: number | null = null;
   // A pause near the end of the media, held until it is known whether
   // `ended` follows it (see onPause)
@@ -170,6 +181,7 @@ export function createAnalyticsPlugin(
 
     return {
       viewId: generateId(),
+      beaconSeq: 0,
       sessionId: getSessionId(),
       viewerId: mergedConfig.viewerId || getAnonymousViewerId(),
       viewStart: Date.now(),
@@ -259,6 +271,8 @@ export function createAnalyticsPlugin(
 
       // Event-specific data
       ...data,
+      // Reserved ordering field: neither dimensions nor event data may win.
+      beaconSeq: ++session.beaconSeq,
     };
 
     // Use custom beacon function if provided (for testing)
@@ -382,6 +396,7 @@ export function createAnalyticsPlugin(
       connectionType: getConnectionType(),
       ...mergedConfig.customDimensions,
       ...data,
+      beaconSeq: ++session.beaconSeq,
     };
 
     if (mergedConfig.customBeacon) {
@@ -458,7 +473,7 @@ export function createAnalyticsPlugin(
   function accrueTime(now: number = Date.now()): void {
     const elapsed = now - lastHeartbeatTime;
     session.watchTime += elapsed;
-    if (session.playbackState === 'playing' && !isRebuffering) {
+    if (session.playbackState === 'playing' && !isRebuffering && waitingSince === null) {
       session.playTime += elapsed;
     }
     lastHeartbeatTime = now;
@@ -602,6 +617,7 @@ export function createAnalyticsPlugin(
   function startView(lastKnownIsLive: boolean | null = null): void {
     // A held pause belongs to the view it happened in, never the next one
     commitPendingPause();
+    cancelPendingRebuffer();
     session = initSession();
     session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
@@ -609,6 +625,8 @@ export function createAnalyticsPlugin(
     lastKnownDuration = 0;
     isRebuffering = false;
     rebufferStartTime = null;
+    pendingEchoes = 0;
+    lastBusSeekAt = 0;
     pauseStartTime = null;
     playRequestPending = false;
 
@@ -824,6 +842,25 @@ export function createAnalyticsPlugin(
    * @param event - The change, dispatched only when the value actually changed
    */
   function onStateChange(event: StateChangeEvent): void {
+    if (event.key === 'seeking' && event.previousValue === false && event.value === true) {
+      // Replay preparation must not change an already-finalized view.
+      if (session.viewEnd !== null) return;
+      if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1000) {
+        pendingEchoes--;
+        return;
+      }
+      pendingEchoes = 0;
+      cancelPendingRebuffer();
+      session.seekCount++;
+      // Providers write the element's target before setting seeking true.
+      sendBeacon('seeking', {
+        seekCount: session.seekCount,
+        seekTo: api?.getState('currentTime'),
+        seekSource: 'element',
+      });
+      return;
+    }
+
     if (event.key === 'paused') {
       if (event.previousValue === true && event.value === false && !api?.getState('playing')) {
         onPlayRequest();
@@ -897,7 +934,8 @@ export function createAnalyticsPlugin(
    *   should go out.
    */
   function closeRebuffer(sendEndBeacon: boolean): void {
-    if (!isRebuffering || !rebufferStartTime) return;
+    cancelPendingRebuffer();
+    if (!isRebuffering || rebufferStartTime === null) return;
 
     // The stall's time is watch time, never play time
     accrueTime();
@@ -1071,22 +1109,52 @@ export function createAnalyticsPlugin(
 
     // Only count as rebuffer if we've started playing AND are not
     // mid-seek (seeks trigger waiting which is not a rebuffer).
-    if (session.firstFrameTime !== null && !isRebuffering && !api.getState('seeking')) {
+    if (session.firstFrameTime !== null && !isRebuffering && waitingSince === null && !api.getState('seeking')) {
       // Time up to the stall was spent playing
       accrueTime();
-      isRebuffering = true;
-      rebufferStartTime = Date.now();
-      session.rebufferCount++;
-
-      sendBeacon('rebufferStart', {
-        rebufferCount: session.rebufferCount,
-        currentTime: api.getState('currentTime'),
-      });
+      waitingSince = Date.now();
+      if (rebufferGraceMs === 0) {
+        openRebuffer(waitingSince);
+        waitingSince = null;
+      } else {
+        graceTimer = setTimeout(() => {
+          if (waitingSince !== null && !api?.getState('seeking')) {
+            openRebuffer(waitingSince);
+          }
+          cancelPendingRebuffer();
+        }, rebufferGraceMs);
+      }
     }
   }
 
   /**
-   * Handle seeking: count the seek and send a `seeking` beacon.
+   * Count a confirmed stall, including its grace in the measured duration.
+   * The beacon timestamp stays the send time, never backdated to waiting.
+   * @param startedAt - Time of the original waiting event
+   */
+  function openRebuffer(startedAt: number): void {
+    accrueTime();
+    isRebuffering = true;
+    rebufferStartTime = startedAt;
+    session.rebufferCount++;
+    sendBeacon('rebufferStart', {
+      rebufferCount: session.rebufferCount,
+      currentTime: api?.getState('currentTime'),
+    });
+  }
+
+  /** Drop unconfirmed waiting without counting or beaconing a rebuffer. */
+  function cancelPendingRebuffer(): void {
+    // Credit pending waiting as watch time before clearing its play-time guard.
+    if (waitingSince !== null) accrueTime();
+    if (graceTimer !== null) clearTimeout(graceTimer);
+    graceTimer = null;
+    waitingSince = null;
+  }
+
+  /**
+   * Handle seeking in an open view: count the seek and send a `seeking` beacon.
+   * Ignore seeks after viewEnd; only a play request starts the replay view.
    *
    * `seekTo` is the seek target from the event payload. Core emits
    * `playback:seeking` before it writes `currentTime`, so the state still
@@ -1096,13 +1164,20 @@ export function createAnalyticsPlugin(
    * @param payload - The `playback:seeking` payload, `{ time }` (the target)
    */
   function onSeeking(payload?: { time?: number }): void {
-    if (!api) return;
+    if (!api || session.viewEnd !== null) return;
 
+    cancelPendingRebuffer();
+    const now = Date.now();
+    // Coalesced requests can leave unused echoes. Do not renew expired ones.
+    if (now - lastBusSeekAt > 1000) pendingEchoes = 0;
+    pendingEchoes++;
+    lastBusSeekAt = now;
     session.seekCount++;
 
     const target = payload?.time;
     sendBeacon('seeking', {
       seekCount: session.seekCount,
+      seekSource: 'player',
       seekTo: typeof target === 'number' && Number.isFinite(target)
         ? target
         : api.getState('currentTime'),
@@ -1323,6 +1398,11 @@ export function createAnalyticsPlugin(
     // below is sent.
     closeRebuffer(false);
 
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+
     session.viewEnd = Date.now();
 
     if (!session.exitType) {
@@ -1426,6 +1506,7 @@ export function createAnalyticsPlugin(
       }
 
       discardPendingPause();
+      cancelPendingRebuffer();
 
       // Cleanup event listeners
       cleanupFns.forEach((fn) => fn());

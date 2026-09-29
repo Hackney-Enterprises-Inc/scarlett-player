@@ -907,6 +907,59 @@ function runAssertions(fixtures, absent, scenarioNotes) {
     return `${beacons.length} beacons`;
   });
 
+  check('every beacon has a positive integer beaconSeq, starting at 1 and increasing per view in timestamp/beaconSeq order', () => {
+    const views = new Map();
+    for (const r of beacons) {
+      const b = r.body;
+      if (!b || typeof b.viewId !== 'string' || !b.viewId) fail(`${eventOf(r)} (${r.scenario}): missing viewId`);
+      if (!Number.isSafeInteger(b.beaconSeq) || b.beaconSeq < 1) {
+        fail(`${eventOf(r)} (${r.scenario}): invalid beaconSeq ${JSON.stringify(b.beaconSeq)}`);
+      }
+      if (typeof b.timestamp !== 'number' || !Number.isFinite(b.timestamp)) {
+        fail(`${eventOf(r)} (${r.scenario}): invalid timestamp ${JSON.stringify(b.timestamp)}`);
+      }
+      if (!views.has(b.viewId)) views.set(b.viewId, []);
+      views.get(b.viewId).push(b);
+    }
+    if (!views.size) fail('no beacon views captured');
+    for (const [viewId, view] of views) {
+      // Requests (including async-header fetches and unload sendBeacon) may
+      // arrive out of order. Validate the payload order, never recorder order.
+      view.sort((a, b) => a.timestamp - b.timestamp || a.beaconSeq - b.beaconSeq);
+      if (view[0].event !== 'viewStart' || view[0].beaconSeq !== 1) {
+        fail(`${viewId}: first beacon is ${view[0].event} with beaconSeq ${view[0].beaconSeq}, expected viewStart/1`);
+      }
+      for (let i = 1; i < view.length; i++) {
+        if (view[i].beaconSeq <= view[i - 1].beaconSeq) {
+          fail(`${viewId}: beaconSeq ${view[i].beaconSeq} (${view[i].event}) did not increase from ${view[i - 1].beaconSeq}`);
+        }
+      }
+    }
+    return `${beacons.length} beacons across ${views.size} views (including custom events and unload)`;
+  });
+
+  check('seeking beacons carry player/element seekSource; the core seek to 20s is player', () => {
+    let seeks = 0;
+    for (const r of beacons) {
+      if (eventOf(r) === 'seeking') {
+        seeks++;
+        if (r.body.seekSource !== 'player' && r.body.seekSource !== 'element') {
+          fail(`seeking (${r.scenario}): invalid seekSource ${JSON.stringify(r.body.seekSource)}`);
+        }
+      } else if ('seekSource' in r.body) {
+        fail(`${eventOf(r)} (${r.scenario}): seekSource is only expected on seeking`);
+      }
+    }
+    if (!seeks) fail('no seeking beacons captured');
+    // The runner uses core seek(), not UI/native controls. Validate the known
+    // request rather than the first selected seeking fixture: HLS may also
+    // seek the element internally before the runner requests its first seek.
+    if (!beaconsOf('full-session').some((r) => eventOf(r) === 'seeking' && r.body.seekTo === 20 && r.body.seekSource === 'player')) {
+      fail('core seek to 20s lacks a seeking beacon with seekSource player');
+    }
+    return `${seeks} seeking beacons`;
+  });
+
   check('fetch beacons carry X-API-Key and X-Wire-Token; the unload beacon carries neither, and api_key in the query', () => {
     for (const r of beacons) {
       if (transportOf(r) === 'fetch') {
@@ -1044,7 +1097,8 @@ function runAssertions(fixtures, absent, scenarioNotes) {
   });
 
   check('heartbeat watchTime and rebufferCount never decrease (sanity)', () => {
-    const beats = beaconsOf('full-session').filter((r) => eventOf(r) === 'heartbeat').map((r) => r.body);
+    const beats = beaconsOf('full-session').filter((r) => eventOf(r) === 'heartbeat').map((r) => r.body)
+      .sort((a, b) => a.timestamp - b.timestamp || a.beaconSeq - b.beaconSeq);
     for (let i = 1; i < beats.length; i++) {
       if (beats[i].watchTime < beats[i - 1].watchTime) fail(`watchTime fell at heartbeat ${i}`);
       if (beats[i].rebufferCount < beats[i - 1].rebufferCount) fail(`rebufferCount fell at heartbeat ${i}`);

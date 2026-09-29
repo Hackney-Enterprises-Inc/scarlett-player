@@ -562,6 +562,7 @@ describe('Analytics Plugin', () => {
     it('should track rebuffer events', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,
+        rebufferGraceMs: 0, // This test asserts the legacy synchronous opt-out.
         customBeacon: mockBeacon,
       });
 

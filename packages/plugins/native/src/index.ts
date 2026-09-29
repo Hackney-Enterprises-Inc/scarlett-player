@@ -437,6 +437,8 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
 
     // Seeking events - only emit state update, not playback:seeking (which would cause a loop)
     on('seeking', () => {
+      // Seeking subscribers need the target, not the last timeupdate position.
+      api?.setState('currentTime', videoEl.currentTime);
       api?.setState('seeking', true);
       // A scrub back from the end never fires play or playing while paused, so
       // this is the only place the key can be cleared for a paused viewer.
