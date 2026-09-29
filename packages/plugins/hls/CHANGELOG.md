@@ -1,5 +1,11 @@
 # @scarlett-player/hls
 
+## 1.19.2
+
+### Patch Changes
+
+- [#127](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/127) [`22ca150`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/22ca150490173f2be4237f83325d9d3839aa122c) Thanks [@alexhackney](https://github.com/alexhackney)! - Fix the playback stall watchdog re-checking every ~15ms instead of every ~15s while playing. The target duration it re-arms on was computed in seconds but handed to `setTimeout` unconverted, so the interval cap of 30000 never applied and the watchdog spun continuously instead of polling on a sane cadence; stall detection itself (which compares against a millisecond threshold) was unaffected and still worked.
+
 ## 1.19.1
 
 ## 1.19.0

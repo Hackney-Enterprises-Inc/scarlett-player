@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.19.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @scarlett-player/core@1.19.2
+
 ## 1.19.1
 
 ### Patch Changes
