@@ -42173,7 +42173,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastStallCheckPosition = video.currentTime;
       const levelTargetDuration = hls?.targetDuration ?? hls?.levels?.[hls?.currentLevel]?.details?.targetduration ?? 0;
       const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
-      const checkInterval = Math.min(targetDuration, 3e4);
+      const checkInterval = Math.min(targetDuration * 1e3, 3e4);
       const check = () => {
         if (!video || !api) return;
         const isPlaying = api.getState("playing");
@@ -52376,6 +52376,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     return { name: "Unknown" };
   }
+  function isDesktopModeIPad(ua) {
+    return ua.includes("Macintosh") && (navigator.maxTouchPoints ?? 0) > 1;
+  }
   function getOSInfo() {
     const ua = navigator.userAgent;
     const platform = navigator.platform || "";
@@ -52386,17 +52389,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (ua.includes("Windows NT 6.1")) return { name: "Windows", version: "7" };
       return { name: "Windows" };
     }
-    if (ua.includes("Mac OS X")) {
-      const match = ua.match(/Mac OS X (\d+)[._](\d+)/);
-      return {
-        name: "macOS",
-        version: match ? `${match[1]}.${match[2]}` : void 0
-      };
-    }
     if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iPod")) {
       const match = ua.match(/OS (\d+)[._](\d+)/);
       return {
         name: "iOS",
+        version: match ? `${match[1]}.${match[2]}` : void 0
+      };
+    }
+    if (isDesktopModeIPad(ua)) {
+      return { name: "iOS" };
+    }
+    if (ua.includes("Mac OS X")) {
+      const match = ua.match(/Mac OS X (\d+)[._](\d+)/);
+      return {
+        name: "macOS",
         version: match ? `${match[1]}.${match[2]}` : void 0
       };
     }
@@ -52420,7 +52426,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     if (ua.includes("TV") || ua.includes("PlayStation") || ua.includes("Xbox") || ua.includes("SmartTV")) {
       return "tv";
     }
-    if (ua.includes("iPad") || ua.includes("Android") && !ua.includes("Mobile") || ua.includes("Tablet")) {
+    if (ua.includes("iPad") || isDesktopModeIPad(ua) || ua.includes("Android") && !ua.includes("Mobile") || ua.includes("Tablet")) {
       return "tablet";
     }
     if (ua.includes("Mobile") || ua.includes("iPhone") || ua.includes("iPod") || ua.includes("Android") && ua.includes("Mobile")) {
@@ -52602,9 +52608,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let session;
     let heartbeatTimer = null;
     let lastHeartbeatTime = 0;
+    let lastKnownCurrentTime = 0;
+    let lastKnownDuration = 0;
     let isRebuffering = false;
     let rebufferStartTime = null;
     let pauseStartTime = null;
+    let pendingPause = null;
     let playRequestPending = false;
     let pendingTrack = null;
     let currentTrackId = null;
@@ -52768,14 +52777,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }).catch(() => {
       });
     }
+    function accrueTime(now2 = Date.now()) {
+      const elapsed = now2 - lastHeartbeatTime;
+      session.watchTime += elapsed;
+      if (session.playbackState === "playing" && !isRebuffering) {
+        session.playTime += elapsed;
+      }
+      lastHeartbeatTime = now2;
+      const duration = api?.getState("duration");
+      if (typeof duration === "number" && duration > 0) {
+        lastKnownDuration = duration;
+        lastKnownCurrentTime = api?.getState("currentTime") ?? 0;
+      }
+    }
     function sendHeartbeat() {
       if (!api) return;
       const now2 = Date.now();
-      const timeSinceLastHeartbeat = now2 - lastHeartbeatTime;
-      session.watchTime += timeSinceLastHeartbeat;
-      if (session.playbackState === "playing" && !isRebuffering) {
-        session.playTime += timeSinceLastHeartbeat;
-      }
+      accrueTime(now2);
       if (session.bitrateHistory.length > 0) {
         const totalBitrateTime = session.bitrateHistory.reduce((sum, b, i, arr) => {
           const nextTime = i < arr.length - 1 ? arr[i + 1]?.time : now2;
@@ -52800,7 +52818,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         qoeScore: getQoEScore(),
         ...latencySampler.summary() ?? {}
       });
-      lastHeartbeatTime = now2;
     }
     function getQoEScore() {
       return calculateQoEScore({
@@ -52814,6 +52831,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function sendViewEnd() {
       if (!api) return;
+      accrueTime();
+      commitPendingPause();
+      closeRebuffer(true);
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -52823,7 +52843,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         currentTime: api.getState("currentTime"),
         duration: api.getState("duration")
       };
-      const completionRate = state.duration ? state.currentTime / state.duration * 100 : 0;
+      let completionRate = 0;
+      if (session.exitType === "completed") {
+        completionRate = 100;
+      } else if (state.duration > 0) {
+        completionRate = state.currentTime / state.duration * 100;
+      } else if (lastKnownDuration > 0) {
+        completionRate = lastKnownCurrentTime / lastKnownDuration * 100;
+      }
       sendBeacon("viewEnd", {
         watchTime: session.watchTime,
         playTime: session.playTime,
@@ -52846,9 +52873,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     }
     function startView(lastKnownIsLive = null) {
+      commitPendingPause();
       session = initSession();
       session.lastKnownIsLive = lastKnownIsLive;
       lastHeartbeatTime = Date.now();
+      lastKnownCurrentTime = 0;
+      lastKnownDuration = 0;
       isRebuffering = false;
       rebufferStartTime = null;
       pauseStartTime = null;
@@ -52968,18 +52998,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         startupTime: session.startupTime
       });
     }
-    function onPlaying() {
-      const now2 = Date.now();
-      if (isRebuffering && rebufferStartTime) {
-        const rebufferDuration = now2 - rebufferStartTime;
-        session.rebufferDuration += rebufferDuration;
-        isRebuffering = false;
-        rebufferStartTime = null;
+    function closeRebuffer(sendEndBeacon) {
+      if (!isRebuffering || !rebufferStartTime) return;
+      accrueTime();
+      const rebufferDuration = Date.now() - rebufferStartTime;
+      session.rebufferDuration += rebufferDuration;
+      isRebuffering = false;
+      rebufferStartTime = null;
+      if (sendEndBeacon) {
         sendBeacon("rebufferEnd", {
           duration: rebufferDuration,
           totalRebufferTime: session.rebufferDuration
         });
       }
+    }
+    function onPlaying() {
+      const now2 = Date.now();
+      accrueTime(now2);
+      closeRebuffer(true);
+      commitPendingPause();
       if (pauseStartTime) {
         const pauseDuration = now2 - pauseStartTime;
         session.pauseDuration += pauseDuration;
@@ -52989,17 +53026,60 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onPause() {
       if (!api) return;
+      accrueTime();
+      closeRebuffer(true);
       playRequestPending = false;
-      session.pauseCount++;
       session.playbackState = "paused";
-      pauseStartTime = Date.now();
-      sendBeacon("pause", {
-        currentTime: api.getState("currentTime")
-      });
+      if (api.getState("ended") === true || pendingPause) return;
+      const now2 = Date.now();
+      const currentTime = api.getState("currentTime");
+      if (isNearEndOfMedia()) {
+        pendingPause = {
+          time: now2,
+          currentTime,
+          timer: setTimeout(commitPendingPause, 0)
+        };
+        return;
+      }
+      recordPause(now2, currentTime);
+    }
+    function recordPause(time, currentTime) {
+      session.pauseCount++;
+      pauseStartTime = time;
+      sendBeacon("pause", { currentTime });
+    }
+    function commitPendingPause() {
+      if (!pendingPause) return;
+      const { time, currentTime, timer } = pendingPause;
+      clearTimeout(timer);
+      pendingPause = null;
+      recordPause(time, currentTime);
+    }
+    function discardPendingPause() {
+      if (!pendingPause) return;
+      clearTimeout(pendingPause.timer);
+      pendingPause = null;
+    }
+    function isNearEndOfMedia() {
+      if (!api) return false;
+      if (resolveIsLive() === true || api.getState("live") === true) return false;
+      const duration = api.getState("duration");
+      const currentTime = api.getState("currentTime");
+      return typeof duration === "number" && Number.isFinite(duration) && duration > 0 && typeof currentTime === "number" && currentTime >= duration - 0.5;
+    }
+    function onTimeUpdate(payload) {
+      if (!api) return;
+      const currentTime = payload?.currentTime;
+      const duration = api.getState("duration");
+      if (typeof currentTime === "number" && Number.isFinite(currentTime) && typeof duration === "number" && duration > 0) {
+        lastKnownCurrentTime = currentTime;
+        lastKnownDuration = duration;
+      }
     }
     function onWaiting() {
       if (!api) return;
       if (session.firstFrameTime !== null && !isRebuffering && !api.getState("seeking")) {
+        accrueTime();
         isRebuffering = true;
         rebufferStartTime = Date.now();
         session.rebufferCount++;
@@ -53009,15 +53089,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       }
     }
-    function onSeeking() {
+    function onSeeking(payload) {
       if (!api) return;
       session.seekCount++;
+      const target = payload?.time;
       sendBeacon("seeking", {
         seekCount: session.seekCount,
-        seekTo: api.getState("currentTime")
+        seekTo: typeof target === "number" && Number.isFinite(target) ? target : api.getState("currentTime")
       });
     }
     function onEnded() {
+      discardPendingPause();
+      accrueTime();
       session.playbackState = "ended";
       session.exitType = "completed";
       sendViewEnd();
@@ -53042,6 +53125,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         fatal: errorEvent.fatal
       });
       if (errorEvent.fatal) {
+        accrueTime();
         session.playbackState = "error";
         session.exitType = "error";
         sendViewEnd();
@@ -53081,6 +53165,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         fatal: errorEvent.fatal
       });
       if (errorEvent.fatal) {
+        accrueTime();
         session.playbackState = "error";
         session.exitType = "error";
         sendViewEnd();
@@ -53130,6 +53215,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onBeforeUnload() {
       if (session.viewEnd) return;
+      accrueTime();
+      commitPendingPause();
+      closeRebuffer(false);
       session.viewEnd = Date.now();
       if (!session.exitType) {
         session.exitType = "abandoned";
@@ -53164,6 +53252,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubWaiting = api.on("media:waiting", onWaiting);
         const unsubSeeking = api.on("playback:seeking", onSeeking);
         const unsubEnded = api.on("playback:ended", onEnded);
+        const unsubTimeUpdate = api.on("playback:timeupdate", onTimeUpdate);
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
         const unsubQuality = api.on("quality:change", onQualityChange);
@@ -53183,7 +53272,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubQuality,
           unsubLatency,
           unsubLowLatency,
-          unsubPlaylist
+          unsubPlaylist,
+          unsubTimeUpdate
         );
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("beforeunload", onBeforeUnload);
@@ -53207,6 +53297,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           session.exitType = session.exitType || "abandoned";
           sendViewEnd();
         }
+        discardPendingPause();
         cleanupFns.forEach((fn) => fn());
         cleanupFns = [];
         api?.logger.info("Analytics plugin destroyed");
