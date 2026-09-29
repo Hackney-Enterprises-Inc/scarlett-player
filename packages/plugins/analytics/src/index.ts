@@ -133,10 +133,23 @@ export function createAnalyticsPlugin(
   let api: IPluginAPI | null = null;
   let session: ViewSession;
   let heartbeatTimer: NodeJS.Timeout | null = null;
+  // When watch/play time was last accrued (see accrueTime)
   let lastHeartbeatTime = 0;
+  // The last position and duration seen with a duration, so a view whose
+  // state was already reset by a load() still reports how far it got (see
+  // onTimeUpdate)
+  let lastKnownCurrentTime = 0;
+  let lastKnownDuration = 0;
   let isRebuffering = false;
   let rebufferStartTime: number | null = null;
   let pauseStartTime: number | null = null;
+  // A pause near the end of the media, held until it is known whether
+  // `ended` follows it (see onPause)
+  let pendingPause: {
+    time: number;
+    currentTime: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
   // A playlist track that has not been loaded yet (see onPlaylistChange)
@@ -430,21 +443,41 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * Accrue watch and play time up to now.
+   *
+   * Adds the time since the last accrual to `watchTime`, and to `playTime`
+   * only while playback is running and not stalled. Called by every
+   * heartbeat, before every change to `playbackState` or `isRebuffering`
+   * (so each stretch is credited under the state it was spent in), and
+   * before either viewEnd payload (so the final partial interval is not
+   * lost). Also records the position and duration while the duration is
+   * known, for `completionRate` once a `load()` has zeroed them.
+   *
+   * @param now - The accrual time; defaults to `Date.now()`
+   */
+  function accrueTime(now: number = Date.now()): void {
+    const elapsed = now - lastHeartbeatTime;
+    session.watchTime += elapsed;
+    if (session.playbackState === 'playing' && !isRebuffering) {
+      session.playTime += elapsed;
+    }
+    lastHeartbeatTime = now;
+
+    const duration = api?.getState('duration');
+    if (typeof duration === 'number' && duration > 0) {
+      lastKnownDuration = duration;
+      lastKnownCurrentTime = api?.getState('currentTime') ?? 0;
+    }
+  }
+
+  /**
    * Send periodic heartbeat with current metrics.
    */
   function sendHeartbeat(): void {
     if (!api) return;
 
     const now = Date.now();
-    const timeSinceLastHeartbeat = now - lastHeartbeatTime;
-
-    // Update watch time
-    session.watchTime += timeSinceLastHeartbeat;
-
-    // Update play time (only if playing and not rebuffering)
-    if (session.playbackState === 'playing' && !isRebuffering) {
-      session.playTime += timeSinceLastHeartbeat;
-    }
+    accrueTime(now);
 
     // Calculate average bitrate (weighted by time spent at each level)
     if (session.bitrateHistory.length > 0) {
@@ -473,8 +506,6 @@ export function createAnalyticsPlugin(
       qoeScore: getQoEScore(),
       ...(latencySampler.summary() ?? {}),
     });
-
-    lastHeartbeatTime = now;
   }
 
   /**
@@ -497,6 +528,16 @@ export function createAnalyticsPlugin(
   function sendViewEnd(): void {
     if (!api) return;
 
+    // The time since the last heartbeat belongs to this view too
+    accrueTime();
+
+    // A near-end pause still held when the view ends was the viewer's
+    commitPendingPause();
+
+    // A rebuffer still open when the view ends (ended, a fatal error, a view
+    // switch, destroy()) would otherwise lose its time entirely.
+    closeRebuffer(true);
+
     // Stop heartbeat so it does not keep ticking after viewEnd
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
@@ -510,9 +551,17 @@ export function createAnalyticsPlugin(
       duration: api.getState('duration'),
     };
 
-    const completionRate = state.duration
-      ? (state.currentTime / state.duration) * 100
-      : 0;
+    // A completed view is 100 even when a host's own `ended` listener already
+    // called load(), which zeroes currentTime and duration before this runs.
+    // Otherwise the live state, or the last position seen with a duration.
+    let completionRate = 0;
+    if (session.exitType === 'completed') {
+      completionRate = 100;
+    } else if (state.duration > 0) {
+      completionRate = (state.currentTime / state.duration) * 100;
+    } else if (lastKnownDuration > 0) {
+      completionRate = (lastKnownCurrentTime / lastKnownDuration) * 100;
+    }
 
     sendBeacon('viewEnd', {
       watchTime: session.watchTime,
@@ -551,9 +600,13 @@ export function createAnalyticsPlugin(
    *   source to classify it again; another video starts unknown.
    */
   function startView(lastKnownIsLive: boolean | null = null): void {
+    // A held pause belongs to the view it happened in, never the next one
+    commitPendingPause();
     session = initSession();
     session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
+    lastKnownCurrentTime = 0;
+    lastKnownDuration = 0;
     isRebuffering = false;
     rebufferStartTime = null;
     pauseStartTime = null;
@@ -831,23 +884,48 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle playback started/resumed.
+   * Close an open rebuffer, if one is open: add its elapsed time to
+   * `session.rebufferDuration` and clear the tracking flags.
+   *
+   * The resume path (`onPlaying`) is not the only way a stall ends - the
+   * viewer can pause mid-stall, the view can end (`ended`, a fatal error, a
+   * view switch, `destroy()`), or the page can unload. Every one of those
+   * closes the rebuffer through this helper so its time is never lost.
+   *
+   * @param sendEndBeacon - Send the same `rebufferEnd` beacon `onPlaying()`
+   *   sends on resume. False on unload, where only the unload `viewEnd`
+   *   should go out.
    */
-  function onPlaying(): void {
-    const now = Date.now();
+  function closeRebuffer(sendEndBeacon: boolean): void {
+    if (!isRebuffering || !rebufferStartTime) return;
 
-    // End rebuffer?
-    if (isRebuffering && rebufferStartTime) {
-      const rebufferDuration = now - rebufferStartTime;
-      session.rebufferDuration += rebufferDuration;
-      isRebuffering = false;
-      rebufferStartTime = null;
+    // The stall's time is watch time, never play time
+    accrueTime();
 
+    const rebufferDuration = Date.now() - rebufferStartTime;
+    session.rebufferDuration += rebufferDuration;
+    isRebuffering = false;
+    rebufferStartTime = null;
+
+    if (sendEndBeacon) {
       sendBeacon('rebufferEnd', {
         duration: rebufferDuration,
         totalRebufferTime: session.rebufferDuration,
       });
     }
+  }
+
+  /**
+   * Handle playback started/resumed.
+   */
+  function onPlaying(): void {
+    const now = Date.now();
+    accrueTime(now);
+
+    closeRebuffer(true);
+
+    // A held near-end pause that playback resumed from was the viewer's
+    commitPendingPause();
 
     // End pause?
     if (pauseStartTime) {
@@ -861,19 +939,128 @@ export function createAnalyticsPlugin(
 
   /**
    * Handle pause.
+   *
+   * The element fires `pause` just before `ended` when the media runs out,
+   * in the same task, and the providers emit `playback:ended` synchronously
+   * from the element's `ended`. That pause is not the viewer's, so it is not
+   * counted: no `pause` beacon, no `pauseCount` increment, no pause duration.
+   * A pause while the `ended` state is already set is dropped at once. A
+   * pause near the end of VOD media is held for one macrotask
+   * (`setTimeout(0)`): `onEnded()` discards it, and otherwise it is counted
+   * as the viewer's, with its own time and position. A pause anywhere else
+   * is counted immediately. Every pause still settles a pending play request
+   * and closes an open rebuffer.
    */
   function onPause(): void {
     if (!api) return;
 
+    accrueTime();
+
+    // A stall that ends in a pause rather than a resume still closes.
+    closeRebuffer(true);
+
     // A pause settles any request still waiting for its first frame
     playRequestPending = false;
-    session.pauseCount++;
     session.playbackState = 'paused';
-    pauseStartTime = Date.now();
 
-    sendBeacon('pause', {
-      currentTime: api.getState('currentTime'),
-    });
+    if (api.getState('ended') === true || pendingPause) return;
+
+    const now = Date.now();
+    const currentTime = api.getState('currentTime');
+
+    if (isNearEndOfMedia()) {
+      pendingPause = {
+        time: now,
+        currentTime,
+        timer: setTimeout(commitPendingPause, 0),
+      };
+      return;
+    }
+
+    recordPause(now, currentTime);
+  }
+
+  /**
+   * Count a viewer pause: `pauseCount`, the start of its duration, and the
+   * `pause` beacon.
+   *
+   * @param time - When the pause happened
+   * @param currentTime - The position it happened at
+   */
+  function recordPause(time: number, currentTime: number): void {
+    session.pauseCount++;
+    pauseStartTime = time;
+
+    sendBeacon('pause', { currentTime });
+  }
+
+  /**
+   * Count a held near-end pause as the viewer's (see onPause). No-op when
+   * none is held. Called when its deferral runs out, and before anything
+   * that would otherwise leave it held: playback resuming, the view ending,
+   * the page unloading, a new view starting.
+   */
+  function commitPendingPause(): void {
+    if (!pendingPause) return;
+
+    const { time, currentTime, timer } = pendingPause;
+    clearTimeout(timer);
+    pendingPause = null;
+    recordPause(time, currentTime);
+  }
+
+  /**
+   * Drop a held near-end pause: `ended` followed it, so it was the
+   * element's. No-op when none is held.
+   */
+  function discardPendingPause(): void {
+    if (!pendingPause) return;
+
+    clearTimeout(pendingPause.timer);
+    pendingPause = null;
+  }
+
+  /**
+   * Whether a VOD position is within half a second of a known duration.
+   *
+   * Only a reason to hold a pause until `ended` has had its chance, never
+   * proof of the end on its own: a viewer can pause there too.
+   *
+   * @returns True when a pause now may be the element's end-of-media pause
+   */
+  function isNearEndOfMedia(): boolean {
+    if (!api) return false;
+    if (resolveIsLive() === true || api.getState('live') === true) return false;
+
+    const duration = api.getState('duration');
+    const currentTime = api.getState('currentTime');
+    return typeof duration === 'number' && Number.isFinite(duration) && duration > 0
+      && typeof currentTime === 'number' && currentTime >= duration - 0.5;
+  }
+
+  /**
+   * Record the view's progress from a `playback:timeupdate`.
+   *
+   * The position is the payload's, the duration the state's, and only while
+   * the duration is known. Core's load() zeroes both in state but emits no
+   * timeupdate, so the outgoing view's last snapshot survives the reset for
+   * its `completionRate`. accrueTime() records the same pair from state, as a
+   * fallback for a provider that emits no timeupdate.
+   *
+   * @param payload - The `playback:timeupdate` payload, `{ currentTime }`
+   */
+  function onTimeUpdate(payload?: { currentTime?: number }): void {
+    if (!api) return;
+
+    const currentTime = payload?.currentTime;
+    const duration = api.getState('duration');
+    if (
+      typeof currentTime === 'number' && Number.isFinite(currentTime)
+      && typeof duration === 'number' && duration > 0
+    ) {
+      lastKnownCurrentTime = currentTime;
+      lastKnownDuration = duration;
+    }
   }
 
   /**
@@ -885,6 +1072,8 @@ export function createAnalyticsPlugin(
     // Only count as rebuffer if we've started playing AND are not
     // mid-seek (seeks trigger waiting which is not a rebuffer).
     if (session.firstFrameTime !== null && !isRebuffering && !api.getState('seeking')) {
+      // Time up to the stall was spent playing
+      accrueTime();
       isRebuffering = true;
       rebufferStartTime = Date.now();
       session.rebufferCount++;
@@ -897,16 +1086,26 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle seeking.
+   * Handle seeking: count the seek and send a `seeking` beacon.
+   *
+   * `seekTo` is the seek target from the event payload. Core emits
+   * `playback:seeking` before it writes `currentTime`, so the state still
+   * holds the position the seek started from; it is only the fallback for an
+   * emit without a finite `time`.
+   *
+   * @param payload - The `playback:seeking` payload, `{ time }` (the target)
    */
-  function onSeeking(): void {
+  function onSeeking(payload?: { time?: number }): void {
     if (!api) return;
 
     session.seekCount++;
 
+    const target = payload?.time;
     sendBeacon('seeking', {
       seekCount: session.seekCount,
-      seekTo: api.getState('currentTime'),
+      seekTo: typeof target === 'number' && Number.isFinite(target)
+        ? target
+        : api.getState('currentTime'),
     });
   }
 
@@ -914,6 +1113,9 @@ export function createAnalyticsPlugin(
    * Handle playback ended.
    */
   function onEnded(): void {
+    // The pause just before this was the element's, not the viewer's
+    discardPendingPause();
+    accrueTime();
     session.playbackState = 'ended';
     session.exitType = 'completed';
     sendViewEnd();
@@ -947,6 +1149,7 @@ export function createAnalyticsPlugin(
     });
 
     if (errorEvent.fatal) {
+      accrueTime();
       session.playbackState = 'error';
       session.exitType = 'error';
       sendViewEnd();
@@ -1010,6 +1213,7 @@ export function createAnalyticsPlugin(
     });
 
     if (errorEvent.fatal) {
+      accrueTime();
       session.playbackState = 'error';
       session.exitType = 'error';
       sendViewEnd();
@@ -1107,6 +1311,18 @@ export function createAnalyticsPlugin(
    */
   function onBeforeUnload(): void {
     if (session.viewEnd) return;
+
+    // The time since the last heartbeat belongs to this view too
+    accrueTime();
+
+    // A near-end pause still held as the page goes was the viewer's
+    commitPendingPause();
+
+    // The page is going away: fold an open rebuffer's time into
+    // rebufferDuration, but without its own beacon - only the unload viewEnd
+    // below is sent.
+    closeRebuffer(false);
+
     session.viewEnd = Date.now();
 
     if (!session.exitType) {
@@ -1150,6 +1366,7 @@ export function createAnalyticsPlugin(
       const unsubWaiting = api.on('media:waiting', onWaiting);
       const unsubSeeking = api.on('playback:seeking', onSeeking);
       const unsubEnded = api.on('playback:ended', onEnded);
+      const unsubTimeUpdate = api.on('playback:timeupdate', onTimeUpdate);
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
       const unsubQuality = api.on('quality:change', onQualityChange);
@@ -1174,7 +1391,8 @@ export function createAnalyticsPlugin(
         unsubQuality,
         unsubLatency,
         unsubLowLatency,
-        unsubPlaylist
+        unsubPlaylist,
+        unsubTimeUpdate
       );
 
       // Page lifecycle events
@@ -1206,6 +1424,8 @@ export function createAnalyticsPlugin(
         session.exitType = session.exitType || 'abandoned';
         sendViewEnd();
       }
+
+      discardPendingPause();
 
       // Cleanup event listeners
       cleanupFns.forEach((fn) => fn());
