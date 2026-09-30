@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.20.0
+
+### Minor Changes
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85) Thanks [@alexhackney](https://github.com/alexhackney)! - Expose opt-in analytics privacy controls and batching through full-build embed attributes and programmatic configuration.
+
+### Patch Changes
+
+- Updated dependencies [[`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85)]:
+  - @scarlett-player/core@1.20.0
+
 ## 1.19.3
 
 ### Patch Changes

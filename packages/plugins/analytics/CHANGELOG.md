@@ -1,5 +1,15 @@
 # @scarlett-player/analytics
 
+## 1.20.0
+
+### Minor Changes
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85) Thanks [@alexhackney](https://github.com/alexhackney)! - Add privacy and page context controls, structured error categories and QoE v2 (including null access-denial scores), plus opt-in bounded batch beacons for compatible ingests. Pending batches are discarded if DNT/GPC opts out before dispatch.
+
+### Patch Changes
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`47f0191`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/47f019144cd3cff72e0a12de143796c6ec2b4086) Thanks [@alexhackney](https://github.com/alexhackney)! - Preserve the original analytics beacon when beforeSend returns undefined or another non-object value.
+
 ## 1.19.3
 
 ### Patch Changes

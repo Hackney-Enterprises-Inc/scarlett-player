@@ -1,5 +1,7 @@
 # @scarlett-player/captions
 
+## 1.20.0
+
 ## 1.19.3
 
 ## 1.19.2
