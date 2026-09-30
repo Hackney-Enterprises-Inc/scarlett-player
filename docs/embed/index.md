@@ -49,9 +49,7 @@ packages/embed/
 │   ├── version.ts         # __PKG_VERSION__, replaced at build time
 │   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
 │                          # lookup and the core/ui shims they build against
-├── templates/
-│   ├── laravel-embed.blade.php  # Laravel Blade template for /v/{id}
-│   └── EmbedController.php      # Example Laravel controller
+├── templates/             # Legacy copy-paste examples; not the Laravel integration path
 ├── tests/                 # embed, parser, iframe-error, version
 ├── demo.html              # Interactive demo page
 ├── iframe.html            # iframe embed helper (published alongside dist)
@@ -183,168 +181,78 @@ The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 ></iframe>
 ```
 
-Host applications can also route their own URLs to a page that renders the
-player - see the Laravel integration below.
+Laravel hosts can use the Composer package's embed page instead of building a
+player page themselves - see the Laravel integration below.
 
 ---
 
-## Laravel integration for `/v/{id}` URLs
+## Laravel integration
 
-Working examples live in `packages/embed/templates/`
-(`EmbedController.php`, `laravel-embed.blade.php`).
+For Laravel 12/13 on PHP 8.3+, install
+[`hei/laravel-scarlett-player` v0.3.0](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/tree/v0.3.0)
+instead of copying a controller and Blade template:
 
-### How it works
-
-```
-User loads: https://embed.thestreamplatform.com/v/abc123
-                            ↓
-Laravel route: Route::get('/v/{video:uuid}', [EmbedController::class, 'video'])
-                            ↓
-Controller looks up video in database
-                            ↓
-Returns Blade template with player pre-configured:
-  - Stream URL from database
-  - Brand colors from tenant settings
-  - Poster, autoplay, etc.
+```bash
+composer require hei/laravel-scarlett-player:^0.3.0
+php artisan vendor:publish --tag=scarlett-config
+php artisan scarlett:doctor
 ```
 
-### Routes (add to routes/web.php)
+Configure `media.model` and `media.key` (and either a `ScarlettMedia` model,
+complete `media.attributes` mapping, or `media.resolver`) so the package can
+resolve an id to a playback URL and its live/protected flags. Set
+`SCARLETT_CDN_URL=https://assets.thestreamplatform.com/scarlett-player` for
+embed mode: the package fills in its pinned version and `embed.js`. See
+[Player and embed](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#player-and-embed)
+for the media contract, feature matrix and config options.
 
-```php
-Route::get('/v/{video:uuid}', [EmbedController::class, 'video']);
-Route::get('/embed/{event:slug}', [EmbedController::class, 'event']);
-Route::get('/live/{channel}', [EmbedController::class, 'live']);
-```
-
-### Controller example
-
-```php
-<?php
-
-namespace App\Http\Controllers;
-
-use App\Models\Event;
-use App\Models\Video;
-
-class EmbedController extends Controller
-{
-    /**
-     * Embed a video by UUID
-     * URL: /v/abc123
-     */
-    public function video(Video $video)
-    {
-        if (!$video->embeddable) {
-            abort(403, 'This video cannot be embedded');
-        }
-
-        return view('embed.player', [
-            'src' => $video->stream_url,
-            'title' => $video->title,
-            'poster' => $video->thumbnail_url,
-            'autoplay' => request()->boolean('autoplay'),
-            'muted' => request()->boolean('muted', request()->boolean('autoplay')),
-            'brandColor' => $video->tenant->brand_color,
-            'tenant' => $video->tenant,
-        ]);
-    }
-
-    /**
-     * Embed a live event by slug
-     * URL: /embed/fight-night-2025
-     */
-    public function event(Event $event)
-    {
-        if (!$event->is_public && !$event->isAccessibleBy(auth()->user())) {
-            abort(403, 'Access denied');
-        }
-
-        return view('embed.player', [
-            'src' => $event->live_stream_url ?? $event->replay_url,
-            'title' => $event->title,
-            'poster' => $event->poster_url,
-            'autoplay' => $event->is_live,
-            'muted' => $event->is_live,
-            'brandColor' => $event->tenant->brand_color,
-            'tenant' => $event->tenant,
-        ]);
-    }
-}
-```
-
-### Blade template (resources/views/embed/player.blade.php)
+The [Blade component](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#blade-component)
+uses `module` mode by default: publish `scarlett-js`, install the player npm
+packages and import the initialiser in your Vite entry point. Choose `embed`
+mode to render data attributes and load the CDN bundle instead:
 
 ```blade
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ $title ?? 'Video Player' }}</title>
-  <meta name="robots" content="noindex, nofollow">
-  @if(isset($poster))
-  <meta property="og:image" content="{{ $poster }}">
-  @endif
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    #player { width: 100%; height: 100%; }
-  </style>
-</head>
-<body>
-  <div id="player"></div>
-  <script src="{{ config('services.scarlett.cdn_url') }}/embed.umd.cjs"></script>
-  <script>
-    ScarlettPlayer.create(@json([
-      'container' => '#player',
-      'src' => $src,
-      'autoplay' => $autoplay ?? false,
-      'muted' => $muted ?? false,
-      'poster' => $poster ?? null,
-      'brandColor' => $brandColor ?? null,
-    ]));
-  </script>
-</body>
-</html>
+<x-scarlett-player :media="$video" autoplay muted />
+<x-scarlett-player :media="$video" mode="embed" brand-color="#e50914" />
 ```
+
+`player.mode` changes the default; `mode="embed"` overrides it per component.
+The package's default `player.player_version` is **1.19.1**, including the
+embed bundle it loads. Player-side attributes added in a later 1.20 bundle
+are **not available** through that pinned embed until the Laravel package is
+repinned in its own repo (or the host explicitly configures a compatible
+bundle). Do not assume a newer installed module package changes the embed pin.
+The authoritative attributes for a chosen bundle are in the
+[embed README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/embed/README.md#available-data-attributes).
+
+The package's [embed page](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#embed-page)
+registers `GET /v/{uuid}` as `scarlett.embed.show` by default (outside the
+`api/scarlett` route prefix); no host controller or route is needed. Use
+`ScarlettPlayer::embedUrl($video)` for the page URL or
+`ScarlettPlayer::embedCode($video)` for an iframe snippet. Protected media,
+`embed.always_sign`, or an explicit expiry produces a signed URL; the default
+signature TTL is one day. Configure `embed.allowed_domains` with embedding
+hosts to restrict `frame-ancestors` (empty allows all); it also constrains
+the `shareUrl` query parameter. Plan around expiring links in copied snippets.
+See the package's [oEmbed](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#oembed)
+endpoint, `GET {prefix}/oembed?url=<embed page URL>` (`scarlett.oembed.show`),
+for discovery; protected media still requires a valid signed URL.
 
 ---
 
 ## Multi-tenant branding
 
-Each TSP client gets their own branded player:
+Each TSP client gets their own branded player. In Laravel, supply the tenant's
+colour through the Blade component's `brand-color` attribute or a
+`MediaSource`'s `meta['brand_color']` for the embed page (see the package's
+[embed page](https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#embed-page)):
 
 ```html
 <!-- Client A: Red -->
-<div data-sp src="{{ $clientA->stream }}" color="{{ $clientA->brand_color }}"></div>
+<div data-sp src="https://example.com/client-a.m3u8" color="#e50914"></div>
 
 <!-- Client B: Blue -->
-<div data-sp src="{{ $clientB->stream }}" color="{{ $clientB->brand_color }}"></div>
-```
-
-### Embed code generator (Laravel)
-
-```php
-public function generateEmbed(Event $event): string
-{
-    $params = http_build_query([
-        'src' => $event->stream_url,
-        'brand-color' => $event->client->brand_color,
-        'autoplay' => 'true',
-        'muted' => 'true',
-    ]);
-
-    $cdnUrl = config('services.scarlett.cdn_url');
-
-    return <<<HTML
-    <iframe
-      src="{$cdnUrl}/iframe.html?{$params}"
-      width="640" height="360"
-      frameborder="0" allowfullscreen
-      allow="autoplay; fullscreen; picture-in-picture"
-    ></iframe>
-    HTML;
-}
+<div data-sp src="https://example.com/client-b.m3u8" color="#1e90ff"></div>
 ```
 
 ---

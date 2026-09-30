@@ -41031,6 +41031,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       active
     };
   }
+  function segmentFromFragment(frag, ok) {
+    if (!frag || typeof frag !== "object") return null;
+    const { type, stats } = frag;
+    if (type !== "main" && type !== "audio" && type !== "subtitle") return null;
+    const start = stats?.loading?.start;
+    const end = stats?.loading?.end;
+    const bytes = stats?.loaded;
+    if (typeof start !== "number" || !Number.isFinite(start) || typeof end !== "number" || !Number.isFinite(end) || end < start || typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return null;
+    return { durationMs: end - start, bytes, ok, kind: type };
+  }
   function setupHlsEventHandlers(hls, api, callbacks) {
     const handlers = [];
     const addHandler = (event, handler) => {
@@ -41093,7 +41103,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       callbacks.onAudioTrackSwitched?.(data.id);
     });
     let lastBandwidthUpdate = 0;
-    addHandler("hlsFragLoaded", () => {
+    addHandler("hlsFragLoaded", (_event, data) => {
+      const segment = segmentFromFragment(data?.frag, true);
+      if (segment) api.emit("media:segment", segment);
       const now2 = Date.now();
       if (now2 - lastBandwidthUpdate >= 2e3 && hls.bandwidthEstimate) {
         lastBandwidthUpdate = now2;
@@ -41130,6 +41142,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     });
     addHandler("hlsError", (_event, data) => {
       const error = parseHlsError(data);
+      if (!error.fatal && (error.details === "fragLoadError" || error.details === "fragLoadTimeOut")) {
+        const segment = segmentFromFragment(data.frag, false);
+        if (segment) api.emit("media:segment", segment);
+      }
       const isBufferHoleSeek = !error.fatal && (error.details?.includes("bufferStalledError") || data.reason?.includes("buffer holes"));
       if (isBufferHoleSeek) {
         api.logger.debug(`HLS buffer recovery: ${error.reason || error.details}`, {
@@ -41278,7 +41294,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const error = video.error;
       if (error) {
         api.logger.error("Video element error", { code: error.code, message: error.message });
-        api.emit("media:error", { error: new Error(error.message || "Video playback error") });
+        const playbackError = new Error(error.message || "Video playback error");
+        if (typeof error.code === "number" && error.code > 0) {
+          Object.assign(playbackError, {
+            code: error.code,
+            detail: { mediaErrorCode: error.code }
+          });
+        }
+        api.emit("media:error", { error: playbackError });
       }
     });
     addHandler("enterpictureinpicture", () => {
@@ -42140,6 +42163,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           },
           getIsAutoQuality: () => isAutoQuality
         });
+        const activeHls = hls;
+        const onIncompleteFragmentError = (_event, data) => {
+          if (session !== loadSession || hls !== activeHls || !api || data?.fatal !== false || data.details !== "fragLoadError" && data.details !== "fragLoadTimeOut") return;
+          const kind = data.frag?.type;
+          const start = data.frag?.stats?.loading?.start;
+          const end = data.frag?.stats?.loading?.end;
+          const bytes = data.frag?.stats?.loaded;
+          if (kind !== "main" && kind !== "audio" && kind !== "subtitle" || typeof start !== "number" || !Number.isFinite(start) || end !== 0 || typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return;
+          const durationMs = performance.now() - start;
+          if (!Number.isFinite(durationMs) || durationMs < 0) return;
+          api.emit("media:segment", { kind, durationMs, bytes, ok: false });
+        };
+        activeHls.on("hlsError", onIncompleteFragmentError);
+        const cleanupMappedHlsEvents = cleanupHlsEvents;
+        cleanupHlsEvents = () => {
+          activeHls.off("hlsError", onIncompleteFragmentError);
+          cleanupMappedHlsEvents?.();
+        };
         const timeout_ms = mergedConfig.loadTimeoutMs ?? 3e4;
         if (timeout_ms > 0) {
           watchdog = setTimeout(() => {
@@ -52461,43 +52502,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   function calculateQoEScore(params) {
     const {
       startupTime,
+      rebufferCount,
       rebufferDuration,
       watchTime,
       maxBitrate,
       exitType,
-      errorCount
+      warningCount,
+      fatalErrorCategory
     } = params;
-    let startupScore = 100;
-    if (startupTime !== null) {
-      if (startupTime < 1e3) startupScore = 100;
-      else if (startupTime < 2e3) startupScore = 85;
-      else if (startupTime < 4e3) startupScore = 70;
-      else if (startupTime < 8e3) startupScore = 50;
-      else startupScore = 30;
-    }
-    let smoothnessScore = 100;
-    if (watchTime > 0) {
-      const rebufferRatio = rebufferDuration / watchTime * 100;
-      if (rebufferRatio < 0.1) smoothnessScore = 100;
-      else if (rebufferRatio < 1) smoothnessScore = 85;
-      else if (rebufferRatio < 2) smoothnessScore = 70;
-      else if (rebufferRatio < 5) smoothnessScore = 50;
-      else smoothnessScore = 30;
-    }
-    let successScore = 100;
-    if (exitType === "error") {
-      successScore = 0;
-    } else if (errorCount > 0) {
-      successScore = Math.max(0, 100 - errorCount * 10);
-    }
-    let qualityScore = 80;
-    if (maxBitrate > 4e6) qualityScore = 100;
-    else if (maxBitrate > 2e6) qualityScore = 90;
-    else if (maxBitrate > 1e6) qualityScore = 75;
-    else if (maxBitrate > 5e5) qualityScore = 60;
-    else if (maxBitrate > 0) qualityScore = 40;
-    const qoeScore = successScore * 0.3 + startupScore * 0.25 + smoothnessScore * 0.3 + qualityScore * 0.15;
-    return Math.round(qoeScore);
+    if (exitType === "error") return fatalErrorCategory === "access" ? null : 0;
+    const scores = [
+      startupTime === null ? 100 : 100 * 0.5 ** (Math.max(0, startupTime) / 4e3),
+      Math.min(
+        100 / Math.sqrt(1 + (rebufferCount / 2) ** 2),
+        100 * Math.exp(-10 * rebufferDuration / Math.max(1, watchTime))
+      )
+    ];
+    if (maxBitrate > 0) scores.push(clamp2(20 + 15 * Math.log2(maxBitrate / 25e4), 10, 100));
+    return Math.round(clamp2(scores.reduce((sum, score) => sum + score, 0) / scores.length - Math.min(20, 3 * warningCount), 0, 100));
   }
   var LATENCY_BUCKET_SECONDS = 0.25;
   var LATENCY_MAX_SECONDS = 120;
@@ -52573,6 +52595,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return "{}";
     }
   }
+  function clamp2(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
   function isHttpsUrl(url) {
     if (!url || typeof url !== "string" || !url.trim()) {
       return false;
@@ -52584,6 +52609,187 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     } catch {
       return false;
     }
+  }
+
+  // packages/plugins/analytics/src/transport.ts
+  function createTransport(config, logger2, isOptedOut) {
+    const batch = config.batch;
+    const enabled = Boolean(batch);
+    const options = typeof batch === "object" ? batch : {};
+    const intervalMs = typeof options.intervalMs === "number" && Number.isFinite(options.intervalMs) && options.intervalMs > 0 ? options.intervalMs : 1e4;
+    const maxEvents = typeof options.maxEvents === "number" && Number.isFinite(options.maxEvents) && options.maxEvents > 0 ? Math.floor(options.maxEvents) : 20;
+    const queue = [];
+    let timer = null;
+    const bytes = (body) => new TextEncoder().encode(body).length;
+    const envelope = (events) => ({ batch: 1, sentAt: Date.now(), events });
+    const bodyFor = (events) => safeStringify(envelope(events));
+    function blocked() {
+      if (!isOptedOut()) return false;
+      clearTimer();
+      queue.length = 0;
+      return true;
+    }
+    function beaconHeaders(extra) {
+      const headers = new Headers({ "Content-Type": "application/json", ...config.apiKey && isHttpsUrl(config.beaconUrl) ? { "X-API-Key": config.apiKey } : {} });
+      for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+      return headers;
+    }
+    function post(body) {
+      const dispatch = (extra) => {
+        if (blocked()) return;
+        try {
+          fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {
+          });
+        } catch {
+        }
+      };
+      const configured = config.headers;
+      if (typeof configured !== "function") {
+        dispatch(configured ?? {});
+        return;
+      }
+      Promise.resolve().then(() => configured()).then(dispatch).catch((error) => {
+        logger2.debug("Analytics headers() failed; sending without them", { error });
+        dispatch({});
+      });
+    }
+    function unload(body) {
+      if (blocked()) return;
+      if (navigator.sendBeacon) {
+        let url = config.beaconUrl;
+        if (config.apiKey && isHttpsUrl(config.beaconUrl)) {
+          try {
+            const base = typeof window !== "undefined" && window.location?.href ? window.location.href : void 0;
+            const parsed = base ? new URL(url, base) : new URL(url);
+            parsed.searchParams.set("api_key", config.apiKey);
+            url = parsed.toString();
+          } catch {
+            url = `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(config.apiKey)}`;
+          }
+        }
+        try {
+          if (!blocked() && navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) return;
+        } catch {
+        }
+      }
+      if (blocked()) return;
+      const extra = typeof config.headers === "function" ? {} : config.headers ?? {};
+      try {
+        fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {
+        });
+      } catch {
+      }
+    }
+    function clearTimer() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    }
+    function flushWith(dispatch) {
+      if (blocked()) return;
+      clearTimer();
+      if (queue.length) dispatch(bodyFor(queue.splice(0)));
+    }
+    function send(payload) {
+      if (blocked()) return;
+      if (config.customBeacon) {
+        config.customBeacon(config.beaconUrl, payload);
+        return;
+      }
+      if (!enabled) {
+        post(safeStringify(payload));
+        return;
+      }
+      if (bytes(bodyFor([payload])) > 6e4) {
+        flushWith(post);
+        post(safeStringify(payload));
+        return;
+      }
+      if (queue.length && bytes(bodyFor([...queue, payload])) > 6e4) flushWith(post);
+      queue.push(payload);
+      if (queue.length >= maxEvents || payload.event === "viewEnd" || payload.event === "error" && payload.fatal === true) {
+        flushWith(post);
+      } else if (timer === null) timer = setTimeout(() => flushWith(post), intervalMs);
+    }
+    function sendUnload(payload) {
+      if (blocked()) return;
+      if (config.customBeacon) {
+        config.customBeacon(config.beaconUrl, payload);
+        return;
+      }
+      if (!enabled) {
+        unload(safeStringify(payload));
+        return;
+      }
+      if (queue.length && bytes(bodyFor([...queue, payload])) > 6e4) flushWith(unload);
+      if (bytes(bodyFor([payload])) > 6e4) {
+        unload(safeStringify(payload));
+        return;
+      }
+      queue.push(payload);
+      flushWith(unload);
+    }
+    return { send, sendUnload, flush: () => flushWith(post), flushUnload: () => flushWith(unload) };
+  }
+
+  // packages/plugins/analytics/src/privacy.ts
+  function privacyOptOut(enabled) {
+    if (!enabled || typeof navigator === "undefined") return false;
+    return navigator.doNotTrack === "1" || navigator.globalPrivacyControl === true;
+  }
+
+  // packages/plugins/analytics/src/context.ts
+  function pageContext(playerInitTime) {
+    const context = {};
+    if (typeof window !== "undefined") {
+      context.pageUrl = window.location.origin + window.location.pathname;
+    }
+    if (typeof document !== "undefined" && document.referrer) {
+      try {
+        context.referrerOrigin = new URL(document.referrer).origin;
+      } catch {
+      }
+    }
+    if (typeof performance !== "undefined" && Number.isFinite(performance.now())) {
+      context.pageLoadToInitMs = Math.max(0, performance.now());
+    }
+    if (typeof playerInitTime === "number" && Number.isFinite(playerInitTime)) {
+      context.playerInitMs = Math.max(0, Date.now() - playerInitTime);
+    }
+    return context;
+  }
+
+  // packages/plugins/analytics/src/errors.ts
+  function classifyError(error) {
+    const detail = error.detail && typeof error.detail === "object" ? error.detail : {};
+    if ([401, 403, 451].includes(detail.httpStatus)) return "access";
+    if (["MEDIA_NETWORK_ERROR", "SOURCE_LOAD_FAILED"].includes(error.code) || detail.type === "network") return "network";
+    if (["MEDIA_DECODE_ERROR", "MEDIA_APPEND_ERROR", "MEDIA_BUFFER_FULL"].includes(error.code) || detail.type === "media") return "media";
+    if (["SOURCE_NOT_SUPPORTED", "PLAYLIST_INVALID", "PROVIDER_NOT_FOUND"].includes(error.code)) return "source";
+    if (error.code === "PLAYBACK_FAILED") return "playback";
+    if (["PROVIDER_SETUP_FAILED", "PLUGIN_SETUP_FAILED", "PLUGIN_NOT_FOUND"].includes(error.code)) return "player";
+    return "unknown";
+  }
+  function errorDetail(detail) {
+    if (!detail || typeof detail !== "object") return {};
+    const input = detail;
+    const result = {};
+    for (const key of ["httpStatus", "mediaErrorCode", "attempts"]) {
+      if (typeof input[key] === "number" && Number.isFinite(input[key])) result[key] = input[key];
+    }
+    for (const key of ["retriesExhausted", "reconnectExhausted", "timedOut"]) {
+      if (typeof input[key] === "boolean") result[key] = input[key];
+    }
+    return result;
+  }
+  function safeErrorMessage(message) {
+    return message.replace(/https?:\/\/[^\s)]+/g, (url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.origin + parsed.pathname;
+      } catch {
+        return "[url]";
+      }
+    });
   }
 
   // packages/plugins/analytics/src/version.ts
@@ -52606,6 +52812,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       throw new Error("Analytics plugin requires videoId");
     }
     const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
+    let nextAnonymous = mergedConfig.anonymous === true;
     const rebufferGraceMs = typeof mergedConfig.rebufferGraceMs === "number" && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0 ? mergedConfig.rebufferGraceMs : 250;
     const configuredVideo = {
       videoId: mergedConfig.videoId,
@@ -52632,13 +52839,80 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let currentTrackId = null;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
+    let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
+    let viewContext = {};
+    let segmentCount = 0;
+    let segmentBytes = 0;
+    let segmentDurationMs = 0;
+    let segmentMaxMs = 0;
+    let segmentErrors = 0;
+    let mainBytes = 0;
+    let mainDurationMs = 0;
+    let frameBaseline = null;
+    function onSegment(segment) {
+      if (session.viewEnd !== null || !segment || !Number.isFinite(segment.bytes) || segment.bytes < 0 || !Number.isFinite(segment.durationMs) || segment.durationMs < 0 || segment.kind !== "main" && segment.kind !== "audio" && segment.kind !== "subtitle") return;
+      segmentCount++;
+      segmentBytes += segment.bytes;
+      segmentDurationMs += segment.durationMs;
+      segmentMaxMs = Math.max(segmentMaxMs, segment.durationMs);
+      if (segment.ok === false) segmentErrors++;
+      if (segment.kind === "main") {
+        mainBytes += segment.bytes;
+        mainDurationMs += segment.durationMs;
+      }
+    }
+    function segmentSummary() {
+      if (segmentCount === 0) return {};
+      const result = {
+        segmentCount,
+        segmentBytes,
+        segmentLoadAvgMs: segmentDurationMs / segmentCount,
+        segmentLoadMaxMs: segmentMaxMs,
+        segmentErrors,
+        ...mainDurationMs > 0 ? { segmentThroughputBps: mainBytes * 8 * 1e3 / mainDurationMs } : {}
+      };
+      resetSegments();
+      return result;
+    }
+    function resetSegments() {
+      segmentCount = segmentBytes = segmentDurationMs = segmentMaxMs = segmentErrors = 0;
+      mainBytes = mainDurationMs = 0;
+    }
+    function readFrames() {
+      const video2 = api?.container.querySelector("video");
+      if (!video2 || typeof video2.getVideoPlaybackQuality !== "function") return null;
+      try {
+        const quality = video2.getVideoPlaybackQuality();
+        const decoded = quality?.totalVideoFrames;
+        const dropped = quality?.droppedVideoFrames;
+        if (!Number.isFinite(decoded) || decoded < 0 || !Number.isFinite(dropped) || dropped < 0) return null;
+        return { video: video2, decoded, dropped };
+      } catch {
+        return null;
+      }
+    }
+    function resetFrames() {
+      frameBaseline = readFrames();
+    }
+    function frameSummary() {
+      const current = readFrames();
+      const previous = frameBaseline;
+      frameBaseline = current;
+      if (!current || !previous || current.video !== previous.video || current.decoded < previous.decoded || current.dropped < previous.dropped) return {};
+      return {
+        decodedFrames: current.decoded - previous.decoded,
+        droppedFrames: current.dropped - previous.dropped
+      };
+    }
     function initSession() {
       latencySampler = createLatencySampler();
+      const anonymous = nextAnonymous;
       return {
         viewId: generateId2(),
         beaconSeq: 0,
-        sessionId: getSessionId(),
-        viewerId: mergedConfig.viewerId || getAnonymousViewerId(),
+        sessionId: anonymous ? generateId2() : getSessionId(),
+        viewerId: anonymous ? generateId2() : mergedConfig.viewerId || getAnonymousViewerId(),
+        anonymous,
         viewStart: Date.now(),
         playRequestTime: null,
         firstFrameTime: null,
@@ -52652,6 +52926,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         rebufferCount: 0,
         rebufferDuration: 0,
         errorCount: 0,
+        warningCount: 0,
+        fatalErrorCategory: null,
         errors: [],
         bitrateHistory: [],
         qualityChanges: 0,
@@ -52665,134 +52941,60 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function resolveIsLive() {
       return video.isLive ?? session.lastKnownIsLive;
     }
-    function sendBeacon(eventType, data = {}) {
-      if (mergedConfig.disableInDev && isDevelopment()) {
-        return;
+    function buildPayload(eventType, data) {
+      if (mergedConfig.disableInDev && isDevelopment()) return null;
+      if (privacyOptOut(mergedConfig.respectDoNotTrack)) {
+        transport.flush();
+        return null;
       }
-      if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) {
-        return;
-      }
+      if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) return null;
       const payload = {
-        // Event info
         event: eventType,
         timestamp: Date.now(),
-        // View context
         viewId: session.viewId,
         sessionId: session.sessionId,
         viewerId: session.viewerId,
-        // Video context
         videoId: video.videoId,
         videoTitle: video.videoTitle,
         isLive: resolveIsLive(),
-        // Player context
         playerVersion: PLUGIN_VERSION,
         playerName: PLUGIN_NAME,
-        // Environment
         browser: getBrowserInfo().name,
         os: getOSInfo().name,
         deviceType: getDeviceType(),
         screenSize: getScreenSize(),
         playerSize: getPlayerSize(api?.container ?? null),
         connectionType: getConnectionType(),
-        // Custom dimensions
+        ...session.anonymous ? { anonymous: true } : {},
         ...mergedConfig.customDimensions,
-        // Event-specific data
         ...data,
-        // Reserved ordering field: neither dimensions nor event data may win.
-        beaconSeq: ++session.beaconSeq
+        beaconSeq: session.beaconSeq + 1
       };
-      if (mergedConfig.customBeacon) {
-        mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
-        return;
+      if (mergedConfig.beforeSend) {
+        try {
+          const result = mergedConfig.beforeSend(payload);
+          if (result === null) return null;
+          if (typeof result !== "object") {
+            session.beaconSeq++;
+            return payload;
+          }
+          session.beaconSeq++;
+          return { ...result, beaconSeq: session.beaconSeq };
+        } catch (error) {
+          api?.logger.debug("Analytics beforeSend() failed; sending unmodified beacon", { error });
+        }
       }
-      const body = safeStringify(payload);
-      const post = (extra) => {
-        fetch(mergedConfig.beaconUrl, {
-          method: "POST",
-          headers: beaconHeaders(extra),
-          body,
-          keepalive: true
-        }).catch(() => {
-        });
-      };
-      const configured = mergedConfig.headers;
-      if (typeof configured !== "function") {
-        post(configured ?? {});
-        return;
-      }
-      Promise.resolve().then(() => configured()).then(post).catch((error) => {
-        api?.logger.debug("Analytics headers() failed; sending without them", { error });
-        post({});
-      });
+      session.beaconSeq++;
+      return payload;
     }
-    function baseHeaders() {
-      const shouldAttachApiKey = Boolean(mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl));
-      return {
-        "Content-Type": "application/json",
-        ...shouldAttachApiKey ? { "X-API-Key": mergedConfig.apiKey } : {}
-      };
-    }
-    function beaconHeaders(extra) {
-      const headers = new Headers(baseHeaders());
-      for (const [name, value] of Object.entries(extra)) {
-        headers.set(name, value);
-      }
-      return headers;
+    function sendBeacon(eventType, data = {}) {
+      const payload = buildPayload(eventType, data);
+      if (payload) transport.send(payload);
     }
     function sendUnloadBeacon(eventType, data = {}) {
-      if (mergedConfig.disableInDev && isDevelopment()) return;
-      if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) return;
-      const payload = {
-        event: eventType,
-        timestamp: Date.now(),
-        viewId: session.viewId,
-        sessionId: session.sessionId,
-        viewerId: session.viewerId,
-        videoId: video.videoId,
-        videoTitle: video.videoTitle,
-        isLive: resolveIsLive(),
-        playerVersion: PLUGIN_VERSION,
-        playerName: PLUGIN_NAME,
-        browser: getBrowserInfo().name,
-        os: getOSInfo().name,
-        deviceType: getDeviceType(),
-        screenSize: getScreenSize(),
-        playerSize: getPlayerSize(api?.container ?? null),
-        connectionType: getConnectionType(),
-        ...mergedConfig.customDimensions,
-        ...data,
-        beaconSeq: ++session.beaconSeq
-      };
-      if (mergedConfig.customBeacon) {
-        mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
-        return;
-      }
-      const body = safeStringify(payload);
-      if (navigator.sendBeacon) {
-        let urlWithApiKey = mergedConfig.beaconUrl;
-        if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
-          try {
-            const base = typeof window !== "undefined" && window.location?.href ? window.location.href : void 0;
-            const urlObj = base ? new URL(mergedConfig.beaconUrl, base) : new URL(mergedConfig.beaconUrl);
-            urlObj.searchParams.set("api_key", mergedConfig.apiKey);
-            urlWithApiKey = urlObj.toString();
-          } catch {
-            const separator = mergedConfig.beaconUrl.includes("?") ? "&" : "?";
-            urlWithApiKey = `${mergedConfig.beaconUrl}${separator}api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
-          }
-        }
-        const blob = new Blob([body], { type: "application/json" });
-        const sent = navigator.sendBeacon(urlWithApiKey, blob);
-        if (sent) return;
-      }
-      const staticHeaders = typeof mergedConfig.headers === "function" ? {} : mergedConfig.headers;
-      fetch(mergedConfig.beaconUrl, {
-        method: "POST",
-        headers: beaconHeaders(staticHeaders ?? {}),
-        body,
-        keepalive: true
-      }).catch(() => {
-      });
+      const payload = buildPayload(eventType, data);
+      if (payload) transport.sendUnload(payload);
+      else transport.flushUnload();
     }
     function accrueTime(now2 = Date.now()) {
       const elapsed = now2 - lastHeartbeatTime;
@@ -52833,17 +53035,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         rebufferDuration: session.rebufferDuration,
         avgBitrate: session.avgBitrate,
         qoeScore: getQoEScore(),
-        ...latencySampler.summary() ?? {}
+        qoeVersion: 2,
+        warningCount: session.warningCount,
+        ...latencySampler.summary() ?? {},
+        ...segmentSummary(),
+        ...frameSummary()
       });
     }
     function getQoEScore() {
       return calculateQoEScore({
         startupTime: session.startupTime,
+        rebufferCount: session.rebufferCount,
         rebufferDuration: session.rebufferDuration,
         watchTime: session.watchTime,
         maxBitrate: session.maxBitrate,
         exitType: session.exitType,
-        errorCount: session.errorCount
+        warningCount: session.warningCount,
+        fatalErrorCategory: session.fatalErrorCategory
       });
     }
     function sendViewEnd() {
@@ -52882,17 +53090,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         pauseDuration: session.pauseDuration,
         seekCount: session.seekCount,
         errorCount: session.errorCount,
+        warningCount: session.warningCount,
+        ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
         exitType: session.exitType,
         qoeScore: getQoEScore(),
+        qoeVersion: 2,
         completionRate,
         // Absent entirely on VOD: nothing ever emitted a live:latency reading
-        ...latencySampler.summary() ?? {}
+        ...latencySampler.summary() ?? {},
+        ...segmentSummary(),
+        ...frameSummary()
       });
     }
     function startView(lastKnownIsLive = null) {
       commitPendingPause();
       cancelPendingRebuffer();
       session = initSession();
+      resetSegments();
+      resetFrames();
       session.lastKnownIsLive = lastKnownIsLive;
       lastHeartbeatTime = Date.now();
       lastKnownCurrentTime = 0;
@@ -52903,7 +53118,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastBusSeekAt = 0;
       pauseStartTime = null;
       playRequestPending = false;
-      sendBeacon("viewStart");
+      sendBeacon("viewStart", viewContext);
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
       }
@@ -53015,6 +53230,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (event.key === "source" && event.value) {
         const src = event.value.src;
         onSourceChange(typeof src === "string" ? src : "");
+        resetFrames();
         return;
       }
       if (event.key === "live" && event.value === true) {
@@ -53172,11 +53388,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function onError(payload) {
       const error = payload.error;
       session.errorCount++;
+      const category = classifyError(error);
+      const fatal = error.fatal === true;
+      if (fatal) session.fatalErrorCategory = category;
+      else session.warningCount++;
       const errorEvent = {
         time: Date.now(),
         type: error.name || "Error",
         message: error.message || "Unknown error",
-        fatal: error.fatal ?? false
+        fatal
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -53184,9 +53404,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       sendBeacon("error", {
         errorType: errorEvent.type,
-        errorMessage: errorEvent.message,
-        errorCode: error.code,
-        fatal: errorEvent.fatal
+        errorMessage: safeErrorMessage(errorEvent.message),
+        ...typeof error.code === "string" || typeof error.code === "number" ? { errorCode: error.code } : {},
+        fatal: errorEvent.fatal,
+        errorCategory: category,
+        errorSeverity: fatal ? "fatal" : "warning",
+        ...errorDetail(error.detail)
       });
       if (errorEvent.fatal) {
         accrueTime();
@@ -53212,11 +53435,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       session.errorCount++;
+      const category = classifyError(err);
+      const fatal = err.fatal === true;
+      if (fatal) session.fatalErrorCategory = category;
+      else session.warningCount++;
       const errorEvent = {
         time: Date.now(),
         type,
         message,
-        fatal: err.fatal ?? false
+        fatal
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -53224,9 +53451,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       sendBeacon("error", {
         errorType: errorEvent.type,
-        errorMessage: errorEvent.message,
-        errorCode: code,
-        fatal: errorEvent.fatal
+        errorMessage: safeErrorMessage(errorEvent.message),
+        ...code !== void 0 ? { errorCode: code } : {},
+        fatal: errorEvent.fatal,
+        errorCategory: category,
+        errorSeverity: fatal ? "fatal" : "warning",
+        ...errorDetail(err.detail)
       });
       if (errorEvent.fatal) {
         accrueTime();
@@ -53273,6 +53503,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (document.hidden) {
         session.exitType = "background";
         sendHeartbeat();
+        transport.flush();
       } else {
         session.exitType = null;
       }
@@ -53299,9 +53530,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         avgBitrate: session.avgBitrate,
         maxBitrate: session.maxBitrate,
         exitType: session.exitType,
+        warningCount: session.warningCount,
+        ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
         // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
         // view is the one most worth having latency for
-        ...latencySampler.summary() ?? {}
+        ...latencySampler.summary() ?? {},
+        ...segmentSummary(),
+        ...frameSummary()
       });
     }
     return {
@@ -53310,8 +53545,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       version: PLUGIN_VERSION,
       type: "analytics",
       description: "Quality of Experience and engagement analytics",
+      /** Begin the first view and subscribe to player and page events. @param pluginApi - Core plugin API. */
       async init(pluginApi) {
         api = pluginApi;
+        viewContext = pageContext(mergedConfig.playerInitTime);
         startView();
         const unsubPlay = api.on("playback:play", onPlayEvent);
         const unsubState = api.subscribeToState(onStateChange);
@@ -53324,6 +53561,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
         const unsubQuality = api.on("quality:change", onQualityChange);
+        const unsubSegment = api.on("media:segment", onSegment);
         const unsubLatency = api.on("live:latency", onLiveLatency);
         const unsubLowLatency = api.on("live:lowlatency", onLowLatencyChange);
         const unsubPlaylist = api.on("playlist:change", onPlaylistChange);
@@ -53338,6 +53576,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubError,
           unsubCoreError,
           unsubQuality,
+          unsubSegment,
           unsubLatency,
           unsubLowLatency,
           unsubPlaylist,
@@ -53356,6 +53595,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           videoId: video.videoId
         });
       },
+      /** End an open view, flush pending batches and remove all listeners. */
       async destroy() {
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
@@ -53365,6 +53605,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           session.exitType = session.exitType || "abandoned";
           sendViewEnd();
         }
+        transport.flush();
         discardPendingPause();
         cancelPendingRebuffer();
         cleanupFns.forEach((fn) => fn());
@@ -53373,18 +53614,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api = null;
       },
       // === Public API ===
+      /** @returns Current view ID. */
       getViewId() {
         return session.viewId;
       },
+      /** @returns Current session ID. */
       getSessionId() {
         return session.sessionId;
       },
+      /** @returns QoE v2 score or null after fatal access denial. */
       getQoEScore() {
         return getQoEScore();
       },
+      /** Set the identity mode for the next view; current IDs remain unchanged. @param anonymous - Disable storage for future views. */
+      setAnonymous(anonymous) {
+        nextAnonymous = anonymous;
+      },
+      /** @returns Shallow snapshot of the current view metrics. */
       getMetrics() {
         return { ...session };
       },
+      /** Switch videos at a view boundary, ignoring same-video token refreshes. @param next - New video metadata. @throws Error if videoId is missing. */
       setVideo(next) {
         if (!next || typeof next.videoId !== "string" || next.videoId === "") {
           throw new Error("Analytics setVideo() requires videoId");
@@ -53395,6 +53645,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         switchVideo(next);
       },
+      /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
       trackEvent(name, data = {}) {
         sendBeacon(`custom:${name}`, data);
       }

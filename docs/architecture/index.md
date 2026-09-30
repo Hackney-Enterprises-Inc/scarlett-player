@@ -409,6 +409,20 @@ Core owns these namespaces: `player:`, `playback:`, `media:`, `volume:`,
 `playlist:`, plus the single unnamespaced `error`. A plugin namespaces its own
 events with its plugin id.
 
+`media:segment` carries `{ durationMs, bytes, ok, kind }` for measured hls.js
+fragment loads and failures (`kind` is `main`, `audio` or `subtitle`). Duration
+is the request's loading interval in milliseconds; on non-fatal fragment errors
+and timeouts where hls.js leaves `loading.end` at zero, the plugin uses
+`performance.now() - loading.start` when both timing and loaded bytes are
+measurable. `bytes` is the amount loaded. A provider without those measurements
+does not emit the event: native Safari HLS, progressive media and WHEP do not
+report fabricated zero-valued segments. Both HLS entries share this mapping.
+Analytics aggregates the available measurements by heartbeat/final view end
+into `segmentCount`, `segmentBytes`, `segmentLoadAvgMs`, `segmentLoadMaxMs`,
+`segmentThroughputBps` (from main fragments when timed) and `segmentErrors`;
+it omits these keys without measurements. Decoded/dropped frame deltas are
+reported only when the media element exposes `getVideoPlaybackQuality()`.
+
 `EventBus` provides `on`, `once`, `off`, `emit`, `emitAsync`, `intercept`,
 `removeAllListeners`, `listenerCount` and `destroy`. A handler that throws is
 caught and logged, so one bad listener cannot stop the others. An
@@ -430,11 +444,35 @@ Every dispatched beacon has a per-view `beaconSeq`, starting at 1 on
 `viewStart`, assigned after development/error-sampling filters and protected
 from custom-data overrides. Custom events and unload beacons share the counter.
 Order each view by `timestamp, beaconSeq`, not arrival or row ID. An ingest
-that drops heartbeats sees sequence gaps. Laravel integrations require
-`hei/laravel-scarlett-player` v0.3.0 and its migration before or alongside
-player 1.19.3 to recognise the new ordering/source fields. See the
-[analytics README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md) for the full
-accounting and ingest contract; there is no new embed attribute.
+that drops heartbeats sees sequence gaps. `seeking` carries `seekSource`
+(`player` or `element`); a view closes seek accounting at `viewEnd`. The
+`hei/laravel-scarlett-player` v0.3.0 migration recognises the 1.19.3
+ordering/source fields, **not** opt-in batch envelopes.
+
+Heartbeats and ordinary final `viewEnd` carry continuous QoE
+`qoeVersion: 2`; fatal access denial produces `qoeScore: null`. The unload
+`viewEnd` keeps its smaller field subset without QoE. Structured `error`
+beacons classify code/detail into `errorCategory` and `errorSeverity`, expose
+only validated diagnostic fields and avoid raw signed URLs. `warningCount`
+and (on fatal ends) `fatalErrorCategory` accompany view metrics.
+
+Analytics has no default endpoint: the host must configure `beaconUrl`.
+`respectDoNotTrack` honors DNT/GPC by suppressing beacons; `anonymous` uses
+per-view IDs without storage, and `setAnonymous()` changes the *next* view.
+`beforeSend` may modify or drop normal and unload payloads. `null` drops a
+beacon; other non-object results preserve the original payload and consume
+its sequence number once. On `viewStart`,
+`pageUrl` is origin plus pathname only, `referrerOrigin` omits paths, and
+`pageLoadToInitMs`/optional `playerInitMs` capture context. `batch` defaults
+off, preserving one POST per beacon; opt-in sends a bounded
+`{ batch: 1, sentAt, events }` envelope and needs a compatible custom ingest.
+**Laravel v0.3.0 rejects batch requests with 422.** Its default CDN embed pin
+is 1.19.1, so newer `data-analytics-anonymous`,
+`data-analytics-respect-dnt` and `data-analytics-batch` attributes only work
+when the embed bundle is separately repinned to a version that supports them;
+an attribute alone never enables analytics without `data-analytics-beacon-url`.
+See the [analytics README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md) for the
+full accounting and wire contract.
 
 ## Error and reconnect model
 

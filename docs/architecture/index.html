@@ -532,6 +532,19 @@ core change.</p>
 <code>chapter:</code>, <code>gesture:</code>, <code>controls:</code>, <code>ui:</code>, <code>state:</code>, <code>plugin:</code>, <code>error:</code> and
 <code>playlist:</code>, plus the single unnamespaced <code>error</code>. A plugin namespaces its own
 events with its plugin id.</p>
+<p><code>media:segment</code> carries <code>{ durationMs, bytes, ok, kind }</code> for measured hls.js
+fragment loads and failures (<code>kind</code> is <code>main</code>, <code>audio</code> or <code>subtitle</code>). Duration
+is the request&#39;s loading interval in milliseconds; on non-fatal fragment errors
+and timeouts where hls.js leaves <code>loading.end</code> at zero, the plugin uses
+<code>performance.now() - loading.start</code> when both timing and loaded bytes are
+measurable. <code>bytes</code> is the amount loaded. A provider without those measurements
+does not emit the event: native Safari HLS, progressive media and WHEP do not
+report fabricated zero-valued segments. Both HLS entries share this mapping.
+Analytics aggregates the available measurements by heartbeat/final view end
+into <code>segmentCount</code>, <code>segmentBytes</code>, <code>segmentLoadAvgMs</code>, <code>segmentLoadMaxMs</code>,
+<code>segmentThroughputBps</code> (from main fragments when timed) and <code>segmentErrors</code>;
+it omits these keys without measurements. Decoded/dropped frame deltas are
+reported only when the media element exposes <code>getVideoPlaybackQuality()</code>.</p>
 <p><code>EventBus</code> provides <code>on</code>, <code>once</code>, <code>off</code>, <code>emit</code>, <code>emitAsync</code>, <code>intercept</code>,
 <code>removeAllListeners</code>, <code>listenerCount</code> and <code>destroy</code>. A handler that throws is
 caught and logged, so one bad listener cannot stop the others. An
@@ -550,11 +563,33 @@ play time, even when too short to count as a rebuffer.</p>
 <code>viewStart</code>, assigned after development/error-sampling filters and protected
 from custom-data overrides. Custom events and unload beacons share the counter.
 Order each view by <code>timestamp, beaconSeq</code>, not arrival or row ID. An ingest
-that drops heartbeats sees sequence gaps. Laravel integrations require
-<code>hei/laravel-scarlett-player</code> v0.3.0 and its migration before or alongside
-player 1.19.3 to recognise the new ordering/source fields. See the
-<a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md">analytics README</a> for the full
-accounting and ingest contract; there is no new embed attribute.</p>
+that drops heartbeats sees sequence gaps. <code>seeking</code> carries <code>seekSource</code>
+(<code>player</code> or <code>element</code>); a view closes seek accounting at <code>viewEnd</code>. The
+<code>hei/laravel-scarlett-player</code> v0.3.0 migration recognises the 1.19.3
+ordering/source fields, <strong>not</strong> opt-in batch envelopes.</p>
+<p>Heartbeats and ordinary final <code>viewEnd</code> carry continuous QoE
+<code>qoeVersion: 2</code>; fatal access denial produces <code>qoeScore: null</code>. The unload
+<code>viewEnd</code> keeps its smaller field subset without QoE. Structured <code>error</code>
+beacons classify code/detail into <code>errorCategory</code> and <code>errorSeverity</code>, expose
+only validated diagnostic fields and avoid raw signed URLs. <code>warningCount</code>
+and (on fatal ends) <code>fatalErrorCategory</code> accompany view metrics.</p>
+<p>Analytics has no default endpoint: the host must configure <code>beaconUrl</code>.
+<code>respectDoNotTrack</code> honors DNT/GPC by suppressing beacons; <code>anonymous</code> uses
+per-view IDs without storage, and <code>setAnonymous()</code> changes the <em>next</em> view.
+<code>beforeSend</code> may modify or drop normal and unload payloads. <code>null</code> drops a
+beacon; other non-object results preserve the original payload and consume
+its sequence number once. On <code>viewStart</code>,
+<code>pageUrl</code> is origin plus pathname only, <code>referrerOrigin</code> omits paths, and
+<code>pageLoadToInitMs</code>/optional <code>playerInitMs</code> capture context. <code>batch</code> defaults
+off, preserving one POST per beacon; opt-in sends a bounded
+<code>{ batch: 1, sentAt, events }</code> envelope and needs a compatible custom ingest.
+<strong>Laravel v0.3.0 rejects batch requests with 422.</strong> Its default CDN embed pin
+is 1.19.1, so newer <code>data-analytics-anonymous</code>,
+<code>data-analytics-respect-dnt</code> and <code>data-analytics-batch</code> attributes only work
+when the embed bundle is separately repinned to a version that supports them;
+an attribute alone never enables analytics without <code>data-analytics-beacon-url</code>.
+See the <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md">analytics README</a> for the
+full accounting and wire contract.</p>
 <h2 id="error-and-reconnect-model"><a class="anchor" href="#error-and-reconnect-model">Error and reconnect model</a></h2>
 <p><code>ErrorHandler</code> normalises anything thrown into a <code>PlayerError</code>
 (<code>code</code>, <code>message</code>, <code>fatal</code>, <code>timestamp</code>, optional <code>context</code>, <code>originalError</code>

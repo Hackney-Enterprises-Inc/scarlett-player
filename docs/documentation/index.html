@@ -116,11 +116,11 @@
 </thead>
 <tbody><tr>
 <td><a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/core"><code>@scarlett-player/core</code></a></td>
-<td>Core engine - reactive state, event bus, plugin system, error handling</td>
+<td>Core engine - reactive state, event bus (including measured <code>media:segment</code>), plugin system, error handling</td>
 </tr>
 <tr>
 <td><a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/hls"><code>@scarlett-player/hls</code></a></td>
-<td>HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller <code>@scarlett-player/hls/light</code> entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery</td>
+<td>HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery, measured hls.js fragment success/failure via <code>media:segment</code> (not native HLS). A smaller <code>@scarlett-player/hls/light</code> entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery</td>
 </tr>
 <tr>
 <td><a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/native"><code>@scarlett-player/native</code></a></td>
@@ -148,7 +148,7 @@
 </tr>
 <tr>
 <td><a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/analytics"><code>@scarlett-player/analytics</code></a></td>
-<td>Analytics - startup time, grace-filtered rebuffers, bitrate and engagement metrics, player/element seek tracking, per-view beacon sequence</td>
+<td>Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls and opt-in batching for compatible ingests</td>
 </tr>
 <tr>
 <td><a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/playlist"><code>@scarlett-player/playlist</code></a></td>

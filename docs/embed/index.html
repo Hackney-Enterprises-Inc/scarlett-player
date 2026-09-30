@@ -59,7 +59,7 @@
         <li><a href="#quick-start">Quick Start</a></li>
         <li><a href="#package-structure">Package structure</a></li>
         <li><a href="#three-ways-to-embed">Three ways to embed</a></li>
-        <li><a href="#laravel-integration-for-vid-urls">Laravel integration for <code>/v/{id}</code> URLs</a></li>
+        <li><a href="#laravel-integration">Laravel integration</a></li>
         <li><a href="#multi-tenant-branding">Multi-tenant branding</a></li>
         <li><a href="#cdn-deployment">CDN deployment</a></li>
         <li><a href="#bundle-size">Bundle size</a></li>
@@ -99,9 +99,7 @@ are already in it.</p>
 │   ├── version.ts         # __PKG_VERSION__, replaced at build time
 │   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
 │                          # lookup and the core/ui shims they build against
-├── templates/
-│   ├── laravel-embed.blade.php  # Laravel Blade template for /v/{id}
-│   └── EmbedController.php      # Example Laravel controller
+├── templates/             # Legacy copy-paste examples; not the Laravel integration path
 ├── tests/                 # embed, parser, iframe-error, version
 ├── demo.html              # Interactive demo page
 ├── iframe.html            # iframe embed helper (published alongside dist)
@@ -259,140 +257,60 @@ player.destroy();</code></pre>
   allow=&quot;autoplay; fullscreen; picture-in-picture&quot;
   allowfullscreen
 &gt;&lt;/iframe&gt;</code></pre>
-<p>Host applications can also route their own URLs to a page that renders the
-player - see the Laravel integration below.</p>
+<p>Laravel hosts can use the Composer package&#39;s embed page instead of building a
+player page themselves - see the Laravel integration below.</p>
 <hr>
-<h2 id="laravel-integration-for-vid-urls"><a class="anchor" href="#laravel-integration-for-vid-urls">Laravel integration for <code>/v/{id}</code> URLs</a></h2>
-<p>Working examples live in <code>packages/embed/templates/</code>
-(<code>EmbedController.php</code>, <code>laravel-embed.blade.php</code>).</p>
-<h3 id="how-it-works"><a class="anchor" href="#how-it-works">How it works</a></h3>
-<pre tabindex="0"><code>User loads: https://embed.thestreamplatform.com/v/abc123
-                            ↓
-Laravel route: Route::get(&#39;/v/{video:uuid}&#39;, [EmbedController::class, &#39;video&#39;])
-                            ↓
-Controller looks up video in database
-                            ↓
-Returns Blade template with player pre-configured:
-  - Stream URL from database
-  - Brand colors from tenant settings
-  - Poster, autoplay, etc.</code></pre>
-<h3 id="routes-add-to-routeswebphp"><a class="anchor" href="#routes-add-to-routeswebphp">Routes (add to routes/web.php)</a></h3>
-<pre tabindex="0"><code class="language-php">Route::get(&#39;/v/{video:uuid}&#39;, [EmbedController::class, &#39;video&#39;]);
-Route::get(&#39;/embed/{event:slug}&#39;, [EmbedController::class, &#39;event&#39;]);
-Route::get(&#39;/live/{channel}&#39;, [EmbedController::class, &#39;live&#39;]);</code></pre>
-<h3 id="controller-example"><a class="anchor" href="#controller-example">Controller example</a></h3>
-<pre tabindex="0"><code class="language-php">&lt;?php
-
-namespace App\Http\Controllers;
-
-use App\Models\Event;
-use App\Models\Video;
-
-class EmbedController extends Controller
-{
-    /**
-     * Embed a video by UUID
-     * URL: /v/abc123
-     */
-    public function video(Video $video)
-    {
-        if (!$video-&gt;embeddable) {
-            abort(403, &#39;This video cannot be embedded&#39;);
-        }
-
-        return view(&#39;embed.player&#39;, [
-            &#39;src&#39; =&gt; $video-&gt;stream_url,
-            &#39;title&#39; =&gt; $video-&gt;title,
-            &#39;poster&#39; =&gt; $video-&gt;thumbnail_url,
-            &#39;autoplay&#39; =&gt; request()-&gt;boolean(&#39;autoplay&#39;),
-            &#39;muted&#39; =&gt; request()-&gt;boolean(&#39;muted&#39;, request()-&gt;boolean(&#39;autoplay&#39;)),
-            &#39;brandColor&#39; =&gt; $video-&gt;tenant-&gt;brand_color,
-            &#39;tenant&#39; =&gt; $video-&gt;tenant,
-        ]);
-    }
-
-    /**
-     * Embed a live event by slug
-     * URL: /embed/fight-night-2025
-     */
-    public function event(Event $event)
-    {
-        if (!$event-&gt;is_public &amp;&amp; !$event-&gt;isAccessibleBy(auth()-&gt;user())) {
-            abort(403, &#39;Access denied&#39;);
-        }
-
-        return view(&#39;embed.player&#39;, [
-            &#39;src&#39; =&gt; $event-&gt;live_stream_url ?? $event-&gt;replay_url,
-            &#39;title&#39; =&gt; $event-&gt;title,
-            &#39;poster&#39; =&gt; $event-&gt;poster_url,
-            &#39;autoplay&#39; =&gt; $event-&gt;is_live,
-            &#39;muted&#39; =&gt; $event-&gt;is_live,
-            &#39;brandColor&#39; =&gt; $event-&gt;tenant-&gt;brand_color,
-            &#39;tenant&#39; =&gt; $event-&gt;tenant,
-        ]);
-    }
-}</code></pre>
-<h3 id="blade-template-resourcesviewsembedplayerbladephp"><a class="anchor" href="#blade-template-resourcesviewsembedplayerbladephp">Blade template (resources/views/embed/player.blade.php)</a></h3>
-<pre tabindex="0"><code class="language-blade">&lt;!DOCTYPE html&gt;
-&lt;html lang=&quot;en&quot;&gt;
-&lt;head&gt;
-  &lt;meta charset=&quot;UTF-8&quot;&gt;
-  &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;&gt;
-  &lt;title&gt;{{ $title ?? &#39;Video Player&#39; }}&lt;/title&gt;
-  &lt;meta name=&quot;robots&quot; content=&quot;noindex, nofollow&quot;&gt;
-  @if(isset($poster))
-  &lt;meta property=&quot;og:image&quot; content=&quot;{{ $poster }}&quot;&gt;
-  @endif
-  &lt;style&gt;
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    #player { width: 100%; height: 100%; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;div id=&quot;player&quot;&gt;&lt;/div&gt;
-  &lt;script src=&quot;{{ config(&#39;services.scarlett.cdn_url&#39;) }}/embed.umd.cjs&quot;&gt;&lt;/script&gt;
-  &lt;script&gt;
-    ScarlettPlayer.create(@json([
-      &#39;container&#39; =&gt; &#39;#player&#39;,
-      &#39;src&#39; =&gt; $src,
-      &#39;autoplay&#39; =&gt; $autoplay ?? false,
-      &#39;muted&#39; =&gt; $muted ?? false,
-      &#39;poster&#39; =&gt; $poster ?? null,
-      &#39;brandColor&#39; =&gt; $brandColor ?? null,
-    ]));
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;</code></pre>
+<h2 id="laravel-integration"><a class="anchor" href="#laravel-integration">Laravel integration</a></h2>
+<p>For Laravel 12/13 on PHP 8.3+, install
+<a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/tree/v0.3.0"><code>hei/laravel-scarlett-player</code> v0.3.0</a>
+instead of copying a controller and Blade template:</p>
+<pre tabindex="0"><code class="language-bash">composer require hei/laravel-scarlett-player:^0.3.0
+php artisan vendor:publish --tag=scarlett-config
+php artisan scarlett:doctor</code></pre>
+<p>Configure <code>media.model</code> and <code>media.key</code> (and either a <code>ScarlettMedia</code> model,
+complete <code>media.attributes</code> mapping, or <code>media.resolver</code>) so the package can
+resolve an id to a playback URL and its live/protected flags. Set
+<code>SCARLETT_CDN_URL=https://assets.thestreamplatform.com/scarlett-player</code> for
+embed mode: the package fills in its pinned version and <code>embed.js</code>. See
+<a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#player-and-embed">Player and embed</a>
+for the media contract, feature matrix and config options.</p>
+<p>The <a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#blade-component">Blade component</a>
+uses <code>module</code> mode by default: publish <code>scarlett-js</code>, install the player npm
+packages and import the initialiser in your Vite entry point. Choose <code>embed</code>
+mode to render data attributes and load the CDN bundle instead:</p>
+<pre tabindex="0"><code class="language-blade">&lt;x-scarlett-player :media=&quot;$video&quot; autoplay muted /&gt;
+&lt;x-scarlett-player :media=&quot;$video&quot; mode=&quot;embed&quot; brand-color=&quot;#e50914&quot; /&gt;</code></pre>
+<p><code>player.mode</code> changes the default; <code>mode=&quot;embed&quot;</code> overrides it per component.
+The package&#39;s default <code>player.player_version</code> is <strong>1.19.1</strong>, including the
+embed bundle it loads. Player-side attributes added in a later 1.20 bundle
+are <strong>not available</strong> through that pinned embed until the Laravel package is
+repinned in its own repo (or the host explicitly configures a compatible
+bundle). Do not assume a newer installed module package changes the embed pin.
+The authoritative attributes for a chosen bundle are in the
+<a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/embed/README.md#available-data-attributes">embed README</a>.</p>
+<p>The package&#39;s <a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#embed-page">embed page</a>
+registers <code>GET /v/{uuid}</code> as <code>scarlett.embed.show</code> by default (outside the
+<code>api/scarlett</code> route prefix); no host controller or route is needed. Use
+<code>ScarlettPlayer::embedUrl($video)</code> for the page URL or
+<code>ScarlettPlayer::embedCode($video)</code> for an iframe snippet. Protected media,
+<code>embed.always_sign</code>, or an explicit expiry produces a signed URL; the default
+signature TTL is one day. Configure <code>embed.allowed_domains</code> with embedding
+hosts to restrict <code>frame-ancestors</code> (empty allows all); it also constrains
+the <code>shareUrl</code> query parameter. Plan around expiring links in copied snippets.
+See the package&#39;s <a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#oembed">oEmbed</a>
+endpoint, <code>GET {prefix}/oembed?url=&lt;embed page URL&gt;</code> (<code>scarlett.oembed.show</code>),
+for discovery; protected media still requires a valid signed URL.</p>
 <hr>
 <h2 id="multi-tenant-branding"><a class="anchor" href="#multi-tenant-branding">Multi-tenant branding</a></h2>
-<p>Each TSP client gets their own branded player:</p>
+<p>Each TSP client gets their own branded player. In Laravel, supply the tenant&#39;s
+colour through the Blade component&#39;s <code>brand-color</code> attribute or a
+<code>MediaSource</code>&#39;s <code>meta[&#39;brand_color&#39;]</code> for the embed page (see the package&#39;s
+<a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#embed-page">embed page</a>):</p>
 <pre tabindex="0"><code class="language-html">&lt;!-- Client A: Red --&gt;
-&lt;div data-sp src=&quot;{{ $clientA-&gt;stream }}&quot; color=&quot;{{ $clientA-&gt;brand_color }}&quot;&gt;&lt;/div&gt;
+&lt;div data-sp src=&quot;https://example.com/client-a.m3u8&quot; color=&quot;#e50914&quot;&gt;&lt;/div&gt;
 
 &lt;!-- Client B: Blue --&gt;
-&lt;div data-sp src=&quot;{{ $clientB-&gt;stream }}&quot; color=&quot;{{ $clientB-&gt;brand_color }}&quot;&gt;&lt;/div&gt;</code></pre>
-<h3 id="embed-code-generator-laravel"><a class="anchor" href="#embed-code-generator-laravel">Embed code generator (Laravel)</a></h3>
-<pre tabindex="0"><code class="language-php">public function generateEmbed(Event $event): string
-{
-    $params = http_build_query([
-        &#39;src&#39; =&gt; $event-&gt;stream_url,
-        &#39;brand-color&#39; =&gt; $event-&gt;client-&gt;brand_color,
-        &#39;autoplay&#39; =&gt; &#39;true&#39;,
-        &#39;muted&#39; =&gt; &#39;true&#39;,
-    ]);
-
-    $cdnUrl = config(&#39;services.scarlett.cdn_url&#39;);
-
-    return &lt;&lt;&lt;HTML
-    &lt;iframe
-      src=&quot;{$cdnUrl}/iframe.html?{$params}&quot;
-      width=&quot;640&quot; height=&quot;360&quot;
-      frameborder=&quot;0&quot; allowfullscreen
-      allow=&quot;autoplay; fullscreen; picture-in-picture&quot;
-    &gt;&lt;/iframe&gt;
-    HTML;
-}</code></pre>
+&lt;div data-sp src=&quot;https://example.com/client-b.m3u8&quot; color=&quot;#1e90ff&quot;&gt;&lt;/div&gt;</code></pre>
 <hr>
 <h2 id="cdn-deployment"><a class="anchor" href="#cdn-deployment">CDN deployment</a></h2>
 <p>Uploading is automated: <code>release.yml</code> hands <code>packages/embed/dist/</code> and
