@@ -29,7 +29,7 @@ For AI coding agents: [llms.txt](https://scarlettplayer.com/llms.txt) indexes th
 - **WHEP Monitoring** - Sub-second WebRTC playback over WHEP for a producer's low-delay preview (Tmesis, MediaMTX, any server that answers offers), with the HLS provider's reconnect scheduler
 - **AirPlay & Chromecast** - Built-in casting with session management
 - **Playlists** - Queue management, shuffle, repeat modes, auto-advance
-- **Analytics** - QoE metrics, engagement tracking, beacon transport
+- **Analytics** - QoE v2 metrics, structured errors, opt-in privacy controls and beacon batching for compatible ingests
 - **Sharing** - Native share sheet on mobile, copy link, social targets, embed codes, timestamped links
 - **Chapters** - Markers on the progress bar, a chapter list, and seek to chapter
 - **Touch Gestures** - Double-tap left or right to seek, keep tapping to go further
@@ -260,15 +260,15 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 
 | Package | Description |
 |---------|-------------|
-| `@scarlett-player/core` | Core engine - reactive state, event bus, plugin system, error handling |
-| `@scarlett-player/hls` | HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery. A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
+| `@scarlett-player/core` | Core engine - reactive state, event bus (including measured `media:segment`), plugin system, error handling |
+| `@scarlett-player/hls` | HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery, measured hls.js fragment success/failure via `media:segment` (not native HLS). A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
 | `@scarlett-player/native` | Native provider - video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
 | `@scarlett-player/whep` | WHEP provider - WebRTC playback over WHEP for sub-second live monitoring; bearer token or async token provider, the HLS provider's reconnect knobs, a receiver-side latency estimate. Answers only (no server counter-offers) |
 | `@scarlett-player/ui` | Video UI - play/pause, progress, volume, fullscreen, PiP, quality menu, live indicator, keyboard shortcuts |
 | `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
 | `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
 | `@scarlett-player/chromecast` | Chromecast - Google Cast SDK, session management, remote control |
-| `@scarlett-player/analytics` | Analytics - startup time, grace-filtered rebuffers, bitrate and engagement metrics, player/element seek tracking, per-view beacon sequence |
+| `@scarlett-player/analytics` | Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls and opt-in batching for compatible ingests |
 | `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
 | `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
@@ -282,14 +282,34 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 
 ## Analytics
 
-Analytics defaults to a 250 ms rebuffer grace (`rebufferGraceMs: 0` restores
-immediate counting). Confirmed stalls retain their full duration; short
-waiting still counts as watch time, not play time. Every beacon has a per-view
-`beaconSeq`, and `seeking` beacons identify the player or element path with
-`seekSource`. Seek accounting stops at `viewEnd`; pre-play replay seeks do not
-change the finalized view. See the [analytics README](./packages/plugins/analytics/README.md)
-for timing, ordering and the Laravel v0.3.0 ingest prerequisite for player
-1.19.3. No new embed data attribute is introduced.
+Analytics requires a host-supplied `beaconUrl`; there is no default collection
+endpoint. Its 250 ms rebuffer grace (`rebufferGraceMs: 0` restores immediate
+counting) excludes short waits from play time while retaining confirmed stalls'
+full duration. Every sent beacon carries per-view `beaconSeq`; `seeking` has
+`seekSource: 'player' | 'element'`. Heartbeats and ordinary final `viewEnd`
+carry `qoeVersion: 2` and a continuous `qoeScore` (`null` for fatal access
+denial); unload retains its smaller field subset. Error beacons include a
+structured category, severity and validated diagnostics, not raw detail URLs.
+
+`respectDoNotTrack` suppresses sends when DNT/GPC opts out; `anonymous` uses
+new IDs per view without storage. `beforeSend` can alter or drop beacons and
+`playerInitTime` supplies optional view-start timing. `pageUrl` contains only
+origin and pathname; `referrerOrigin` is origin-only. The full embed bundle
+supports `data-analytics-anonymous`, `data-analytics-respect-dnt` and
+`data-analytics-batch`, but none enables analytics without
+`data-analytics-beacon-url`. The Laravel Composer package's default pinned
+**1.19.1** embed bundle does not have these newer attributes; repin that bundle
+separately before using them. Batching defaults **off** (one POST per beacon).
+Opting in sends `{ batch: 1, sentAt, events }` and requires a compatible custom
+ingest: **Laravel v0.3.0 rejects batches (422)**. See the
+[analytics README](./packages/plugins/analytics/README.md) for the full wire
+contract and [embed README](./packages/embed/README.md) for bundle attributes.
+
+On hls.js HLS, the core `media:segment` event reports measured fragment
+`durationMs`, `bytes`, `ok` and `kind`; analytics includes interval segment
+counts, bytes, load timing, throughput and errors on heartbeats/final view
+ends. Native HLS, progressive media and WHEP do not emit this event, so
+segment metrics are omitted instead of reported as zero.
 
 ## Keyboard Shortcuts
 
@@ -426,7 +446,10 @@ transports send (one JSON per event and transport, plus a `manifest.json`),
 checks them against the wire contract, and writes them only if every check
 passes; the output belongs to the Laravel package
 (`tests/Fixtures/wire/<version>/` in `laravel-scarlett-player`), not to this
-repo, and `--smoke` writes to a temp directory instead.
+repo, and `--smoke` writes to a temp directory instead. Existing versioned
+captures are never overwritten: choose a new output directory for a recapture.
+`--batch` additionally records an opt-in envelope on the local recorder; it
+does not demonstrate Laravel ingest compatibility.
 
 `verify-browser.mjs` drives the source demo at `/demo/`; `verify-site.mjs`
 covers the homepage (`/docs/`) and both demo routes (`/docs/demo/` is what

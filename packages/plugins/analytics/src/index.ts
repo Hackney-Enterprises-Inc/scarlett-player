@@ -13,7 +13,7 @@
  * - Persistent viewer identification
  */
 
-import type { IPluginAPI, Plugin, QualityLevel, StateChangeEvent } from '@scarlett-player/core';
+import type { IPluginAPI, PlayerEventMap, Plugin, QualityLevel, StateChangeEvent } from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
   ViewSession,
@@ -37,9 +37,11 @@ import {
   calculateQoEScore,
   createLatencySampler,
   isDevelopment,
-  safeStringify,
-  isHttpsUrl,
 } from './helpers';
+import { createTransport } from './transport';
+import { privacyOptOut } from './privacy';
+import { pageContext } from './context';
+import { classifyError, errorDetail, safeErrorMessage } from './errors';
 import { PKG_VERSION } from './version';
 
 // Re-export types
@@ -117,6 +119,7 @@ export function createAnalyticsPlugin(
 
   // Merge with defaults
   const mergedConfig = { ...DEFAULT_CONFIG, ...config } as AnalyticsConfig;
+  let nextAnonymous = mergedConfig.anonymous === true;
   const rebufferGraceMs = typeof mergedConfig.rebufferGraceMs === 'number'
     && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0
     ? mergedConfig.rebufferGraceMs
@@ -172,6 +175,87 @@ export function createAnalyticsPlugin(
   // Reset alongside the session so a second view does not inherit the first
   // one's readings.
   let latencySampler = createLatencySampler();
+  let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
+  let viewContext: Record<string, string | number> = {};
+  // Only retain interval totals, never fragment data or signed segment URLs.
+  let segmentCount = 0;
+  let segmentBytes = 0;
+  let segmentDurationMs = 0;
+  let segmentMaxMs = 0;
+  let segmentErrors = 0;
+  let mainBytes = 0;
+  let mainDurationMs = 0;
+  let frameBaseline: { video: HTMLVideoElement; decoded: number; dropped: number } | null = null;
+
+  /** Record a measured fragment; failed requests and alternate renditions count too. */
+  function onSegment(segment: PlayerEventMap['media:segment']): void {
+    if (session.viewEnd !== null || !segment ||
+      !Number.isFinite(segment.bytes) || segment.bytes < 0 ||
+      !Number.isFinite(segment.durationMs) || segment.durationMs < 0 ||
+      (segment.kind !== 'main' && segment.kind !== 'audio' && segment.kind !== 'subtitle')) return;
+    segmentCount++;
+    segmentBytes += segment.bytes;
+    segmentDurationMs += segment.durationMs;
+    segmentMaxMs = Math.max(segmentMaxMs, segment.durationMs);
+    if (segment.ok === false) segmentErrors++;
+    if (segment.kind === 'main') {
+      mainBytes += segment.bytes;
+      mainDurationMs += segment.durationMs;
+    }
+  }
+
+  /** Take and clear the measured fragment interval, omitting unavailable throughput. */
+  function segmentSummary(): Record<string, number> {
+    if (segmentCount === 0) return {};
+    const result = {
+      segmentCount, segmentBytes,
+      segmentLoadAvgMs: segmentDurationMs / segmentCount,
+      segmentLoadMaxMs: segmentMaxMs,
+      segmentErrors,
+      ...(mainDurationMs > 0 ? { segmentThroughputBps: mainBytes * 8 * 1000 / mainDurationMs } : {}),
+    };
+    resetSegments();
+    return result;
+  }
+
+  /** Reset interval totals when starting a new view. */
+  function resetSegments(): void {
+    segmentCount = segmentBytes = segmentDurationMs = segmentMaxMs = segmentErrors = 0;
+    mainBytes = mainDurationMs = 0;
+  }
+
+  /** Read counters only from a video with the standard playback-quality API. */
+  function readFrames(): { video: HTMLVideoElement; decoded: number; dropped: number } | null {
+    const video = api?.container.querySelector('video');
+    if (!video || typeof video.getVideoPlaybackQuality !== 'function') return null;
+    try {
+      const quality = video.getVideoPlaybackQuality();
+      const decoded = quality?.totalVideoFrames;
+      const dropped = quality?.droppedVideoFrames;
+      if (!Number.isFinite(decoded) || decoded < 0 || !Number.isFinite(dropped) || dropped < 0) return null;
+      return { video, decoded, dropped };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Baseline at source/view boundaries to avoid counting the previous video's frames. */
+  function resetFrames(): void {
+    frameBaseline = readFrames();
+  }
+
+  /** Frame increments since the previous heartbeat (or source/view boundary). */
+  function frameSummary(): Record<string, number> {
+    const current = readFrames();
+    const previous = frameBaseline;
+    frameBaseline = current;
+    if (!current || !previous || current.video !== previous.video ||
+      current.decoded < previous.decoded || current.dropped < previous.dropped) return {};
+    return {
+      decodedFrames: current.decoded - previous.decoded,
+      droppedFrames: current.dropped - previous.dropped,
+    };
+  }
 
   /**
    * Initialize view session.
@@ -179,11 +263,14 @@ export function createAnalyticsPlugin(
   function initSession(): ViewSession {
     latencySampler = createLatencySampler();
 
+    const anonymous = nextAnonymous;
+
     return {
       viewId: generateId(),
       beaconSeq: 0,
-      sessionId: getSessionId(),
-      viewerId: mergedConfig.viewerId || getAnonymousViewerId(),
+      sessionId: anonymous ? generateId() : getSessionId(),
+      viewerId: anonymous ? generateId() : mergedConfig.viewerId || getAnonymousViewerId(),
+      anonymous,
       viewStart: Date.now(),
       playRequestTime: null,
       firstFrameTime: null,
@@ -197,6 +284,8 @@ export function createAnalyticsPlugin(
       rebufferCount: 0,
       rebufferDuration: 0,
       errorCount: 0,
+      warningCount: 0,
+      fatalErrorCategory: null,
       errors: [],
       bitrateHistory: [],
       qualityChanges: 0,
@@ -222,161 +311,14 @@ export function createAnalyticsPlugin(
     return video.isLive ?? session.lastKnownIsLive;
   }
 
-  /**
-   * Send analytics beacon to server.
-   */
-  function sendBeacon(
-    eventType: AnalyticsEventType | string,
-    data: Record<string, unknown> = {}
-  ): void {
-    // Skip if disabled in dev
-    if (mergedConfig.disableInDev && isDevelopment()) {
-      return;
+  /** Build once for both normal and unload paths, applying all per-beacon guards. */
+  function buildPayload(eventType: AnalyticsEventType | string, data: Record<string, unknown>): BeaconPayload | null {
+    if (mergedConfig.disableInDev && isDevelopment()) return null;
+    if (privacyOptOut(mergedConfig.respectDoNotTrack)) {
+      transport.flush(); // Also discard beacons queued before the signal changed.
+      return null;
     }
-
-    // Apply error sampling
-    if (eventType === 'error' && Math.random() > (mergedConfig.errorSampleRate ?? 1.0)) {
-      return;
-    }
-
-    const payload: BeaconPayload = {
-      // Event info
-      event: eventType,
-      timestamp: Date.now(),
-
-      // View context
-      viewId: session.viewId,
-      sessionId: session.sessionId,
-      viewerId: session.viewerId,
-
-      // Video context
-      videoId: video.videoId,
-      videoTitle: video.videoTitle,
-      isLive: resolveIsLive(),
-
-      // Player context
-      playerVersion: PLUGIN_VERSION,
-      playerName: PLUGIN_NAME,
-
-      // Environment
-      browser: getBrowserInfo().name,
-      os: getOSInfo().name,
-      deviceType: getDeviceType(),
-      screenSize: getScreenSize(),
-      playerSize: getPlayerSize(api?.container ?? null),
-      connectionType: getConnectionType(),
-
-      // Custom dimensions
-      ...mergedConfig.customDimensions,
-
-      // Event-specific data
-      ...data,
-      // Reserved ordering field: neither dimensions nor event data may win.
-      beaconSeq: ++session.beaconSeq,
-    };
-
-    // Use custom beacon function if provided (for testing)
-    if (mergedConfig.customBeacon) {
-      mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
-      return;
-    }
-
-    const body = safeStringify(payload);
-
-    /** Post `body` with the base headers plus whatever `headers` resolved to. */
-    const post = (extra: Record<string, string>): void => {
-      // Primary transport: fetch with keepalive. Unlike sendBeacon, fetch
-      // supports custom headers (X-API-Key), which is how the backend
-      // authenticates beacons. 100% of sendBeacon-based beacons arrived
-      // without the header — sendBeacon cannot attach custom headers at all.
-      fetch(mergedConfig.beaconUrl, {
-        method: 'POST',
-        headers: beaconHeaders(extra),
-        body,
-        keepalive: true,
-      }).catch(() => {
-        // Silently fail - don't disrupt playback
-      });
-    };
-
-    const configured = mergedConfig.headers;
-
-    if (typeof configured !== 'function') {
-      // Static (or absent) headers keep this path synchronous, which is what
-      // a beacon sent from a visibilitychange handler needs.
-      post(configured ?? {});
-      return;
-    }
-
-    // A function is resolved per request, so a rotating CSRF or Bearer token
-    // is current. A rejection must not cost the beacon: analytics is not worth
-    // losing over a token the server will simply refuse.
-    //
-    // Called from inside the chain rather than before it, so a headers()
-    // that throws synchronously - reading a cookie that is not there, say -
-    // lands in the same catch as one that rejects. Called directly, the throw
-    // would escape sendBeacon() into whichever player event handler triggered
-    // the beacon, and the beacon itself would never be sent.
-    Promise.resolve()
-      .then(() => configured())
-      .then(post)
-      .catch((error) => {
-        api?.logger.debug('Analytics headers() failed; sending without them', { error });
-        post({});
-      });
-  }
-
-  /**
-   * Headers every fetch-transport beacon carries.
-   *
-   * The API key rides here rather than on the URL whenever the transport can
-   * hold it; see `sendUnloadBeacon` for the one path that cannot.
-   */
-  function baseHeaders(): Record<string, string> {
-    const shouldAttachApiKey = Boolean(mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl));
-
-    return {
-      'Content-Type': 'application/json',
-      ...(shouldAttachApiKey ? { 'X-API-Key': mergedConfig.apiKey! } : {}),
-    };
-  }
-
-  /**
-   * The base headers with `extra` applied on top, as a `Headers`.
-   *
-   * `Headers.set` matches field names case-insensitively, so a host that
-   * configures `content-type` replaces ours instead of sitting beside it.
-   * Spreading into a plain object cannot do that: both spellings survive into
-   * the request, where the `Headers` constructor APPENDS rather than replaces
-   * and the beacon goes out with the two values comma-joined.
-   *
-   * @param extra - Resolved `headers` entries, which win over the base ones
-   * @returns Headers for the beacon request
-   */
-  function beaconHeaders(extra: Record<string, string>): Headers {
-    const headers = new Headers(baseHeaders());
-
-    for (const [name, value] of Object.entries(extra)) {
-      headers.set(name, value);
-    }
-
-    return headers;
-  }
-
-  /**
-   * Send a beacon on page unload using navigator.sendBeacon.
-   *
-   * sendBeacon cannot attach custom headers, so the API key is appended
-   * as a query parameter instead. This is the only path that survives
-   * iOS Safari's aggressive process termination on pagehide.
-   */
-  function sendUnloadBeacon(
-    eventType: AnalyticsEventType | string,
-    data: Record<string, unknown> = {}
-  ): void {
-    if (mergedConfig.disableInDev && isDevelopment()) return;
-    if (eventType === 'error' && Math.random() > (mergedConfig.errorSampleRate ?? 1.0)) return;
-
+    if (eventType === 'error' && Math.random() > (mergedConfig.errorSampleRate ?? 1.0)) return null;
     const payload: BeaconPayload = {
       event: eventType,
       timestamp: Date.now(),
@@ -394,67 +336,36 @@ export function createAnalyticsPlugin(
       screenSize: getScreenSize(),
       playerSize: getPlayerSize(api?.container ?? null),
       connectionType: getConnectionType(),
+      ...(session.anonymous ? { anonymous: true as const } : {}),
       ...mergedConfig.customDimensions,
       ...data,
-      beaconSeq: ++session.beaconSeq,
+      beaconSeq: session.beaconSeq + 1,
     };
-
-    if (mergedConfig.customBeacon) {
-      mergedConfig.customBeacon(mergedConfig.beaconUrl, payload);
-      return;
-    }
-
-    const body = safeStringify(payload);
-
-    if (navigator.sendBeacon) {
-      // Append API key as query parameter — sendBeacon cannot set headers
-      let urlWithApiKey = mergedConfig.beaconUrl;
-      if (mergedConfig.apiKey && isHttpsUrl(mergedConfig.beaconUrl)) {
-        try {
-          // Parsed against the page, the way isHttpsUrl() judged it HTTPS in
-          // the first place: a relative beaconUrl such as `/analytics/beacon`
-          // is legal here and `new URL()` alone rejects it, which dropped
-          // every relative endpoint into the string fallback below.
-          const base =
-            typeof window !== 'undefined' && window.location?.href
-              ? window.location.href
-              : undefined;
-          const urlObj = base
-            ? new URL(mergedConfig.beaconUrl, base)
-            : new URL(mergedConfig.beaconUrl);
-          urlObj.searchParams.set('api_key', mergedConfig.apiKey);
-          urlWithApiKey = urlObj.toString();
-        } catch {
-          // Last resort for a URL neither parse could take. Appending with the
-          // right separator matters: a `?` on an endpoint that already carries
-          // a query string folds the key into the previous parameter's value.
-          const separator = mergedConfig.beaconUrl.includes('?') ? '&' : '?';
-          urlWithApiKey = `${mergedConfig.beaconUrl}${separator}api_key=${encodeURIComponent(mergedConfig.apiKey)}`;
-        }
+    if (mergedConfig.beforeSend) {
+      try {
+        const result = mergedConfig.beforeSend(payload);
+        if (result === null) return null;
+        session.beaconSeq++;
+        return { ...result, beaconSeq: session.beaconSeq };
+      } catch (error) {
+        api?.logger.debug('Analytics beforeSend() failed; sending unmodified beacon', { error });
       }
-      const blob = new Blob([body], { type: 'application/json' });
-      const sent = navigator.sendBeacon(urlWithApiKey, blob);
-      if (sent) return;
     }
+    session.beaconSeq++;
+    return payload;
+  }
 
-    // Fallback to fetch with keepalive when sendBeacon is unavailable or returns false.
-    //
-    // Static `headers` are merged; a `headers()` function is NOT called here.
-    // This runs inside pagehide, where the page can be torn down before a
-    // promise resolves, and a beacon that waits for a token is a beacon that
-    // never leaves. A host that needs authenticated unload beacons uses the
-    // `api_key` query parameter above, which is the only thing sendBeacon can
-    // carry anyway.
-    const staticHeaders = typeof mergedConfig.headers === 'function' ? {} : mergedConfig.headers;
+  /** Send a normal event, preserving creation order and per-view sequence. */
+  function sendBeacon(eventType: AnalyticsEventType | string, data: Record<string, unknown> = {}): void {
+    const payload = buildPayload(eventType, data);
+    if (payload) transport.send(payload);
+  }
 
-    fetch(mergedConfig.beaconUrl, {
-      method: 'POST',
-      headers: beaconHeaders(staticHeaders ?? {}),
-      body,
-      keepalive: true,
-    }).catch(() => {
-      // Silently fail - don't disrupt playback
-    });
+  /** Send an unload event without waiting for asynchronous headers. */
+  function sendUnloadBeacon(eventType: AnalyticsEventType | string, data: Record<string, unknown> = {}): void {
+    const payload = buildPayload(eventType, data);
+    if (payload) transport.sendUnload(payload);
+    else transport.flushUnload();
   }
 
   /**
@@ -519,21 +430,27 @@ export function createAnalyticsPlugin(
       rebufferDuration: session.rebufferDuration,
       avgBitrate: session.avgBitrate,
       qoeScore: getQoEScore(),
+      qoeVersion: 2,
+      warningCount: session.warningCount,
       ...(latencySampler.summary() ?? {}),
+      ...segmentSummary(),
+      ...frameSummary(),
     });
   }
 
   /**
    * Calculate current QoE score.
    */
-  function getQoEScore(): number {
+  function getQoEScore(): number | null {
     return calculateQoEScore({
       startupTime: session.startupTime,
+      rebufferCount: session.rebufferCount,
       rebufferDuration: session.rebufferDuration,
       watchTime: session.watchTime,
       maxBitrate: session.maxBitrate,
       exitType: session.exitType,
-      errorCount: session.errorCount,
+      warningCount: session.warningCount,
+      fatalErrorCategory: session.fatalErrorCategory,
     });
   }
 
@@ -595,11 +512,16 @@ export function createAnalyticsPlugin(
       pauseDuration: session.pauseDuration,
       seekCount: session.seekCount,
       errorCount: session.errorCount,
+      warningCount: session.warningCount,
+      ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
       exitType: session.exitType,
       qoeScore: getQoEScore(),
+      qoeVersion: 2,
       completionRate,
       // Absent entirely on VOD: nothing ever emitted a live:latency reading
       ...(latencySampler.summary() ?? {}),
+      ...segmentSummary(),
+      ...frameSummary(),
     });
   }
 
@@ -619,6 +541,8 @@ export function createAnalyticsPlugin(
     commitPendingPause();
     cancelPendingRebuffer();
     session = initSession();
+    resetSegments();
+    resetFrames();
     session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
     lastKnownCurrentTime = 0;
@@ -630,7 +554,7 @@ export function createAnalyticsPlugin(
     pauseStartTime = null;
     playRequestPending = false;
 
-    sendBeacon('viewStart');
+    sendBeacon('viewStart', viewContext);
 
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
@@ -877,6 +801,7 @@ export function createAnalyticsPlugin(
     if (event.key === 'source' && event.value) {
       const src = (event.value as { src?: unknown }).src;
       onSourceChange(typeof src === 'string' ? src : '');
+      resetFrames();
       return;
     }
 
@@ -1202,12 +1127,16 @@ export function createAnalyticsPlugin(
   function onError(payload: { error: Error }): void {
     const error = payload.error;
     session.errorCount++;
+    const category = classifyError(error as Error & { code?: unknown; detail?: unknown });
+    const fatal = (error as Error & { fatal?: boolean }).fatal === true;
+    if (fatal) session.fatalErrorCategory = category;
+    else session.warningCount++;
 
     const errorEvent: ErrorEvent = {
       time: Date.now(),
       type: error.name || 'Error',
       message: error.message || 'Unknown error',
-      fatal: (error as any).fatal ?? false,
+      fatal,
     };
 
     session.errors.push(errorEvent);
@@ -1218,9 +1147,13 @@ export function createAnalyticsPlugin(
 
     sendBeacon('error', {
       errorType: errorEvent.type,
-      errorMessage: errorEvent.message,
-      errorCode: (error as any).code,
+      errorMessage: safeErrorMessage(errorEvent.message),
+      ...((typeof (error as any).code === 'string' || typeof (error as any).code === 'number')
+        ? { errorCode: (error as any).code } : {}),
       fatal: errorEvent.fatal,
+      errorCategory: category,
+      errorSeverity: fatal ? 'fatal' : 'warning',
+      ...errorDetail((error as Error & { detail?: unknown }).detail),
     });
 
     if (errorEvent.fatal) {
@@ -1268,11 +1201,15 @@ export function createAnalyticsPlugin(
     }
 
     session.errorCount++;
+    const category = classifyError(err);
+    const fatal = err.fatal === true;
+    if (fatal) session.fatalErrorCategory = category;
+    else session.warningCount++;
     const errorEvent: ErrorEvent = {
       time: Date.now(),
       type,
       message,
-      fatal: err.fatal ?? false,
+      fatal,
     };
 
     session.errors.push(errorEvent);
@@ -1282,9 +1219,12 @@ export function createAnalyticsPlugin(
 
     sendBeacon('error', {
       errorType: errorEvent.type,
-      errorMessage: errorEvent.message,
-      errorCode: code,
+      errorMessage: safeErrorMessage(errorEvent.message),
+      ...(code !== undefined ? { errorCode: code } : {}),
       fatal: errorEvent.fatal,
+      errorCategory: category,
+      errorSeverity: fatal ? 'fatal' : 'warning',
+      ...errorDetail(err.detail),
     });
 
     if (errorEvent.fatal) {
@@ -1369,6 +1309,7 @@ export function createAnalyticsPlugin(
     if (document.hidden) {
       session.exitType = 'background';
       sendHeartbeat();
+      transport.flush();
     } else {
       // Reset exitType when returning to foreground so that a subsequent
       // pagehide does not inherit the stale 'background' label.
@@ -1417,9 +1358,13 @@ export function createAnalyticsPlugin(
       avgBitrate: session.avgBitrate,
       maxBitrate: session.maxBitrate,
       exitType: session.exitType,
+      warningCount: session.warningCount,
+      ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
       // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
       // view is the one most worth having latency for
       ...(latencySampler.summary() ?? {}),
+      ...segmentSummary(),
+      ...frameSummary(),
     });
   }
 
@@ -1432,8 +1377,10 @@ export function createAnalyticsPlugin(
     type: 'analytics',
     description: 'Quality of Experience and engagement analytics',
 
+    /** Begin the first view and subscribe to player and page events. @param pluginApi - Core plugin API. */
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
+      viewContext = pageContext(mergedConfig.playerInitTime);
 
       // First view: viewStart and the heartbeat
       startView();
@@ -1450,6 +1397,7 @@ export function createAnalyticsPlugin(
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
       const unsubQuality = api.on('quality:change', onQualityChange);
+      const unsubSegment = api.on('media:segment', onSegment);
       // Live latency. The HLS provider emits this at the timeupdate cadence
       // for live content only, so a VOD session records nothing and the live
       // keys stay out of its beacons entirely.
@@ -1469,6 +1417,7 @@ export function createAnalyticsPlugin(
         unsubError,
         unsubCoreError,
         unsubQuality,
+        unsubSegment,
         unsubLatency,
         unsubLowLatency,
         unsubPlaylist,
@@ -1492,6 +1441,7 @@ export function createAnalyticsPlugin(
       });
     },
 
+    /** End an open view, flush pending batches and remove all listeners. */
     async destroy(): Promise<void> {
       // Stop heartbeat
       if (heartbeatTimer) {
@@ -1504,6 +1454,7 @@ export function createAnalyticsPlugin(
         session.exitType = session.exitType || 'abandoned';
         sendViewEnd();
       }
+      transport.flush();
 
       discardPendingPause();
       cancelPendingRebuffer();
@@ -1518,22 +1469,32 @@ export function createAnalyticsPlugin(
 
     // === Public API ===
 
+    /** @returns Current view ID. */
     getViewId(): string {
       return session.viewId;
     },
 
+    /** @returns Current session ID. */
     getSessionId(): string {
       return session.sessionId;
     },
 
-    getQoEScore(): number {
+    /** @returns QoE v2 score or null after fatal access denial. */
+    getQoEScore(): number | null {
       return getQoEScore();
     },
 
+    /** Set the identity mode for the next view; current IDs remain unchanged. @param anonymous - Disable storage for future views. */
+    setAnonymous(anonymous: boolean): void {
+      nextAnonymous = anonymous;
+    },
+
+    /** @returns Shallow snapshot of the current view metrics. */
     getMetrics(): Partial<ViewSession> {
       return { ...session };
     },
 
+    /** Switch videos at a view boundary, ignoring same-video token refreshes. @param next - New video metadata. @throws Error if videoId is missing. */
     setVideo(next: AnalyticsVideo): void {
       if (!next || typeof next.videoId !== 'string' || next.videoId === '') {
         throw new Error('Analytics setVideo() requires videoId');
@@ -1549,6 +1510,7 @@ export function createAnalyticsPlugin(
       switchVideo(next);
     },
 
+    /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
     trackEvent(name: string, data: Record<string, unknown> = {}): void {
       sendBeacon(`custom:${name}`, data);
     },

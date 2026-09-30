@@ -70,6 +70,47 @@ describe('parseDataAttributes', () => {
     });
   });
 
+  describe('analytics attributes', () => {
+    it('parses explicit privacy and batching booleans only with a beacon URL', () => {
+      element.setAttribute('data-analytics-beacon-url', 'https://example.com/beacon');
+      element.setAttribute('data-analytics-api-key', 'key');
+      element.setAttribute('data-analytics-video-id', 'video-1');
+      element.setAttribute('data-analytics-anonymous', '');
+      element.setAttribute('data-analytics-respect-dnt', 'false');
+      element.setAttribute('data-analytics-batch', 'true');
+      expect(parseDataAttributes(element).analytics).toEqual({
+        beaconUrl: 'https://example.com/beacon',
+        apiKey: 'key',
+        videoId: 'video-1',
+        anonymous: true,
+        respectDoNotTrack: false,
+        batch: true,
+      });
+    });
+
+    it('leaves absent analytics options unset and accepts explicit false', () => {
+      element.setAttribute('data-analytics-beacon-url', 'https://example.com/beacon');
+      expect(parseDataAttributes(element).analytics).not.toHaveProperty('anonymous');
+      expect(parseDataAttributes(element).analytics).not.toHaveProperty('respectDoNotTrack');
+      expect(parseDataAttributes(element).analytics).not.toHaveProperty('batch');
+      for (const name of ['anonymous', 'respect-dnt', 'batch']) {
+        element.setAttribute(`data-analytics-${name}`, 'false');
+      }
+      expect(parseDataAttributes(element).analytics).toMatchObject({
+        anonymous: false,
+        respectDoNotTrack: false,
+        batch: false,
+      });
+    });
+
+    it('does not enable analytics from option attributes without a beacon URL', () => {
+      element.setAttribute('data-analytics-anonymous', '');
+      element.setAttribute('data-analytics-respect-dnt', '');
+      element.setAttribute('data-analytics-batch', '');
+      expect(parseDataAttributes(element).analytics).toBeUndefined();
+    });
+  });
+
   describe('boolean attributes parsing', () => {
     it('should parse autoplay attribute', () => {
       element.setAttribute('data-autoplay', 'true');

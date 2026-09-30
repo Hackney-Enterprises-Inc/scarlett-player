@@ -10,26 +10,31 @@ never to this repo. Design and rationale:
 ```bash
 node scripts/capture-wire-fixtures.mjs --smoke          # temp dir, print manifest (what CI runs)
 node scripts/capture-wire-fixtures.mjs                  # ../packages/laravel-scarlett-player/tests/Fixtures/wire/<version>/
-node scripts/capture-wire-fixtures.mjs --out=<dir> --force
+node scripts/capture-wire-fixtures.mjs --out=<new-dir>  # never overwrite an existing capture
+node scripts/capture-wire-fixtures.mjs --smoke --batch    # optional local batch-envelope check
 WIRE_DEBUG=1 node scripts/capture-wire-fixtures.mjs --smoke   # also list every request received
 ```
 
 Needs Playwright's Chromium, ffmpeg (the HLS fixture) and openssl (the beacon
 origin's certificate). It starts its own servers; no `:8899` server is needed.
 Capture after the release you want to pin: `<version>` is read from
-`packages/plugins/analytics/package.json`.
+`packages/plugins/analytics/package.json`. If a versioned directory already
+exists, use a fresh `--out` path instead of replacing historical evidence.
 
 ## What it produces
 
 One JSON per request, `<event>.<transport>[.<variant>].json`, each
 `{ fixture, request, response? }`, plus `_session.sequence.json` (every beacon
 of the full session in arrival order) and `manifest.json` (versions, files,
-expected-but-absent fixtures with a reason, assertion results). Six
+expected-but-absent fixtures with a reason, assertion results). Eight
 scenarios, each in a fresh browser context: full session ending on `ended`,
 unload (`sendBeacon`), `destroy()`, fatal playlist 404, a clip whose first
 POST gets a 500 and whose retry gets a 202, and a live stream abandoned by
 navigation (`viewStart.fetch.live.json`, `heartbeat.fetch.live.json`,
-`viewEnd.sendBeacon.live-unload.json`). `rebufferStart`/`rebufferEnd` are
+`viewEnd.sendBeacon.live-unload.json`), an anonymous/privacy view, and a native
+MP4 control. With `--batch`, a ninth scenario writes `batch.fetch.json` from
+the local HTTPS recorder; **Laravel v0.3.0 rejects batch bodies (422)**, so
+this does not verify Laravel compatibility. `rebufferStart`/`rebufferEnd` are
 best effort; everything else is required.
 
 The live scenario plays `/__wire/live.m3u8`, a rolling playlist the page
@@ -68,7 +73,12 @@ with `exitType: 'error'`; the live heartbeat and live unload `viewEnd` carry
 be `false` on the standard-latency playlist) and no VOD beacon carries any; custom dimensions at the top level; clip create and retry share
 `clientRequestId` and body (`capturedAt` is minted per attempt) and carry the
 CSRF header; heartbeats never go backwards in payload timestamp/sequence order; every bus `quality:change` produced
-a matching `qualityChange` beacon; nothing left `127.0.0.1`. Any failure
+a matching `qualityChange` beacon; QoE v2 and structured fatal-error fields;
+anonymous viewStart context without URL query/fragment, `beforeSend` and DNT
+suppression; measured hls.js `media:segment` values and segment interval metrics
+with no fabricated segment data on native MP4; nothing left `127.0.0.1`. The
+manifest includes provider segment samples for the hls.js and MP4 scenarios.
+Any failure
 exits non-zero and writes nothing.
 
 The seek scenario uses core `player.seek()`, not UI or native controls, so it

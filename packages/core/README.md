@@ -121,6 +121,7 @@ player.on('playback:seeking', ({ time }) => {});
 player.on('volume:change', ({ volume, muted }) => {});
 player.on('fullscreen:change', ({ fullscreen }) => {});
 player.on('quality:change', ({ quality, auto }) => {});  // quality: 'level-<index>' (an id in `qualities`) or 'auto'
+player.on('media:segment', ({ durationMs, bytes, ok, kind }) => {}); // hls.js segment request measurement
 player.on('error', (error) => {});                    // Structured PlayerError { code, message, fatal }
 player.on('error:reconnecting', ({ attempt, delayMs }) => {}); // Self-heal attempt scheduled
 player.on('error:recovered', () => {});               // Self-heal succeeded, playback resumed
@@ -131,6 +132,14 @@ player.on('error:retry', ({ src }) => {});            // Viewer pressed Try Agai
 a listener has to be attached before `init()` or `load()` runs. With
 `createPlayer()` the returned promise is the readiness signal and the event is
 redundant.
+
+`media:segment` is a typed `PlayerEventMap` event for providers that fetch
+segments themselves. `durationMs` is the hls.js fragment load interval in
+milliseconds, `bytes` is its loaded-byte count (including partial bytes on a
+failure), `ok` is `false` for a non-fatal fragment load error/timeout, and
+`kind` is `'main' | 'audio' | 'subtitle'`. When hls.js has no valid measurements,
+no event is sent; native HLS, progressive MP4 and WHEP do not report segment
+measurements. Absence means unavailable, not zero.
 
 ## Plugins
 

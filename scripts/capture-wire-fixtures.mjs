@@ -23,7 +23,7 @@
  *     Access-Control-Allow-Credentials: true, without which the credentialed
  *     unload sendBeacon is silently dropped.
  *
- * Six scenarios, each in a fresh browser context (fresh viewId, viewerId and
+ * Scenarios, each in a fresh browser context (fresh viewId, viewerId and
  * session): full session, unload, destroy, fatal error, clip create + retry,
  * and a live stream abandoned by navigation (the latency summary keys).
  * The assertions below run before anything is written; a failure exits
@@ -31,15 +31,17 @@
  * contract is worse than none.
  *
  * Usage:
- *   node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--force] [--smoke]
+ *   node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch]
  *
  *   --out    Output directory. Default:
  *            ../packages/laravel-scarlett-player/tests/Fixtures/wire/<version>/
  *            resolved from the repo root, <version> being the analytics
- *            package's own. Refuses an existing directory without --force.
- *   --force  Allow an existing --out; its *.json files are replaced.
+ *            package's own. Refuses an existing directory: captures are
+ *            versioned evidence, never replaced in place.
  *   --smoke  Write to a temp directory instead, print the manifest, exit.
  *            What CI runs on a push to main.
+ *   --batch  Also capture the opt-in batch envelope against the local recorder.
+ *            Laravel v0.3.0 rejects batches; this is NOT an ingest test.
  *
  *   WIRE_DEBUG=1 in the environment also lists every request received.
  *
@@ -52,7 +54,7 @@
 
 import { Buffer } from 'node:buffer';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { createRequire } from 'node:module';
@@ -101,20 +103,20 @@ const MIME = {
  * Parse the command line.
  *
  * @param {string[]} argv - Arguments after the script path
- * @returns {{ out: string, force: boolean, smoke: boolean }}
+ * @returns {{ out: string, smoke: boolean, batch: boolean }}
  * @throws {Error} On an unknown flag
  */
 function parseArgs(argv) {
   const opts = {
     out: resolve(REPO_ROOT, '..', 'packages/laravel-scarlett-player/tests/Fixtures/wire', PLAYER_VERSION),
-    force: false,
     smoke: false,
+    batch: false,
   };
   for (const arg of argv) {
-    if (arg === '--force') opts.force = true;
-    else if (arg === '--smoke') opts.smoke = true;
+    if (arg === '--smoke') opts.smoke = true;
+    else if (arg === '--batch') opts.batch = true;
     else if (arg.startsWith('--out=')) opts.out = resolve(process.cwd(), arg.slice('--out='.length));
-    else throw new Error(`Unknown argument ${arg}. Usage: node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--force] [--smoke]`);
+    else throw new Error(`Unknown argument ${arg}. Usage: node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch]`);
   }
   return opts;
 }
@@ -191,6 +193,7 @@ async function bundlePage(outfile) {
       ['analytics', 'packages/plugins/analytics/src/index.ts'],
       ['clips', 'packages/plugins/clips/src/index.ts'],
       ['ui', 'packages/plugins/ui/src/index.ts'],
+      ['native', 'packages/plugins/native/src/index.ts'],
     ].map(([name, rel]) => [`@scarlett-player/${name}`, join(REPO_ROOT, rel)])
   );
   await esbuild.build({
@@ -382,7 +385,7 @@ async function startBeaconServer(tls, pageOrigin) {
  * @param {string} bundlePath - The page bundle in the temp directory
  * @returns {Promise<{ server: import('node:http').Server, origin: string }>}
  */
-async function startPageServer(bundlePath) {
+async function startPageServer(bundlePath, nativePath) {
   /** Attempts per clientRequestId: the first fails, the rest succeed. */
   const clipAttempts = new Map();
 
@@ -430,8 +433,10 @@ async function startPageServer(bundlePath) {
     const file =
       url.pathname === '/__wire/page.js'
         ? bundlePath
+        : url.pathname === '/__wire/native.mp4'
+          ? nativePath
         : resolve(REPO_ROOT, `.${decodeURIComponent(url.pathname)}`);
-    if (file !== bundlePath && !file.startsWith(REPO_ROOT + sep)) {
+    if (file !== bundlePath && file !== nativePath && !file.startsWith(REPO_ROOT + sep)) {
       res.writeHead(403);
       res.end();
       return;
@@ -502,9 +507,10 @@ const transportOf = (r) => (!r.headers['x-api-key'] && r.query.api_key !== undef
  * @param {string} beaconOrigin
  * @param {string} [src] - Playlist path; the page defaults to the fixture
  * @param {'vod'|'live'} [video] - Which videoId/videoTitle the beacons carry
+ * @param {string} [mode] - Additional capture mode (privacy, native or batch)
  * @returns {Promise<{ context: import('playwright').BrowserContext, page: import('playwright').Page, pageErrors: string[] }>}
  */
-async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod') {
+async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod', mode) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   // Nothing may leave 127.0.0.1, as in verify-browser.mjs, but enforced by
   // the launch's --host-resolver-rules rather than a route (see
@@ -519,6 +525,7 @@ async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod')
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   const query = new URLSearchParams({ beacon: beaconOrigin, src: src ?? '/__wire/master.m3u8', video });
+  if (mode) query.set(mode, '1');
   await page.goto(`${pageOrigin}/scripts/wire-capture/index.html?${query}`);
   await page.waitForFunction(() => window.wire !== undefined);
   const initError = await page.evaluate(async () => {
@@ -641,6 +648,7 @@ async function scenarioFullSession(browser, pageOrigin, beaconOrigin) {
         qualityChangeCount: window.wire.qualityChangeCount,
         qualityChanges: window.wire.qualityChanges,
         qualities: window.wire.player.getQualities().map(({ id, bitrate, width, height }) => ({ id, bitrate, width, height })),
+        segments: window.wire.segments,
       }))
     );
   } finally {
@@ -774,6 +782,54 @@ async function scenarioLive(browser, pageOrigin, beaconOrigin) {
   return { notes };
 }
 
+/** Anonymous view context and a dropped event, through the real transport. */
+async function scenarioPrivacy(browser, pageOrigin, beaconOrigin) {
+  const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, undefined, 'vod', 'privacy');
+  try {
+    await page.evaluate(() => {
+      window.wire.analytics.trackEvent('wireDropped');
+      window.wire.analytics.trackEvent('wirePrivacy', { source: 'harness' });
+    });
+    await waitFor(() => beaconsOf('privacy').some((r) => eventOf(r) === 'custom:wirePrivacy'), 5000, 'privacy custom event');
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'doNotTrack', { configurable: true, value: '1' });
+      window.wire.analytics.trackEvent('wireDntSuppressed');
+    });
+    await sleep(200);
+  } finally {
+    await context.close();
+  }
+  return { notes: { pageErrors } };
+}
+
+/** Native MP4 has no provider-level media:segment event or fabricated measurements. */
+async function scenarioNative(browser, pageOrigin, beaconOrigin) {
+  const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, '/__wire/native.mp4', 'vod', 'native');
+  let segments = [];
+  try {
+    await play(page);
+    await waitPlaying(page, 0.2);
+    await waitFor(() => beaconsOf('native').some((r) => eventOf(r) === 'heartbeat'), 5000, 'native heartbeat');
+    segments = await page.evaluate(() => window.wire.segments);
+  } finally {
+    await context.close();
+  }
+  return { notes: { pageErrors, segments } };
+}
+
+/** Opt-in batch envelope, recorded only when --batch was requested. */
+async function scenarioBatch(browser, pageOrigin, beaconOrigin) {
+  const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, undefined, 'vod', 'batch');
+  try {
+    await page.evaluate(() => window.wire.analytics.trackEvent('wireBatch', { source: 'harness' }));
+    await page.evaluate(() => window.wire.player.destroy());
+    await waitFor(() => beaconsOf('batch').some((r) => r.body?.batch === 1), 5000, 'batch POST');
+  } finally {
+    await context.close();
+  }
+  return { notes: { pageErrors } };
+}
+
 const SCENARIOS = [
   ['full-session', scenarioFullSession],
   ['unload', scenarioUnload],
@@ -781,6 +837,8 @@ const SCENARIOS = [
   ['error', scenarioError],
   ['clip', scenarioClip],
   ['live', scenarioLive],
+  ['privacy', scenarioPrivacy],
+  ['native', scenarioNative],
 ];
 
 // ---------------------------------------------------------------------------
@@ -795,7 +853,7 @@ const fileSafe = (event) => event.replace(/[^A-Za-z0-9_-]/g, '-');
  *
  * @returns {{ fixtures: Map<string, { meta: object, record: object }>, absent: Array<{ file: string, reason: string }> }}
  */
-function selectFixtures(scenarioNotes) {
+function selectFixtures(scenarioNotes, includeBatch) {
   const fixtures = new Map();
   const absent = [];
 
@@ -861,6 +919,15 @@ function selectFixtures(scenarioNotes) {
   beaconFixture('live', 'heartbeat', { pick: 'last', variant: 'live' });
   beaconFixture('live', 'viewEnd', { variant: 'live-unload' });
 
+  beaconFixture('privacy', 'viewStart', { variant: 'anonymous' });
+  beaconFixture('privacy', 'custom:wirePrivacy', { variant: 'anonymous' });
+  beaconFixture('native', 'heartbeat', { variant: 'native' });
+  if (includeBatch) {
+    const batchPost = beaconsOf('batch').find((r) => r.body?.batch === 1);
+    if (batchPost) put('batch.fetch.json', batchPost, { event: null, transport: 'fetch', variant: 'batch', scenario: 'batch' });
+    else absent.push({ file: 'batch.fetch.json', required: true, reason: 'no batch envelope arrived' });
+  }
+
   return { fixtures, absent };
 }
 
@@ -873,7 +940,7 @@ function selectFixtures(scenarioNotes) {
  *
  * @returns {Array<{ name: string, ok: boolean, detail?: string }>}
  */
-function runAssertions(fixtures, absent, scenarioNotes) {
+function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
   const results = [];
   const check = (name, fn) => {
     try {
@@ -886,7 +953,7 @@ function runAssertions(fixtures, absent, scenarioNotes) {
   const fail = (message) => {
     throw new Error(message);
   };
-  const beacons = records.filter((r) => r.origin === 'beacon' && r.method === 'POST');
+  const beacons = records.filter((r) => r.origin === 'beacon' && r.method === 'POST' && r.scenario !== 'batch');
   const body = (file) => fixtures.get(file)?.record.body;
 
   check('every required fixture was captured', () => {
@@ -1015,7 +1082,77 @@ function runAssertions(fixtures, absent, scenarioNotes) {
     for (const key of ['errorType', 'errorMessage', 'errorCode']) {
       if (error[key] === undefined || error[key] === null || error[key] === '') fail(`error lacks ${key}`);
     }
+    if (!['access', 'network', 'media', 'source', 'playback', 'player', 'unknown'].includes(error.errorCategory)) fail(`errorCategory ${error.errorCategory}`);
+    if (error.errorSeverity !== 'fatal') fail(`errorSeverity ${error.errorSeverity}`);
+    if (error.httpStatus !== undefined && (!Number.isInteger(error.httpStatus) || error.httpStatus < 100)) fail(`httpStatus ${error.httpStatus}`);
+    for (const key of ['mediaErrorCode', 'attempts']) if (key in error && (!Number.isFinite(error[key]) || error[key] < 0)) fail(`${key} ${error[key]}`);
+    for (const key of ['retriesExhausted', 'reconnectExhausted', 'timedOut']) if (key in error && typeof error[key] !== 'boolean') fail(`${key} ${error[key]}`);
+    if ('url' in error || 'detail' in error || /[?#]wire-secret/.test(error.errorMessage)) fail('error leaked a raw URL/detail');
     if (viewEnd.exitType !== 'error') fail(`viewEnd exitType ${viewEnd.exitType}`);
+    if (viewEnd.fatalErrorCategory !== error.errorCategory || !Number.isInteger(viewEnd.warningCount)) fail('fatal category/warning count mismatch');
+  });
+
+  check('QoE v2 on scored heartbeat and fetch viewEnd, absent from unload subset', () => {
+    for (const r of beacons.filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)) && transportOf(r) === 'fetch')) {
+      if (r.body.qoeVersion !== 2 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) fail(`${eventOf(r)} (${r.scenario}): invalid QoE v2`);
+    }
+    for (const r of beacons.filter((r) => eventOf(r) === 'viewEnd' && transportOf(r) === 'sendBeacon')) {
+      if ('qoeVersion' in r.body || 'qoeScore' in r.body) fail('unload carries QoE fetch-only fields');
+    }
+  });
+
+  check('anonymous viewStart has sanitized context and beforeSend drop does not consume a sequence', () => {
+    const start = body('viewStart.fetch.anonymous.json');
+    const custom = body('custom-wirePrivacy.fetch.anonymous.json');
+    if (!start || !custom) fail('anonymous fixtures missing');
+    if (start.anonymous !== true || custom.anonymous !== true || start.beaconSeq !== 1) fail('anonymous IDs/sequence incorrect');
+    const seq = beaconsOf('privacy').map((r) => r.body.beaconSeq).sort((a, b) => a - b);
+    if (seq.some((n, i) => n !== i + 1)) fail(`dropped event consumed a beaconSeq: ${seq}`);
+    if (start.pageUrl !== new URL(start.pageUrl).origin + new URL(start.pageUrl).pathname || !start.pageUrl.endsWith('/scripts/wire-capture/index.html')) fail(`unsafe pageUrl ${start.pageUrl}`);
+    if (!Number.isFinite(start.pageLoadToInitMs) || !Number.isFinite(start.playerInitMs) || start.playerInitMs < 0) fail('missing viewStart timing context');
+    if ('referrerOrigin' in start) fail('unexpected referrerOrigin on direct navigation');
+    if (beaconsOf('privacy').some((r) => eventOf(r) === 'custom:wireDropped')) fail('beforeSend did not drop event');
+    if (beaconsOf('privacy').some((r) => eventOf(r) === 'custom:wireDntSuppressed')) fail('DNT did not suppress event');
+    for (const r of beacons.filter((r) => eventOf(r) !== 'viewStart')) {
+      if (['pageUrl', 'referrerOrigin', 'pageLoadToInitMs', 'playerInitMs'].some((key) => key in r.body)) fail(`${eventOf(r)} (${r.scenario}) leaked viewStart context`);
+    }
+  });
+
+  check('hls.js emits measured segment values; native MP4 emits none', () => {
+    const segments = scenarioNotes['full-session']?.segments;
+    if (!segments?.length) fail('no media:segment on hls.js playback');
+    for (const s of segments) {
+      if (!['main', 'audio', 'subtitle'].includes(s.kind) || typeof s.ok !== 'boolean'
+        || !Number.isFinite(s.durationMs) || s.durationMs < 0 || !Number.isFinite(s.bytes) || s.bytes < 0) fail(`invalid segment ${JSON.stringify(s)}`);
+    }
+    if (!segments.some((s) => s.ok && s.bytes > 0 && s.durationMs > 0)) fail('no successful segment with positive measured values');
+    if (scenarioNotes.native?.segments?.length) fail(`native MP4 emitted ${scenarioNotes.native.segments.length} segments`);
+    if (!body('heartbeat.fetch.native.json')) fail('native heartbeat missing');
+    return `${segments.length} measured hls.js segments; native MP4 none`;
+  });
+
+  check('hls.js interval beacons carry segment aggregates; native MP4 omits them', () => {
+    const keys = ['segmentCount', 'segmentBytes', 'segmentLoadAvgMs', 'segmentLoadMaxMs', 'segmentThroughputBps', 'segmentErrors'];
+    const vod = beaconsOf('full-session').filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)));
+    const measured = vod.filter((r) => r.body.segmentCount > 0);
+    if (!measured.length) fail('no hls.js interval beacon carries measured segment aggregates');
+    for (const r of measured) {
+      for (const key of keys) if (!Number.isFinite(r.body[key]) || r.body[key] < 0) fail(`${eventOf(r)} has invalid ${key}: ${r.body[key]}`);
+      if (r.body.segmentBytes <= 0 || r.body.segmentLoadMaxMs < r.body.segmentLoadAvgMs) fail('invalid hls.js segment interval');
+    }
+    for (const r of beaconsOf('native')) {
+      if (keys.some((key) => key in r.body)) fail(`native ${eventOf(r)} fabricated segment metrics`);
+    }
+    return `${measured.length} measured interval beacons`;
+  });
+
+  if (includeBatch) check('opt-in batch envelope preserves event order and uses fetch auth', () => {
+    const posts = beaconsOf('batch');
+    const events = posts.flatMap((r) => r.body?.events ?? []);
+    if (!posts.length || posts.some((r) => r.body?.batch !== 1 || !Number.isFinite(r.body.sentAt) || !Array.isArray(r.body.events) || Buffer.byteLength(JSON.stringify(r.body)) > 60000)) fail('invalid batch envelope/size or a single-event POST');
+    if (!events.some((e) => e.event === 'custom:wireBatch') || !events.some((e) => e.event === 'viewEnd')) fail('batch missing custom event or final viewEnd');
+    for (let i = 1; i < events.length; i++) if (events[i].beaconSeq <= events[i - 1].beaconSeq) fail('batch event sequence out of order');
+    for (const r of posts) if (r.headers['x-api-key'] !== API_KEY || r.headers['x-wire-token'] !== WIRE_TOKEN) fail('batch fetch auth missing');
   });
 
   check('custom dimensions sit at the top level of every beacon, types intact', () => {
@@ -1137,12 +1274,10 @@ function runAssertions(fixtures, absent, scenarioNotes) {
  * @returns {object} The manifest
  */
 function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes }) {
-  mkdirSync(outDir, { recursive: true });
-  // Replace only what this harness writes; anything else in the directory
-  // (a hand-written PROVENANCE.md) is left alone.
-  for (const name of readdirSync(outDir)) {
-    if (name.endsWith('.json')) rmSync(join(outDir, name));
-  }
+  mkdirSync(dirname(outDir), { recursive: true });
+  // Exclusive creation, even if another run created this version after the
+  // early CLI check. Never mutate captured evidence or PROVENANCE.md.
+  mkdirSync(outDir);
 
   const provenance = {
     player: PLAYER_VERSION,
@@ -1198,6 +1333,8 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
           // manifest is parsed, so it is null on every scenario (asserted in
           // runAssertions); later beacons carry the classification.
           isLiveByEvent: Object.fromEntries(beaconsOf(name).reverse().map((r) => [eventOf(r), r.body.isLive])),
+          ...(name === 'full-session' ? { segments: notes.segments ?? [] } : {}),
+          ...(name === 'native' ? { segments: notes.segments ?? [] } : {}),
         },
       ])
     ),
@@ -1211,8 +1348,8 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
 // ---------------------------------------------------------------------------
 
 const opts = parseArgs(process.argv.slice(2));
-if (!opts.smoke && existsSync(opts.out) && !opts.force) {
-  console.error(`${opts.out} exists. Re-run with --force to replace its fixtures.`);
+if (!opts.smoke && existsSync(opts.out)) {
+  console.error(`${opts.out} exists. Choose a new --out directory; captured evidence is never overwritten.`);
   process.exit(1);
 }
 
@@ -1221,6 +1358,7 @@ ensureHlsFixture();
 
 const workDir = mkdtempSync(join(tmpdir(), 'scarlett-wire-'));
 const bundlePath = join(workDir, 'page.js');
+const nativePath = join(workDir, 'native.mp4');
 let exitCode = 1;
 let browser;
 let beaconServer;
@@ -1229,11 +1367,12 @@ let pageServer;
 try {
   const tls = makeCertificate(workDir);
   await bundlePage(bundlePath);
+  execFileSync('ffmpeg', ['-y', '-i', join(REPO_ROOT, 'scripts/fixtures/hls/seg0.ts'), '-c', 'copy', '-movflags', '+faststart', nativePath], { stdio: 'ignore' });
 
   let pageOrigin = '';
   const beacon = await startBeaconServer(tls, () => pageOrigin);
   beaconServer = beacon.server;
-  const pageSrv = await startPageServer(bundlePath);
+  const pageSrv = await startPageServer(bundlePath, nativePath);
   pageServer = pageSrv.server;
   pageOrigin = pageSrv.origin;
 
@@ -1258,7 +1397,7 @@ try {
 
   const scenarioNotes = {};
   const failures = [];
-  for (const [name, run] of SCENARIOS) {
+  for (const [name, run] of [...SCENARIOS, ...(opts.batch ? [['batch', scenarioBatch]] : [])]) {
     currentScenario = name;
     const started = Date.now();
     try {
@@ -1281,8 +1420,8 @@ try {
     console.log('[debug] notes', JSON.stringify(scenarioNotes));
   }
 
-  const { fixtures, absent } = selectFixtures(scenarioNotes);
-  const assertions = runAssertions(fixtures, absent, scenarioNotes);
+  const { fixtures, absent } = selectFixtures(scenarioNotes, opts.batch);
+  const assertions = runAssertions(fixtures, absent, scenarioNotes, opts.batch);
   for (const failure of failures) assertions.unshift({ name: 'scenario ran', ok: false, detail: failure });
 
   console.log('');
@@ -1291,7 +1430,7 @@ try {
   if (assertions.some((a) => !a.ok)) {
     console.error('\nAssertions failed; nothing written.');
   } else {
-    const outDir = opts.smoke ? mkdtempSync(join(tmpdir(), 'scarlett-wire-smoke-')) : opts.out;
+    const outDir = opts.smoke ? join(mkdtempSync(join(tmpdir(), 'scarlett-wire-smoke-')), PLAYER_VERSION) : opts.out;
     const manifest = writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes });
     if (opts.smoke) {
       console.log(`\nSmoke run passed. Manifest (${join(outDir, 'manifest.json')}):\n`);

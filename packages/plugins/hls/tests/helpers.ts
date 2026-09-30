@@ -61,7 +61,12 @@ export const createCapturedHls = (): CapturedHls => {
     recoverMediaError: vi.fn(),
     destroy: vi.fn(),
     on: vi.fn((event: string, handler: HlsEventHandler) => {
-      handlers[event] = handler;
+      // hls.js broadcasts to every listener; keep that behavior when the
+      // factory adds its own error listener alongside event-map's handler.
+      const previous = handlers[event];
+      handlers[event] = previous
+        ? (...args: unknown[]) => { previous(...args); handler(...args); }
+        : handler;
     }),
     off: vi.fn(),
     levels: [{ width: 1280, height: 720, bitrate: 2500000 }],

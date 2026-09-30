@@ -149,12 +149,50 @@ export interface PlaylistItem {
 }
 
 /**
- * Analytics configuration
+ * Analytics options for the full embed build. Analytics is installed only when
+ * `beaconUrl` is supplied; other options alone never enable tracking.
  */
 export interface AnalyticsConfig {
+  /** Endpoint required to enable analytics. */
   beaconUrl?: string;
+  /** Optional API key for the endpoint. */
   apiKey?: string;
+  /** Video identifier used for beacons without a playlist item identifier. */
   videoId?: string;
+  /** Generate per-view identities without persistent storage. */
+  anonymous?: boolean;
+  /** Suppress beacons when DNT or GPC is enabled. */
+  respectDoNotTrack?: boolean;
+  /** Opt in to batched beacons; object form is programmatic only. */
+  batch?: boolean | { intervalMs?: number; maxEvents?: number };
+  /** Programmatic-only hook to modify or drop a beacon before delivery. */
+  beforeSend?: (payload: EmbedBeaconPayload) => EmbedBeaconPayload | null;
+  /** Programmatic-only player construction timestamp, in epoch milliseconds. */
+  playerInitTime?: number;
+}
+
+/**
+ * Beacon fields shared with the analytics plugin's payload. Kept local so
+ * consumers of the self-contained embed do not need to install the separate
+ * analytics package just to resolve its TypeScript declarations.
+ */
+export interface EmbedBeaconPayload {
+  event: string;
+  timestamp: number;
+  beaconSeq: number;
+  viewId: string;
+  sessionId: string;
+  viewerId: string;
+  videoId: string;
+  playerVersion: string;
+  playerName: string;
+  browser: string;
+  os: string;
+  deviceType: 'desktop' | 'mobile' | 'tablet' | 'tv' | 'unknown';
+  screenSize: string;
+  playerSize: string;
+  connectionType: string;
+  [key: string]: unknown;
 }
 
 /**

@@ -411,7 +411,7 @@ describe('Analytics Plugin', () => {
       fire('playing');
 
       expect(slowPlugin.getMetrics().startupTime).toBe(5000);
-      expect(slowPlugin.getQoEScore()).toBeLessThan(fastPlugin.getQoEScore());
+      expect(slowPlugin.getQoEScore()).toBeLessThan(fastPlugin.getQoEScore()!);
     });
   });
 
@@ -771,6 +771,29 @@ describe('Analytics Plugin', () => {
       const metrics = plugin.getMetrics();
       expect(metrics.errorCount).toBe(1);
       expect(metrics.errors).toHaveLength(1);
+    });
+
+    it('sends native MediaError diagnostics from the HLS element in an error beacon', async () => {
+      const plugin = createAnalyticsPlugin({ ...mockConfig, customBeacon: mockBeacon });
+      await plugin.init(api);
+      beacons = [];
+
+      const { setupVideoEventHandlers } = await import(/* @vite-ignore */ hlsEventMap);
+      const video = document.createElement('video');
+      Object.defineProperty(video, 'error', {
+        value: { code: 4, message: '' },
+        configurable: true,
+      });
+      setupVideoEventHandlers(video, api);
+      video.dispatchEvent(new Event('error'));
+
+      const errorBeacon = beacons.find((b) => b.event === 'error');
+      expect(errorBeacon).toMatchObject({
+        errorMessage: 'Video playback error',
+        errorCode: 4,
+        mediaErrorCode: 4,
+      });
+      expect(plugin.getMetrics().errorCount).toBe(1);
     });
 
     it('should handle fatal errors', async () => {

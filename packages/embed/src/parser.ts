@@ -201,6 +201,17 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
       apiKey: element.getAttribute('data-analytics-api-key') || undefined,
       videoId: element.getAttribute('data-analytics-video-id') || undefined,
     };
+    // Only the exact string "false" disables a present boolean, as with the
+    // other embed flags. Absent keys stay absent to preserve plugin defaults.
+    const analyticsFlags = [
+      ['data-analytics-anonymous', 'anonymous'],
+      ['data-analytics-respect-dnt', 'respectDoNotTrack'],
+      ['data-analytics-batch', 'batch'],
+    ] as const;
+    for (const [attribute, option] of analyticsFlags) {
+      const value = element.getAttribute(attribute);
+      if (value !== null) config.analytics[option] = value !== 'false';
+    }
   }
 
   // Captions (JSON array of sources). Installed by the captions plugin in the
