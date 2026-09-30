@@ -345,6 +345,10 @@ export function createAnalyticsPlugin(
       try {
         const result = mergedConfig.beforeSend(payload);
         if (result === null) return null;
+        if (typeof result !== 'object') {
+          session.beaconSeq++;
+          return payload;
+        }
         session.beaconSeq++;
         return { ...result, beaconSeq: session.beaconSeq };
       } catch (error) {

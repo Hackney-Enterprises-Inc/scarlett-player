@@ -120,7 +120,7 @@ export interface AnalyticsConfig {
   respectDoNotTrack?: boolean;
   /** Use fresh viewer and session IDs for each view, without reading or writing storage. */
   anonymous?: boolean;
-  /** Last per-beacon hook, including unload and queued events. Return null to discard. */
+  /** Last per-beacon hook, including unload and queued events. Return null to discard; non-object results fall back to the original payload. */
   beforeSend?: (payload: BeaconPayload) => BeaconPayload | null;
   /** Host-captured epoch milliseconds at player script startup. */
   playerInitTime?: number;

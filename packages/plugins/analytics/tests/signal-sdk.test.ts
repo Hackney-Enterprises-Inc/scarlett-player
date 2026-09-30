@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHarness } from './harness';
 import { calculateQoEScore } from '../src/helpers';
 import { classifyError } from '../src/errors';
+import type { BeaconPayload } from '../src/types';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -53,6 +54,30 @@ describe('Signal privacy and context', () => {
     expect(h.sent('viewStart')).toHaveLength(1);
     expect(h.api.logger.debug).toHaveBeenCalledWith(expect.stringContaining('beforeSend'), expect.anything());
     await h.plugin.destroy();
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['boolean', false],
+    ['number', 42],
+    ['string', 'invalid'],
+    ['bigint', BigInt(1)],
+    ['symbol', Symbol('invalid')],
+    ['function', () => undefined],
+  ])('preserves original payloads and consumes each sequence once for a %s hook result', async (_label, result) => {
+    // JavaScript hosts can return values outside the declared hook contract.
+    const beforeSend = vi.fn((_payload: BeaconPayload) => result as unknown as BeaconPayload);
+    const h = await createHarness({ beforeSend });
+    try {
+      h.plugin.trackEvent('test');
+      window.dispatchEvent(new Event('pagehide'));
+      expect(h.beacons.map(b => b.event)).toEqual(['viewStart', 'custom:test', 'viewEnd']);
+      expect(h.beacons.map(b => b.beaconSeq)).toEqual([1, 2, 3]);
+      expect(h.beacons).toEqual(beforeSend.mock.calls.map(([payload]) => payload));
+      expect(h.beacons.every(b => b.viewId === h.plugin.getViewId() && typeof b.timestamp === 'number')).toBe(true);
+    } finally {
+      await h.plugin.destroy();
+    }
   });
 
   it('includes only sanitized page context on viewStart', async () => {

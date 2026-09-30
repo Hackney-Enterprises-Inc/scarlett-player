@@ -292,7 +292,8 @@ denial); unload retains its smaller field subset. Error beacons include a
 structured category, severity and validated diagnostics, not raw detail URLs.
 
 `respectDoNotTrack` suppresses sends when DNT/GPC opts out; `anonymous` uses
-new IDs per view without storage. `beforeSend` can alter or drop beacons and
+new IDs per view without storage. `beforeSend` can alter or drop beacons
+(non-object results other than `null` preserve the original payload), and
 `playerInitTime` supplies optional view-start timing. `pageUrl` contains only
 origin and pathname; `referrerOrigin` is origin-only. The full embed bundle
 supports `data-analytics-anonymous`, `data-analytics-respect-dnt` and

@@ -457,7 +457,9 @@ and (on fatal ends) `fatalErrorCategory` accompany view metrics.
 Analytics has no default endpoint: the host must configure `beaconUrl`.
 `respectDoNotTrack` honors DNT/GPC by suppressing beacons; `anonymous` uses
 per-view IDs without storage, and `setAnonymous()` changes the *next* view.
-`beforeSend` may modify or drop normal and unload payloads. On `viewStart`,
+`beforeSend` may modify or drop normal and unload payloads. `null` drops a
+beacon; other non-object results preserve the original payload and consume
+its sequence number once. On `viewStart`,
 `pageUrl` is origin plus pathname only, `referrerOrigin` omits paths, and
 `pageLoadToInitMs`/optional `playerInitMs` capture context. `batch` defaults
 off, preserving one POST per beacon; opt-in sends a bounded

@@ -654,6 +654,8 @@ not replace your consent gate. `beforeSend(payload)` receives each payload
 after custom dimensions and event data are merged, including unload events and
 events destined for batches. Return a modified payload or `null` to drop it;
 if the hook throws, the original beacon is sent and the error is debug-logged.
+Returning `undefined` or another non-object value also sends the original
+payload, consuming its sequence number once. Object results remain valid transformations.
 It is the host's responsibility to redact sensitive custom fields there.
 
 `viewStart.pageUrl` includes **only origin + pathname**, never URL query or
