@@ -670,8 +670,8 @@ describe('HLSPlugin', () => {
       // because TypeScript does not track assignments made inside a callback:
       // a `let` initialised to null keeps its `null` flow type, so the truthy
       // guard narrowed it to `never` and the call below did not type-check.
-      // The last entry is the one fired, which is what the overwritten `let`
-      // held.
+      // The event-map error handler is first; the factory also listens for
+      // incomplete non-fatal fragment measurements afterward.
       const errorHandlers: HlsEventHandler[] = [];
       mockHlsInstance.on.mockImplementation((event: string, handler: HlsEventHandler) => {
         if (event === 'hlsManifestParsed') {
@@ -688,7 +688,7 @@ describe('HLSPlugin', () => {
       const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
 
       // Trigger a fatal network error to invoke retry with backoff + jitter
-      errorHandlers[errorHandlers.length - 1]?.('hlsError', {
+      errorHandlers[0]?.('hlsError', {
         type: 'networkError',
         details: 'manifestLoadError',
         fatal: true,
@@ -1245,17 +1245,40 @@ describe('event-map', () => {
       expect(mockApi.setState).not.toHaveBeenCalledWith('mediaType', expect.anything());
     });
 
-    it('should handle error event', () => {
+    it('preserves a native MediaError code when the browser supplies no message', () => {
       Object.defineProperty(video, 'error', {
-        value: { code: 4, message: 'Media load error' },
+        value: { code: 4, message: '' },
         writable: true,
       });
       setupVideoEventHandlers(video, mockApi);
 
       video.dispatchEvent(new Event('error'));
 
-      expect(mockApi.logger.error).toHaveBeenCalled();
-      expect(mockApi.emit).toHaveBeenCalledWith('media:error', { error: expect.any(Error) });
+      expect(mockApi.logger.error).toHaveBeenCalledWith('Video element error', { code: 4, message: '' });
+      const emitted = mockApi.emit.mock.calls.find(([name]) => name === 'media:error')?.[1] as {
+        error: Error & { code?: number; detail?: { mediaErrorCode: number } };
+      };
+      expect(emitted.error).toBeInstanceOf(Error);
+      expect(emitted.error.message).toBe('Video playback error');
+      expect(emitted.error.code).toBe(4);
+      expect(emitted.error.detail).toEqual({ mediaErrorCode: 4 });
+    });
+
+    it('leaves the native error unadorned when its code is zero', () => {
+      Object.defineProperty(video, 'error', {
+        value: { code: 0, message: 'Media load error' },
+        writable: true,
+      });
+      setupVideoEventHandlers(video, mockApi);
+
+      video.dispatchEvent(new Event('error'));
+
+      const emitted = mockApi.emit.mock.calls.find(([name]) => name === 'media:error')?.[1] as {
+        error: Error & { code?: number; detail?: { mediaErrorCode: number } };
+      };
+      expect(emitted.error.message).toBe('Media load error');
+      expect(emitted.error).not.toHaveProperty('code');
+      expect(emitted.error).not.toHaveProperty('detail');
     });
   });
 });

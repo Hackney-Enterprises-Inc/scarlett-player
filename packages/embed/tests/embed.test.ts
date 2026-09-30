@@ -656,6 +656,30 @@ describe('createEmbedPlayer', () => {
     expect(fullPluginCreators.analytics).toHaveBeenCalled();
   });
 
+  it('forwards privacy, batching and programmatic hooks to analytics only with a beacon URL', async () => {
+    const beforeSend = vi.fn((payload) => payload);
+    const analytics = {
+      beaconUrl: 'https://analytics.example.com',
+      anonymous: true,
+      respectDoNotTrack: false,
+      batch: { intervalMs: 2500, maxEvents: 5 },
+      beforeSend,
+      playerInitTime: 12345,
+    };
+    await createEmbedPlayer(container, { src: 'video.m3u8', analytics }, fullPluginCreators, fullAvailableTypes);
+    expect(fullPluginCreators.analytics).toHaveBeenCalledWith(expect.objectContaining({
+      ...analytics,
+      videoId: 'video.m3u8',
+    }));
+
+    vi.clearAllMocks();
+    await createEmbedPlayer(container, {
+      src: 'video.m3u8',
+      analytics: { anonymous: true, respectDoNotTrack: true, batch: true },
+    }, fullPluginCreators, fullAvailableTypes);
+    expect(fullPluginCreators.analytics).not.toHaveBeenCalled();
+  });
+
   it('should include playlist plugin when playlist provided', async () => {
     await createEmbedPlayer(
       container,
@@ -1345,4 +1369,3 @@ describe('setupAutoInit', () => {
     expect(initialised(el)).toBe(true);
   });
 });
-

@@ -298,71 +298,38 @@ export function getConnectionType(): string {
  * Score ranges from 0-100 based on multiple factors.
  *
  * @param params - QoE calculation parameters
- * @returns QoE score (0-100)
+ * @returns QoE score (0-100), or null for a fatal access denial
  */
 export function calculateQoEScore(params: {
   startupTime: number | null;
+  rebufferCount: number;
   rebufferDuration: number;
   watchTime: number;
   maxBitrate: number;
   exitType: string | null;
-  errorCount: number;
-}): number {
+  warningCount: number;
+  fatalErrorCategory: string | null;
+}): number | null {
   const {
     startupTime,
+    rebufferCount,
     rebufferDuration,
     watchTime,
     maxBitrate,
     exitType,
-    errorCount,
+    warningCount,
+    fatalErrorCategory,
   } = params;
-
-  // 1. Startup Score (25% weight)
-  let startupScore = 100;
-  if (startupTime !== null) {
-    if (startupTime < 1000) startupScore = 100;
-    else if (startupTime < 2000) startupScore = 85;
-    else if (startupTime < 4000) startupScore = 70;
-    else if (startupTime < 8000) startupScore = 50;
-    else startupScore = 30;
-  }
-
-  // 2. Smoothness Score (30% weight) - based on rebuffer ratio
-  let smoothnessScore = 100;
-  if (watchTime > 0) {
-    const rebufferRatio = (rebufferDuration / watchTime) * 100;
-    if (rebufferRatio < 0.1) smoothnessScore = 100;
-    else if (rebufferRatio < 1) smoothnessScore = 85;
-    else if (rebufferRatio < 2) smoothnessScore = 70;
-    else if (rebufferRatio < 5) smoothnessScore = 50;
-    else smoothnessScore = 30;
-  }
-
-  // 3. Success Score (30% weight)
-  let successScore = 100;
-  if (exitType === 'error') {
-    successScore = 0;
-  } else if (errorCount > 0) {
-    // Penalize for non-fatal errors
-    successScore = Math.max(0, 100 - errorCount * 10);
-  }
-
-  // 4. Quality Score (15% weight) - based on max bitrate achieved
-  let qualityScore = 80; // Default
-  if (maxBitrate > 4000000) qualityScore = 100; // 4K
-  else if (maxBitrate > 2000000) qualityScore = 90; // 1080p
-  else if (maxBitrate > 1000000) qualityScore = 75; // 720p
-  else if (maxBitrate > 500000) qualityScore = 60; // 480p
-  else if (maxBitrate > 0) qualityScore = 40; // Low quality
-
-  // Calculate weighted average
-  const qoeScore =
-    successScore * 0.30 +
-    startupScore * 0.25 +
-    smoothnessScore * 0.30 +
-    qualityScore * 0.15;
-
-  return Math.round(qoeScore);
+  if (exitType === 'error') return fatalErrorCategory === 'access' ? null : 0;
+  const scores = [
+    startupTime === null ? 100 : 100 * 0.5 ** (Math.max(0, startupTime) / 4000),
+    Math.min(
+      100 / Math.sqrt(1 + (rebufferCount / 2) ** 2),
+      100 * Math.exp(-10 * rebufferDuration / Math.max(1, watchTime))
+    ),
+  ];
+  if (maxBitrate > 0) scores.push(clamp(20 + 15 * Math.log2(maxBitrate / 250000), 10, 100));
+  return Math.round(clamp(scores.reduce((sum, score) => sum + score, 0) / scores.length - Math.min(20, 3 * warningCount), 0, 100));
 }
 
 /**
@@ -599,4 +566,3 @@ export function isHttpsUrl(url: string): boolean {
     return false;
   }
 }
-

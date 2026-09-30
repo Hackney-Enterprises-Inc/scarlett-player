@@ -52,6 +52,27 @@ The [analytics plugin](../analytics/README.md#seek-tracking) uses this state
 transition to track native/element-driven seeks without duplicating recent
 player-requested seeks.
 
+## Segment measurements
+
+Both the regular and light hls.js builds emit the core `media:segment` event
+when a media fragment request completes, and on a non-fatal fragment load error
+or timeout with measurable hls.js stats:
+
+```typescript
+player.on('media:segment', ({ durationMs, bytes, ok, kind }) => {
+  // durationMs: loading.end - loading.start on completed requests;
+  // on incomplete non-fatal failures (loading.end === 0): performance.now() - loading.start
+  // bytes: stats.loaded
+  // ok: true on load, false on non-fatal load error/timeout
+  // kind: 'main' | 'audio' | 'subtitle'
+});
+```
+
+This event is emitted only for hls.js fragments with valid load timing and
+byte measurements. It is not emitted on native Safari HLS, or by progressive
+MP4 or WHEP providers; missing events are not zero-byte or zero-duration loads.
+The existing `bandwidth` state updates remain unchanged.
+
 ## Configuration
 
 All options are optional; defaults shown.

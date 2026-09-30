@@ -321,6 +321,11 @@ export async function createEmbedPlayer(
         beaconUrl: config.analytics.beaconUrl,
         apiKey: config.analytics.apiKey,
         videoId: config.analytics.videoId || config.src || 'unknown',
+        ...(config.analytics.anonymous !== undefined && { anonymous: config.analytics.anonymous }),
+        ...(config.analytics.respectDoNotTrack !== undefined && { respectDoNotTrack: config.analytics.respectDoNotTrack }),
+        ...(config.analytics.batch !== undefined && { batch: config.analytics.batch }),
+        ...(config.analytics.beforeSend !== undefined && { beforeSend: config.analytics.beforeSend }),
+        ...(config.analytics.playerInitTime !== undefined && { playerInitTime: config.analytics.playerInitTime }),
       });
 
       // The first playlist item is loaded as the player's src below, not

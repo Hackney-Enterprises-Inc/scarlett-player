@@ -22,8 +22,9 @@
 import { createPlayer } from '@scarlett-player/core';
 import type { IPluginAPI, Plugin, ScarlettPlayer } from '@scarlett-player/core';
 import { createHLSPlugin } from '@scarlett-player/hls';
+import { createNativePlugin } from '@scarlett-player/native';
 import { createAnalyticsPlugin } from '@scarlett-player/analytics';
-import type { IAnalyticsPlugin } from '@scarlett-player/analytics';
+import type { AnalyticsConfig, IAnalyticsPlugin } from '@scarlett-player/analytics';
 import { createClipsPlugin } from '@scarlett-player/clips';
 import type { ClipsPlugin } from '@scarlett-player/clips';
 
@@ -38,6 +39,8 @@ export interface WireHandle {
   qualityChangeCount: number;
   /** Their payloads, in order, for the tripwire's failure message. */
   qualityChanges: Array<{ quality: string; auto: boolean }>;
+  /** Actual provider segment measurements, never inferred from network requests. */
+  segments: Array<{ durationMs: number; bytes: number; ok: boolean; kind: string }>;
   /**
    * `error` events heard on the bus, reduced to what the runner reports: an
    * error the bus carried but no beacon followed is a player bug, not a
@@ -59,6 +62,9 @@ const beaconOrigin = params.get('beacon');
 if (!beaconOrigin) throw new Error('wire-capture: ?beacon=<https origin> is required');
 const src = params.get('src') ?? '/scripts/fixtures/hls/vod.m3u8';
 const video = params.get('video') === 'live' ? 'live' : 'vod';
+const privacy = params.has('privacy');
+const batch = params.has('batch');
+const native = params.has('native');
 
 /**
  * Read a `<meta name>` tag's content, the way a Laravel page exposes its CSRF
@@ -81,6 +87,14 @@ const analytics = createAnalyticsPlugin({
   customDimensions: { tenant: 'wire', planTier: 'free', experiment: 42, beta: true },
   // A function, so the fixtures show a per-beacon host header beside X-API-Key.
   headers: () => ({ 'X-Wire-Token': 'per-beacon' }),
+  ...(privacy ? {
+    anonymous: true,
+    respectDoNotTrack: true,
+    playerInitTime: Date.now() - 1000,
+    beforeSend: (payload: Parameters<NonNullable<AnalyticsConfig['beforeSend']>>[0]) =>
+      payload.event === 'custom:wireDropped' ? null : payload,
+  } : {}),
+  ...(batch ? { batch: { intervalMs: 10000, maxEvents: 20 } } : {}),
 });
 
 const clips = createClipsPlugin({
@@ -100,6 +114,7 @@ const handle = {
   clips,
   qualityChangeCount: 0,
   qualityChanges: [],
+  segments: [],
   busErrors: [],
   initError: null,
 } as unknown as WireHandle;
@@ -122,6 +137,7 @@ const qualityProbe: Plugin = {
       handle.qualityChangeCount++;
       handle.qualityChanges.push({ quality: payload.quality, auto: payload.auto });
     });
+    api.on('media:segment', (payload) => handle.segments.push(payload));
     api.on('error', (payload) => {
       handle.busErrors.push({
         fatal: payload.fatal === true,
@@ -143,7 +159,7 @@ handle.ready = createPlayer({
     // A short forward buffer so holding segment responses for a few seconds
     // starves playback and yields a real rebufferStart/rebufferEnd pair; at
     // the 30 s default the whole fixture buffers ahead and never stalls.
-    createHLSPlugin({ maxBufferLength: 4, maxMaxBufferLength: 6 }),
+    ...(native ? [createNativePlugin()] : [createHLSPlugin({ maxBufferLength: 4, maxMaxBufferLength: 6 })]),
     qualityProbe,
     analytics,
     clips,

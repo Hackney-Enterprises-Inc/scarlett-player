@@ -4,7 +4,7 @@
  * Maps hls.js events to Scarlett Player events.
  */
 
-import type { IPluginAPI } from '@scarlett-player/core';
+import type { IPluginAPI, PlayerEventMap } from '@scarlett-player/core';
 import type { AudioTrack } from '@scarlett-player/core';
 import type { HlsAudioTrack, HlsInstance, HlsLevel, HLSError, HLSErrorType } from './types';
 import { formatLevel } from './quality';
@@ -145,6 +145,23 @@ export function formatAudioTrack(
   };
 }
 
+/** Read only completed, measurable media fragment requests; never infer zeroes. */
+function segmentFromFragment(frag: unknown, ok: boolean): PlayerEventMap['media:segment'] | null {
+  if (!frag || typeof frag !== 'object') return null;
+  const { type, stats } = frag as {
+    type?: unknown;
+    stats?: { loading?: { start?: number; end?: number }; loaded?: number };
+  };
+  if (type !== 'main' && type !== 'audio' && type !== 'subtitle') return null;
+  const start = stats?.loading?.start;
+  const end = stats?.loading?.end;
+  const bytes = stats?.loaded;
+  if (typeof start !== 'number' || !Number.isFinite(start)
+    || typeof end !== 'number' || !Number.isFinite(end) || end < start
+    || typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null;
+  return { durationMs: end - start, bytes, ok, kind: type };
+}
+
 /**
  * Setup hls.js event handlers that map to Scarlett events.
  *
@@ -265,9 +282,11 @@ export function setupHlsEventHandlers(
     callbacks.onAudioTrackSwitched?.(data.id);
   });
 
-  // Fragment loaded - update bandwidth estimate
+  // Fragment loaded - update bandwidth estimate and report measured segments.
   let lastBandwidthUpdate = 0;
-  addHandler('hlsFragLoaded', () => {
+  addHandler('hlsFragLoaded', (_event: string, data: { frag?: unknown }) => {
+    const segment = segmentFromFragment(data?.frag, true);
+    if (segment) api.emit('media:segment', segment);
     const now = Date.now();
     if (now - lastBandwidthUpdate >= 2000 && hls.bandwidthEstimate) {
       lastBandwidthUpdate = now;
@@ -326,6 +345,11 @@ export function setupHlsEventHandlers(
   // Error handling
   addHandler('hlsError', (_event: string, data: Record<string, unknown>) => {
     const error = parseHlsError(data);
+
+    if (!error.fatal && (error.details === 'fragLoadError' || error.details === 'fragLoadTimeOut')) {
+      const segment = segmentFromFragment(data.frag, false);
+      if (segment) api.emit('media:segment', segment);
+    }
 
     // Buffer hole/stall seeking is a common non-fatal recovery action, not a real error
     const isBufferHoleSeek = !error.fatal && (
@@ -624,7 +648,14 @@ export function setupVideoEventHandlers(
     const error = video.error;
     if (error) {
       api.logger.error('Video element error', { code: error.code, message: error.message });
-      api.emit('media:error', { error: new Error(error.message || 'Video playback error') });
+      const playbackError = new Error(error.message || 'Video playback error');
+      if (typeof error.code === 'number' && error.code > 0) {
+        Object.assign(playbackError, {
+          code: error.code,
+          detail: { mediaErrorCode: error.code },
+        });
+      }
+      api.emit('media:error', { error: playbackError });
     }
   });
 

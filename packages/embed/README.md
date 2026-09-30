@@ -177,6 +177,35 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-analytics-beacon-url` | string | Beacon endpoint. Setting it enables the analytics plugin |
 | `data-analytics-video-id` | string | Video identifier sent with every beacon |
 | `data-analytics-api-key` | string | Optional API key |
+| `data-analytics-anonymous` | boolean | Use per-view anonymous identifiers without persistent storage; default `false` |
+| `data-analytics-respect-dnt` | boolean | Respect browser Do Not Track / Global Privacy Control and suppress beacons; default `false` |
+| `data-analytics-batch` | boolean | Opt in to batch requests; default `false`. Requires an endpoint that accepts `{ batch: 1, sentAt, events: [...] }` rather than single-beacon bodies |
+
+These options apply only to the **Full** build and **none enables analytics by
+itself**: supply a nonempty `data-analytics-beacon-url` to install the plugin.
+Boolean attributes are `true` when present (including an empty value); only
+the exact value `false` disables one. Batch tuning (`intervalMs`, `maxEvents`),
+`beforeSend` and `playerInitTime` are available only through
+`ScarlettPlayer.create({ analytics: { ... } })`, not HTML attributes. For example:
+
+```js
+await ScarlettPlayer.create({
+  container: '#player', src: 'video.m3u8',
+  analytics: {
+    beaconUrl: 'https://example.com/beacons', videoId: 'video-1',
+    anonymous: true, respectDoNotTrack: true,
+    batch: { intervalMs: 10000, maxEvents: 20 },
+    playerInitTime: Date.now(),
+    beforeSend: (payload) => payload, // return null to drop a beacon
+  },
+});
+```
+
+Batching needs a compatible ingest: `hei/laravel-scarlett-player` v0.3.0
+rejects batch envelopes (422). Its currently pinned 1.19.1 embed bundle does
+not expose these new embed attributes until that package updates its bundle
+in its own repository. Keep batching off for that release or use a compatible
+custom endpoint.
 
 #### Captions, Chapters and Clips Attributes
 

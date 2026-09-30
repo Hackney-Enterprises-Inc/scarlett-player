@@ -100,6 +100,11 @@ const player = await createPlayer({
   rebufferGraceMs?: number;       // Default: 250ms; 0 opens synchronously; negative/non-finite uses 250
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
+  respectDoNotTrack?: boolean;    // Default: false; suppress beacons for DNT=1 or GPC
+  anonymous?: boolean;            // Default: false; per-view IDs without storage
+  beforeSend?: (payload: BeaconPayload) => BeaconPayload | null; // Alter/drop each beacon
+  playerInitTime?: number;        // Host epoch ms; used for viewStart.playerInitMs
+  batch?: boolean | { intervalMs?: number; maxEvents?: number }; // Off by default; 10s/20 events
   apiKey?: string;                // HTTPS endpoints only: X-API-Key header, or ?api_key= on unload (see API key transport)
   headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
                                   // Extra headers for the fetch transport; a function is resolved per beacon (CSRF, Bearer)
@@ -115,17 +120,17 @@ The plugin automatically tracks these events:
 
 | Event | Description | Data |
 |-------|-------------|------|
-| `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment |
+| `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment, pageUrl (origin + pathname only), optional referrerOrigin, pageLoadToInitMs, optional playerInitMs |
 | `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
-| `heartbeat` | Periodic update (10s default) | watchTime, playTime (only the time actually spent playing, not stalled or paused), QoE score |
+| `heartbeat` | Periodic update (10s default) | watchTime, playTime (only the time actually spent playing, not stalled or paused), warningCount, qoeScore, qoeVersion: 2 |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
 | `seeking` | A player-requested or element-driven seek started (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount, seekSource: `'player'` or `'element'` |
 | `rebufferStart` | Buffering persisted through `rebufferGraceMs` (250 ms default); duration is measured from the first eligible `waiting`, not this beacon's timestamp | rebufferCount |
 | `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
-| `error` | Error occurred: a media element error, or a player `error` event (including a provider's fatal error such as an HLS manifest 404) | errorType, errorMessage, errorCode, fatal. `errorType` is the `Error` name when there is one, otherwise the player error code; `errorCode` is the player error code (for example `MEDIA_NETWORK_ERROR`), absent when there is none |
-| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | all metrics, exitType, QoE score. watchTime and playTime include the time since the last heartbeat. completionRate is 100 for a `completed` view; otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them |
+| `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), errorCode, fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, attempts, retriesExhausted, reconnectExhausted, timedOut when provided. Classification uses code/detail, not message text; no raw detail or signed URL is sent |
+| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | Final metrics, exitType, warningCount, optional fatalErrorCategory, qoeScore, qoeVersion: 2 (except unload's 1.19.3 field subset). watchTime and playTime include the time since the last heartbeat. completionRate is 100 for a `completed` view; otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them |
 
 ### Rebuffer grace and time accounting
 
@@ -379,35 +384,23 @@ heartbeat and no final beacon, and a replay after `ended` was not measured.
 
 ## Quality of Experience (QoE) Score
 
-The plugin calculates a QoE score (0-100) based on:
-
-- **Success Score (30%)** - Did playback succeed without errors?
-- **Startup Score (25%)** - How fast did video start?
-  - <1s: 100
-  - <2s: 85
-  - <4s: 70
-  - <8s: 50
-  - 8s+: 30
-
-- **Smoothness Score (30%)** - How much rebuffering?
-  - <0.1% rebuffer ratio: 100
-  - <1%: 85
-  - <2%: 70
-  - <5%: 50
-  - 5%+: 30
-
-- **Quality Score (15%)** - What bitrate was achieved?
-  - >4 Mbps (4K): 100
-  - >2 Mbps (1080p): 90
-  - >1 Mbps (720p): 75
-  - >500 Kbps (480p): 60
-  - Lower: 40
+`qoeVersion: 2` identifies the continuous scoring contract on each heartbeat
+and ordinary `viewEnd` carrying `qoeScore`. The score averages the available
+components: startup `100 × 0.5^(startupTime/4000)` (100 if unknown), smoothness
+`min(100 / sqrt(1 + (rebufferCount/2)^2), 100 × exp(-10 × rebufferDuration/watchTime))`,
+and bitrate quality `clamp(20 + 15 × log2(maxBitrate/250000), 10, 100)`.
+Bitrate quality is **omitted** when unknown (native HLS, MP4, WHEP), not scored
+as low quality. Non-fatal warnings subtract `min(20, 3 × warningCount)` from
+the mean. A fatal playback exit scores 0; a view ended by a structured 401,
+403 or 451 access error scores **null**, rather than counting an entitlement
+denial as playback failure. The final result is rounded and clamped to 0–100.
+`getQoEScore()` therefore returns `number | null`.
 
 Access the score:
 
 ```typescript
 const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
-const qoeScore = analytics.getQoEScore(); // 0-100
+const qoeScore = analytics.getQoEScore(); // 0–100, or null for a fatal access denial
 ```
 
 ## Metrics API
@@ -440,6 +433,26 @@ same deploy. Older ingests still accept the payload, but store the new keys
 as host custom dimensions in `scarlett_views.custom`, not as recognised
 ordering/source fields. Recapture the Laravel wire fixtures after the player
 release and repin their `player_version`.
+
+**Batching is not supported by Laravel v0.3.0:** it rejects batch envelopes
+with HTTP 422. Leave `batch` off with that version. Only enable batching for a
+custom ingest that explicitly accepts both the single-event and batch shapes;
+do not infer compatibility from the client version.
+
+### Opt-in batching
+
+`batch` defaults to **off**. The off path keeps one POST per beacon, the same
+`beaconSeq`/`seekSource` order, fetch keepalive and unload fallback as 1.19.3.
+With `batch: true` (or `{ intervalMs: 10000, maxEvents: 20 }`), queued events
+flush on the timer, count limit, viewEnd, fatal error, hidden tab, pagehide or
+destroy. The JSON body is `{ "batch": 1, "sentAt": <epoch ms>, "events": [ ... ] }`;
+each envelope is at most **60,000 UTF-8 bytes**. An individual beacon too large
+for an envelope is sent alone without wrapping. Event timestamps and sequence
+numbers are assigned when events occur, not at flush time. Dynamic `headers()`
+is called once per batch. On pagehide the queued events and unload viewEnd use
+`navigator.sendBeacon()` (including the HTTPS-only `api_key` URL parameter),
+falling back to keepalive fetch. `customBeacon` always receives individual
+payloads, even when batching is enabled.
 
 ### Endpoint Requirements
 
@@ -624,6 +637,33 @@ The plugin does not guarantee that analytics data is free of personally identifi
 - **Consent and Opt-out**: Callers are responsible for obtaining any required consent before initializing analytics and for honoring opt-out or consent withdrawal. `disableInDev` only suppresses beacons in development; it is not a production consent control.
 - **Environment Data**: The plugin also collects browser, OS, device, screen/player size, and connection information using browser APIs.
 
+### Privacy controls and page context
+
+Analytics is never installed implicitly: a host must supply `beaconUrl` and
+`videoId`; there is **no default endpoint**. In normal mode the plugin uses
+`sp_session_id` in sessionStorage and `sp_viewer_id` in localStorage (falling
+back to sessionStorage and then ephemeral IDs when storage is unavailable).
+`anonymous: true` ignores even an explicit `viewerId`, never reads or writes
+storage, generates fresh viewer/session IDs per view, and adds `anonymous: true`
+to its beacons. `analytics.setAnonymous(true | false)` changes identity mode at
+the **next view** only (for example, on a video switch or replay), not mid-view.
+
+`respectDoNotTrack: true` suppresses each beacon while `navigator.doNotTrack`
+is `'1'` or Global Privacy Control is `true`; the default is false. This does
+not replace your consent gate. `beforeSend(payload)` receives each payload
+after custom dimensions and event data are merged, including unload events and
+events destined for batches. Return a modified payload or `null` to drop it;
+if the hook throws, the original beacon is sent and the error is debug-logged.
+Returning `undefined` or another non-object value also sends the original
+payload, consuming its sequence number once. Object results remain valid transformations.
+It is the host's responsibility to redact sensitive custom fields there.
+
+`viewStart.pageUrl` includes **only origin + pathname**, never URL query or
+fragment. `referrerOrigin` contains only the referrer's origin when parseable;
+`pageLoadToInitMs` uses `performance.now()` at plugin initialization. If the
+host supplies an epoch-ms `playerInitTime`, `playerInitMs` measures elapsed time
+to that initialization. Other beacons do not carry these page-context fields.
+
 ### Consent-Gated Initialization Example
 
 ```typescript
@@ -685,7 +725,7 @@ expect(beacons[0].event).toBe('viewStart');
 
 The plugin is designed for minimal performance impact:
 
-- **Async Beacons**: Uses `navigator.sendBeacon()` for non-blocking sends
+- **Async Beacons**: Uses keepalive fetch for normal events; `navigator.sendBeacon()` on unload
 - **Efficient Timers**: Single heartbeat interval per player
 - **Lazy Calculation**: QoE score calculated only when needed
 - **Memory Efficient**: Limits error history and bitrate tracking

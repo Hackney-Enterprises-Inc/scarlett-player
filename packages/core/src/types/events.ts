@@ -77,6 +77,21 @@ export interface PlayerEventMap {
   /** Media progress (buffering) */
   'media:progress': { buffered: number };
 
+  /**
+   * Segment request measurement from a provider that fetches media segments
+   * itself (currently hls.js). `durationMs` is the fragment loading interval
+   * and `bytes` is the number of bytes loaded, including bytes on a failed
+   * request. `ok` distinguishes successful loads from non-fatal fragment
+   * failures; `kind` identifies the rendition. Missing measurements are not
+   * emitted. Native HLS, progressive MP4 and WHEP do not emit this event.
+   */
+  'media:segment': {
+    durationMs: number;
+    bytes: number;
+    ok: boolean;
+    kind: 'main' | 'audio' | 'subtitle';
+  };
+
   /** Media stalled (network slow or unresponsive) */
   'media:stalled': void;
 

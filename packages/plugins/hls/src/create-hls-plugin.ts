@@ -1307,6 +1307,41 @@ export function createHLSPluginWith(
         getIsAutoQuality: () => isAutoQuality,
       });
 
+      // event-map handles completed fragment failures; hls.js leaves
+      // loading.end at 0 on XHR errors/timeouts, so measure only those from
+      // the failure event itself. Bind to this pipeline's cleanup and session
+      // so a queued event cannot report against a replacement source.
+      const activeHls = hls;
+      const onIncompleteFragmentError = (_event: string, data: {
+        fatal?: boolean;
+        details?: string;
+        frag?: {
+          type?: unknown;
+          stats?: { loading?: { start?: unknown; end?: unknown }; loaded?: unknown };
+        };
+      }): void => {
+        if (session !== loadSession || hls !== activeHls || !api || data?.fatal !== false ||
+          (data.details !== 'fragLoadError' && data.details !== 'fragLoadTimeOut')) return;
+
+        const kind = data.frag?.type;
+        const start = data.frag?.stats?.loading?.start;
+        const end = data.frag?.stats?.loading?.end;
+        const bytes = data.frag?.stats?.loaded;
+        if ((kind !== 'main' && kind !== 'audio' && kind !== 'subtitle') ||
+          typeof start !== 'number' || !Number.isFinite(start) || end !== 0 ||
+          typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return;
+
+        const durationMs = performance.now() - start;
+        if (!Number.isFinite(durationMs) || durationMs < 0) return;
+        api.emit('media:segment', { kind, durationMs, bytes, ok: false });
+      };
+      activeHls.on('hlsError', onIncompleteFragmentError);
+      const cleanupMappedHlsEvents = cleanupHlsEvents;
+      cleanupHlsEvents = () => {
+        activeHls.off('hlsError', onIncompleteFragmentError);
+        cleanupMappedHlsEvents?.();
+      };
+
       // Watchdog: no code path may leave this promise pending forever. If the
       // manifest has not parsed and recovery has not reported terminal within
       // the window, tear down and fail with a real error the UI can show.

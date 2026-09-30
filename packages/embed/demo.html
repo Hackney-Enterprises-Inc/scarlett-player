@@ -287,17 +287,16 @@ const player = ScarlettPlayer.create({
   allowfullscreen
 &gt;&lt;/iframe&gt;
 
-&lt;!-- Option 2: Video ID (requires Laravel backend) --&gt;
-&lt;iframe src="https://embed.thestreamplatform.com/v/abc123"&gt;&lt;/iframe&gt;
-
-&lt;!-- Option 3: Event slug --&gt;
-&lt;iframe src="https://embed.thestreamplatform.com/embed/fight-night-2025"&gt;&lt;/iframe&gt;
+&lt;!-- Option 2: Laravel Composer package embed page; use ScarlettPlayer::embedUrl($video) --&gt;
+&lt;iframe src="https://app.example.com/v/550e8400-e29b-41d4-a716-446655440000"&gt;&lt;/iframe&gt;
       </div>
 
       <p style="margin-top: 15px; color: #666; font-size: 14px;">
-        <strong>How /v/abc123 works:</strong> The Laravel backend looks up the video by ID,
-        fetches the stream URL and brand colors from the database, and returns a page with
-        the player pre-configured. See <code>templates/EmbedController.php</code> for implementation.
+        <strong>Laravel embed page:</strong> <code>hei/laravel-scarlett-player</code> registers
+        <code>GET /v/{uuid}</code> and resolves the media. Generate the iframe URL with
+        <code>ScarlettPlayer::embedUrl($video)</code> (signed for protected media), or use
+        <code>ScarlettPlayer::embedCode($video)</code> for the entire snippet. See the
+        <a href="https://github.com/Hackney-Enterprises-Inc/laravel-scarlett-player/blob/v0.3.0/README.md#embed-page">package embed page guide</a>.
       </p>
     </div>
 

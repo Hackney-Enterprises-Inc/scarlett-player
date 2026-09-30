@@ -116,6 +116,17 @@ export interface AnalyticsConfig {
   /** Disable analytics in development (default: false) */
   disableInDev?: boolean;
 
+  /** Honor DNT (`1`) and Global Privacy Control on every beacon; default false. */
+  respectDoNotTrack?: boolean;
+  /** Use fresh viewer and session IDs for each view, without reading or writing storage. */
+  anonymous?: boolean;
+  /** Last per-beacon hook, including unload and queued events. Return null to discard; non-object results fall back to the original payload. */
+  beforeSend?: (payload: BeaconPayload) => BeaconPayload | null;
+  /** Host-captured epoch milliseconds at player script startup. */
+  playerInitTime?: number;
+  /** Opt in to the batch envelope; requires a compatible custom ingest. Default false. */
+  batch?: boolean | { intervalMs?: number; maxEvents?: number };
+
   /** Custom beacon transport function (for testing) */
   customBeacon?: BeaconFunction;
 }
@@ -168,6 +179,9 @@ export interface ViewSession {
   /** Last dispatched beacon number in this view; starts at zero before viewStart. */
   beaconSeq: number;
 
+  /** Identity mode fixed for the lifetime of this view. */
+  anonymous: boolean;
+
   /** Session ID (persists across views in same browsing session) */
   sessionId: string;
 
@@ -215,6 +229,12 @@ export interface ViewSession {
 
   /** Number of errors encountered */
   errorCount: number;
+
+  /** Non-fatal errors in this view, including sampled-out beacons. */
+  warningCount: number;
+
+  /** Category of the fatal error ending this view, if any. */
+  fatalErrorCategory: ErrorCategory | null;
 
   /** Array of error events */
   errors: ErrorEvent[];
@@ -270,6 +290,44 @@ export interface BeaconPayload {
 
   /** On seeking beacons: a player bus request or an element/native-controls seek. */
   seekSource?: 'player' | 'element';
+
+  /** Present only when persistent IDs are disabled for this view. */
+  anonymous?: true;
+
+  /** Sanitized origin plus pathname on viewStart only. */
+  pageUrl?: string;
+  /** Origin of the document referrer on viewStart, when parseable. */
+  referrerOrigin?: string;
+  /** Milliseconds from page navigation to plugin initialization. */
+  pageLoadToInitMs?: number;
+  /** Milliseconds from host-supplied playerInitTime to plugin initialization. */
+  playerInitMs?: number;
+
+  /** Continuous QoE scoring contract identifier. */
+  qoeVersion?: 2;
+  /** Null for an access-denied fatal view. */
+  qoeScore?: number | null;
+
+  /** Structured error category on error events. */
+  errorCategory?: ErrorCategory;
+  /** Fatal error or non-fatal warning. */
+  errorSeverity?: 'fatal' | 'warning';
+  /** Validated, numeric HTTP status from the player error detail. */
+  httpStatus?: number;
+  /** Browser media error code when supplied by the provider. */
+  mediaErrorCode?: number;
+  /** Number of connection/load attempts when provided. */
+  attempts?: number;
+  /** Whether the provider exhausted retries. */
+  retriesExhausted?: boolean;
+  /** Whether reconnect attempts were exhausted. */
+  reconnectExhausted?: boolean;
+  /** Whether the provider reported a timeout. */
+  timedOut?: boolean;
+  /** Non-fatal errors accumulated for this view. */
+  warningCount?: number;
+  /** Category of the fatal error that ended the view. */
+  fatalErrorCategory?: ErrorCategory;
 
   // === View Context ===
   /** Current view ID */
@@ -356,6 +414,9 @@ export type BeaconFunction = (
   payload: BeaconPayload
 ) => void | Promise<void>;
 
+/** Structured player error groups; classification never examines message text. */
+export type ErrorCategory = 'access' | 'network' | 'media' | 'source' | 'playback' | 'player' | 'unknown';
+
 /**
  * The video a view is about: what `setVideo()` takes.
  *
@@ -411,7 +472,10 @@ export interface IAnalyticsPlugin {
    * Get calculated QoE score (0-100).
    * @returns Quality of Experience score
    */
-  getQoEScore(): number;
+  getQoEScore(): number | null;
+
+  /** Switch persistent/ephemeral identity for the next view only. @param anonymous - True to avoid all storage for the next view. */
+  setAnonymous(anonymous: boolean): void;
 
   /**
    * Get current metrics/session data.
