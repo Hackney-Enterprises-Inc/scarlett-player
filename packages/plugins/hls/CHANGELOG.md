@@ -1,5 +1,17 @@
 # @scarlett-player/hls
 
+## 1.20.0
+
+### Minor Changes
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85) Thanks [@alexhackney](https://github.com/alexhackney)! - Preserve Safari native MediaError codes in playback errors for diagnostics and analytics.
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85) Thanks [@alexhackney](https://github.com/alexhackney)! - Expose typed segment request measurements from hls.js for successful fragments and non-fatal load failures.
+
+### Patch Changes
+
+- [#131](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/131) [`c0843ea`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/c0843ea3bb237eb25817c609823f5df4df6bbf85) Thanks [@alexhackney](https://github.com/alexhackney)! - Report measurable failed HLS fragment requests when hls.js leaves the load end time unset.
+
 ## 1.19.3
 
 ### Patch Changes
