@@ -389,7 +389,9 @@ export function createHLSPluginWith(
    * (HEI-SCARLETT-18). Holding it at the sync position lands a viewer who
    * drags to the end exactly where "go live" would put them. The window start
    * comes from the playlist on the hls.js path, because under MSE
-   * `seekable.start(0)` stays 0.
+   * `seekable.start(0)` stays 0. While nothing reveals the live edge yet, a
+   * finite duration is the upper bound, and without one the seek goes through
+   * as requested.
    *
    * @param time - Requested position in seconds (already known to be finite)
    * @returns The position to write to the element
@@ -405,7 +407,16 @@ export function createHLSPluginWith(
         DEFAULT_TARGET_LATENCY;
       const start = metrics?.seekableRange?.start ?? 0;
       const syncPosition = computeLiveSyncPosition(metrics, targetLatency);
-      const upper = syncPosition !== undefined ? Math.max(start, syncPosition) : time;
+      if (syncPosition !== undefined) {
+        return Math.max(start, Math.min(time, Math.max(start, syncPosition)));
+      }
+      // Nothing reveals the edge yet (no playlist window, no seekable range).
+      // Keep the pre-clamp behaviour: a finite duration still bounds the
+      // seek, and otherwise it goes through. Dropping it instead would lose
+      // an early player.seek(), and the UI offers no live seeking without a
+      // seekable range anyway.
+      const duration = video.duration;
+      const upper = Number.isFinite(duration) && duration > 0 ? duration : time;
       return Math.max(start, Math.min(time, upper));
     }
 

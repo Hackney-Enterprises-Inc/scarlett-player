@@ -160,6 +160,40 @@ describe('live seek clamp', () => {
     });
   });
 
+  describe('live with no known edge yet', () => {
+    /** hls.js booted and flagged live, but no playlist window, sync position or seekable range. */
+    const loadWithoutEdge = async (duration: number) => {
+      const plugin = createHLSPlugin();
+      await plugin.init(api);
+      plugin.loadSource(SRC).catch(() => {});
+      await flush();
+      state.live = true;
+
+      const video = (api.container as HTMLElement).querySelector('video') as HTMLVideoElement;
+      stubElement(video, { start: 0, end: 0 }, duration);
+      Object.defineProperty(video, 'seekable', { value: { length: 0 }, configurable: true });
+      currentTime = 5;
+    };
+
+    it('falls back to the duration clamp rather than writing the raw target', async () => {
+      await loadWithoutEdge(160);
+
+      seek(500);
+
+      expect(currentTime).toBe(160);
+    });
+
+    it('still lets the seek through when the duration says nothing either', async () => {
+      // Native live before its first seekable range: dropping the seek would
+      // silently lose an early player.seek() (a resume position, say).
+      await loadWithoutEdge(Infinity);
+
+      seek(42);
+
+      expect(currentTime).toBe(42);
+    });
+  });
+
   describe('VOD is unchanged', () => {
     it('clamps to [0, duration] and nothing else', async () => {
       state.live = false;
