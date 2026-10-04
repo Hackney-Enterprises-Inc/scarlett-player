@@ -1396,6 +1396,47 @@ describe('SettingsMenu speed on live streams', () => {
     expect(video.playbackRate).toBe(1);
   });
 
+  it('restores the rate when the DVR window arrives after live (native HLS)', () => {
+    // Native HLS sets `live` on durationchange and `seekableRange` only on
+    // the next timeupdate; a render in that gap must not lose the rate.
+    api = createMockApi({ playbackRate: 1.5, source: { src: 'https://x/live.m3u8', type: 'hls' } });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    api.setState('live', true);
+    api.setState('seekableRange', null);
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+
+    api.setState('seekableRange', { start: 0, end: 600 });
+    menu.update();
+
+    expect(api.emit).toHaveBeenLastCalledWith('playback:ratechange', { rate: 1.5 });
+    expect(video.playbackRate).toBe(1.5);
+  });
+
+  it('does not carry a withdrawn rate over to another source', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: null,
+      source: { src: 'https://x/a/whep', type: 'whep' },
+    });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 2;
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+
+    api.setState('source', { src: 'https://x/vod.m3u8', type: 'hls' });
+    api.setState('live', false);
+    menu.update();
+
+    expect(video.playbackRate).toBe(1);
+    expect(api.emit).not.toHaveBeenCalledWith('playback:ratechange', { rate: 2 });
+  });
+
   it('does not touch the rate on a live stream with DVR', () => {
     api = createMockApi({ live: true, seekableRange: { start: 0, end: 600 }, playbackRate: 1.5 });
     const video = api.container.querySelector('video') as HTMLVideoElement;

@@ -89,6 +89,11 @@ export class SkipButton implements Control {
     let target: number;
 
     if (live && seekableRange) {
+      // Already at live: there is nothing ahead. The provider would only pull
+      // the seek back to the sync position, a pointless re-seek that can
+      // stall briefly (the gestures plugin refuses the same way).
+      if (this.direction === 'forward' && this.api.getState('liveEdge')) return;
+
       // Live DVR: constrain to seekable range; the provider narrows the top
       // end to the live sync position.
       target = this.direction === 'backward'

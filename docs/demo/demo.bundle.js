@@ -36503,6 +36503,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   letter-spacing: 0.02em;
 }
 
+/* Live with DVR: reserve room for "-0:00" so the offset appearing on a
+   scrub back, and blanking again at the edge, does not shift the bar. */
+.sp-time--live {
+  min-width: 5ch;
+}
+
 /* ============================================
    Volume Control
    ============================================ */
@@ -38123,30 +38129,54 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       "use strict";
       init_utils();
       TimeDisplay = class {
+        /**
+         * @param api - Plugin API used to read playback and live state
+         */
         constructor(api) {
           this.api = api;
           this.el = createElement("div", { className: "sp-time" });
           this.el.setAttribute("aria-live", "off");
         }
+        /**
+         * @returns The readout element
+         */
         render() {
           return this.el;
         }
+        /** Re-read player state and redraw the readout. */
         update() {
           const live = this.api.getState("live");
           const currentTime = this.api.getState("currentTime") || 0;
           const duration = this.api.getState("duration") || 0;
           if (live) {
             const seekableRange = this.api.getState("seekableRange");
-            if (seekableRange) {
-              const behindLive = seekableRange.end - currentTime;
-              this.el.textContent = formatLiveTime(behindLive);
-            } else {
-              this.el.textContent = formatLiveTime(0);
-            }
+            const atEdge = this.api.getState("liveEdge");
+            this.el.classList.toggle("sp-time--live", !!seekableRange);
+            this.el.style.display = seekableRange ? "" : "none";
+            const text = seekableRange && !atEdge ? formatLiveTime(seekableRange.end - currentTime) : "LIVE";
+            this.setText(text === "LIVE" ? "" : text);
           } else {
-            this.el.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+            this.el.classList.remove("sp-time--live");
+            this.el.style.display = "";
+            this.setText(`${formatTime(currentTime)} / ${formatTime(duration)}`);
           }
         }
+        /**
+         * Write the readout, hiding the element from assistive tech while blank.
+         *
+         * @param text - Readout text; an empty string blanks the control
+         */
+        setText(text) {
+          if (this.el.textContent !== text) {
+            this.el.textContent = text;
+          }
+          if (text) {
+            this.el.removeAttribute("aria-hidden");
+          } else {
+            this.el.setAttribute("aria-hidden", "true");
+          }
+        }
+        /** Remove the readout from the DOM. */
         destroy() {
           this.el.remove();
         }
@@ -38942,6 +38972,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.isOpen = false;
           this.currentPanel = "main";
           this.lastQualitiesJson = "";
+          this.lastSpeedAvailable = true;
+          /** Rate taken away while Speed was withdrawn, and the source it belonged to. */
+          this.withdrawnRate = null;
           this.api = api;
           this.el = createElement("div", { className: "sp-settings" });
           this.btn = createButton("sp-settings__btn", "Settings", icons.settings);
@@ -38991,7 +39024,34 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         render() {
           return this.el;
         }
+        /**
+         * Sync the menu with player state. Called by the UI plugin on every state
+         * change.
+         *
+         * Live and DVR state usually arrive after the manifest, so this is also where
+         * Speed is withdrawn or restored: an open menu is re-rendered when the
+         * Speed row comes or goes, and the gear is hidden while the menu would be
+         * empty. While Speed is withdrawn, a rate other than 1 is reset to 1 (see
+         * {@link SettingsMenu.isSpeedAvailable}).
+         */
         update() {
+          const speedAvailable = this.isSpeedAvailable();
+          if (!speedAvailable) {
+            this.resetRate();
+          } else {
+            this.restoreRate();
+          }
+          const hasRows = this.hasRows();
+          this.el.style.display = hasRows ? "" : "none";
+          if (this.isOpen && !hasRows) {
+            this.close(false);
+          }
+          if (speedAvailable !== this.lastSpeedAvailable) {
+            this.lastSpeedAvailable = speedAvailable;
+            if (this.isOpen && (this.currentPanel === "main" || this.currentPanel === "speed")) {
+              this.showPanel("main");
+            }
+          }
           const qualities = this.api.getState("qualities") || [];
           const qualitiesJson = JSON.stringify(qualities.map((q) => q.id));
           if (qualitiesJson !== this.lastQualitiesJson) {
@@ -39011,6 +39071,65 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.updateAudioActiveStates();
             }
           }
+        }
+        /**
+         * Whether the Speed control is offered for the current stream.
+         *
+         * False only for live without a DVR window: `live` true and `seekableRange`
+         * null, the same test SkipButton and ProgressBar use. hls.js sets `live`
+         * from the level playlist and the native HLS path from an infinite duration;
+         * `seekableRange` is written by the hls plugin's live metrics. WHEP sets
+         * `live` true with `seekableRange` null, so it never offers Speed.
+         *
+         * @returns True on VOD and on live with DVR
+         */
+        isSpeedAvailable() {
+          return !(this.api.getState("live") && !this.api.getState("seekableRange"));
+        }
+        /**
+         * Put playback back to normal speed while Speed is withdrawn.
+         *
+         * Reads the video element first: WHEP never mirrors `ratechange` into
+         * state, so state can say 1 while the element still plays at the rate the
+         * viewer (or an embed's `data-playback-rate`) chose before the stream was
+         * known to be live. A no-op when the rate is already 1.
+         *
+         * The rate is remembered with its source so {@link SettingsMenu.restoreRate}
+         * can give it back: native HLS reports `live` one event before its
+         * `seekableRange`, so a DVR stream looks live-only for a moment.
+         */
+        resetRate() {
+          const video = this.api.container.querySelector("video");
+          const rate = video ? video.playbackRate : this.api.getState("playbackRate") ?? 1;
+          if (rate === 1) return;
+          this.withdrawnRate = { rate, src: this.api.getState("source")?.src };
+          this.api.emit("playback:ratechange", { rate: 1 });
+          if (video) {
+            video.playbackRate = 1;
+          }
+        }
+        /**
+         * Give back a rate {@link SettingsMenu.resetRate} took, once Speed is
+         * offered again on the same source (its DVR window arrived late). A rate
+         * taken on one source is dropped, never applied to the next.
+         */
+        restoreRate() {
+          const withdrawn = this.withdrawnRate;
+          if (!withdrawn) return;
+          this.withdrawnRate = null;
+          if (withdrawn.src !== this.api.getState("source")?.src) return;
+          this.api.emit("playback:ratechange", { rate: withdrawn.rate });
+          const video = this.api.container.querySelector("video");
+          if (video) {
+            video.playbackRate = withdrawn.rate;
+          }
+        }
+        /**
+         * Whether the main panel would have at least one row, mirroring the
+         * conditions in {@link SettingsMenu.renderMainPanel}.
+         */
+        hasRows() {
+          return this.isSpeedAvailable() || (this.api.getState("qualities") || []).length > 0 || (this.api.getState("textTracks") || []).length > 0 || (this.api.getState("audioTracks") || []).length > 1;
         }
         toggle() {
           this.isOpen ? this.close() : this.open();
@@ -39099,6 +39218,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             );
             this.panel.appendChild(audioRow);
           }
+          if (!this.isSpeedAvailable()) return;
           const speedLabel = playbackRate === 1 ? "Normal" : `${playbackRate}x`;
           const speedRow = this.createMainRow(
             "Speed",
@@ -39408,26 +39528,33 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           this.el.style.display = "";
         }
+        /**
+         * Skip by the configured number of seconds, then announce the target.
+         *
+         * Writes the element and emits `playback:seeking`, the same pattern the
+         * progress bar uses. The emit is what matters on live: the provider's
+         * `playback:seeking` handler holds a live seek at the live sync position,
+         * and before it was emitted here a forward skip landed on
+         * `seekableRange.end`, where nothing is buffered, and stalled
+         * (HEI-SCARLETT-18). It also lets analytics count the skip as a player seek
+         * rather than an unexplained element seek.
+         */
         skip() {
           const video = getVideo(this.api.container);
           if (!video) return;
           const live = this.api.getState("live");
           const seekableRange = this.api.getState("seekableRange");
+          let target;
           if (live && seekableRange) {
-            if (this.direction === "backward") {
-              video.currentTime = Math.max(seekableRange.start, video.currentTime - this.seconds);
-            } else {
-              video.currentTime = Math.min(seekableRange.end, video.currentTime + this.seconds);
-            }
-            return;
-          }
-          const duration = video.duration || 0;
-          if (!duration || !isFinite(duration)) return;
-          if (this.direction === "backward") {
-            video.currentTime = Math.max(0, video.currentTime - this.seconds);
+            if (this.direction === "forward" && this.api.getState("liveEdge")) return;
+            target = this.direction === "backward" ? Math.max(seekableRange.start, video.currentTime - this.seconds) : Math.min(seekableRange.end, video.currentTime + this.seconds);
           } else {
-            video.currentTime = Math.min(duration, video.currentTime + this.seconds);
+            const duration = video.duration || 0;
+            if (!duration || !isFinite(duration)) return;
+            target = this.direction === "backward" ? Math.max(0, video.currentTime - this.seconds) : Math.min(duration, video.currentTime + this.seconds);
           }
+          video.currentTime = target;
+          this.api.emit("playback:seeking", { time: target });
         }
         destroy() {
           this.el.removeEventListener("click", this.clickHandler);
@@ -41615,6 +41742,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return metrics;
     };
+    const seekableEnd = () => video?.seekable?.length ? video.seekable.end(video.seekable.length - 1) : void 0;
+    const computeLiveSyncPosition = (metrics, targetLatency) => {
+      if (hls && !isNative && typeof hls.liveSyncPosition === "number") {
+        return hls.liveSyncPosition;
+      }
+      const end = seekableEnd() ?? metrics?.seekableRange?.end;
+      return end !== void 0 ? Math.max(0, end - targetLatency) : void 0;
+    };
+    const safeSeekTarget = (time) => {
+      if (!video) return time;
+      if (api?.getState("live")) {
+        const metrics = readLiveMetrics();
+        const targetLatency = (hls && !isNative ? hls.targetLatency : void 0) || metrics?.targetLatency || DEFAULT_TARGET_LATENCY;
+        const start = metrics?.seekableRange?.start ?? 0;
+        const syncPosition = computeLiveSyncPosition(metrics, targetLatency);
+        const upper = syncPosition !== void 0 ? Math.max(start, syncPosition) : time;
+        return Math.max(start, Math.min(time, upper));
+      }
+      return Math.max(0, Math.min(time, video.duration || 0));
+    };
     const applyPoster = () => {
       if (!video) return;
       video.poster = api?.getState("poster") || "";
@@ -42439,8 +42586,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
           if (!video) return;
           if (!Number.isFinite(time)) return;
-          const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
-          video.currentTime = clampedTime;
+          video.currentTime = safeSeekTarget(time);
         });
         const unsubVolume = api.on("volume:change", ({ volume }) => {
           if (video) video.volume = volume;
@@ -42657,13 +42803,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const metrics = readLiveMetrics();
         if (isNative) {
           const targetLatency2 = metrics?.targetLatency ?? DEFAULT_TARGET_LATENCY;
-          const seekableEnd = video?.seekable?.length ? video.seekable.end(video.seekable.length - 1) : void 0;
           return {
             isLive: true,
             latency: metrics?.latency ?? 0,
             targetLatency: targetLatency2,
             drift: 0,
-            liveSyncPosition: seekableEnd !== void 0 ? Math.max(0, seekableEnd - targetLatency2) : void 0,
+            liveSyncPosition: computeLiveSyncPosition(metrics, targetLatency2),
             lowLatency: metrics?.lowLatency ?? false
           };
         }
@@ -42674,7 +42819,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           latency: hls.latency || 0,
           targetLatency,
           drift: hls.drift || 0,
-          liveSyncPosition: hls.liveSyncPosition ?? (video?.seekable?.length ? Math.max(0, video.seekable.end(video.seekable.length - 1) - targetLatency) : void 0),
+          liveSyncPosition: computeLiveSyncPosition(metrics, targetLatency),
           lowLatency: metrics?.lowLatency ?? false
         };
       },
@@ -48092,7 +48237,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       let target;
       if (live && seekableRange) {
         target = Math.max(seekableRange.start, Math.min(seekableRange.end, current + delta));
-        if (zone === "right" && target <= current) {
+        if (zone === "right" && (target <= current || api.getState("liveEdge"))) {
           overlay?.announceLiveEdge();
           return false;
         }
@@ -48887,7 +49032,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const live = api.getState("live");
       const seekableRange = api.getState("seekableRange");
       if (live && seekableRange) {
-        video.currentTime = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+        const target = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+        video.currentTime = target;
+        api.emit("playback:seeking", { time: target });
         return;
       }
       const duration = video.duration;
@@ -53795,6 +53942,52 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     return { id: DEFAULT_SCENARIO, feature, known: false };
   }
+  var SHARE_SRC_PARAM = "src";
+  var SHARE_TYPE_PARAM = "type";
+  var MAX_SHARED_URL_LENGTH = 2048;
+  var AUDIO_EXTENSION = /\.(mp3|m4a|aac|wav|oga|ogg|opus|flac)$/i;
+  function parseSharedSource(search, isWhep) {
+    const params = new URLSearchParams(search.replace(/^\?/, ""));
+    const raw = (params.get(SHARE_SRC_PARAM) ?? "").trim();
+    if (!raw || raw.length > MAX_SHARED_URL_LENGTH) return null;
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    const type = params.get(SHARE_TYPE_PARAM);
+    if (type !== null) {
+      return type === "whep" || type === "video" || type === "audio" ? { url: raw, type } : null;
+    }
+    if (isWhep(raw)) return { url: raw, type: "whep" };
+    return { url: raw, type: AUDIO_EXTENSION.test(parsed.pathname) ? "audio" : "video" };
+  }
+  function sharedSourceScenario(source) {
+    return source.type === "whep" ? "whep" : "custom";
+  }
+  function shareableSourceUrl(raw) {
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return { url: "", stripped: true };
+    }
+    const stripped = parsed.search !== "" || parsed.hash !== "" || parsed.username !== "" || parsed.password !== "";
+    return { url: `${parsed.origin}${parsed.pathname}`, stripped };
+  }
+  function withSharedSource(href, source) {
+    const url = new URL(href);
+    url.searchParams.delete(SHARE_SRC_PARAM);
+    url.searchParams.delete(SHARE_TYPE_PARAM);
+    if (source) {
+      url.searchParams.set(SHARE_SRC_PARAM, shareableSourceUrl(source.url).url);
+      url.searchParams.set(SHARE_TYPE_PARAM, source.type);
+      url.hash = `#${sharedSourceScenario(source)}`;
+    }
+    return url.toString();
+  }
 
   // demo/site-controller.ts
   init_src2();
@@ -54294,6 +54487,9 @@ ${indent}src: ${tsString(config.src)},`;
     const customStateUrl = req("custom-state-url");
     const customStateKind = req("custom-state-kind");
     const customChange = req("custom-change");
+    const sourceChange = req("source-change");
+    const sourceShare = req("source-share");
+    const sourceShareNote = req("source-share-note");
     const codeDescription = req("code-description");
     const codeInstall = req("code-install");
     const codeEl = req("playground-code");
@@ -54334,6 +54530,7 @@ ${indent}src: ${tsString(config.src)},`;
     let snippetKind = "typescript";
     let posterDismissed = false;
     let toastTimer = 0;
+    let awaitingPlay = null;
     const scenario = () => SCENARIOS[current ?? "hls"];
     const stateOf = (role) => {
       if (!alive[role]) return null;
@@ -54346,9 +54543,17 @@ ${indent}src: ${tsString(config.src)},`;
     const sourceOf = (role) => stateOf(role)?.source?.src ?? expected[role];
     const safePause = (role) => {
       const state = stateOf(role);
-      if (!state || !state.playing) return;
+      if (!state) return;
+      let media = null;
+      try {
+        media = mediaOf(role);
+      } catch {
+      }
+      const pendingPlay = !!media && !media.paused;
+      if (!state.playing && !pendingPlay) return;
       try {
         deps.players[role].pause();
+        if (media && !media.paused) media.pause();
       } catch {
       }
     };
@@ -54442,6 +54647,14 @@ ${indent}src: ${tsString(config.src)},`;
       });
       player.on("playback:play", () => {
         log(role, "info", "play");
+        if (role === "video" && live.status === "idle" && live.url && expected.video === live.url) {
+          safePause("video");
+          return;
+        }
+        if (awaitingPlay === role) {
+          awaitingPlay = null;
+          if (role === activeRole()) setStatus("");
+        }
         if (role === "video" && !posterDismissed) {
           posterDismissed = true;
           renderPoster();
@@ -54551,8 +54764,8 @@ ${indent}src: ${tsString(config.src)},`;
       const group = scenario().group;
       for (const link of navLinks) {
         const linkGroup = link.dataset.scenario;
-        if (linkGroup === "cinema") link.hash = `#${memory.cinema}`;
-        if (linkGroup === "audio") link.hash = `#${memory.audio}`;
+        if (linkGroup === "cinema") link.setAttribute("href", `#${memory.cinema}`);
+        if (linkGroup === "audio") link.setAttribute("href", `#${memory.audio}`);
         if (linkGroup === group) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
       }
@@ -54629,7 +54842,7 @@ ${indent}src: ${tsString(config.src)},`;
       whepStateBadge.dataset.on = String(live.status === "connected" && !liveFailed);
       whepStateValue.textContent = live.status === "error" ? `${live.error || "failed"} (retrying)` : liveLabel[live.status].toLowerCase();
       customStateList.hidden = custom.status === "idle";
-      customChange.hidden = custom.status !== "loaded";
+      customChange.hidden = custom.status !== "loaded" && custom.status !== "error";
       customStateUrl.textContent = custom.url ?? "\u2014";
       customStateKind.textContent = custom.kind === "audio" ? "audio" : "video";
       const customLabel = {
@@ -54651,7 +54864,12 @@ ${indent}src: ${tsString(config.src)},`;
         const available = feature === "watermark" ? caps.watermark || videoCustom : Boolean(caps[feature]);
         button.hidden = !available;
       }
-      const anyVisible = featureButtons.some((b) => !b.hidden);
+      const own = scenario().group === "live" ? live.status : scenario().group === "custom" ? custom.status : "idle";
+      sourceChange.hidden = !(own === "connected" || own === "loaded" || own === "error");
+      sourceShare.hidden = !(own === "connected" || own === "loaded");
+      const shared = currentSharedSource();
+      sourceShareNote.hidden = sourceShare.hidden || !shared || !shareableSourceUrl(shared.url).stripped;
+      const anyVisible = featureButtons.some((b) => !b.hidden) || !sourceChange.hidden || !sourceShare.hidden;
       req("feature-actions").hidden = !anyVisible;
       if (!caps.chapters) closePanel(chapterPanel, "chapters");
       if (!caps.clips) closePanel(clipPanel, "clips");
@@ -55026,7 +55244,34 @@ ${indent}src: ${tsString(config.src)},`;
         showStage("custom");
       }
     };
+    const currentSharedSource = () => {
+      const s = scenario();
+      if (current === null) return null;
+      if (s.group === "live" && live.url && live.status !== "idle") return { url: live.url, type: "whep" };
+      if (s.group === "custom" && custom.url && custom.status !== "idle") return { url: custom.url, type: custom.kind };
+      return null;
+    };
+    const syncAddress = () => {
+      if (current === null) return;
+      const next = withSharedSource(window.location.href, currentSharedSource());
+      if (next !== window.location.href) history.replaceState(history.state, "", next);
+    };
+    const copyShareLink = async () => {
+      const source = currentSharedSource();
+      if (!source) return;
+      const link = withSharedSource(window.location.href, source);
+      const { stripped } = shareableSourceUrl(source.url);
+      try {
+        await navigator.clipboard.writeText(link);
+        notify(
+          stripped ? "Link copied without the query string, fragment or credentials. If the stream needs a token, the link will not play on its own." : "Link copied. It opens the demo on this source."
+        );
+      } catch {
+        notify("Copy was blocked here. The address bar holds the same link.");
+      }
+    };
     const renderAll = () => {
+      syncAddress();
       renderNav();
       renderMeta();
       renderSettings();
@@ -55042,6 +55287,7 @@ ${indent}src: ${tsString(config.src)},`;
         current = id;
         if (s.group === "cinema" || s.group === "audio") memory[s.group] = id;
         const gen = ++generation;
+        awaitingPlay = null;
         pauseAllBut(s.src ? s.player : null);
         closePanel(chapterPanel, "chapters");
         closePanel(clipPanel, "clips");
@@ -55066,7 +55312,51 @@ ${indent}src: ${tsString(config.src)},`;
       }
       void activate(parsed.id, parsed.feature);
     };
-    const connectWhep = async () => {
+    const mediaOf = (role) => {
+      const container = req(role === "video" ? "player" : role === "audio" ? "audio-player" : "mini-player");
+      const all = container.querySelectorAll("video, audio");
+      return all.length ? all[all.length - 1] : null;
+    };
+    const autoStart = async (role, gen) => {
+      const media = mediaOf(role);
+      if (!media || !media.paused) return;
+      try {
+        await media.play();
+        if (gen !== generation) {
+          media.pause();
+          return;
+        }
+        log(role, "info", "autoplay", "started");
+        return;
+      } catch (error) {
+        if (gen !== generation) return;
+        if (!(error instanceof DOMException) || error.name !== "NotAllowedError") {
+          log(role, "warn", "autoplay", loadErrorMessage(error));
+          return;
+        }
+      }
+      const wasMuted = media.muted;
+      media.muted = true;
+      try {
+        await media.play();
+        if (gen !== generation) {
+          media.pause();
+          media.muted = wasMuted;
+          return;
+        }
+        log(role, "info", "autoplay", "started muted (sound blocked by the browser)");
+        notify("Playing muted: this browser blocks autoplay with sound. Unmute in the player.");
+        return;
+      } catch {
+        if (gen !== generation) return;
+        media.muted = wasMuted;
+      }
+      awaitingPlay = role;
+      log(role, "info", "autoplay", "blocked by the browser; waiting for Play");
+      setStatus("Press Play to start");
+      notify("This browser blocked autoplay. Press Play to start.");
+    };
+    const connectWhep = async (options = {}) => {
       const check = validateUrl(whepUrl.value, "whep", deps.whep);
       if (!check.ok) {
         whepError.textContent = check.message;
@@ -55082,8 +55372,10 @@ ${indent}src: ${tsString(config.src)},`;
       live.reconnect = "\u2014";
       whepConnect.disabled = true;
       whepConnect.textContent = "Connecting\u2026";
+      awaitingPlay = null;
       pauseAllBut(null);
       expected.video = check.url;
+      syncAddress();
       renderSettings();
       try {
         await deps.ready.video;
@@ -55101,7 +55393,15 @@ ${indent}src: ${tsString(config.src)},`;
         }
         return;
       }
-      if (gen !== generation) return;
+      if (gen !== generation) {
+        if (live.status === "idle" && expected.video === check.url) {
+          try {
+            deps.players.video.pause();
+          } catch {
+          }
+        }
+        return;
+      }
       whepConnect.disabled = false;
       whepConnect.textContent = "Connect";
       whepError.textContent = "";
@@ -55110,16 +55410,21 @@ ${indent}src: ${tsString(config.src)},`;
       showStage("video");
       renderAll();
       log("video", "info", "whep", "connected");
-      notify("Connected. Press Play to watch your stream.");
+      if (options.autostart) await autoStart("video", gen);
+      else notify("Connected. Press Play to watch your stream.");
     };
     const disconnectWhep = () => {
+      generation++;
       safePause("video");
+      awaitingPlay = null;
       live.status = "idle";
+      whepConnect.disabled = false;
+      whepConnect.textContent = "Connect";
       showStage("whep");
       renderAll();
       whepUrl.focus();
     };
-    const loadCustom = async () => {
+    const loadCustom = async (options = {}) => {
       const check = validateUrl(customUrl.value, "media", deps.whep);
       if (!check.ok) {
         customError.textContent = check.message;
@@ -55137,8 +55442,10 @@ ${indent}src: ${tsString(config.src)},`;
       custom.error = "";
       customLoad.disabled = true;
       customLoad.textContent = "Loading\u2026";
+      awaitingPlay = null;
       pauseAllBut(null);
       expected[role] = check.url;
+      syncAddress();
       renderSettings();
       try {
         await deps.ready[role];
@@ -55170,13 +55477,41 @@ ${indent}src: ${tsString(config.src)},`;
       showStage(role === "audio" ? "audio-full" : "video");
       renderAll();
       log(role, "info", "custom source", "loaded");
+      if (options.autostart) await autoStart(role, gen);
     };
     const changeCustom = () => {
+      generation++;
       pauseAllBut(null);
+      awaitingPlay = null;
+      if (custom.url) customUrl.value = custom.url;
       custom.status = "idle";
+      customLoad.disabled = false;
+      customLoad.textContent = "Load";
       showStage("custom");
       renderAll();
       customUrl.focus();
+      customUrl.select();
+    };
+    const changeSource = () => {
+      if (scenario().group === "live") {
+        disconnectWhep();
+        if (live.url) whepUrl.value = live.url;
+        whepUrl.select();
+      } else if (scenario().group === "custom") {
+        changeCustom();
+      }
+    };
+    const openSharedSource = (source) => {
+      if (source.type === "whep") {
+        whepUrl.value = source.url;
+        void connectWhep({ autostart: true });
+        return;
+      }
+      customUrl.value = source.url;
+      for (const radio of customForm.querySelectorAll('input[name="custom-kind"]')) {
+        radio.checked = radio.value === source.type;
+      }
+      void loadCustom({ autostart: true });
     };
     const renderStats = () => {
       const role = activeRole();
@@ -55256,7 +55591,9 @@ ${indent}src: ${tsString(config.src)},`;
       }
       if (state) {
         if (hasFailed(state)) setStatus("Playback error", "error");
-        else if (state.live) setStatus("LIVE", "live");
+        else if (awaitingPlay !== null && awaitingPlay === role) {
+          if (stageStatus.dataset.tone) setStatus("Press Play to start");
+        } else if (state.live) setStatus("LIVE", "live");
         else if (stageStatus.dataset.tone) setStatus("");
       }
       if (s.group === "cinema") syncCaptionControls();
@@ -55372,6 +55709,10 @@ ${indent}src: ${tsString(config.src)},`;
       });
       whepUrl.addEventListener("input", () => {
         whepError.textContent = "";
+        if (live.status === "connecting" && whepUrl.value.trim() !== live.url) {
+          whepConnect.disabled = false;
+          whepConnect.textContent = "Connect";
+        }
       });
       whepDisconnect.addEventListener("click", disconnectWhep);
       customForm.addEventListener("submit", (event) => {
@@ -55380,8 +55721,14 @@ ${indent}src: ${tsString(config.src)},`;
       });
       customUrl.addEventListener("input", () => {
         customError.textContent = "";
+        if (custom.status === "loading" && customUrl.value.trim() !== custom.url) {
+          customLoad.disabled = false;
+          customLoad.textContent = "Load";
+        }
       });
       customChange.addEventListener("click", changeCustom);
+      sourceChange.addEventListener("click", changeSource);
+      sourceShare.addEventListener("click", () => void copyShareLink());
       diagnostics.addEventListener("toggle", () => {
         if (diagnostics.open) {
           renderDiagnosticsSections();
@@ -55414,7 +55761,10 @@ ${indent}src: ${tsString(config.src)},`;
       applyAccent(DEFAULT_ACCENT);
       applyClipLimits();
       if (expected.video && !stateOf("video")?.source) setStatus("Loading\u2026");
+      const shared = deps.sharedSource;
+      if (shared) history.replaceState(history.state, "", withSharedSource(window.location.href, shared));
       route();
+      if (shared) openSharedSource(shared);
       window.setInterval(tick, 250);
     };
     return { start, logBeacon, logClip, notify };
@@ -55523,9 +55873,6 @@ Cada trampa se prueba una sola vez.
       console.error("Player containers not found");
       return;
     }
-    const initial = parseLocation(window.location.hash, window.location.search);
-    const initialScenario = SCENARIOS[initial.id];
-    const initialVideoSrc = initialScenario.group === "cinema" ? initialScenario.src : null;
     let controller = null;
     const fakeClipCreation = (range) => {
       const uuid2 = crypto.randomUUID();
@@ -55547,6 +55894,10 @@ Cada trampa se prueba una sola vez.
       imageHeight: 64
     });
     const whepPlugin = createWHEPPlugin();
+    const sharedSource = parseSharedSource(window.location.search, (url) => whepPlugin.canPlay(url));
+    const initial = parseLocation(window.location.hash, window.location.search);
+    const initialScenario = SCENARIOS[sharedSource ? sharedSourceScenario(sharedSource) : initial.id];
+    const initialVideoSrc = initialScenario.group === "cinema" ? initialScenario.src : null;
     const videoUI = uiPlugin({
       hideDelay: 3e3,
       theme: {
@@ -55753,6 +56104,7 @@ Cada trampa se prueba una sola vez.
       captions: SNIPPET_CAPTIONS,
       chapterList: VIDEO_CHAPTERS,
       initialVideoSrc,
+      sharedSource,
       ready,
       loadAudioTrack
     });

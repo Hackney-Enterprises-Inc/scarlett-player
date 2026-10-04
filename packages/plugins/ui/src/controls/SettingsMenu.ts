@@ -43,6 +43,8 @@ export class SettingsMenu implements Control {
   private keyHandler: (e: KeyboardEvent) => void;
   private lastQualitiesJson = '';
   private lastSpeedAvailable = true;
+  /** Rate taken away while Speed was withdrawn, and the source it belonged to. */
+  private withdrawnRate: { rate: number; src: string | undefined } | null = null;
 
   constructor(api: IPluginAPI) {
     this.api = api;
@@ -126,6 +128,8 @@ export class SettingsMenu implements Control {
     const speedAvailable = this.isSpeedAvailable();
     if (!speedAvailable) {
       this.resetRate();
+    } else {
+      this.restoreRate();
     }
 
     const hasRows = this.hasRows();
@@ -192,15 +196,38 @@ export class SettingsMenu implements Control {
    * state, so state can say 1 while the element still plays at the rate the
    * viewer (or an embed's `data-playback-rate`) chose before the stream was
    * known to be live. A no-op when the rate is already 1.
+   *
+   * The rate is remembered with its source so {@link SettingsMenu.restoreRate}
+   * can give it back: native HLS reports `live` one event before its
+   * `seekableRange`, so a DVR stream looks live-only for a moment.
    */
   private resetRate(): void {
     const video = this.api.container.querySelector('video');
     const rate = video ? video.playbackRate : (this.api.getState('playbackRate') ?? 1);
     if (rate === 1) return;
 
+    this.withdrawnRate = { rate, src: this.api.getState('source')?.src };
     this.api.emit('playback:ratechange', { rate: 1 });
     if (video) {
       video.playbackRate = 1;
+    }
+  }
+
+  /**
+   * Give back a rate {@link SettingsMenu.resetRate} took, once Speed is
+   * offered again on the same source (its DVR window arrived late). A rate
+   * taken on one source is dropped, never applied to the next.
+   */
+  private restoreRate(): void {
+    const withdrawn = this.withdrawnRate;
+    if (!withdrawn) return;
+    this.withdrawnRate = null;
+    if (withdrawn.src !== this.api.getState('source')?.src) return;
+
+    this.api.emit('playback:ratechange', { rate: withdrawn.rate });
+    const video = this.api.container.querySelector('video');
+    if (video) {
+      video.playbackRate = withdrawn.rate;
     }
   }
 

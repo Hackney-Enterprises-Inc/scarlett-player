@@ -97,7 +97,9 @@ stream without one (`live` true, `seekableRange` null, as with WHEP) the Speed
 row is left out and any rate other than 1 is reset to 1, since there is nothing
 behind the edge to play through. The menu follows the stream as live and DVR
 state arrive after the manifest, and the settings button hides while the menu
-has no rows at all.
+has no rows at all. If the DVR window turns up afterwards on the same source
+(native HLS reports `live` just before its seekable range), the rate that was
+reset is put back.
 
 Because `quality` hides, a layout with `quality` and no `settings` would lose
 quality selection entirely below the width where the bar fits. `uiPlugin()`
@@ -201,7 +203,8 @@ they do not emit this bus command.
 On live the emit is what keeps a seek playable: the HLS provider holds every
 `playback:seeking` request at the live sync position, so a forward skip or a
 drag to the end lands at live instead of on the end of the seekable range,
-where nothing is buffered yet.
+where nothing is buffered yet. While `liveEdge` is true the skip-forward
+button does nothing at all, since there is nothing ahead to skip to.
 
 Big-overlay replay still seeks by writing `currentTime` without a bus request. Analytics observes these through the
 element path (`seekSource: 'element'` when not consumed as a recent bus echo),

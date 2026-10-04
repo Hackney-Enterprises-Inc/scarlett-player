@@ -49,7 +49,6 @@ packages/embed/
 │   ├── version.ts         # __PKG_VERSION__, replaced at build time
 │   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
 │                          # lookup and the core/ui shims they build against
-├── templates/             # Legacy copy-paste examples; not the Laravel integration path
 ├── tests/                 # embed, parser, iframe-error, version
 ├── demo.html              # Interactive demo page
 ├── iframe.html            # iframe embed helper (published alongside dist)

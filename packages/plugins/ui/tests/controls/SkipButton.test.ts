@@ -284,6 +284,31 @@ describe('SkipButton', () => {
       btn.destroy();
     });
 
+    it('does nothing on a forward skip while already at the live edge', () => {
+      const btn = new SkipButton(api, 'forward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 147, writable: true });
+      (api.getState as any).mockImplementation((key: string) => (key === 'liveEdge' ? true : live(key)));
+
+      btn.render().click();
+
+      expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+      expect(video.currentTime).toBe(147);
+      btn.destroy();
+    });
+
+    it('still skips backward from the live edge', () => {
+      const btn = new SkipButton(api, 'backward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 147, writable: true });
+      (api.getState as any).mockImplementation((key: string) => (key === 'liveEdge' ? true : live(key)));
+
+      btn.render().click();
+
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 137 });
+      btn.destroy();
+    });
+
     it('emits the backward live target', () => {
       const btn = new SkipButton(api, 'backward');
       (api.getState as any).mockImplementation(live);

@@ -353,7 +353,8 @@ provider is loaded.
 `playback:seeking { time }` is a seek request, not a notification of every
 element seek. Core, gestures, media-session and UI controls can emit it. The
 video UI emits after its direct `currentTime` write: progress-bar press and
-release (not every throttled drag move), keyboard seeks and control-bar replay.
+release (not every throttled drag move), keyboard seeks, the skip buttons and
+control-bar replay. The chapters plugin emits it for live chapter seeks.
 HLS and native providers instead handle the element's `seeking` by publishing
 its target `currentTime` **before** `seeking: true`; they do not re-emit the
 command and create a feedback loop. Analytics observes both paths, consuming
@@ -580,7 +581,8 @@ target latency carried over from an hls.js session on the same source.
 
 A viewer is at the edge when `latency <= targetLatency + tolerance`, with
 `tolerance = max(1.5, partTarget ?? targetduration / 2)`. That formula is what
-decides when "GO LIVE" appears.
+decides when "GO LIVE" appears, and the UI's time readout follows the same
+`liveEdge` flag: blank at the edge, `-m:ss` behind live once it clears.
 
 **`lowLatencyMode` reports effect, not intent.** It is true only when the
 manifest carries `EXT-X-PART` or advertises `CAN-BLOCK-RELOAD=YES` *and* the
@@ -594,6 +596,10 @@ provider's `liveSyncPosition` and only then falls back to `seekableRange.end`
 and `duration`. The two are not interchangeable under low latency: the end of
 the seekable range is past the last loaded part, and seeking there stalls. The
 UI's `LiveIndicator` used to seek there itself; it now carries no target at all.
+The same rule covers every other live seek: the HLS provider clamps each
+`playback:seeking` request to `[window start, liveSyncPosition]`, so a
+progress-bar drag or End key to the end of the window lands at the sync
+position instead of stalling. VOD seeks still clamp to `[0, duration]`.
 
 ## Fullscreen
 
@@ -1110,7 +1116,6 @@ packages/embed/
 │   ├── version.ts         # __PKG_VERSION__, replaced at build time
 │   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
 │                          # lookup and the core/ui shims they build against
-├── templates/             # Legacy copy-paste examples; not the Laravel integration path
 ├── tests/                 # embed, parser, iframe-error, version
 ├── demo.html              # Interactive demo page
 ├── iframe.html            # iframe embed helper (published alongside dist)
