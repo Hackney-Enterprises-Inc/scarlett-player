@@ -9,6 +9,11 @@
  * bar at every width (`DEFAULT_PRIORITY` in fit.ts), so that assumption always
  * holds here, and pinning it is also what keeps speed, captions and quality
  * reachable once the other controls have left.
+ *
+ * Speed is withdrawn on a live stream without a DVR window (`live` true and
+ * `seekableRange` null): with nothing behind the edge to play through, a rate
+ * above 1 only runs into the edge and one below 1 only drifts behind it. When
+ * that leaves the menu with no rows at all, the gear itself is hidden.
  */
 
 import type { AudioTrack, IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';
@@ -37,6 +42,7 @@ export class SettingsMenu implements Control {
   private closeHandler: (e: MouseEvent) => void;
   private keyHandler: (e: KeyboardEvent) => void;
   private lastQualitiesJson = '';
+  private lastSpeedAvailable = true;
 
   constructor(api: IPluginAPI) {
     this.api = api;
@@ -106,7 +112,39 @@ export class SettingsMenu implements Control {
     return this.el;
   }
 
+  /**
+   * Sync the menu with player state. Called by the UI plugin on every state
+   * change.
+   *
+   * Live and DVR state usually arrive after the manifest, so this is also where
+   * Speed is withdrawn or restored: an open menu is re-rendered when the
+   * Speed row comes or goes, and the gear is hidden while the menu would be
+   * empty. While Speed is withdrawn, a rate other than 1 is reset to 1 (see
+   * {@link SettingsMenu.isSpeedAvailable}).
+   */
   update(): void {
+    const speedAvailable = this.isSpeedAvailable();
+    if (!speedAvailable) {
+      this.resetRate();
+    }
+
+    const hasRows = this.hasRows();
+    this.el.style.display = hasRows ? '' : 'none';
+
+    // An empty menu is hidden, so it must not stay open behind the scenes: the
+    // focus trap would keep swallowing Tab. This holds whichever row went
+    // last, not only Speed (a caption track can be removed at any time).
+    if (this.isOpen && !hasRows) {
+      this.close(false);
+    }
+
+    if (speedAvailable !== this.lastSpeedAvailable) {
+      this.lastSpeedAvailable = speedAvailable;
+      if (this.isOpen && (this.currentPanel === 'main' || this.currentPanel === 'speed')) {
+        this.showPanel('main');
+      }
+    }
+
     const qualities = this.api.getState('qualities') || [];
 
     // Only rebuild when qualities change
@@ -130,6 +168,53 @@ export class SettingsMenu implements Control {
         this.updateAudioActiveStates();
       }
     }
+  }
+
+  /**
+   * Whether the Speed control is offered for the current stream.
+   *
+   * False only for live without a DVR window: `live` true and `seekableRange`
+   * null, the same test SkipButton and ProgressBar use. hls.js sets `live`
+   * from the level playlist and the native HLS path from an infinite duration;
+   * `seekableRange` is written by the hls plugin's live metrics. WHEP sets
+   * `live` true with `seekableRange` null, so it never offers Speed.
+   *
+   * @returns True on VOD and on live with DVR
+   */
+  private isSpeedAvailable(): boolean {
+    return !(this.api.getState('live') && !this.api.getState('seekableRange'));
+  }
+
+  /**
+   * Put playback back to normal speed while Speed is withdrawn.
+   *
+   * Reads the video element first: WHEP never mirrors `ratechange` into
+   * state, so state can say 1 while the element still plays at the rate the
+   * viewer (or an embed's `data-playback-rate`) chose before the stream was
+   * known to be live. A no-op when the rate is already 1.
+   */
+  private resetRate(): void {
+    const video = this.api.container.querySelector('video');
+    const rate = video ? video.playbackRate : (this.api.getState('playbackRate') ?? 1);
+    if (rate === 1) return;
+
+    this.api.emit('playback:ratechange', { rate: 1 });
+    if (video) {
+      video.playbackRate = 1;
+    }
+  }
+
+  /**
+   * Whether the main panel would have at least one row, mirroring the
+   * conditions in {@link SettingsMenu.renderMainPanel}.
+   */
+  private hasRows(): boolean {
+    return (
+      this.isSpeedAvailable() ||
+      (this.api.getState('qualities') || []).length > 0 ||
+      (this.api.getState('textTracks') || []).length > 0 ||
+      (this.api.getState('audioTracks') || []).length > 1
+    );
   }
 
   private toggle(): void {
@@ -235,7 +320,8 @@ export class SettingsMenu implements Control {
       this.panel.appendChild(audioRow);
     }
 
-    // Speed row
+    // Speed row (not on live without a DVR window)
+    if (!this.isSpeedAvailable()) return;
     const speedLabel = playbackRate === 1 ? 'Normal' : `${playbackRate}x`;
     const speedRow = this.createMainRow(
       'Speed',

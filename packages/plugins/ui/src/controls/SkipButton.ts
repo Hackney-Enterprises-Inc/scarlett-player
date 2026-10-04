@@ -69,31 +69,42 @@ export class SkipButton implements Control {
     this.el.style.display = '';
   }
 
+  /**
+   * Skip by the configured number of seconds, then announce the target.
+   *
+   * Writes the element and emits `playback:seeking`, the same pattern the
+   * progress bar uses. The emit is what matters on live: the provider's
+   * `playback:seeking` handler holds a live seek at the live sync position,
+   * and before it was emitted here a forward skip landed on
+   * `seekableRange.end`, where nothing is buffered, and stalled
+   * (HEI-SCARLETT-18). It also lets analytics count the skip as a player seek
+   * rather than an unexplained element seek.
+   */
   private skip(): void {
     const video = getVideo(this.api.container);
     if (!video) return;
 
     const live = this.api.getState('live');
     const seekableRange = this.api.getState('seekableRange');
+    let target: number;
 
     if (live && seekableRange) {
-      // Live DVR: constrain to seekable range
-      if (this.direction === 'backward') {
-        video.currentTime = Math.max(seekableRange.start, video.currentTime - this.seconds);
-      } else {
-        video.currentTime = Math.min(seekableRange.end, video.currentTime + this.seconds);
-      }
-      return;
-    }
-
-    const duration = video.duration || 0;
-    if (!duration || !isFinite(duration)) return;
-
-    if (this.direction === 'backward') {
-      video.currentTime = Math.max(0, video.currentTime - this.seconds);
+      // Live DVR: constrain to seekable range; the provider narrows the top
+      // end to the live sync position.
+      target = this.direction === 'backward'
+        ? Math.max(seekableRange.start, video.currentTime - this.seconds)
+        : Math.min(seekableRange.end, video.currentTime + this.seconds);
     } else {
-      video.currentTime = Math.min(duration, video.currentTime + this.seconds);
+      const duration = video.duration || 0;
+      if (!duration || !isFinite(duration)) return;
+
+      target = this.direction === 'backward'
+        ? Math.max(0, video.currentTime - this.seconds)
+        : Math.min(duration, video.currentTime + this.seconds);
     }
+
+    video.currentTime = target;
+    this.api.emit('playback:seeking', { time: target });
   }
 
   destroy(): void {

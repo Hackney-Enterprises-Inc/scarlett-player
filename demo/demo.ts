@@ -27,7 +27,7 @@ import { createAnalyticsPlugin } from '../packages/plugins/analytics/src/index';
 import type { Chapter } from '../packages/core/src/index';
 import type { IPlaylistPlugin } from '../packages/plugins/playlist/src/index';
 import type { ClipRange } from '../packages/plugins/clips/src/index';
-import { SAMPLE, SCENARIOS, parseLocation } from './scenarios';
+import { SAMPLE, SCENARIOS, parseLocation, parseSharedSource, sharedSourceScenario } from './scenarios';
 import { createSiteController, type AudioTrackSpec, type SiteController } from './site-controller';
 
 // Version injected at build time
@@ -173,12 +173,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // The scenario the page opens on decides which sample, if any, the video
-  // player starts loading. A page opened on #audio fetches no video manifest.
-  const initial = parseLocation(window.location.hash, window.location.search);
-  const initialScenario = SCENARIOS[initial.id];
-  const initialVideoSrc = initialScenario.group === 'cinema' ? initialScenario.src : null;
-
   // Player and plugin instances live outside the arrays so the controller can
   // call their public methods (configure/open on clips, the watermark
   // setters, setTheme on the UIs, getSessionUrl on WHEP).
@@ -221,6 +215,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const whepPlugin = createWHEPPlugin();
+
+  // The scenario the page opens on decides which sample, if any, the video
+  // player starts loading. A page opened on #audio fetches no video manifest,
+  // and neither does a shared link (`?src=`): the controller loads the
+  // visitor's source instead. Read after the WHEP plugin exists, because its
+  // canPlay is what infers a WHEP link that carries no `type`.
+  const sharedSource = parseSharedSource(window.location.search, (url) => whepPlugin.canPlay(url));
+  const initial = parseLocation(window.location.hash, window.location.search);
+  const initialScenario = SCENARIOS[sharedSource ? sharedSourceScenario(sharedSource) : initial.id];
+  const initialVideoSrc = initialScenario.group === 'cinema' ? initialScenario.src : null;
 
   const videoUI = uiPlugin({
     hideDelay: 3000,
@@ -464,6 +468,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     captions: SNIPPET_CAPTIONS,
     chapterList: VIDEO_CHAPTERS,
     initialVideoSrc,
+    sharedSource,
     ready,
     loadAudioTrack,
   });

@@ -239,6 +239,36 @@ describe('createChaptersPlugin', () => {
     expect(api.video.currentTime).toBe(200);
   });
 
+  // HEI-SCARLETT-18: the provider's playback:seeking handler holds a live seek
+  // at the sync position; writing only the element bypassed it.
+  it('routes a live chapter seek through playback:seeking', () => {
+    const api = createMockApi({
+      live: true,
+      seekableRange: { start: 200, end: 400 },
+    });
+    const plugin = createChaptersPlugin({
+      chapters: [{ time: 500, label: 'Not reached yet' }],
+    });
+    plugin.init(api as never);
+    api.emit.mockClear();
+
+    plugin.seekToChapter(0);
+
+    expect(api.video.currentTime).toBe(400);
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 400 });
+  });
+
+  it('leaves a VOD chapter seek as a plain element write', () => {
+    const api = createMockApi();
+    const plugin = createChaptersPlugin({ chapters: CHAPTERS });
+    plugin.init(api as never);
+    api.emit.mockClear();
+
+    plugin.seekToChapter(2);
+
+    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+  });
+
   it('does not clamp against a non-finite duration', () => {
     const api = createMockApi();
     Object.defineProperty(api.video, 'duration', { value: Infinity, configurable: true });

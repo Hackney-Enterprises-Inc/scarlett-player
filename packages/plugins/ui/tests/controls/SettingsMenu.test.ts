@@ -1224,3 +1224,195 @@ describe('SettingsMenu - audio tracks', () => {
     menu.destroy();
   });
 });
+
+// --- Speed on live streams (HEI-SCARLETT-19) ---
+//
+// A live stream with no DVR window (`live: true`, `seekableRange: null`) has
+// nothing to play faster or slower against: the edge is the only position. The
+// Speed row is withdrawn there and stays on VOD and on live with DVR.
+describe('SettingsMenu speed on live streams', () => {
+  let api: MockPluginAPI;
+  let menu: SettingsMenu;
+
+  const openRowLabels = (m: SettingsMenu): string[] => {
+    const el = m.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+    return Array.from(el.querySelectorAll('.sp-settings-panel__row')).map(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent ?? ''
+    );
+  };
+
+  afterEach(() => {
+    menu.destroy();
+  });
+
+  it('omits the Speed row on a live stream without a DVR window', () => {
+    api = createMockApi({ live: true, seekableRange: null, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Quality']);
+  });
+
+  it('keeps the Speed row on a live stream with a DVR window', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 600 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+  });
+
+  it('keeps the Speed row on VOD', () => {
+    api = createMockApi({ live: false, seekableRange: null });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+  });
+
+  it('hides the gear when a live-only stream leaves the menu with nothing in it', () => {
+    api = createMockApi({ live: true, seekableRange: null });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(menu.render().style.display).toBe('none');
+  });
+
+  it('brings the gear back when the stream turns out to have a DVR window', () => {
+    api = createMockApi({ live: true, seekableRange: null });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(menu.render().style.display).toBe('none');
+
+    api.setState('seekableRange', { start: 0, end: 600 });
+    menu.update();
+
+    expect(menu.render().style.display).toBe('');
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+  });
+
+  it('withdraws Speed when live state arrives after load, with the menu open', () => {
+    // Before the manifest: no live flag yet, so this looks like VOD
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(openRowLabels(menu)).toEqual(['Quality', 'Speed']);
+
+    api.setState('live', true);
+    api.setState('seekableRange', null);
+    menu.update();
+
+    const labels = Array.from(menu.render().querySelectorAll('.sp-settings-panel__row')).map(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent
+    );
+    expect(labels).toEqual(['Quality']);
+    expect(menu.isMenuOpen()).toBe(true);
+  });
+
+  it('leaves the Speed sub-panel for the main panel when speed is withdrawn', () => {
+    api = createMockApi({ qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    const el = menu.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+    (Array.from(el.querySelectorAll<HTMLElement>('.sp-settings-panel__row')).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === 'Speed'
+    ) as HTMLElement).click();
+    expect(menu.getPanel()).toBe('speed');
+
+    api.setState('live', true);
+    api.setState('seekableRange', null);
+    menu.update();
+
+    expect(menu.getPanel()).toBe('main');
+    expect(el.querySelectorAll('.sp-settings-panel__item').length).toBe(0);
+  });
+
+  it('closes an open menu that a live-only stream leaves empty', () => {
+    api = createMockApi();
+    menu = new SettingsMenu(api);
+    menu.update();
+    menu.render().querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+    expect(menu.isMenuOpen()).toBe(true);
+
+    api.setState('live', true);
+    api.setState('seekableRange', null);
+    menu.update();
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(menu.render().style.display).toBe('none');
+  });
+
+  it('closes an open menu when its last row goes while Speed is already withdrawn', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: null,
+      textTracks: [{ id: 'en', label: 'English', language: 'en', kind: 'subtitles' }],
+    });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(openRowLabels(menu)).toEqual(['Captions']);
+    expect(menu.isMenuOpen()).toBe(true);
+
+    // Speed availability does not change here; only the last other row goes.
+    api.setState('textTracks', []);
+    menu.update();
+
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(menu.render().style.display).toBe('none');
+
+    // A closed menu must not trap Tab on the document.
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+  });
+
+  it('resets a non-1 rate to 1 when speed is withdrawn', () => {
+    api = createMockApi({ playbackRate: 1.5 });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(api.emit).not.toHaveBeenCalledWith('playback:ratechange', expect.anything());
+
+    api.setState('live', true);
+    api.setState('seekableRange', null);
+    menu.update();
+
+    expect(api.emit).toHaveBeenCalledWith('playback:ratechange', { rate: 1 });
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it('resets a rate the provider never reported to state', () => {
+    // WHEP does not mirror `ratechange` into state, so the element is the
+    // source of truth: state still says 1 while the element plays at 2x.
+    api = createMockApi({ live: true, seekableRange: null, playbackRate: 1 });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 2;
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(api.emit).toHaveBeenCalledWith('playback:ratechange', { rate: 1 });
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it('does not touch the rate on a live stream with DVR', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 600 }, playbackRate: 1.5 });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(api.emit).not.toHaveBeenCalledWith('playback:ratechange', expect.anything());
+    expect(video.playbackRate).toBe(1.5);
+  });
+
+  it('does not re-emit once the rate is already 1', () => {
+    api = createMockApi({ live: true, seekableRange: null });
+    menu = new SettingsMenu(api);
+    menu.update();
+    menu.update();
+
+    expect(api.emit).not.toHaveBeenCalledWith('playback:ratechange', expect.anything());
+  });
+});

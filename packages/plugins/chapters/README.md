@@ -77,7 +77,7 @@ chapters.next();              // no-op inside or past the last chapter
 chapters.previous();          // restart the chapter, or step back if it just started
 ```
 
-Seeks are clamped to the seekable range on live DVR and to the duration on VOD. The pure lookup helpers `normaliseChapters`, `chapterIndexAt`, `nextChapterIndex` and `previousChapterIndex` are exported too.
+Seeks are clamped to the seekable range on live DVR and to the duration on VOD. A live chapter seek also emits `playback:seeking`, so the HLS provider holds it at the live sync position rather than on the end of the window, where nothing is buffered yet. The pure lookup helpers `normaliseChapters`, `chapterIndexAt`, `nextChapterIndex` and `previousChapterIndex` are exported too.
 
 ## State and events
 

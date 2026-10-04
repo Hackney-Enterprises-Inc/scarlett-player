@@ -52,6 +52,16 @@ The [analytics plugin](../analytics/README.md#seek-tracking) uses this state
 transition to track native/element-driven seeks without duplicating recent
 player-requested seeks.
 
+**Live seeks stop at the live sync position.** A `playback:seeking` request on
+a live stream is clamped to the DVR window, and its upper end is the live sync
+position (`getLiveInfo().liveSyncPosition`: the stream's target latency behind
+the edge), not the end of the seekable range. Nothing is loaded past the last
+segment, so a seek to the very end used to pause and buffer; dragging the
+progress bar to the end, pressing End, or calling `player.seek()` past the sync
+position now lands where `seekToLive()` would and keeps playing. This holds on
+both hls.js and native Safari playback. VOD seeks still clamp to
+`[0, duration]`.
+
 ## Segment measurements
 
 Both the regular and light hls.js builds emit the core `media:segment` event

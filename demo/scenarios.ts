@@ -222,7 +222,9 @@ export interface ParsedLocation {
  * Accepts the canonical hashes, the aliases, `#hls?feature=clips` and a
  * `?feature=clips` query string (the homepage's Create card links
  * `/demo/?feature=clips#hls`). Anything else is the default scenario and
- * reported as unknown.
+ * reported as unknown. A shared source (`?src=`) is not read here: it
+ * decides the scenario once, on page load ({@link parseSharedSource}), and
+ * must not pull every later hash change back to it.
  *
  * @param hash - `location.hash`, with or without the leading `#`
  * @param search - `location.search`, with or without the leading `?`
@@ -255,6 +257,130 @@ export function parseLocation(hash: string, search = ''): ParsedLocation {
   }
 
   return { id: DEFAULT_SCENARIO, feature, known: false };
+}
+
+/** How a shared link says to play its source. */
+export type SharedSourceType = 'whep' | 'video' | 'audio';
+
+/**
+ * A visitor's own source carried in the page URL, so a link opens the demo
+ * on that stream: `?src=<url>&type=whep|video|audio`.
+ */
+export interface SharedSource {
+  /** The http(s) URL, exactly as it will be handed to the player */
+  url: string;
+  type: SharedSourceType;
+}
+
+/** Query parameter that carries a shared source's URL. */
+export const SHARE_SRC_PARAM = 'src';
+
+/** Query parameter that says how to play it. */
+export const SHARE_TYPE_PARAM = 'type';
+
+/** Longer than any real stream URL; anything past it is ignored, not loaded. */
+const MAX_SHARED_URL_LENGTH = 2048;
+
+/** File extensions a link without `type` is played as audio for. */
+const AUDIO_EXTENSION = /\.(mp3|m4a|aac|wav|oga|ogg|opus|flac)$/i;
+
+/**
+ * Read a shared source from the page's query string.
+ *
+ * Only an absolute http or https URL is accepted, and `type`, when present,
+ * must be one of the three known values; anything else (another scheme, a
+ * relative or unparsable URL, an unknown type, an absurd length) returns
+ * null and the page opens as if the parameters were not there. Without
+ * `type` the kind is inferred: a URL the WHEP provider would claim is WHEP,
+ * a known audio extension is audio, everything else is video.
+ *
+ * The URL is returned as text. Callers put it into the page only through
+ * `textContent` and input values, never as markup.
+ *
+ * @param search - `location.search`, with or without the leading `?`
+ * @param isWhep - The WHEP provider's own `canPlay`, so the claim rule lives in one place
+ * @returns The source, or null when the query carries none or a malformed one
+ */
+export function parseSharedSource(search: string, isWhep: (url: string) => boolean): SharedSource | null {
+  const params = new URLSearchParams(search.replace(/^\?/, ''));
+  const raw = (params.get(SHARE_SRC_PARAM) ?? '').trim();
+  if (!raw || raw.length > MAX_SHARED_URL_LENGTH) return null;
+
+  let parsed: URL;
+  try {
+    // No base: a relative value is malformed here, not resolved against the page.
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+  const type = params.get(SHARE_TYPE_PARAM);
+  if (type !== null) {
+    return type === 'whep' || type === 'video' || type === 'audio' ? { url: raw, type } : null;
+  }
+  if (isWhep(raw)) return { url: raw, type: 'whep' };
+  return { url: raw, type: AUDIO_EXTENSION.test(parsed.pathname) ? 'audio' : 'video' };
+}
+
+/**
+ * The scenario a shared source opens on.
+ *
+ * @param source - A parsed shared source
+ * @returns `whep` for a WHEP endpoint, `custom` for everything else
+ */
+export function sharedSourceScenario(source: SharedSource): ScenarioId {
+  return source.type === 'whep' ? 'whep' : 'custom';
+}
+
+/**
+ * The form of a source URL the page is willing to share: scheme, host, port
+ * and path only. The query string, the fragment and any `user:pass@` are
+ * dropped, all of them and not by name, because there is no telling which
+ * parameter is a token. A token carried in the path cannot be detected and
+ * is not attempted.
+ *
+ * @param raw - The source URL as the visitor (or an incoming link) gave it
+ * @returns The shareable URL, and whether anything was removed from it
+ */
+export function shareableSourceUrl(raw: string): { url: string; stripped: boolean } {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // Callers only hold validated http(s) URLs; never echo an unparsable one.
+    return { url: '', stripped: true };
+  }
+  // `origin` already excludes the userinfo; `search` and `hash` are '' for a
+  // bare `?` or `#`, which carry nothing worth reporting.
+  const stripped = parsed.search !== '' || parsed.hash !== '' || parsed.username !== '' || parsed.password !== '';
+  return { url: `${parsed.origin}${parsed.pathname}`, stripped };
+}
+
+/**
+ * A page URL with the shared-source parameters set to `source`, or removed
+ * when it is null. Every other parameter is kept. With a source, the hash is
+ * pointed at the scenario that plays it, so the link opens there even from
+ * a page that was showing another one.
+ *
+ * The `src` written is always {@link shareableSourceUrl}'s form, never the
+ * full URL: this is the one place the page builds a link, for the address
+ * bar and for Copy link alike, so nothing can share a query-string token.
+ *
+ * @param href - The page URL to start from, normally `location.href`
+ * @param source - The source to carry, or null to drop the parameters
+ * @returns The rewritten absolute URL
+ */
+export function withSharedSource(href: string, source: SharedSource | null): string {
+  const url = new URL(href);
+  url.searchParams.delete(SHARE_SRC_PARAM);
+  url.searchParams.delete(SHARE_TYPE_PARAM);
+  if (source) {
+    url.searchParams.set(SHARE_SRC_PARAM, shareableSourceUrl(source.url).url);
+    url.searchParams.set(SHARE_TYPE_PARAM, source.type);
+    url.hash = `#${sharedSourceScenario(source)}`;
+  }
+  return url.toString();
 }
 
 /**

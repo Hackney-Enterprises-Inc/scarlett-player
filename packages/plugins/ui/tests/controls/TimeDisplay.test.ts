@@ -56,32 +56,6 @@ describe('TimeDisplay', () => {
     expect(el.textContent).toBe('1:05 / 1:01:05');
   });
 
-  it('should display LIVE when at live edge', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 100;
-      return null;
-    });
-
-    timeDisplay.update();
-    const el = timeDisplay.render();
-    expect(el.textContent).toBe('LIVE');
-  });
-
-  it('should display negative time when behind live edge', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 35;
-      return null;
-    });
-
-    timeDisplay.update();
-    const el = timeDisplay.render();
-    expect(el.textContent).toBe('-1:05');
-  });
-
   it('should have aria-live off', () => {
     const el = timeDisplay.render();
     expect(el.getAttribute('aria-live')).toBe('off');
@@ -151,92 +125,116 @@ describe('TimeDisplay', () => {
 
   // --- Live Mode ---
 
-  it('should display LIVE when live with no seekable range', () => {
+  /** Point the mock at a live stream; `liveEdge` is the plugin-owned edge flag. */
+  function setLive(opts: {
+    liveEdge: boolean;
+    currentTime: number;
+    seekableRange: { start: number; end: number } | null;
+  }): void {
     (api.getState as any).mockImplementation((key: string) => {
       if (key === 'live') return true;
-      if (key === 'seekableRange') return null;
-      if (key === 'currentTime') return 50;
+      if (key === 'liveEdge') return opts.liveEdge;
+      if (key === 'seekableRange') return opts.seekableRange;
+      if (key === 'currentTime') return opts.currentTime;
       return null;
     });
+  }
+
+  it('shows no time at the live edge, even though the edge sits behind the seekable end', () => {
+    // hls.js holds playback a target latency behind seekableRange.end, so
+    // the old readout counted "-0:18" while the viewer was live.
+    setLive({ liveEdge: true, currentTime: 82, seekableRange: { start: 0, end: 100 } });
 
     timeDisplay.update();
     const el = timeDisplay.render();
-    expect(el.textContent).toBe('LIVE');
+    expect(el.textContent).toBe('');
+    expect(el.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('should display LIVE when exactly at live edge', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 100;
-      return null;
-    });
+  it('shows no time on live without a seekable range (WHEP, before the first playlist)', () => {
+    setLive({ liveEdge: true, currentTime: 50, seekableRange: null });
 
     timeDisplay.update();
     const el = timeDisplay.render();
-    expect(el.textContent).toBe('LIVE');
+    expect(el.textContent).toBe('');
+    expect(el.style.display).toBe('none');
+  });
+
+  it('shows no time when off the edge but the range is unknown', () => {
+    // resetLiveMetrics() leaves liveEdge false with no range during a source change.
+    setLive({ liveEdge: false, currentTime: 50, seekableRange: null });
+
+    timeDisplay.update();
+    expect(timeDisplay.render().textContent).toBe('');
+  });
+
+  it('shows the distance behind live once the viewer has scrubbed back', () => {
+    setLive({ liveEdge: false, currentTime: 58, seekableRange: { start: 0, end: 100 } });
+
+    timeDisplay.update();
+    const el = timeDisplay.render();
+    expect(el.textContent).toBe('-0:42');
+    expect(el.hasAttribute('aria-hidden')).toBe(false);
   });
 
   it('should display negative minutes:seconds when behind live edge', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 300 };
-      if (key === 'currentTime') return 170; // 130 seconds behind
-      return null;
-    });
+    setLive({ liveEdge: false, currentTime: 170, seekableRange: { start: 0, end: 300 } });
 
     timeDisplay.update();
-    const el = timeDisplay.render();
-    expect(el.textContent).toBe('-2:10');
+    expect(timeDisplay.render().textContent).toBe('-2:10');
   });
 
   it('should display negative time with hours when very far behind live edge', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 10000 };
-      if (key === 'currentTime') return 2335; // 7665 seconds behind = 2:07:45
-      return null;
-    });
+    setLive({ liveEdge: false, currentTime: 2335, seekableRange: { start: 0, end: 10000 } });
 
     timeDisplay.update();
+    expect(timeDisplay.render().textContent).toBe('-2:07:45');
+  });
+
+  it('never prints LIVE: a non-positive offset off the edge renders nothing', () => {
+    setLive({ liveEdge: false, currentTime: 100, seekableRange: { start: 0, end: 100 } });
+
+    timeDisplay.update();
+    expect(timeDisplay.render().textContent).toBe('');
+  });
+
+  it('keeps its slot while a DVR stream sits at the edge, so scrubbing back does not shift the bar', () => {
+    setLive({ liveEdge: true, currentTime: 95, seekableRange: { start: 0, end: 100 } });
+    timeDisplay.update();
     const el = timeDisplay.render();
-    expect(el.textContent).toBe('-2:07:45');
+    expect(el.style.display).toBe('');
+    expect(el.classList.contains('sp-time--live')).toBe(true);
+
+    setLive({ liveEdge: false, currentTime: 58, seekableRange: { start: 0, end: 100 } });
+    timeDisplay.update();
+    expect(el.style.display).toBe('');
+    expect(el.classList.contains('sp-time--live')).toBe(true);
+    expect(el.textContent).toBe('-0:42');
+
+    setLive({ liveEdge: true, currentTime: 95, seekableRange: { start: 0, end: 100 } });
+    timeDisplay.update();
+    expect(el.textContent).toBe('');
+    expect(el.style.display).toBe('');
   });
 
   // --- State transitions ---
 
   it('should switch from VOD to live display when state changes', () => {
-    // Start in VOD mode
     timeDisplay.update();
     const el = timeDisplay.render();
     expect(el.textContent).toBe('1:05 / 1:01:05');
 
-    // Switch to live
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 100;
-      return null;
-    });
-
+    setLive({ liveEdge: true, currentTime: 100, seekableRange: { start: 0, end: 100 } });
     timeDisplay.update();
-    expect(el.textContent).toBe('LIVE');
+    expect(el.textContent).toBe('');
   });
 
   it('should switch from live to VOD display when state changes', () => {
-    // Start in live mode
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 100;
-      return null;
-    });
-
+    setLive({ liveEdge: false, currentTime: 40, seekableRange: { start: 0, end: 100 } });
     timeDisplay.update();
     const el = timeDisplay.render();
-    expect(el.textContent).toBe('LIVE');
+    expect(el.textContent).toBe('-1:00');
 
-    // Switch to VOD
     (api.getState as any).mockImplementation((key: string) => {
       if (key === 'live') return false;
       if (key === 'currentTime') return 30;
@@ -246,22 +244,36 @@ describe('TimeDisplay', () => {
 
     timeDisplay.update();
     expect(el.textContent).toBe('0:30 / 1:00');
+    expect(el.classList.contains('sp-time--live')).toBe(false);
+    expect(el.style.display).toBe('');
+    expect(el.hasAttribute('aria-hidden')).toBe(false);
+  });
+
+  it('restores a VOD readout after a WHEP stream hid the element', () => {
+    setLive({ liveEdge: true, currentTime: 0, seekableRange: null });
+    timeDisplay.update();
+    const el = timeDisplay.render();
+    expect(el.style.display).toBe('none');
+
+    (api.getState as any).mockImplementation((key: string) => {
+      if (key === 'live') return false;
+      if (key === 'currentTime') return 30;
+      if (key === 'duration') return 60;
+      return null;
+    });
+    timeDisplay.update();
+    expect(el.style.display).toBe('');
+    expect(el.textContent).toBe('0:30 / 1:00');
   });
 
   // --- Edge Cases ---
 
   it('should handle zero-second edge case in live mode (behind by < 1 second)', () => {
-    (api.getState as any).mockImplementation((key: string) => {
-      if (key === 'live') return true;
-      if (key === 'seekableRange') return { start: 0, end: 100 };
-      if (key === 'currentTime') return 99.5; // 0.5 seconds behind
-      return null;
-    });
+    setLive({ liveEdge: false, currentTime: 99.5, seekableRange: { start: 0, end: 100 } });
 
     timeDisplay.update();
-    const el = timeDisplay.render();
     // formatLiveTime(0.5) => behindLive > 0, so "-0:00"
-    expect(el.textContent).toBe('-0:00');
+    expect(timeDisplay.render().textContent).toBe('-0:00');
   });
 
   // --- Cleanup ---

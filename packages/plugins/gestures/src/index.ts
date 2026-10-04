@@ -165,7 +165,11 @@ export function createGesturesPlugin(config: GesturesPluginConfig = {}): Gesture
 
       // Forward at the live edge is not a failure, it is the viewer already
       // being live. Say so rather than showing a ripple that did nothing.
-      if (zone === 'right' && target <= current) {
+      // `liveEdge` counts too: the provider holds live seeks at the live sync
+      // position, a target latency short of seekableRange.end, so a viewer at
+      // live never reaches the range end and a forward seek would be pulled
+      // straight back.
+      if (zone === 'right' && (target <= current || api.getState('liveEdge'))) {
         overlay?.announceLiveEdge();
         return false;
       }

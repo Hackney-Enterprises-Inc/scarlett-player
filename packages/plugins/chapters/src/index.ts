@@ -161,7 +161,11 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
    * Seek, clamped to what the media allows.
    *
    * Live DVR is clamped to the seekable range rather than to duration, which is
-   * Infinity for a live stream and would let a chapter seek run off the edge.
+   * Infinity for a live stream and would let a chapter seek run off the edge,
+   * and is emitted as `playback:seeking` so the provider can hold it at the
+   * live sync position.
+   *
+   * @param time - Requested position in seconds
    */
   const seekTo = (time: number): void => {
     if (!api) return;
@@ -173,7 +177,13 @@ export function createChaptersPlugin(config: ChaptersPluginConfig = {}): Chapter
     const seekableRange = api.getState('seekableRange');
 
     if (live && seekableRange) {
-      video.currentTime = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+      const target = Math.max(seekableRange.start, Math.min(seekableRange.end, time));
+      video.currentTime = target;
+      // The provider's playback:seeking handler holds a live seek at the live
+      // sync position; a chapter not reached yet would otherwise land on
+      // seekableRange.end, where nothing is buffered (HEI-SCARLETT-18). VOD
+      // stays a plain element write.
+      api.emit('playback:seeking', { time: target });
       return;
     }
 
