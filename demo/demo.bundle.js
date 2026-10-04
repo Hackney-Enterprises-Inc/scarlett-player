@@ -41757,7 +41757,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const targetLatency = (hls && !isNative ? hls.targetLatency : void 0) || metrics?.targetLatency || DEFAULT_TARGET_LATENCY;
         const start = metrics?.seekableRange?.start ?? 0;
         const syncPosition = computeLiveSyncPosition(metrics, targetLatency);
-        const upper = syncPosition !== void 0 ? Math.max(start, syncPosition) : time;
+        if (syncPosition !== void 0) {
+          return Math.max(start, Math.min(time, Math.max(start, syncPosition)));
+        }
+        const duration = video.duration;
+        const upper = Number.isFinite(duration) && duration > 0 ? duration : time;
         return Math.max(start, Math.min(time, upper));
       }
       return Math.max(0, Math.min(time, video.duration || 0));
