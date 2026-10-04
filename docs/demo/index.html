@@ -98,7 +98,8 @@
             </div>
 
             <!-- WHEP: no public endpoint exists, so nothing plays until one is
-                 connected. The URL stays in memory on this page. -->
+                 connected. The endpoint is mirrored into the address bar
+                 (?src=&type=whep) so the page can be shared. -->
             <div class="empty-stage" id="stage-whep" hidden>
               <span class="empty-icon" aria-hidden="true">◉</span>
               <h2>Your stream. In the moment.</h2>
@@ -110,7 +111,7 @@
                   <button type="submit" id="whep-connect">Connect</button>
                 </div>
                 <p class="form-error" id="whep-error" role="alert"></p>
-                <p class="form-note">Sub-second WebRTC playback of a stream you own (Tmesis <code>/whep/v1/streams/&lt;id&gt;</code>, MediaMTX <code>/&lt;path&gt;/whep</code>, Nimble <code>/&lt;app&gt;/&lt;stream&gt;/whep.stream</code>). The endpoint never enters the address bar, analytics or storage.</p>
+                <p class="form-note">Sub-second WebRTC playback of a stream you own (Tmesis <code>/whep/v1/streams/&lt;id&gt;</code>, MediaMTX <code>/&lt;path&gt;/whep</code>, Nimble <code>/&lt;app&gt;/&lt;stream&gt;/whep.stream</code>). The endpoint goes into the address bar so you can share the page, but its query string, fragment and credentials are never included. It never goes into analytics or storage.</p>
               </form>
             </div>
 
@@ -131,7 +132,7 @@
                   <button type="submit" id="custom-load">Load</button>
                 </div>
                 <p class="form-error" id="custom-error" role="alert"></p>
-                <p class="form-note">HLS (<code>.m3u8</code>), MP4, WebM, MOV, MP3, AAC, WAV and more. The URL stays on this page.</p>
+                <p class="form-note">HLS (<code>.m3u8</code>), MP4, WebM, MOV, MP3, AAC, WAV and more. The URL goes into the address bar so you can share the page, but its query string, fragment and credentials are never included. It is never stored.</p>
               </form>
             </div>
           </div>
@@ -151,7 +152,12 @@
             <button type="button" data-feature="chapters" aria-expanded="false" aria-controls="chapter-panel">◫ <span>Explore chapters</span></button>
             <button type="button" data-feature="clips" aria-expanded="false" aria-controls="clip-panel">✂ <span>Make a clip</span></button>
             <button type="button" data-feature="watermark" aria-pressed="false">◇ <span>Add a watermark</span></button>
+            <!-- The visitor's own source (Live monitor, Your stream): back to
+                 the form with the URL in it, and a link that reopens it. -->
+            <button type="button" id="source-change" hidden>↺ <span>Change source</span></button>
+            <button type="button" id="source-share" hidden>⧉ <span>Copy link</span></button>
           </div>
+          <p class="form-note" id="source-share-note" hidden>Shared links leave out this source's query string, fragment and credentials. If the stream needs a token, the link will not play on its own.</p>
 
           <div id="chapter-panel" class="stage-panel" hidden>
             <div class="clip-heading"><strong>Jump to a chapter.</strong><span id="chapter-current">—</span></div>

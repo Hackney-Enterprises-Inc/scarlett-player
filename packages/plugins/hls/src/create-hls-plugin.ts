@@ -350,6 +350,80 @@ export function createHLSPluginWith(
   };
 
   /**
+   * End of the element's `seekable` ranges, when it reports any.
+   *
+   * @returns The last seekable end in seconds, or undefined
+   */
+  const seekableEnd = (): number | undefined =>
+    video?.seekable?.length ? video.seekable.end(video.seekable.length - 1) : undefined;
+
+  /**
+   * Where a live viewer should sit: the stream's target latency behind the edge.
+   *
+   * hls.js computes this itself on the MSE path (`hls.liveSyncPosition`); before
+   * it has one, and always on the native path, it is `seekable.end` minus the
+   * target latency.
+   *
+   * @param metrics - Current snapshot from {@link readLiveMetrics}
+   * @param targetLatency - Target latency to hold back by, in seconds
+   * @returns The sync position in seconds, or undefined when nothing reveals the edge
+   */
+  const computeLiveSyncPosition = (
+    metrics: LiveMetrics | null,
+    targetLatency: number
+  ): number | undefined => {
+    if (hls && !isNative && typeof hls.liveSyncPosition === 'number') {
+      return hls.liveSyncPosition;
+    }
+    const end = seekableEnd() ?? metrics?.seekableRange?.end;
+    return end !== undefined ? Math.max(0, end - targetLatency) : undefined;
+  };
+
+  /**
+   * Clamp a seek target to a position playback can continue from.
+   *
+   * VOD clamps to `[0, duration]`, as it always has. Live clamps to
+   * `[window start, live sync position]`: the end of the seekable range is
+   * the newest media the playlist announces, with nothing buffered past it,
+   * so a seek there pauses and buffers until the next segment arrives
+   * (HEI-SCARLETT-18). Holding it at the sync position lands a viewer who
+   * drags to the end exactly where "go live" would put them. The window start
+   * comes from the playlist on the hls.js path, because under MSE
+   * `seekable.start(0)` stays 0. While nothing reveals the live edge yet, a
+   * finite duration is the upper bound, and without one the seek goes through
+   * as requested.
+   *
+   * @param time - Requested position in seconds (already known to be finite)
+   * @returns The position to write to the element
+   */
+  const safeSeekTarget = (time: number): number => {
+    if (!video) return time;
+
+    if (api?.getState('live')) {
+      const metrics = readLiveMetrics();
+      const targetLatency =
+        (hls && !isNative ? hls.targetLatency : undefined) ||
+        metrics?.targetLatency ||
+        DEFAULT_TARGET_LATENCY;
+      const start = metrics?.seekableRange?.start ?? 0;
+      const syncPosition = computeLiveSyncPosition(metrics, targetLatency);
+      if (syncPosition !== undefined) {
+        return Math.max(start, Math.min(time, Math.max(start, syncPosition)));
+      }
+      // Nothing reveals the edge yet (no playlist window, no seekable range).
+      // Keep the pre-clamp behaviour: a finite duration still bounds the
+      // seek, and otherwise it goes through. Dropping it instead would lose
+      // an early player.seek(), and the UI offers no live seeking without a
+      // seekable range anyway.
+      const duration = video.duration;
+      const upper = Number.isFinite(duration) && duration > 0 ? duration : time;
+      return Math.max(start, Math.min(time, upper));
+    }
+
+    return Math.max(0, Math.min(time, video.duration || 0));
+  };
+
+  /**
    * Mirror the `poster` state key onto the media element.
    *
    * Called at element creation, at the top of every `loadSource()`, and from
@@ -1762,8 +1836,9 @@ export function createHLSPluginWith(
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
         if (!video) return;
         if (!Number.isFinite(time)) return;
-        const clampedTime = Math.max(0, Math.min(time, video.duration || 0));
-        video.currentTime = clampedTime;
+        // Every seek source ends here (progress bar, keyboard, player.seek(),
+        // seekToLive()), so this is the one place the live clamp protects all.
+        video.currentTime = safeSeekTarget(time);
       });
 
       const unsubVolume = api.on('volume:change', ({ volume }: { volume: number }) => {
@@ -2073,17 +2148,13 @@ export function createHLSPluginWith(
 
       if (isNative) {
         const targetLatency = metrics?.targetLatency ?? DEFAULT_TARGET_LATENCY;
-        const seekableEnd = video?.seekable?.length
-          ? video.seekable.end(video.seekable.length - 1)
-          : undefined;
 
         return {
           isLive: true,
           latency: metrics?.latency ?? 0,
           targetLatency,
           drift: 0,
-          liveSyncPosition:
-            seekableEnd !== undefined ? Math.max(0, seekableEnd - targetLatency) : undefined,
+          liveSyncPosition: computeLiveSyncPosition(metrics, targetLatency),
           lowLatency: metrics?.lowLatency ?? false,
         };
       }
@@ -2097,10 +2168,7 @@ export function createHLSPluginWith(
         latency: hls.latency || 0,
         targetLatency,
         drift: hls.drift || 0,
-        liveSyncPosition: hls.liveSyncPosition ??
-          (video?.seekable?.length
-            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - targetLatency)
-            : undefined),
+        liveSyncPosition: computeLiveSyncPosition(metrics, targetLatency),
         lowLatency: metrics?.lowLatency ?? false,
       };
     },

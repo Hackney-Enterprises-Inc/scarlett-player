@@ -169,12 +169,12 @@ While the view is open, both seek paths send `seeking` and increment `seekCount`
   includes core `player.seek()`, gesture seeks, media-session seek actions,
   audio UI and playlist seek requests, and the video UI's progress-bar
   presses/releases, keyboard arrows and Home/End on the focused progress bar,
-  and control-bar replay to zero. `seekTo` uses the requested target.
+  the skip-backward/forward buttons, and control-bar replay to zero. `seekTo` uses the requested target.
 - **`seekSource: 'element'`**: the provider reports `seeking` changing from
   false to true without a recent pending bus echo. This covers browser/native
   controls, OS seeks that reach the media element directly, and direct
-  `currentTime` writes (including the video UI's skip buttons and big-overlay
-  replay, which do not emit a seek request). HLS (including native Safari) and native providers
+  `currentTime` writes (including the video UI's big-overlay replay, which
+  does not emit a seek request). HLS (including native Safari) and native providers
   publish the element's new `currentTime` before setting `seeking: true`, so
   `seekTo` is the target rather than the previous timeupdate position.
 

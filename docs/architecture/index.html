@@ -482,7 +482,8 @@ provider is loaded.</p>
 <p><code>playback:seeking { time }</code> is a seek request, not a notification of every
 element seek. Core, gestures, media-session and UI controls can emit it. The
 video UI emits after its direct <code>currentTime</code> write: progress-bar press and
-release (not every throttled drag move), keyboard seeks and control-bar replay.
+release (not every throttled drag move), keyboard seeks, the skip buttons and
+control-bar replay. The chapters plugin emits it for live chapter seeks.
 HLS and native providers instead handle the element&#39;s <code>seeking</code> by publishing
 its target <code>currentTime</code> <strong>before</strong> <code>seeking: true</code>; they do not re-emit the
 command and create a feedback loop. Analytics observes both paths, consuming
@@ -682,7 +683,8 @@ and the edge threshold stays deliberately loose (the historical 10s) unless a
 target latency carried over from an hls.js session on the same source.</p>
 <p>A viewer is at the edge when <code>latency &lt;= targetLatency + tolerance</code>, with
 <code>tolerance = max(1.5, partTarget ?? targetduration / 2)</code>. That formula is what
-decides when &quot;GO LIVE&quot; appears.</p>
+decides when &quot;GO LIVE&quot; appears, and the UI&#39;s time readout follows the same
+<code>liveEdge</code> flag: blank at the edge, <code>-m:ss</code> behind live once it clears.</p>
 <p><strong><code>lowLatencyMode</code> reports effect, not intent.</strong> It is true only when the
 manifest carries <code>EXT-X-PART</code> or advertises <code>CAN-BLOCK-RELOAD=YES</code> <em>and</em> the
 host asked for low latency in the HLS plugin config. A flag set against a plain
@@ -693,7 +695,11 @@ flag - hls.js will not load its parts.</p>
 provider&#39;s <code>liveSyncPosition</code> and only then falls back to <code>seekableRange.end</code>
 and <code>duration</code>. The two are not interchangeable under low latency: the end of
 the seekable range is past the last loaded part, and seeking there stalls. The
-UI&#39;s <code>LiveIndicator</code> used to seek there itself; it now carries no target at all.</p>
+UI&#39;s <code>LiveIndicator</code> used to seek there itself; it now carries no target at all.
+The same rule covers every other live seek: the HLS provider clamps each
+<code>playback:seeking</code> request to <code>[window start, liveSyncPosition]</code>, so a
+progress-bar drag or End key to the end of the window lands at the sync
+position instead of stalling. VOD seeks still clamp to <code>[0, duration]</code>.</p>
 <h2 id="fullscreen"><a class="anchor" href="#fullscreen">Fullscreen</a></h2>
 <p>Core owns fullscreen since 1.8.0. <code>packages/core/src/fullscreen.ts</code> exports
 <code>enterFullscreen(container)</code>, <code>exitFullscreen(container)</code> and

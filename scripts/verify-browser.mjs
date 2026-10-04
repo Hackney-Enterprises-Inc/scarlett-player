@@ -74,6 +74,29 @@
  *      page with `defer` scripts and with `type="module"` ESM scripts also
  *      gets both controls: auto-init waits for DOMContentLoaded, after the
  *      addon scripts that follow the embed in document order.
+ *  13. Shared demo links and changing a visitor's source (HEI-SCARLETT-17,
+ *      HEI-SCARLETT-21). `?src=<fixture>&type=video` opens Your stream on the
+ *      fixture without ever requesting the sample, and starts it: muted when
+ *      the browser refuses sound (play() stubbed to reject unmuted calls),
+ *      paused behind a "Press Play" prompt when it refuses everything, and a
+ *      click then plays with sound. Change source brings the form back with
+ *      the URL in it, a second URL loads without a page reload into ONE
+ *      element, the address bar follows it, Copy link copies the same URL,
+ *      and leaving the scenario drops the parameters. A failed source keeps a
+ *      way back to the form. A WHEP endpoint answering 503 keeps the join
+ *      pending and retrying; typing a second endpoint re-enables Connect and
+ *      the first endpoint's reconnect timers stop (zero further POSTs). When
+ *      the first endpoint recovers (a real WebRTC answer) while the visitor
+ *      is still typing after Change source, the form, the typed URL and the
+ *      address bar are left alone. A shared link whose autoplay is still
+ *      pending (first segment held) does not start playing once the visitor
+ *      has pressed Change source or left the scenario. Every
+ *      malformed parameter (another scheme, markup, unknown type, absurd
+ *      length) is ignored without an error, and markup in a valid URL only
+ *      ever renders as text. A source carrying `user:pass@`, `?token=` and a
+ *      `#fragment` plays from its full URL, arriving by link or typed in,
+ *      while the address bar and Copy link carry scheme, host, port and path
+ *      only, and the page says what it left out.
  *
  * Usage:
  *   pnpm build && node demo/build.cjs
@@ -2241,6 +2264,408 @@ ${addonTags}
       errs.pageErrors.length === 0 && errs.rejections.length === 0,
       [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
     );
+    await page.close();
+  }
+}
+
+// ============================================================ SCENARIO 13
+// Shared demo links (?src=&type=) and changing a visitor's source without a
+// reload. Everything plays the local fixture or a routed local WHEP endpoint.
+{
+  console.log('\n--- Scenario 13: shared links, change source, autoplay fallback ---');
+  const SAMPLE_PATTERN = /vod\.thestreamplatform\.com/;
+  const DEMO_PATH = 'http://127.0.0.1:8899/demo/index.html';
+  const linkFor = (src, type) => {
+    const u = new global.URL(DEMO_PATH);
+    u.searchParams.set('src', src);
+    if (type) u.searchParams.set('type', type);
+    return u.toString();
+  };
+
+  /**
+   * Open a demo URL with HTMLMediaElement.play() shaped like a browser's
+   * autoplay policy: 'sound' rejects unmuted calls, 'all' rejects every call
+   * until window.__allowPlay is set, 'none' leaves play() alone. Also records
+   * clipboard writes and every request to the sample host.
+   */
+  const openShared = async (href, policy) => {
+    const tracked = await newTrackedPage();
+    const { page } = tracked;
+    const sampleRequests = [];
+    page.on('request', (r) => { if (SAMPLE_PATTERN.test(r.url())) sampleRequests.push(r.url()); });
+    page.on('dialog', (d) => { tracked.errors.pageErrors.push(`dialog: ${d.message()}`); void d.dismiss(); });
+    await page.addInitScript((mode) => {
+      window.__copied = [];
+      try {
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: { writeText: async (text) => { window.__copied.push(text); } },
+        });
+      } catch {}
+      if (mode === 'none') return;
+      const original = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function play() {
+        const blocked = mode === 'all' ? !window.__allowPlay : !this.muted;
+        if (blocked) return Promise.reject(new DOMException('blocked by the harness', 'NotAllowedError'));
+        return original.call(this);
+      };
+    }, policy);
+    await page.goto(href, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.player && typeof window.player.load === 'function', { timeout: 30000 });
+    return { ...tracked, sampleRequests };
+  };
+
+  const snapshot = (page) => page.evaluate(() => {
+    const vids = document.querySelectorAll('#player video');
+    const v = vids[vids.length - 1];
+    return {
+      hash: location.hash,
+      search: location.search,
+      href: location.href,
+      src: window.player.getState().source?.src ?? null,
+      videos: vids.length,
+      paused: v?.paused ?? true,
+      muted: v?.muted ?? false,
+      status: document.getElementById('stage-status')?.textContent ?? '',
+      customInput: document.getElementById('custom-url').value,
+      whepInput: document.getElementById('whep-url').value,
+      customStageHidden: document.getElementById('stage-custom').hidden,
+      whepStageHidden: document.getElementById('stage-whep').hidden,
+      changeHidden: document.getElementById('source-change').hidden,
+      shareHidden: document.getElementById('source-share').hidden,
+      noteHidden: document.getElementById('source-share-note').hidden,
+      toast: document.getElementById('toast')?.textContent ?? '',
+      title: document.getElementById('sample-title').textContent,
+      copied: window.__copied ?? [],
+    };
+  });
+
+  // --- 13a: sound blocked -> muted autoplay; change source; copy link; leave.
+  {
+    const { page, collect, sampleRequests } = await openShared(linkFor(FIXTURE_VOD, 'video'), 'sound');
+    await page.waitForFunction(() => {
+      const v = [...document.querySelectorAll('#player video')].pop();
+      return v && !v.paused;
+    }, { timeout: 20000 }).catch(() => {});
+    let s = await snapshot(page);
+    record('13a shared link opens Your stream (#custom)', s.hash === '#custom', s.hash);
+    record('13a shared link loads its source into the player', s.src === FIXTURE_VOD, String(s.src));
+    record('13a the URL is prefilled in the form', s.customInput === FIXTURE_VOD, s.customInput);
+    record('13a sound blocked -> playing muted', !s.paused && s.muted, `paused=${s.paused} muted=${s.muted}`);
+    record('13a the sample is never requested under a shared link', sampleRequests.length === 0, sampleRequests.slice(0, 2).join(' '));
+    record('13a Change source and Copy link are offered', !s.changeHidden && !s.shareHidden, `change=${!s.changeHidden} share=${!s.shareHidden}`);
+    record('13a a URL with nothing to strip shows no stripped-link note', s.noteHidden, `note hidden=${s.noteHidden}`);
+
+    await page.evaluate(() => { window.__noReload = true; });
+    await page.click('#source-share');
+    s = await snapshot(page);
+    const copied = s.copied[s.copied.length - 1] ?? '';
+    const copiedUrl = copied ? new global.URL(copied) : null;
+    record(
+      '13a Copy link copies src, type and #custom, matching the address bar',
+      copiedUrl?.searchParams.get('src') === FIXTURE_VOD && copiedUrl?.searchParams.get('type') === 'video'
+        && copiedUrl?.hash === '#custom' && copied === s.href,
+      copied
+    );
+
+    await page.click('#source-change');
+    s = await snapshot(page);
+    record('13a Change source shows the form again', !s.customStageHidden, `stage-custom hidden=${s.customStageHidden}`);
+    record('13a the form keeps the current URL', s.customInput === FIXTURE_VOD, s.customInput);
+    // A different PATH to the same fixture: a query string would be stripped
+    // from the shared form (13f), so it cannot show the address bar moving.
+    // python's http.server collapses the empty segment.
+    const second = FIXTURE_VOD.replace('/scripts/fixtures/', '/scripts//fixtures/');
+    await page.fill('#custom-url', second);
+    await page.click('#custom-load');
+    await page.waitForFunction((src) => window.player.getState().source?.src === src && !document.getElementById('stage-video').hidden, second, { timeout: 20000 }).catch(() => {});
+    s = await snapshot(page);
+    const noReload = await page.evaluate(() => window.__noReload === true);
+    record('13a a second URL loads without a page reload', s.src === second && noReload, `src=${s.src} sameDocument=${noReload}`);
+    record('13a the previous provider is torn down (one <video> in the player)', s.videos === 1, `videos=${s.videos}`);
+    record('13a the address bar follows the new source', new global.URL(s.href).searchParams.get('src') === second, s.search);
+
+    await page.click('#scenario-nav a[data-scenario="cinema"]');
+    // location.hash changes at the click, but hashchange (and the controller's
+    // rewrite) runs as a later task: wait for the scenario to be active.
+    await page.waitForFunction(() => document.querySelector('#scenario-nav a[aria-current="page"]')?.dataset.scenario === 'cinema', { timeout: 5000 }).catch(() => {});
+    // A nav href that froze the old query string would reload the page here
+    // instead of changing the hash (found by this scenario, fixed in renderNav).
+    await page.waitForFunction(() => window.player && typeof window.player.getState === 'function', { timeout: 30000 });
+    const stayed = await page.evaluate(() => window.__noReload === true);
+    record('13a leaving Your stream is a hash change, not a page reload', stayed, `sameDocument=${stayed}`);
+    s = await snapshot(page);
+    record('13a leaving Your stream drops src/type from the address bar', !/[?&](src|type)=/.test(s.search), s.search || '(no query)');
+
+    const errs = await collect();
+    record('13a zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13b: all autoplay blocked -> prompt, then a click plays with sound.
+  {
+    const { page, collect } = await openShared(linkFor(FIXTURE_VOD), 'all');
+    await page.waitForFunction(() => document.getElementById('stage-status')?.textContent === 'Press Play to start', { timeout: 20000 }).catch(() => {});
+    let s = await snapshot(page);
+    record('13b a link without type infers video for .m3u8', s.hash === '#custom' && s.src === FIXTURE_VOD, `${s.hash} ${s.src}`);
+    record('13b all autoplay blocked -> paused with a Press Play prompt, sound kept', s.paused && !s.muted && s.status === 'Press Play to start', `paused=${s.paused} muted=${s.muted} status="${s.status}"`);
+    const bigPlay = await page.evaluate(() => document.querySelector('#player .sp-big-play')?.classList.contains('sp-big-play--visible') ?? false);
+    record('13b the player shows its big play button', bigPlay, String(bigPlay));
+    await page.evaluate(() => { window.__allowPlay = true; });
+    await page.click('#player .sp-big-play');
+    // paused flips on the play() call; the play event that clears the prompt
+    // follows as a task, so wait for both.
+    await page.waitForFunction(() => {
+      const v = [...document.querySelectorAll('#player video')].pop();
+      return v && !v.paused && document.getElementById('stage-status')?.textContent === '';
+    }, { timeout: 10000 }).catch(() => {});
+    s = await snapshot(page);
+    record('13b one click plays with sound and clears the prompt', !s.paused && !s.muted && s.status === '', `paused=${s.paused} muted=${s.muted} status="${s.status}"`);
+    const errs = await collect();
+    record('13b zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13c: a failed source keeps a way back to the form.
+  {
+    const missing = 'http://127.0.0.1:8899/scripts/fixtures/hls/missing-for-scenario-13.m3u8';
+    const { page, collect } = await openShared(linkFor(missing, 'video'), 'none');
+    await page.waitForFunction(() => !document.getElementById('source-change').hidden, { timeout: 40000 }).catch(() => {});
+    let s = await snapshot(page);
+    record('13c a failed source offers Change source', !s.changeHidden, `change hidden=${s.changeHidden}`);
+    record('13c a failed source keeps its link in the address bar', new global.URL(s.href).searchParams.get('src') === missing, s.search);
+    if (!s.changeHidden) {
+      await page.click('#source-change');
+      await page.fill('#custom-url', FIXTURE_VOD);
+      await page.click('#custom-load');
+      await page.waitForFunction((src) => window.player.getState().source?.src === src && window.player.getState().playbackState !== 'error' && !document.getElementById('stage-video').hidden, FIXTURE_VOD, { timeout: 20000 }).catch(() => {});
+      s = await snapshot(page);
+      record('13c after a failure a new URL loads without a reload', s.src === FIXTURE_VOD && s.videos === 1, `src=${s.src} videos=${s.videos}`);
+    }
+    const errs = await collect();
+    record('13c zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13d: WHEP join stuck retrying on 503 -> a new endpoint stops the old timers.
+  {
+    const endpointA = 'http://127.0.0.1:8899/live/scenario-13-a/whep';
+    const endpointB = 'http://127.0.0.1:8899/live/scenario-13-b/whep';
+    const tracked = await newTrackedPage();
+    const { page, collect } = tracked;
+    const posts = { a: 0, b: 0 };
+    await page.route(/\/live\/scenario-13-[ab]\/whep/, (route) => {
+      const url = route.request().url();
+      if (route.request().method() === 'POST') posts[url.includes('-a/') ? 'a' : 'b'] += 1;
+      return route.fulfill({ status: 503, headers: { 'Retry-After': '1', 'Access-Control-Allow-Origin': '*' }, body: '' });
+    });
+    await page.goto(linkFor(endpointA, 'whep'), { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.player && typeof window.player.load === 'function', { timeout: 30000 });
+    const deadline = Date.now() + 20000;
+    while (posts.a < 2 && Date.now() < deadline) await page.waitForTimeout(250);
+    let s = await snapshot(page);
+    record('13d type=whep opens the Live monitor with the endpoint prefilled', s.hash === '#whep' && s.whepInput === endpointA, `${s.hash} ${s.whepInput}`);
+    record('13d the join retries against a 503', posts.a >= 2, `POSTs to A: ${posts.a}`);
+
+    if (s.whepStageHidden && !s.changeHidden) await page.click('#source-change');
+    await page.fill('#whep-url', endpointB);
+    const enabled = await page.evaluate(() => !document.getElementById('whep-connect').disabled);
+    record('13d typing a different endpoint re-enables Connect during a pending join', enabled, String(enabled));
+    if (enabled) await page.click('#whep-connect');
+    while (posts.b < 1 && Date.now() < deadline + 10000) await page.waitForTimeout(250);
+    const aAtSwitch = posts.a;
+    await page.waitForTimeout(6000);
+    record('13d the new endpoint is joined', posts.b >= 1, `POSTs to B: ${posts.b}`);
+    record('13d the old endpoint\'s reconnect timers are gone (no POSTs after the switch)', posts.a === aAtSwitch, `A: ${aAtSwitch} -> ${posts.a}`);
+    s = await snapshot(page);
+    record('13d the address bar carries the new endpoint', new global.URL(s.href).searchParams.get('src') === endpointB, s.search);
+    const errs = await collect();
+    record('13d zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13g: the old endpoint recovers while the visitor is typing a new one.
+  // Change source must abandon the pending join: a real WebRTC answer from the
+  // recovered endpoint may not take the stage or the address bar back.
+  {
+    const endpointOld = 'http://127.0.0.1:8899/live/scenario-13-g/whep';
+    const endpointNew = 'http://127.0.0.1:8899/live/scenario-13-g-new/whep';
+    const tracked = await newTrackedPage();
+    const { page, collect } = tracked;
+    let recover = false;
+    let answered = 0;
+    await page.route(endpointOld, async (route) => {
+      if (route.request().method() !== 'POST') return route.fulfill({ status: 204 });
+      if (!recover) return route.fulfill({ status: 503, headers: { 'Retry-After': '1', 'Access-Control-Allow-Origin': '*' }, body: '' });
+      const answer = await page.evaluate(async (offer) => {
+        const pc = new RTCPeerConnection();
+        window.__scenario13gPeer = pc;
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; canvas.height = 180;
+        const context = canvas.getContext('2d');
+        setInterval(() => { context.fillStyle = `hsl(${Date.now() % 360} 50% 50%)`; context.fillRect(0, 0, 320, 180); }, 50);
+        const stream = canvas.captureStream(20);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        await pc.setRemoteDescription({ type: 'offer', sdp: offer });
+        await pc.setLocalDescription(await pc.createAnswer());
+        await new Promise((resolve) => {
+          if (pc.iceGatheringState === 'complete') return resolve();
+          pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') resolve(); });
+          setTimeout(resolve, 1500);
+        });
+        return pc.localDescription.sdp;
+      }, route.request().postData());
+      answered += 1;
+      return route.fulfill({ status: 201, headers: { 'Content-Type': 'application/sdp', Location: '/live/scenario-13-g/session', 'Access-Control-Allow-Origin': '*' }, body: answer });
+    });
+    await page.goto(linkFor(endpointOld, 'whep'), { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.player && typeof window.player.load === 'function', { timeout: 30000 });
+    await page.waitForFunction(() => !document.querySelector('#source-change').hidden, {}, { timeout: 30000 });
+    await page.click('#source-change');
+    await page.fill('#whep-url', endpointNew);
+    recover = true;
+    const deadline = Date.now() + 20000;
+    while (answered < 1 && Date.now() < deadline) await page.waitForTimeout(250);
+    // Give the abandoned continuation time to act if it were still live.
+    await page.waitForTimeout(4000);
+    const after = await page.evaluate(() => ({
+      formVisible: !document.querySelector('#stage-whep').hidden,
+      videoStageHidden: document.querySelector('#stage-video').hidden,
+      input: document.querySelector('#whep-url').value,
+      src: new URL(location.href).searchParams.get('src'),
+      playing: window.player.getState().playing,
+    }));
+    record('13g the old endpoint recovered with a real answer while the form was open', answered >= 1, `answers: ${answered}`);
+    record('13g the form stays up with the visitor\'s new URL', after.formVisible && after.videoStageHidden && after.input === endpointNew, JSON.stringify(after));
+    record('13g the address bar is not taken back by the old endpoint', after.src === null, String(after.src));
+    record('13g the abandoned source does not start playing', after.playing === false, String(after.playing));
+    const errs = await collect();
+    record('13g zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13h: a shared link's autoplay is still pending (first segment held)
+  // when the visitor abandons the source. The element is unpaused but state
+  // does not say playing yet; it must not start behind the form or another
+  // scenario once the media arrives.
+  for (const action of ['change-source', 'leave-scenario']) {
+    const tracked = await newTrackedPage();
+    const { page, collect } = tracked;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    await page.route('**/scripts/fixtures/hls/seg*.ts', async (route) => { await gate; await route.continue(); });
+    await page.goto(linkFor(FIXTURE_VOD, 'video'), { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const v = document.querySelector('#player video');
+      return v && !v.paused && window.player && !window.player.getState().playing && !document.querySelector('#source-change').hidden;
+    }, {}, { timeout: 30000 });
+    await page.click(action === 'change-source' ? '#source-change' : '#scenario-nav a[data-scenario="live"]');
+    await page.waitForFunction(() => document.querySelector('#stage-video').hidden, {}, { timeout: 10000 });
+    release();
+    await page.waitForTimeout(3000);
+    const after = await page.evaluate(() => ({
+      hidden: document.querySelector('#stage-video').hidden,
+      paused: document.querySelector('#player video').paused,
+      playing: window.player.getState().playing,
+      time: document.querySelector('#player video').currentTime,
+    }));
+    record(`13h ${action}: a pending autoplay does not start behind the hidden stage`, after.hidden && after.paused && !after.playing && after.time < 0.1, JSON.stringify(after));
+    const errs = await collect();
+    record(`13h ${action}: zero uncaught errors`, errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13e: malformed parameters are ignored; markup stays text.
+  {
+    const cases = [
+      ['javascript: scheme', `${DEMO_PATH}?src=${encodeURIComponent('javascript:window.__xss=1')}`],
+      ['markup instead of a URL', `${DEMO_PATH}?src=${encodeURIComponent('<img src=x onerror="window.__xss=1">')}&type=video`],
+      ['unknown type', `${DEMO_PATH}?src=${encodeURIComponent(FIXTURE_VOD)}&type=bogus`],
+      ['ftp scheme', `${DEMO_PATH}?src=${encodeURIComponent('ftp://127.0.0.1/a.mp4')}`],
+      ['absurd length', `${DEMO_PATH}?src=${encodeURIComponent(`https://127.0.0.1/${'a'.repeat(3000)}.m3u8`)}`],
+    ];
+    for (const [label, href] of cases) {
+      const { page, collect } = await openShared(href, 'none');
+      await page.waitForTimeout(500);
+      const s = await snapshot(page);
+      const xss = await page.evaluate(() => window.__xss === 1);
+      record(
+        `13e ${label}: ignored (default scenario, empty form, parameters dropped)`,
+        (s.hash === '' || s.hash === '#hls') && s.customInput === '' && !/[?&]src=/.test(s.search) && !xss,
+        `hash=${s.hash} input="${s.customInput.slice(0, 40)}" search=${s.search.slice(0, 40)} xss=${xss}`
+      );
+      const errs = await collect();
+      record(`13e ${label}: zero uncaught errors`, errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+      await page.close();
+    }
+
+    const markup = 'http://127.0.0.1:8899/scripts/fixtures/hls/"><img src=x onerror="window.__xss=1">.m3u8';
+    const { page, collect } = await openShared(linkFor(markup, 'video'), 'none');
+    await page.waitForTimeout(3000);
+    const injected = await page.evaluate(() => ({
+      xss: window.__xss === 1,
+      imgs: document.querySelectorAll('img[src="x"]').length,
+      input: document.getElementById('custom-url').value,
+    }));
+    record('13e markup inside a valid URL is only ever text', !injected.xss && injected.imgs === 0 && injected.input === markup, JSON.stringify(injected).slice(0, 160));
+    const errs = await collect();
+    record('13e markup URL: zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13f: query string, fragment and credentials never leave in a link.
+  {
+    const CLEAN = FIXTURE_VOD;
+    const secretUrl = (n) => {
+      const u = new global.URL(FIXTURE_VOD);
+      u.username = 'scenario13user';
+      u.password = 'scenario13pass';
+      u.search = `?token=s3cret-${n}`;
+      u.hash = `#frag-${n}`;
+      return u.toString();
+    };
+    const leaks = (text) => /s3cret|frag-|scenario13user|scenario13pass/.test(decodeURIComponent(text));
+    const checkStripped = async (page, label, full) => {
+      await page.waitForFunction((src) => {
+        const v = [...document.querySelectorAll('#player video')].pop();
+        return window.player.getState().source?.src === src && v && !v.paused;
+      }, full, { timeout: 20000 }).catch(() => {});
+      let s = await snapshot(page);
+      record(`13f ${label}: the player loads the full URL and plays`, s.src === full && !s.paused, `src=${s.src} paused=${s.paused}`);
+      const shared = new global.URL(s.href).searchParams.get('src');
+      record(`13f ${label}: the address bar carries scheme, host, port and path only`, shared === CLEAN && !leaks(s.href), s.search);
+      record(`13f ${label}: the stripped-link note is shown`, !s.noteHidden, `note hidden=${s.noteHidden}`);
+      await page.click('#source-share');
+      s = await snapshot(page);
+      const copied = s.copied[s.copied.length - 1] ?? '';
+      record(
+        `13f ${label}: Copy link carries none of query, fragment or credentials`,
+        copied !== '' && new global.URL(copied).searchParams.get('src') === CLEAN && !leaks(copied),
+        copied
+      );
+      record(`13f ${label}: the copy toast says what was left out`, s.toast.includes('without the query string'), s.toast);
+    };
+
+    const first = secretUrl(1);
+    const { page, collect } = await openShared(linkFor(first, 'video'), 'sound');
+    await checkStripped(page, 'incoming link', first);
+
+    await page.click('#source-change');
+    const second = secretUrl(2);
+    await page.fill('#custom-url', second);
+    await page.click('#custom-load');
+    // A typed URL does not autoplay (only a shared link does): start it the
+    // way a viewer would, muted to get past the harness's sound policy.
+    await page.waitForFunction((src) => window.player.getState().source?.src === src && !document.getElementById('stage-video').hidden, second, { timeout: 20000 }).catch(() => {});
+    await page.evaluate(() => {
+      const v = [...document.querySelectorAll('#player video')].pop();
+      v.muted = true;
+      return v.play().catch(() => {});
+    });
+    await checkStripped(page, 'typed URL', second);
+
+    const errs = await collect();
+    record('13f zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
     await page.close();
   }
 }

@@ -262,6 +262,87 @@ describe('SkipButton', () => {
     });
   });
 
+  // HEI-SCARLETT-18: the provider's playback:seeking handler is the one place
+  // that knows the live sync position. A skip that only wrote the element
+  // bypassed it, so a forward skip landed on seekableRange.end and stalled.
+  describe('routes through playback:seeking', () => {
+    const live = (key: string) => {
+      if (key === 'live') return true;
+      if (key === 'seekableRange') return { start: 50, end: 150 };
+      return undefined;
+    };
+
+    it('emits the forward live target so the provider can hold it at the sync position', () => {
+      const btn = new SkipButton(api, 'forward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 145, writable: true });
+      (api.getState as any).mockImplementation(live);
+
+      btn.render().click();
+
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 150 });
+      btn.destroy();
+    });
+
+    it('does nothing on a forward skip while already at the live edge', () => {
+      const btn = new SkipButton(api, 'forward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 147, writable: true });
+      (api.getState as any).mockImplementation((key: string) => (key === 'liveEdge' ? true : live(key)));
+
+      btn.render().click();
+
+      expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+      expect(video.currentTime).toBe(147);
+      btn.destroy();
+    });
+
+    it('still skips backward from the live edge', () => {
+      const btn = new SkipButton(api, 'backward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 147, writable: true });
+      (api.getState as any).mockImplementation((key: string) => (key === 'liveEdge' ? true : live(key)));
+
+      btn.render().click();
+
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 137 });
+      btn.destroy();
+    });
+
+    it('emits the backward live target', () => {
+      const btn = new SkipButton(api, 'backward');
+      (api.getState as any).mockImplementation(live);
+
+      btn.render().click();
+
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 50 });
+      btn.destroy();
+    });
+
+    it('emits VOD targets with the same [0, duration] clamp as before', () => {
+      const fwd = new SkipButton(api, 'forward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', { value: 115, writable: true });
+
+      fwd.render().click();
+
+      expect(video.currentTime).toBe(120);
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 120 });
+      fwd.destroy();
+    });
+
+    it('emits nothing when VOD has no usable duration', () => {
+      const btn = new SkipButton(api, 'forward');
+      const video = api.container.querySelector('video') as HTMLVideoElement;
+      Object.defineProperty(video, 'duration', { value: NaN, writable: true });
+
+      btn.render().click();
+
+      expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+      btn.destroy();
+    });
+  });
+
   describe('cleanup', () => {
     it('should remove element on destroy', () => {
       const btn = new SkipButton(api, 'backward');

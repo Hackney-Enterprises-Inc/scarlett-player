@@ -154,7 +154,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-aspect-ratio` | string | - | Aspect ratio (e.g., `16:9`, `4:3`) |
 | `data-keyboard` | boolean | `true` | Enable keyboard shortcuts |
 | `data-loop` | boolean | `false` | Loop playback |
-| `data-playback-rate` | number | `1.0` | Playback speed |
+| `data-playback-rate` | number | `1.0` | Playback speed; reset to `1` on a live stream without a DVR window |
 | `data-start-time` | number | `0` | Start position (seconds) |
 | `data-class` | string | - | Custom CSS class(es) |
 | `data-share-url` | string | - | Page URL to share. Setting it adds a share button to the video control bar; leaving it out changes nothing. Never the media `src`, see [Sharing](#sharing) |

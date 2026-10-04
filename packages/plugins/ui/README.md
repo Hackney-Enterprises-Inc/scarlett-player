@@ -43,7 +43,8 @@ const player = await createPlayer({
   supported)
 - Quality selector
 - Progress bar with buffering indicator
-- Time display (current / duration)
+- Time display: current / duration on VOD; on live, blank at the live edge
+  (the LIVE indicator says it) and `-m:ss` behind live after a DVR scrub back
 - Error overlay with viewer-friendly copy per error code, a Try Again action,
   and a reconnecting state while the player self-heals
 - Keyboard shortcuts
@@ -90,6 +91,15 @@ Lower ranks leave first. Ties go to the control that is later in the layout.
 
 Settings never moves, so playback speed and captions are at most two taps away
 at every width.
+
+Speed is offered on VOD and on live streams with a DVR window. On a live
+stream without one (`live` true, `seekableRange` null, as with WHEP) the Speed
+row is left out and any rate other than 1 is reset to 1, since there is nothing
+behind the edge to play through. The menu follows the stream as live and DVR
+state arrive after the manifest, and the settings button hides while the menu
+has no rows at all. If the DVR window turns up afterwards on the same source
+(native HLS reports `live` just before its seekable range), the rate that was
+reset is put back.
 
 Because `quality` hides, a layout with `quality` and no `settings` would lose
 quality selection entirely below the width where the bar fits. `uiPlugin()`
@@ -178,7 +188,8 @@ The UI package reads no plugin-specific state and gains no `IPluginAPI` surface 
 ### Seek events
 
 Progress-bar mouse/touch presses and releases, its focused Arrow/Home/End
-keys, the player-wide arrow shortcuts, and the control-bar Replay button emit
+keys, the player-wide arrow shortcuts, the skip-backward/forward buttons and
+the control-bar Replay button emit
 `playback:seeking { time }` immediately after writing the media element's
 `currentTime`. The payload carries the clamped target (zero for replay).
 Home/End on the focused bar seek to the VOD endpoints or live DVR boundaries.
@@ -189,8 +200,13 @@ With the analytics plugin these requests produce `seeking` beacons with
 seeks are tracked separately through provider state as `'element'` seeks;
 they do not emit this bus command.
 
-The skip-backward/forward buttons and big-overlay replay still seek by writing
-`currentTime` without a bus request. Analytics observes these through the
+On live the emit is what keeps a seek playable: the HLS provider holds every
+`playback:seeking` request at the live sync position, so a forward skip or a
+drag to the end lands at live instead of on the end of the seekable range,
+where nothing is buffered yet. While `liveEdge` is true the skip-forward
+button does nothing at all, since there is nothing ahead to skip to.
+
+Big-overlay replay still seeks by writing `currentTime` without a bus request. Analytics observes these through the
 element path (`seekSource: 'element'` when not consumed as a recent bus echo),
 so the source field describes the path rather than proving native-control use.
 

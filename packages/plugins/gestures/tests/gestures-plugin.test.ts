@@ -471,6 +471,45 @@ describe('createGesturesPlugin', () => {
     expect(surface.querySelector('[aria-live]')?.textContent).toBe('Already at the live edge');
   });
 
+  // HEI-SCARLETT-18: the provider now holds live seeks at the sync position,
+  // so a viewer at live sits a target latency short of seekableRange.end. A
+  // forward tap there would ripple and then be pulled straight back.
+  it('treats the liveEdge flag as already live, not only seekableRange.end', () => {
+    const api = createMockApi({
+      live: true,
+      liveEdge: true,
+      seekableRange: { start: 50, end: 400 },
+    });
+    api.video.currentTime = 397;
+    createGesturesPlugin().init(api as never);
+    const surface = api.container.querySelector('.sp-gestures') as HTMLElement;
+    measureSurface(surface);
+
+    tapSurface(surface, 0.85, 1000);
+    tapSurface(surface, 0.85, 1150);
+
+    expect(api.video.currentTime).toBe(397);
+    expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+    expect(surface.querySelector('[aria-live]')?.textContent).toBe('Already at the live edge');
+  });
+
+  it('routes a live forward seek behind the edge through playback:seeking', () => {
+    const api = createMockApi({
+      live: true,
+      liveEdge: false,
+      seekableRange: { start: 50, end: 400 },
+    });
+    api.video.currentTime = 300;
+    createGesturesPlugin().init(api as never);
+    const surface = api.container.querySelector('.sp-gestures') as HTMLElement;
+    measureSurface(surface);
+
+    tapSurface(surface, 0.85, 1000);
+    tapSurface(surface, 0.85, 1150);
+
+    expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 310 });
+  });
+
   it('does not seek on live with no DVR window', () => {
     const api = createMockApi({ live: true, seekableRange: null });
     createGesturesPlugin().init(api as never);

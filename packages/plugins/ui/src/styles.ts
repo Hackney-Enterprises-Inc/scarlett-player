@@ -500,6 +500,12 @@ export const styles = `
   letter-spacing: 0.02em;
 }
 
+/* Live with DVR: reserve room for "-0:00" so the offset appearing on a
+   scrub back, and blanking again at the edge, does not shift the bar. */
+.sp-time--live {
+  min-width: 5ch;
+}
+
 /* ============================================
    Volume Control
    ============================================ */

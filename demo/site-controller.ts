@@ -19,7 +19,19 @@
  *   arrives after the visitor moved on cannot touch the new scenario.
  * - WHEP and Your stream pause prior playback and show their own empty
  *   state until a source of their own has loaded.
- * - Pasted URLs stay in memory: never in the page URL, analytics or storage.
+ * - A visitor's own source is mirrored into the address bar as
+ *   `?src=<url>&type=whep|video|audio` while it is the one on stage, so the
+ *   page can be shared, and dropped from it when the visitor moves on. Only
+ *   scheme, host, port and path are shared: query string, fragment and
+ *   credentials never reach the address bar or Copy link (the player still
+ *   loads the full URL), and the page says so when it removed any. A link
+ *   carrying a source opens on it and starts it (muted, or waiting for Play,
+ *   when the browser blocks autoplay). Never in analytics or storage.
+ * - Changing a source never needs a reload: the stage keeps a Change source
+ *   action whenever the visitor's source is up or has failed, and a new URL
+ *   goes through `load()`, which tears the previous provider down (a WHEP
+ *   session is DELETEd and its reconnect timers cleared) before the next one
+ *   starts.
  * - Logs are bounded per player and rendered for the active player only;
  *   collapsing Diagnostics stops rendering, not capture. No console
  *   interception.
@@ -37,9 +49,12 @@ import {
   SCENARIOS,
   SAMPLE,
   parseLocation,
+  shareableSourceUrl,
+  withSharedSource,
   type PlayerRole,
   type Scenario,
   type ScenarioId,
+  type SharedSource,
 } from './scenarios';
 import {
   generateSnippet,
@@ -75,6 +90,11 @@ export interface ControllerDeps {
   chapterList: Chapter[];
   /** Source the video player was constructed with, if any */
   initialVideoSrc: string | null;
+  /**
+   * Source a shared link (`?src=`) asked for, already checked to be an
+   * http(s) URL. Loaded and started once on `start()`; null otherwise.
+   */
+  sharedSource: SharedSource | null;
   /**
    * Each player's `init()` promise. A load that goes through a plugin (the
    * playlist) needs the plugin initialised, and a page opened directly on
@@ -419,6 +439,9 @@ export function createSiteController(deps: ControllerDeps): SiteController {
   const customStateUrl = req('custom-state-url');
   const customStateKind = req('custom-state-kind');
   const customChange = req<HTMLButtonElement>('custom-change');
+  const sourceChange = req<HTMLButtonElement>('source-change');
+  const sourceShare = req<HTMLButtonElement>('source-share');
+  const sourceShareNote = req('source-share-note');
   const codeDescription = req('code-description');
   const codeInstall = req('code-install');
   const codeEl = req('playground-code');
@@ -462,6 +485,8 @@ export function createSiteController(deps: ControllerDeps): SiteController {
   let snippetKind: SnippetKind = 'typescript';
   let posterDismissed = false;
   let toastTimer = 0;
+  /** Player left waiting for a click after the browser blocked autoplay. */
+  let awaitingPlay: PlayerRole | null = null;
 
   // ----- Helpers ------------------------------------------------------------
   const scenario = (): Scenario => SCENARIOS[current ?? 'hls'];
@@ -479,11 +504,28 @@ export function createSiteController(deps: ControllerDeps): SiteController {
   /** The source a player has, or is about to have. */
   const sourceOf = (role: PlayerRole): string | null => stateOf(role)?.source?.src ?? expected[role];
 
+  /**
+   * Pause a player that is playing or about to.
+   *
+   * State alone is not enough: after `play()` the element is unpaused while
+   * its first media is still loading and state does not say `playing` yet.
+   * Leaving that request pending would start the player later, behind
+   * whatever the visitor moved on to, so the element is paused as well.
+   */
   const safePause = (role: PlayerRole): void => {
     const state = stateOf(role);
-    if (!state || !state.playing) return;
+    if (!state) return;
+    let media: HTMLMediaElement | null = null;
+    try {
+      media = mediaOf(role);
+    } catch {
+      // No container for this role on the page.
+    }
+    const pendingPlay = !!media && !media.paused;
+    if (!state.playing && !pendingPlay) return;
     try {
       deps.players[role].pause();
+      if (media && !media.paused) media.pause();
     } catch {
       // A player mid-teardown; nothing to pause.
     }
@@ -599,6 +641,17 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     });
     player.on('playback:play', () => {
       log(role, 'info', 'play');
+      // A WHEP join abandoned through Change source / Disconnect is still
+      // retried by the provider (core has no unload), and a WHEP stream starts
+      // itself once it connects: keep it from playing behind the form.
+      if (role === 'video' && live.status === 'idle' && live.url && expected.video === live.url) {
+        safePause('video');
+        return;
+      }
+      if (awaitingPlay === role) {
+        awaitingPlay = null;
+        if (role === activeRole()) setStatus('');
+      }
       if (role === 'video' && !posterDismissed) {
         posterDismissed = true;
         renderPoster();
@@ -722,8 +775,12 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     const group = scenario().group;
     for (const link of navLinks) {
       const linkGroup = link.dataset.scenario;
-      if (linkGroup === 'cinema') link.hash = `#${memory.cinema}`;
-      if (linkGroup === 'audio') link.hash = `#${memory.audio}`;
+      // A fragment-only href, not `link.hash`: the setter freezes the page's
+      // query string into an absolute href, and once `?src=` changes after
+      // that, the click would be a navigation to another URL (a full reload)
+      // instead of a hash change.
+      if (linkGroup === 'cinema') link.setAttribute('href', `#${memory.cinema}`);
+      if (linkGroup === 'audio') link.setAttribute('href', `#${memory.audio}`);
       if (linkGroup === group) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
@@ -809,7 +866,9 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     whepStateValue.textContent = live.status === 'error' ? `${live.error || 'failed'} (retrying)` : liveLabel[live.status].toLowerCase();
 
     customStateList.hidden = custom.status === 'idle';
-    customChange.hidden = custom.status !== 'loaded';
+    // A failed source leaves the player on stage with its error overlay, so
+    // the way back to the form has to be offered then too.
+    customChange.hidden = custom.status !== 'loaded' && custom.status !== 'error';
     customStateUrl.textContent = custom.url ?? '—';
     customStateKind.textContent = custom.kind === 'audio' ? 'audio' : 'video';
     const customLabel: Record<CustomStatus, string> = {
@@ -835,7 +894,14 @@ export function createSiteController(deps: ControllerDeps): SiteController {
         feature === 'watermark' ? caps.watermark || videoCustom : Boolean(caps[feature as keyof typeof caps]);
       button.hidden = !available;
     }
-    const anyVisible = featureButtons.some((b) => !b.hidden);
+    // The visitor's own source, once it is on stage (up or failed): a way
+    // back to its form, and a link to it while it is up.
+    const own = scenario().group === 'live' ? live.status : scenario().group === 'custom' ? custom.status : 'idle';
+    sourceChange.hidden = !(own === 'connected' || own === 'loaded' || own === 'error');
+    sourceShare.hidden = !(own === 'connected' || own === 'loaded');
+    const shared = currentSharedSource();
+    sourceShareNote.hidden = sourceShare.hidden || !shared || !shareableSourceUrl(shared.url).stripped;
+    const anyVisible = featureButtons.some((b) => !b.hidden) || !sourceChange.hidden || !sourceShare.hidden;
     req('feature-actions').hidden = !anyVisible;
     if (!caps.chapters) closePanel(chapterPanel, 'chapters');
     if (!caps.clips) closePanel(clipPanel, 'clips');
@@ -1267,7 +1333,45 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     }
   };
 
+  // ----- Shared source in the address bar --------------------------------------
+  /** The visitor's own source the page is showing (or trying to), if any. */
+  const currentSharedSource = (): SharedSource | null => {
+    const s = scenario();
+    if (current === null) return null;
+    if (s.group === 'live' && live.url && live.status !== 'idle') return { url: live.url, type: 'whep' };
+    if (s.group === 'custom' && custom.url && custom.status !== 'idle') return { url: custom.url, type: custom.kind };
+    return null;
+  };
+
+  /**
+   * Keep `?src=&type=` in the address bar in step with the source on stage.
+   * replaceState, so no history entry is added and no hashchange fires.
+   */
+  const syncAddress = (): void => {
+    if (current === null) return;
+    const next = withSharedSource(window.location.href, currentSharedSource());
+    if (next !== window.location.href) history.replaceState(history.state, '', next);
+  };
+
+  const copyShareLink = async (): Promise<void> => {
+    const source = currentSharedSource();
+    if (!source) return;
+    const link = withSharedSource(window.location.href, source);
+    const { stripped } = shareableSourceUrl(source.url);
+    try {
+      await navigator.clipboard.writeText(link);
+      notify(
+        stripped
+          ? 'Link copied without the query string, fragment or credentials. If the stream needs a token, the link will not play on its own.'
+          : 'Link copied. It opens the demo on this source.'
+      );
+    } catch {
+      notify('Copy was blocked here. The address bar holds the same link.');
+    }
+  };
+
   const renderAll = (): void => {
+    syncAddress();
     renderNav();
     renderMeta();
     renderSettings();
@@ -1290,6 +1394,7 @@ export function createSiteController(deps: ControllerDeps): SiteController {
       current = id;
       if (s.group === 'cinema' || s.group === 'audio') memory[s.group] = id;
       const gen = ++generation;
+      awaitingPlay = null;
       // The empty states pause everything; a sample scenario keeps its own
       // player and pauses the rest.
       pauseAllBut(s.src ? s.player : null);
@@ -1323,7 +1428,65 @@ export function createSiteController(deps: ControllerDeps): SiteController {
   };
 
   // ----- WHEP and custom sources --------------------------------------------
-  const connectWhep = async (): Promise<void> => {
+  /** The media element a player's current provider renders into. */
+  const mediaOf = (role: PlayerRole): HTMLMediaElement | null => {
+    const container = req(role === 'video' ? 'player' : role === 'audio' ? 'audio-player' : 'mini-player');
+    const all = container.querySelectorAll<HTMLMediaElement>('video, audio');
+    return all.length ? (all[all.length - 1] as HTMLMediaElement) : null;
+  };
+
+  /**
+   * Start a shared link's source without a click, the way browsers allow.
+   *
+   * Plays the element directly, because `player.play()` reports nothing back
+   * when the browser refuses; every provider mirrors the element's own play
+   * and volumechange events into state, so the UI follows either way. When
+   * autoplay with sound is blocked it retries muted, and when that is
+   * blocked too it leaves the player paused behind its play button with a
+   * prompt, restoring the sound so the click plays it unmuted.
+   */
+  const autoStart = async (role: PlayerRole, gen: number): Promise<void> => {
+    const media = mediaOf(role);
+    if (!media || !media.paused) return;
+    try {
+      await media.play();
+      if (gen !== generation) {
+        // Abandoned while the play request was pending: do not let it run.
+        media.pause();
+        return;
+      }
+      log(role, 'info', 'autoplay', 'started');
+      return;
+    } catch (error) {
+      if (gen !== generation) return;
+      if (!(error instanceof DOMException) || error.name !== 'NotAllowedError') {
+        log(role, 'warn', 'autoplay', loadErrorMessage(error));
+        return;
+      }
+    }
+    const wasMuted = media.muted;
+    media.muted = true;
+    try {
+      await media.play();
+      if (gen !== generation) {
+        media.pause();
+        media.muted = wasMuted;
+        return;
+      }
+      log(role, 'info', 'autoplay', 'started muted (sound blocked by the browser)');
+      notify('Playing muted: this browser blocks autoplay with sound. Unmute in the player.');
+      return;
+    } catch {
+      if (gen !== generation) return;
+      media.muted = wasMuted;
+    }
+    awaitingPlay = role;
+    log(role, 'info', 'autoplay', 'blocked by the browser; waiting for Play');
+    setStatus('Press Play to start');
+    notify('This browser blocked autoplay. Press Play to start.');
+  };
+
+  const connectWhep = async (options: { autostart?: boolean } = {}): Promise<void> => {
     const check = validateUrl(whepUrl.value, 'whep', deps.whep);
     if (!check.ok) {
       whepError.textContent = check.message;
@@ -1339,8 +1502,10 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     live.reconnect = '—';
     whepConnect.disabled = true;
     whepConnect.textContent = 'Connecting…';
+    awaitingPlay = null;
     pauseAllBut(null);
     expected.video = check.url;
+    syncAddress();
     renderSettings();
     try {
       await deps.ready.video;
@@ -1358,7 +1523,22 @@ export function createSiteController(deps: ControllerDeps): SiteController {
       }
       return;
     }
-    if (gen !== generation) return;
+    if (gen !== generation) {
+      // Abandoned and not replaced: the provider finished the join anyway.
+      // Pause without asking state first; the element may not report playing
+      // yet, and a play request left pending by the failed join would
+      // otherwise start the stream behind the form (see wirePlayer).
+      // (The cast undoes narrowing from before the await; the status has
+      // changed since.)
+      if ((live.status as LiveStatus) === 'idle' && expected.video === check.url) {
+        try {
+          deps.players.video.pause();
+        } catch {
+          // A player mid-teardown; nothing to pause.
+        }
+      }
+      return;
+    }
     whepConnect.disabled = false;
     whepConnect.textContent = 'Connect';
     whepError.textContent = '';
@@ -1367,18 +1547,25 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     showStage('video');
     renderAll();
     log('video', 'info', 'whep', 'connected');
-    notify('Connected. Press Play to watch your stream.');
+    if (options.autostart) await autoStart('video', gen);
+    else notify('Connected. Press Play to watch your stream.');
   };
 
   const disconnectWhep = (): void => {
+    // Abandon any join still pending: without this, an endpoint that recovers
+    // while the visitor is typing a new one would take the stage back.
+    generation++;
     safePause('video');
+    awaitingPlay = null;
     live.status = 'idle';
+    whepConnect.disabled = false;
+    whepConnect.textContent = 'Connect';
     showStage('whep');
     renderAll();
     whepUrl.focus();
   };
 
-  const loadCustom = async (): Promise<void> => {
+  const loadCustom = async (options: { autostart?: boolean } = {}): Promise<void> => {
     const check = validateUrl(customUrl.value, 'media', deps.whep);
     if (!check.ok) {
       customError.textContent = check.message;
@@ -1396,8 +1583,10 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     custom.error = '';
     customLoad.disabled = true;
     customLoad.textContent = 'Loading…';
+    awaitingPlay = null;
     pauseAllBut(null);
     expected[role] = check.url;
+    syncAddress();
     renderSettings();
     try {
       await deps.ready[role];
@@ -1430,14 +1619,56 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     showStage(role === 'audio' ? 'audio-full' : 'video');
     renderAll();
     log(role, 'info', 'custom source', 'loaded');
+    if (options.autostart) await autoStart(role, gen);
   };
 
+  /**
+   * Back to the Your stream form with the current URL in it, selected so
+   * typing replaces it. The old source stays loaded (paused) until a new one
+   * is submitted; that load is what tears it down.
+   */
   const changeCustom = (): void => {
+    // Abandon any load still pending, as disconnectWhep does.
+    generation++;
     pauseAllBut(null);
+    awaitingPlay = null;
+    if (custom.url) customUrl.value = custom.url;
     custom.status = 'idle';
+    customLoad.disabled = false;
+    customLoad.textContent = 'Load';
     showStage('custom');
     renderAll();
     customUrl.focus();
+    customUrl.select();
+  };
+
+  /** The stage's Change source action, for whichever scenario is showing. */
+  const changeSource = (): void => {
+    if (scenario().group === 'live') {
+      disconnectWhep();
+      if (live.url) whepUrl.value = live.url;
+      whepUrl.select();
+    } else if (scenario().group === 'custom') {
+      changeCustom();
+    }
+  };
+
+  /**
+   * Open a shared link's source: prefill the form it belongs to and submit
+   * it, so validation (mixed content, the WHEP claim rule) and errors go
+   * through the same path as a typed URL.
+   */
+  const openSharedSource = (source: SharedSource): void => {
+    if (source.type === 'whep') {
+      whepUrl.value = source.url;
+      void connectWhep({ autostart: true });
+      return;
+    }
+    customUrl.value = source.url;
+    for (const radio of customForm.querySelectorAll<HTMLInputElement>('input[name="custom-kind"]')) {
+      radio.checked = radio.value === source.type;
+    }
+    void loadCustom({ autostart: true });
   };
 
   // ----- Diagnostics tick -------------------------------------------------------
@@ -1536,7 +1767,10 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     // Status beside the title: live state and errors, without a spinner.
     if (state) {
       if (hasFailed(state)) setStatus('Playback error', 'error');
-      else if (state.live) setStatus('LIVE', 'live');
+      // The click-to-play prompt stays up until Play is pressed.
+      else if (awaitingPlay !== null && awaitingPlay === role) {
+        if (stageStatus.dataset.tone) setStatus('Press Play to start');
+      } else if (state.live) setStatus('LIVE', 'live');
       else if (stageStatus.dataset.tone) setStatus('');
     }
     if (s.group === 'cinema') syncCaptionControls();
@@ -1662,6 +1896,12 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     });
     whepUrl.addEventListener('input', () => {
       whepError.textContent = '';
+      // A join can sit pending for its whole reconnect window. A different
+      // endpoint may replace it at any time: the new load supersedes it.
+      if (live.status === 'connecting' && whepUrl.value.trim() !== live.url) {
+        whepConnect.disabled = false;
+        whepConnect.textContent = 'Connect';
+      }
     });
     whepDisconnect.addEventListener('click', disconnectWhep);
 
@@ -1671,8 +1911,14 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     });
     customUrl.addEventListener('input', () => {
       customError.textContent = '';
+      if (custom.status === 'loading' && customUrl.value.trim() !== custom.url) {
+        customLoad.disabled = false;
+        customLoad.textContent = 'Load';
+      }
     });
     customChange.addEventListener('click', changeCustom);
+    sourceChange.addEventListener('click', changeSource);
+    sourceShare.addEventListener('click', () => void copyShareLink());
 
     diagnostics.addEventListener('toggle', () => {
       if (diagnostics.open) {
@@ -1708,7 +1954,12 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     applyAccent(DEFAULT_ACCENT);
     applyClipLimits();
     if (expected.video && !stateOf('video')?.source) setStatus('Loading…');
+    // A shared link opens on its source's scenario whatever hash it came
+    // with; the rewrite is a replaceState, so route() below reads it.
+    const shared = deps.sharedSource;
+    if (shared) history.replaceState(history.state, '', withSharedSource(window.location.href, shared));
     route();
+    if (shared) openSharedSource(shared);
     window.setInterval(tick, 250);
   };
 
