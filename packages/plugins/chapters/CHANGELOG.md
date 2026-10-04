@@ -1,5 +1,11 @@
 # @scarlett-player/chapters
 
+## 1.21.0
+
+### Patch Changes
+
+- [#133](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/133) [`90dede3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/90dede3d9d5382bd3bac16fc54af9c7be92df6e2) Thanks [@alexhackney](https://github.com/alexhackney)! - On a live stream, picking a chapter that has not been reached yet now lands at live instead of at the very end of the stream, where playback stalled. VOD chapter seeks are unchanged.
+
 ## 1.20.0
 
 ## 1.19.3

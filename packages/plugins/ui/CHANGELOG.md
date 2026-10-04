@@ -1,5 +1,17 @@
 # @scarlett-player/ui
 
+## 1.21.0
+
+### Minor Changes
+
+- [#133](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/133) [`90dede3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/90dede3d9d5382bd3bac16fc54af9c7be92df6e2) Thanks [@alexhackney](https://github.com/alexhackney)! - The settings menu no longer offers playback speed on a live stream without a DVR window, and resets the speed to normal if it was changed before the stream was known to be live. VOD and live streams with DVR keep the Speed option, and a DVR stream that briefly looked live-only gets its chosen speed back. When nothing else is left in the menu, the settings button is hidden.
+
+- [#133](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/133) [`90dede3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/90dede3d9d5382bd3bac16fc54af9c7be92df6e2) Thanks [@alexhackney](https://github.com/alexhackney)! - Live streams no longer show a running time at the live edge: the time readout stays blank while the LIVE indicator is lit, and shows how far behind live you are (e.g. `-0:42`) only after scrubbing back on a DVR stream. VOD is unchanged.
+
+### Patch Changes
+
+- [#133](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/133) [`90dede3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/90dede3d9d5382bd3bac16fc54af9c7be92df6e2) Thanks [@alexhackney](https://github.com/alexhackney)! - The skip-forward and skip-backward buttons now send their seek through the player, so on a live stream a forward skip stops at live instead of jumping to the very end of the stream and stalling, and does nothing when the viewer is already at live. VOD skipping lands where it always did; analytics now counts skips as player seeks.
+
 ## 1.20.0
 
 ## 1.19.3

@@ -1,5 +1,7 @@
 # @scarlett-player/airplay
 
+## 1.21.0
+
 ## 1.20.0
 
 ## 1.19.3
