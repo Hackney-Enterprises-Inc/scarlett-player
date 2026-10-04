@@ -1,5 +1,11 @@
 # @scarlett-player/gestures
 
+## 1.21.0
+
+### Patch Changes
+
+- [#133](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/133) [`90dede3`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/90dede3d9d5382bd3bac16fc54af9c7be92df6e2) Thanks [@alexhackney](https://github.com/alexhackney)! - A forward double-tap on a live stream that is already at live now says "Already at the live edge" instead of showing a ripple and snapping back.
+
 ## 1.20.0
 
 ## 1.19.3
