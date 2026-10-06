@@ -1505,6 +1505,8 @@
         constructor(eventBus, stateManager, logger2, options) {
           this.plugins = /* @__PURE__ */ new Map();
           this.initPromises = /* @__PURE__ */ new Map();
+          /** In-flight teardowns, shared by concurrent destroyPlugin() callers. */
+          this.destroyPromises = /* @__PURE__ */ new Map();
           this.initializingStack = /* @__PURE__ */ new Set();
           this.eventBus = eventBus;
           this.stateManager = stateManager;
@@ -1551,11 +1553,28 @@
             await this.initPlugin(id);
           }
         }
-        /** Initialize a specific plugin. */
+        /**
+         * Initialize a specific plugin, its dependencies first.
+         *
+         * Concurrent calls share one init. A call made while a destroy of the same
+         * plugin is in flight waits for that destroy to finish and then runs a fresh
+         * `init()`, rather than handing back the instance being torn down. When
+         * `init()` throws, the cleanups it registered with `api.onDestroy()` run
+         * before the error is rethrown.
+         *
+         * @param id - Plugin ID
+         * @returns Resolves when the plugin is ready
+         * @throws When the plugin is not registered, a dependency is missing, a
+         *   dependency cycle is detected, or the plugin's `init()` throws
+         */
         async initPlugin(id) {
           const record = this.plugins.get(id);
           if (!record) {
             throw new Error(`Plugin "${id}" not found`);
+          }
+          const pendingDestroy = this.destroyPromises.get(id);
+          if (pendingDestroy) {
+            await pendingDestroy;
           }
           if (record.state === "ready") return;
           if (this.initializingStack.has(id)) {
@@ -1604,6 +1623,7 @@
             } catch (error) {
               record.state = "error";
               record.error = error;
+              record.api.runCleanups();
               this.logger.error(`Plugin init failed: ${id}`, { error });
               this.eventBus.emit("plugin:error", { name: id, error });
               throw error;
@@ -1614,25 +1634,77 @@
           this.initPromises.set(id, initPromise);
           return initPromise;
         }
-        /** Destroy all plugins in reverse dependency order. */
+        /**
+         * Destroy all plugins in reverse dependency order.
+         *
+         * A plugin still initializing is not waited for: its `init()` may depend on
+         * something that never arrives (a blocked third-party script), and the
+         * player's own `destroy()` must not hang on it. Its teardown is still
+         * queued, so it is destroyed if and when that init settles.
+         *
+         * @returns Resolves when every ready plugin has been torn down
+         */
         async destroyAll() {
           const order = this.resolveDependencyOrder().reverse();
           for (const id of order) {
-            await this.destroyPlugin(id);
+            const teardown = this.destroyPlugin(id);
+            if (this.initPromises.has(id)) {
+              void teardown.catch(() => {
+              });
+              continue;
+            }
+            await teardown;
           }
         }
-        /** Destroy a specific plugin. */
+        /**
+         * Destroy a specific plugin: its `destroy()`, then its `onDestroy` cleanups.
+         *
+         * A plugin that is still initializing is not skipped: the destroy waits for
+         * that init to settle and then tears the plugin down, so a teardown that
+         * lands mid-init (a provider switch or `unload()` during a slow `init()`)
+         * cannot leave the plugin to become ready afterwards with its listeners
+         * live. An init that fails still runs its registered cleanups. Concurrent calls share
+         * one teardown, so `destroy()` and the cleanups run exactly once. Emits
+         * `plugin:destroyed` when a teardown ran.
+         *
+         * @param id - Plugin ID
+         * @returns Resolves when the teardown has finished (or there was none)
+         */
         async destroyPlugin(id) {
+          const pending = this.destroyPromises.get(id);
+          if (pending) return pending;
           const record = this.plugins.get(id);
-          if (!record || record.state !== "ready") return;
+          if (!record) return;
+          const pendingInit = this.initPromises.get(id);
+          if (!pendingInit && record.state !== "ready") return;
+          const teardown = (async () => {
+            if (pendingInit) {
+              try {
+                await pendingInit;
+              } catch {
+              }
+            }
+            if (record.state !== "ready") {
+              record.api.runCleanups();
+              return;
+            }
+            try {
+              await record.plugin.destroy();
+            } catch (error) {
+              this.logger.error(`Plugin destroy failed: ${id}`, { error });
+            } finally {
+              record.api.runCleanups();
+              record.state = "registered";
+              this.eventBus.emit("plugin:destroyed", { name: id });
+            }
+          })();
+          this.destroyPromises.set(id, teardown);
           try {
-            await record.plugin.destroy();
-          } catch (error) {
-            this.logger.error(`Plugin destroy failed: ${id}`, { error });
+            await teardown;
           } finally {
-            record.api.runCleanups();
-            record.state = "registered";
-            this.eventBus.emit("plugin:destroyed", { name: id });
+            if (this.destroyPromises.get(id) === teardown) {
+              this.destroyPromises.delete(id);
+            }
           }
         }
         /** Get a plugin by ID (returns any registered plugin). */
@@ -1833,6 +1905,20 @@
           this.initialSrcLoaded = false;
           /** Counter to detect stale load() calls */
           this.loadGeneration = 0;
+          /**
+           * The source the last `load()` asked for, cleared by `unload()`. Unlike the
+           * `source` state key it is set before the provider is chosen, so an unload
+           * can tell an in-flight load from an empty player.
+           */
+          this.requestedSource = null;
+          /**
+           * An `unload()`'s provider destroy while it is in flight, so an `unload()`
+           * that follows a newer `load()` in that window waits for the same teardown
+           * instead of resolving before the provider is gone.
+           */
+          this.providerTeardown = null;
+          /** The in-flight `unload()`, shared by a repeat call made before it ends. */
+          this.pendingUnload = null;
           /** True once the lifecycle listeners have been wired (they are wired once) */
           this.listenersWired = false;
           /** True once `player:ready` has been emitted (it is emitted once) */
@@ -2056,6 +2142,7 @@
           this.checkDestroyed();
           this.initialSrcLoaded = true;
           const generation = ++this.loadGeneration;
+          this.requestedSource = source;
           try {
             this.logger.info("Loading source", { source });
             this.stateManager.update({
@@ -2075,6 +2162,9 @@
               this.logger.info("Destroying previous provider", { provider: previousProviderId });
               await this.pluginManager.destroyPlugin(previousProviderId);
               this._currentProvider = null;
+            }
+            if (this.providerTeardown) {
+              await this.providerTeardown;
             }
             await this.ensureInitialized();
             if (generation !== this.loadGeneration) {
@@ -2127,6 +2217,132 @@
               }
             }
           }
+        }
+        /**
+         * Unload the current source and return the player to its empty state.
+         *
+         * Supersedes any in-flight `load()` (it bails at its next checkpoint),
+         * cancels a pending post-seek resume, and destroys the active provider,
+         * which closes its connection or pipeline and removes its media element. A
+         * provider still inside its `init()` is destroyed as soon as that settles.
+         * Then applies the unloaded state: `source` null, `playbackState` idle,
+         * not playing, paused, not ended, not buffering, waiting or seeking,
+         * `currentTime`, `duration` and `bufferedAmount` 0, no error, not live, and
+         * the provider-owned track, quality and live keys cleared. `poster`,
+         * `title`, `chapters` and the user's settings (volume, rate, autoplay) are
+         * left as they are.
+         *
+         * Emits `source:unloaded` once the provider is gone and the state applied.
+         * A no-op, with no event, when nothing is loaded or loading. When a newer
+         * `load()` is called before the unload finishes, that load owns the state:
+         * the unload still destroys the old provider but applies no state and emits
+         * nothing, and the load selects its provider only once that teardown is
+         * done, whichever provider it is.
+         *
+         * The player stays usable: the next `load()` works as on a fresh instance.
+         * Use `destroy()` instead to discard the player for good.
+         *
+         * @returns Resolves once the provider is destroyed and the state applied
+         * @throws When the player has been destroyed
+         *
+         * @example
+         * ```ts
+         * await player.unload(); // leave the stream, keep the player
+         * await player.load('next.m3u8');
+         * ```
+         */
+        async unload() {
+          this.checkDestroyed();
+          if (this.pendingUnload && this.pendingUnload.generation === this.loadGeneration) {
+            return this.pendingUnload.promise;
+          }
+          const provider = this._currentProvider;
+          const src = this.requestedSource;
+          if (!provider && src === null && !this.providerTeardown) {
+            return;
+          }
+          const generation = ++this.loadGeneration;
+          const promise = this.runUnload(generation, provider, src);
+          const pending = { generation, promise };
+          this.pendingUnload = pending;
+          try {
+            await promise;
+          } finally {
+            if (this.pendingUnload === pending) {
+              this.pendingUnload = null;
+            }
+          }
+        }
+        /**
+         * The body of `unload()`, run once per effective unload.
+         *
+         * @param generation - The load generation this unload claimed
+         * @param provider - The provider to destroy, if one was selected
+         * @param src - The source the last `load()` asked for
+         */
+        async runUnload(generation, provider, src) {
+          this.logger.info("Unloading source");
+          this._currentProvider = null;
+          this.requestedSource = null;
+          this.seekingWhilePlaying = false;
+          if (this.seekResumeTimeout !== null) {
+            clearTimeout(this.seekResumeTimeout);
+            this.seekResumeTimeout = null;
+          }
+          if (provider) {
+            const teardown = this.pluginManager.destroyPlugin(provider.id).catch((error) => {
+              this.logger.error("Error destroying provider during unload", {
+                provider: provider.id,
+                error: error.message
+              });
+            });
+            this.providerTeardown = teardown;
+            try {
+              await teardown;
+            } finally {
+              if (this.providerTeardown === teardown) {
+                this.providerTeardown = null;
+              }
+            }
+          } else if (this.providerTeardown) {
+            await this.providerTeardown;
+          }
+          if (generation !== this.loadGeneration) {
+            return;
+          }
+          const wasLowLatency = this.stateManager.getValue("lowLatencyMode");
+          this.stateManager.update({
+            source: null,
+            playbackState: "idle",
+            playing: false,
+            paused: true,
+            ended: false,
+            buffering: false,
+            waiting: false,
+            seeking: false,
+            currentTime: 0,
+            duration: 0,
+            buffered: null,
+            bufferedAmount: 0,
+            error: null,
+            mediaType: "unknown",
+            qualities: [],
+            currentQuality: null,
+            audioTracks: [],
+            currentAudioTrack: null,
+            textTracks: [],
+            currentTextTrack: null,
+            live: false,
+            liveEdge: false,
+            seekableRange: null,
+            liveLatency: 0,
+            lowLatencyMode: false
+          });
+          if (wasLowLatency) {
+            this.eventBus.emit("live:lowlatency", { enabled: false });
+          }
+          this.logger.info("Source unloaded");
+          this.eventBus.emit("source:unloaded", { src });
         }
         /**
          * Start playback.
@@ -38953,12 +39169,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
 
   // packages/plugins/ui/src/controls/SettingsMenu.ts
-  var SPEED_OPTIONS, SettingsMenu;
+  var SPEED_SHOW_DVR_WINDOW, SPEED_HIDE_DVR_WINDOW, SPEED_OPTIONS, SettingsMenu;
   var init_SettingsMenu = __esm({
     "packages/plugins/ui/src/controls/SettingsMenu.ts"() {
       "use strict";
       init_icons();
       init_utils();
+      SPEED_SHOW_DVR_WINDOW = 90;
+      SPEED_HIDE_DVR_WINDOW = 60;
       SPEED_OPTIONS = [
         { label: "0.5x", value: 0.5 },
         { label: "0.75x", value: 0.75 },
@@ -38968,6 +39186,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         { label: "2x", value: 2 }
       ];
       SettingsMenu = class {
+        /**
+         * Create the settings control and attach its document listeners.
+         * @param api - Player state, events and container.
+         */
         constructor(api) {
           this.isOpen = false;
           this.currentPanel = "main";
@@ -38975,6 +39197,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.lastSpeedAvailable = true;
           /** Rate taken away while Speed was withdrawn, and the source it belonged to. */
           this.withdrawnRate = null;
+          /**
+           * Live Speed latch: set once the window reaches {@link SPEED_SHOW_DVR_WINDOW}
+           * on the source, cleared below {@link SPEED_HIDE_DVR_WINDOW} or on a new source.
+           */
+          this.speedLatch = { source: void 0, shown: false };
           this.api = api;
           this.el = createElement("div", { className: "sp-settings" });
           this.btn = createButton("sp-settings__btn", "Settings", icons.settings);
@@ -39021,6 +39248,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           };
           document.addEventListener("keydown", this.keyHandler);
         }
+        /** @returns The settings control element. */
         render() {
           return this.el;
         }
@@ -39073,18 +39301,43 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         /**
-         * Whether the Speed control is offered for the current stream.
+         * Whether the Speed control is offered for the current stream. The single
+         * decision behind the Speed row, the gear's visibility and the rate
+         * reset/restore.
          *
-         * False only for live without a DVR window: `live` true and `seekableRange`
-         * null, the same test SkipButton and ProgressBar use. hls.js sets `live`
-         * from the level playlist and the native HLS path from an infinite duration;
-         * `seekableRange` is written by the hls plugin's live metrics. WHEP sets
-         * `live` true with `seekableRange` null, so it never offers Speed.
+         * Always true on VOD. On live (`live` true) it uses hysteresis per source:
+         * Speed is offered once the `seekableRange` spans
+         * {@link SPEED_SHOW_DVR_WINDOW} seconds and stays offered until the window
+         * drops below {@link SPEED_HIDE_DVR_WINDOW} seconds or `seekableRange` goes
+         * null; then it needs the show threshold again. A window between the two
+         * that never reached the show threshold on this source does not offer
+         * Speed. A new source object starts unlatched, including a reload of the same
+         * URL. This is stricter than the null test SkipButton and ProgressBar use.
          *
-         * @returns True on VOD and on live with DVR
+         * hls.js sets `live` from the level playlist and the native HLS path from an
+         * infinite duration; `seekableRange` is written by the hls plugin's live
+         * metrics. WHEP sets `live` true with `seekableRange` null, so it never
+         * offers Speed. {@link SettingsMenu.update} re-checks on every state change.
+         * The latch only moves on a threshold crossing, so calling this several
+         * times for the same state gives the same answer.
+         *
+         * @returns True on VOD, and on live while the DVR window latch is set
          */
         isSpeedAvailable() {
-          return !(this.api.getState("live") && !this.api.getState("seekableRange"));
+          const source = this.api.getState("source");
+          if (this.speedLatch.source !== source) {
+            this.speedLatch = { source, shown: false };
+            this.withdrawnRate = null;
+          }
+          const live = this.api.getState("live");
+          const range = this.api.getState("seekableRange");
+          const length = range ? range.end - range.start : 0;
+          if (!range || length < SPEED_HIDE_DVR_WINDOW) {
+            this.speedLatch.shown = false;
+          } else if (live && length >= SPEED_SHOW_DVR_WINDOW) {
+            this.speedLatch.shown = true;
+          }
+          return !live || this.speedLatch.shown;
         }
         /**
          * Put playback back to normal speed while Speed is withdrawn.
@@ -39096,7 +39349,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          *
          * The rate is remembered with its source so {@link SettingsMenu.restoreRate}
          * can give it back: native HLS reports `live` one event before its
-         * `seekableRange`, so a DVR stream looks live-only for a moment.
+         * `seekableRange`, so a DVR stream looks live-only for a moment, and a
+         * live window can start short and grow past the threshold.
          */
         resetRate() {
           const video = this.api.container.querySelector("video");
@@ -39110,8 +39364,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         /**
          * Give back a rate {@link SettingsMenu.resetRate} took, once Speed is
-         * offered again on the same source (its DVR window arrived late). A rate
-         * taken on one source is dropped, never applied to the next.
+         * offered again on the same source (its DVR window arrived late or grew to
+         * {@link SPEED_SHOW_DVR_WINDOW} seconds). A rate taken on one source is
+         * dropped, never applied to the next.
          */
         restoreRate() {
           const withdrawn = this.withdrawnRate;
@@ -39413,6 +39668,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           this.close();
         }
         selectSpeed(rate) {
+          if (!this.isSpeedAvailable()) return;
           this.api.emit("playback:ratechange", { rate });
           const video = this.api.container.querySelector("video");
           if (video) {
@@ -39467,12 +39723,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           items[nextIndex].focus();
         }
+        /** @returns The currently selected settings panel. */
         getPanel() {
           return this.currentPanel;
         }
+        /** @returns Whether the settings menu is open. */
         isMenuOpen() {
           return this.isOpen;
         }
+        /** Remove the control element and its document listeners. */
         destroy() {
           document.removeEventListener("click", this.closeHandler);
           document.removeEventListener("keydown", this.keyHandler);
@@ -41421,11 +41680,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const error = video.error;
       if (error) {
         api.logger.error("Video element error", { code: error.code, message: error.message });
-        const playbackError = new Error(error.message || "Video playback error");
+        const fallbackMessage = error.code === 4 ? "Media source not supported" : error.code === 2 ? "Media network error" : "Video playback error";
+        const playbackError = new Error(error.message || fallbackMessage);
         if (typeof error.code === "number" && error.code > 0) {
           Object.assign(playbackError, {
             code: error.code,
-            detail: { mediaErrorCode: error.code }
+            detail: {
+              mediaErrorCode: error.code,
+              networkState: video.networkState,
+              readyState: video.readyState
+            }
           });
         }
         api.emit("media:error", { error: playbackError });
@@ -41766,6 +42030,40 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       return Math.max(0, Math.min(time, video.duration || 0));
     };
+    const rejoinNativeLiveEdge = () => {
+      if (!video || !isNative || !api?.getState("live")) return;
+      const media = video;
+      const events = ["canplay", "progress", "durationchange"];
+      const remove = () => {
+        for (const event of events) media.removeEventListener(event, rejoin);
+        media.removeEventListener("seeking", remove);
+      };
+      const rejoin = () => {
+        if (media.seeking || api?.getState("seeking")) {
+          remove();
+          return;
+        }
+        const metrics = readLiveMetrics();
+        if (!metrics) return;
+        remove();
+        if (metrics.atEdge) return;
+        const syncPosition = computeLiveSyncPosition(
+          metrics,
+          metrics.targetLatency ?? DEFAULT_TARGET_LATENCY
+        );
+        if (syncPosition === void 0) return;
+        const start = media.seekable.start(media.seekable.length - 1);
+        media.currentTime = Math.max(start, safeSeekTarget(syncPosition));
+      };
+      for (const event of events) media.addEventListener(event, rejoin);
+      media.addEventListener("seeking", remove);
+      const previousCleanup = cleanupVideoEvents;
+      cleanupVideoEvents = () => {
+        remove();
+        previousCleanup?.();
+      };
+      rejoin();
+    };
     const applyPoster = () => {
       if (!video) return;
       video.poster = api?.getState("poster") || "";
@@ -41944,12 +42242,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.logger.error(message, { type: error.type, details: error.details });
       api?.setState("playbackState", "error");
       api?.setState("buffering", false);
+      const detail = buildErrorDetail(error, retriesExhausted);
+      if (canAutoReconnect(error) && !reconnectExhausted) {
+        detail.reconnecting = true;
+      }
       api?.emit("error", {
         code: mapFatalErrorCode(error),
         message,
         fatal: true,
         timestamp: Date.now(),
-        detail: buildErrorDetail(error, retriesExhausted)
+        detail
       });
       maybeScheduleReconnect(error);
     };
@@ -42067,7 +42369,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("playbackState", "loading");
         await loadNative(saved_src);
         if (session !== loadSession) return;
-        if (!was_live && video && resumePosition > 0) {
+        if (was_live) {
+          rejoinNativeLiveEdge();
+        } else if (video && resumePosition > 0) {
           video.currentTime = resumePosition;
         }
         api?.setState("playbackState", "ready");
@@ -42469,12 +42773,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         void attemptReconnect();
       }, delay);
     };
-    const maybeScheduleReconnect = (error) => {
-      if (mergedConfig.autoReconnect === false) return;
-      if (!currentSrc) return;
+    const canAutoReconnect = (error) => {
+      if (mergedConfig.autoReconnect === false) return false;
+      if (!currentSrc) return false;
       const isLive = (api?.getState("live") ?? false) && isLiveClassified;
-      if (!isLive && !hasPlayedContent) return;
-      if (error.type !== "network" && error.type !== "media") return;
+      if (!isLive && !hasPlayedContent) return false;
+      return error.type === "network" || error.type === "media";
+    };
+    const maybeScheduleReconnect = (error) => {
+      if (!canAutoReconnect(error)) return;
       if (reconnectWindowStart === 0) {
         reconnectWindowStart = Date.now();
         reconnectResumePosition = video?.currentTime ?? 0;
@@ -42506,7 +42813,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           await loadWithHlsJs(saved_src);
         }
         if (session !== loadSession) return;
-        if (!was_live && video && resume_position > 0) {
+        if (was_live) {
+          rejoinNativeLiveEdge();
+        } else if (video && resume_position > 0) {
           video.currentTime = resume_position;
         }
         api.setState("playbackState", "ready");
@@ -43154,11 +43463,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.logger.error("Video error", { mediaErrorCode: error?.code, code, message });
         api?.setState("playbackState", "error");
         api?.setState("buffering", false);
+        const detail = {
+          networkState: videoEl.networkState,
+          readyState: videoEl.readyState
+        };
+        if (typeof error?.code === "number") detail.mediaErrorCode = error.code;
         api?.emit("error", {
           code,
           message,
           fatal: true,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          detail
         });
       });
       on("enterpictureinpicture", () => {
@@ -43964,6 +44279,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const handleFailure = (failure) => {
       if (!api) return;
+      const session = loadSession;
       const recoverable = failure.recoverable || hasJoined && failure.detail.httpStatus === 404;
       const willReconnect = recoverable && autoReconnect && currentSrc !== "";
       const reconnecting = isReconnecting && !reconnectExhausted && willReconnect;
@@ -43980,11 +44296,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           message: failure.message,
           fatal: true,
           timestamp: Date.now(),
-          detail: { ...failure.detail, attempts: reconnectAttempts }
+          // The provider contract: a fatal error auto-reconnect will handle
+          // says so, since it is emitted before the reconnect is scheduled.
+          detail: {
+            ...failure.detail,
+            attempts: reconnectAttempts,
+            ...willReconnect && !reconnectExhausted ? { reconnecting: true } : {}
+          }
         });
       } else {
         api.logger.warn(`WHEP: reconnect attempt ${reconnectAttempts} failed: ${failure.message}`);
       }
+      if (!api || session !== loadSession) return;
       if (!willReconnect) {
         cancelReconnect();
         settleLoad(new Error(failure.message));
@@ -44572,6 +44895,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let remotePlayerController = null;
     let localTimeBeforeCast = 0;
     let localSrcBeforeCast = "";
+    let remoteStopped = false;
     let castStateHandler = null;
     let sessionStateHandler = null;
     let remotePlayerHandler = null;
@@ -44647,6 +44971,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("chromecastActive", true);
       api.emit("chromecast:connected", { deviceName });
       api.logger.info("Chromecast connected", { deviceName });
+      remoteStopped = false;
       localTimeBeforeCast = api.getState("currentTime") || 0;
       const source = api.getState("source");
       localSrcBeforeCast = source?.src || "";
@@ -44664,6 +44989,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("chromecastActive", true);
       api.emit("chromecast:connected", { deviceName });
       api.logger.info("Chromecast session resumed", { deviceName });
+      remoteStopped = false;
       const video = api.container.querySelector("video");
       if (video) {
         video.pause();
@@ -44674,6 +45000,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("chromecastActive", false);
       api.emit("chromecast:disconnected", void 0);
       api.logger.info("Chromecast disconnected", { resumeTime: castTime });
+      if (remoteStopped) {
+        remoteStopped = false;
+        return;
+      }
       const isLive = api.getState("live");
       const video = api.container.querySelector("video");
       if (video && castTime > 0 && !isLive) {
@@ -44685,6 +45015,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const loadMediaOnCast = async (src, startTime) => {
       if (!currentSession || !window.chrome?.cast) return;
+      remoteStopped = false;
       const contentType = src.includes(".m3u8") ? "application/x-mpegurl" : src.includes(".mpd") ? "application/dash+xml" : "video/mp4";
       const mediaInfo = new window.chrome.cast.media.MediaInfo(src, contentType);
       const title = api.getState("title");
@@ -44701,6 +45032,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       try {
         await currentSession.loadMedia(request);
         if (destroyed) return;
+        if (remoteStopped) {
+          stopRemoteMedia();
+          return;
+        }
         api.logger.debug("Media loaded on Chromecast", { src, startTime });
       } catch (error) {
         if (destroyed) return;
@@ -44708,9 +45043,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api.emit("chromecast:error", { error });
       }
     };
+    const stopRemoteMedia = () => {
+      try {
+        remotePlayerController?.stop();
+      } catch (error) {
+        api.logger.debug("Cast media was already gone when stopping it", { error });
+      }
+    };
+    const onSourceUnloaded = () => {
+      if (destroyed || !api.getState("chromecastActive")) return;
+      remoteStopped = true;
+      localTimeBeforeCast = 0;
+      localSrcBeforeCast = "";
+      stopRemoteMedia();
+      api.logger.debug("Cast media stopped on unload");
+    };
     const handleRemotePlayerChange = () => {
       if (destroyed || !remotePlayer) return;
       if (!api.getState("chromecastActive")) return;
+      if (remoteStopped) return;
       const mediaSession = currentSession?.getMediaSession();
       if (mediaSession?.playerState === "IDLE" && mediaSession?.idleReason === "FINISHED") {
         api.logger.debug("Cast media ended (IDLE + FINISHED)");
@@ -44738,24 +45089,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           await loadMediaOnCast(src, 0);
         });
         const unsubPlay = api.on("playback:play", () => {
-          if (destroyed || !api.getState("chromecastActive")) return;
+          if (destroyed || remoteStopped || !api.getState("chromecastActive")) return;
           if (remotePlayer?.isPaused && remotePlayerController) {
             remotePlayerController.playOrPause();
           }
         });
         const unsubPause = api.on("playback:pause", () => {
-          if (destroyed || !api.getState("chromecastActive")) return;
+          if (destroyed || remoteStopped || !api.getState("chromecastActive")) return;
           if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
             remotePlayerController.playOrPause();
           }
         });
         const unsubSeek = api.on("playback:seeking", ({ time }) => {
-          if (destroyed || !api.getState("chromecastActive")) return;
+          if (destroyed || remoteStopped || !api.getState("chromecastActive")) return;
           if (remotePlayer && remotePlayerController) {
             remotePlayer.currentTime = time;
             remotePlayerController.seek();
           }
         });
+        const unsubUnloaded = api.on("source:unloaded", onSourceUnloaded);
         const unsubPlayerDestroy = api.on("player:destroy", () => {
           destroyed = true;
         });
@@ -44765,6 +45117,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubPlay();
           unsubPause();
           unsubSeek();
+          unsubUnloaded();
         });
         if (!isCastSupported()) {
           api.logger.debug("Chromecast not supported in this browser");
@@ -44811,6 +45164,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             remotePlayerHandler
           );
         }
+        remoteStopped = false;
         castContext = null;
         currentSession = null;
         remotePlayer = null;
@@ -52536,8 +52890,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
   }
+  var IN_APP_BROWSERS = [
+    { name: "Instagram", test: /Instagram/, version: /Instagram (\d+)/ },
+    { name: "Facebook", test: /FBAN|FBAV/, version: /FBAV\/(\d+)/ },
+    { name: "Google App", test: /GSA\//, version: /GSA\/(\d+)/ },
+    { name: "LinkedIn", test: /LinkedInApp/, version: /LinkedInApp\]?\/(\d+)/ },
+    { name: "TikTok", test: /musical_ly|BytedanceWebview/, version: /musical_ly_(\d+)|app_version\/(\d+)/ }
+  ];
   function getBrowserInfo() {
     const ua = navigator.userAgent;
+    for (const app of IN_APP_BROWSERS) {
+      if (!app.test.test(ua)) continue;
+      const match = ua.match(app.version);
+      return {
+        name: app.name,
+        version: match ? match[1] ?? match[2] : void 0
+      };
+    }
     if (ua.includes("Edg/")) {
       const match = ua.match(/Edg\/(\d+)/);
       return {
@@ -52545,8 +52914,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         version: match ? match[1] : void 0
       };
     }
-    if (ua.includes("Chrome/") && !ua.includes("Edg/")) {
-      const match = ua.match(/Chrome\/(\d+)/);
+    if ((ua.includes("Chrome/") || ua.includes("CriOS/")) && !ua.includes("Edg/")) {
+      const match = ua.match(/(?:Chrome|CriOS)\/(\d+)/);
       return {
         name: "Chrome",
         version: match ? match[1] : void 0
@@ -52669,7 +53038,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         100 * Math.exp(-10 * rebufferDuration / Math.max(1, watchTime))
       )
     ];
-    if (maxBitrate > 0) scores.push(clamp2(20 + 15 * Math.log2(maxBitrate / 25e4), 10, 100));
+    if (maxBitrate !== null && maxBitrate > 0) scores.push(clamp2(20 + 15 * Math.log2(maxBitrate / 25e4), 10, 100));
     return Math.round(clamp2(scores.reduce((sum, score) => sum + score, 0) / scores.length - Math.min(20, 3 * warningCount), 0, 100));
   }
   var LATENCY_BUCKET_SECONDS = 0.25;
@@ -52804,6 +53173,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         dispatch({});
       });
     }
+    function unloadHeaders() {
+      const configured = config.headers;
+      if (typeof configured !== "function") return configured ?? {};
+      try {
+        const result = configured();
+        if (result && typeof result.then === "function") {
+          Promise.resolve(result).catch((error) => {
+            logger2.debug("Analytics headers() rejected on unload; sent without them", { error });
+          });
+          return {};
+        }
+        if (result && typeof result === "object") {
+          const prototype = Object.getPrototypeOf(result);
+          if (prototype === Object.prototype || prototype === null) return result;
+        }
+        return {};
+      } catch (error) {
+        logger2.debug("Analytics headers() failed on unload; sending without them", { error });
+        return {};
+      }
+    }
     function unload(body) {
       if (blocked()) return;
       if (navigator.sendBeacon) {
@@ -52824,7 +53214,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       }
       if (blocked()) return;
-      const extra = typeof config.headers === "function" ? {} : config.headers ?? {};
+      const extra = unloadHeaders();
       try {
         fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {
         });
@@ -52918,19 +53308,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     if (["SOURCE_NOT_SUPPORTED", "PLAYLIST_INVALID", "PROVIDER_NOT_FOUND"].includes(error.code)) return "source";
     if (error.code === "PLAYBACK_FAILED") return "playback";
     if (["PROVIDER_SETUP_FAILED", "PLUGIN_SETUP_FAILED", "PLUGIN_NOT_FOUND"].includes(error.code)) return "player";
+    if (detail.mediaErrorCode === 2) return "network";
+    if (detail.mediaErrorCode === 3) return "media";
+    if (detail.mediaErrorCode === 4) return "source";
     return "unknown";
   }
   function errorDetail(detail) {
     if (!detail || typeof detail !== "object") return {};
     const input = detail;
     const result = {};
-    for (const key of ["httpStatus", "mediaErrorCode", "attempts"]) {
+    for (const key of ["httpStatus", "mediaErrorCode", "networkState", "readyState", "attempts"]) {
       if (typeof input[key] === "number" && Number.isFinite(input[key])) result[key] = input[key];
     }
-    for (const key of ["retriesExhausted", "reconnectExhausted", "timedOut"]) {
+    for (const key of ["retriesExhausted", "reconnectExhausted", "reconnecting", "timedOut"]) {
       if (typeof input[key] === "boolean") result[key] = input[key];
     }
     return result;
+  }
+  function sourceHost(src) {
+    if (typeof src !== "string" || src === "") return void 0;
+    try {
+      const base = typeof document !== "undefined" ? document.baseURI : void 0;
+      return new URL(src, base).hostname || void 0;
+    } catch {
+      return void 0;
+    }
   }
   function safeErrorMessage(message) {
     return message.replace(/https?:\/\/[^\s)]+/g, (url) => {
@@ -52949,9 +53351,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   // packages/plugins/analytics/src/index.ts
   var PLUGIN_VERSION = PKG_VERSION17;
   var PLUGIN_NAME = "scarlett-player";
+  var DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1e3;
   var DEFAULT_CONFIG5 = {
     heartbeatInterval: 1e4,
     rebufferGraceMs: 250,
+    idleTimeout: DEFAULT_IDLE_TIMEOUT,
     errorSampleRate: 1,
     disableInDev: false
   };
@@ -52965,6 +53369,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const mergedConfig = { ...DEFAULT_CONFIG5, ...config };
     let nextAnonymous = mergedConfig.anonymous === true;
     const rebufferGraceMs = typeof mergedConfig.rebufferGraceMs === "number" && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0 ? mergedConfig.rebufferGraceMs : 250;
+    const idleTimeout = typeof mergedConfig.idleTimeout === "number" && Number.isFinite(mergedConfig.idleTimeout) && mergedConfig.idleTimeout >= 0 ? mergedConfig.idleTimeout : DEFAULT_IDLE_TIMEOUT;
     const configuredVideo = {
       videoId: mergedConfig.videoId,
       videoTitle: mergedConfig.videoTitle,
@@ -52975,14 +53380,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let session;
     let heartbeatTimer = null;
     let lastHeartbeatTime = 0;
+    let lastPlayingAt = 0;
+    let statePlaying = false;
+    let idleEnded = false;
     let lastKnownCurrentTime = 0;
     let lastKnownDuration = 0;
     let isRebuffering = false;
     let rebufferStartTime = null;
     let waitingSince = null;
     let graceTimer = null;
+    let outageStartedAt = null;
+    let outageLongSent = false;
     let pendingEchoes = 0;
     let lastBusSeekAt = 0;
+    let lastElementSeekAt = null;
+    let elementSeekBeacons = 0;
     let pauseStartTime = null;
     let pendingPause = null;
     let playRequestPending = false;
@@ -52990,6 +53402,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let currentTrackId = null;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
+    let liveMode = "edge";
+    let pendingLiveReading = null;
     let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
     let viewContext = {};
     let segmentCount = 0;
@@ -53070,20 +53484,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         viewEnd: null,
         watchTime: 0,
         playTime: 0,
+        dvrTime: 0,
         pauseCount: 0,
         pauseDuration: 0,
         seekCount: 0,
+        elementSeekCount: 0,
         startupTime: null,
         rebufferCount: 0,
         rebufferDuration: 0,
+        reconnectCount: 0,
+        reconnectDuration: 0,
         errorCount: 0,
         warningCount: 0,
         fatalErrorCategory: null,
         errors: [],
         bitrateHistory: [],
         qualityChanges: 0,
-        maxBitrate: 0,
-        avgBitrate: 0,
+        maxBitrate: null,
+        avgBitrate: null,
         playbackState: "loading",
         exitType: null,
         lastKnownIsLive: null
@@ -53150,8 +53568,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function accrueTime(now2 = Date.now()) {
       const elapsed = now2 - lastHeartbeatTime;
       session.watchTime += elapsed;
-      if (session.playbackState === "playing" && !isRebuffering && waitingSince === null) {
+      if (session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null) {
         session.playTime += elapsed;
+        if (liveMode === "dvr") session.dvrTime += elapsed;
+        lastPlayingAt = now2;
       }
       lastHeartbeatTime = now2;
       const duration = api?.getState("duration");
@@ -53160,37 +53580,102 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         lastKnownCurrentTime = api?.getState("currentTime") ?? 0;
       }
     }
-    function sendHeartbeat() {
+    function updateAvgBitrate(now2) {
+      const history2 = session.bitrateHistory;
+      if (history2.length === 0) return;
+      const totalBitrateTime = history2.reduce((sum, b, i, arr) => {
+        const nextTime = i < arr.length - 1 ? arr[i + 1].time : now2;
+        return sum + b.bitrate * (nextTime - b.time);
+      }, 0);
+      const timeSpan = now2 - history2[0].time;
+      session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : history2[history2.length - 1].bitrate;
+    }
+    function pauseDurationAt(now2) {
+      return session.pauseDuration + (pauseStartTime !== null ? Math.max(0, now2 - pauseStartTime) : 0);
+    }
+    function settlePause(now2 = Date.now()) {
+      if (pauseStartTime === null) return;
+      session.pauseDuration = pauseDurationAt(now2);
+      pauseStartTime = null;
+    }
+    function reconnectDurationAt(now2) {
+      return session.reconnectDuration + (outageStartedAt !== null ? Math.max(0, now2 - outageStartedAt) : 0);
+    }
+    function settleOutage(now2 = Date.now()) {
+      if (outageStartedAt !== null) session.reconnectDuration = reconnectDurationAt(now2);
+      outageStartedAt = null;
+      outageLongSent = false;
+    }
+    function cumulativeMetrics(now2) {
+      updateAvgBitrate(now2);
+      return {
+        watchTime: session.watchTime,
+        playTime: session.playTime,
+        rebufferCount: session.rebufferCount,
+        rebufferDuration: session.rebufferDuration,
+        reconnectCount: session.reconnectCount,
+        reconnectDuration: reconnectDurationAt(now2),
+        avgBitrate: session.avgBitrate,
+        maxBitrate: session.maxBitrate,
+        qualityChanges: session.qualityChanges,
+        pauseCount: session.pauseCount,
+        pauseDuration: pauseDurationAt(now2),
+        seekCount: session.seekCount,
+        elementSeekCount: session.elementSeekCount,
+        errorCount: session.errorCount,
+        warningCount: session.warningCount,
+        qoeScore: getQoEScore(),
+        qoeVersion: 2,
+        // Absent entirely on VOD: nothing ever emitted a live:latency reading
+        ...latencySampler.summary() ?? {},
+        ...resolveIsLive() === true ? { dvrTime: session.dvrTime } : {},
+        ...segmentSummary(),
+        ...frameSummary()
+      };
+    }
+    function viewEndMetrics(now2) {
+      const currentTime = api?.getState("currentTime") ?? 0;
+      const duration = api?.getState("duration") ?? 0;
+      let completionRate = 0;
+      if (resolveIsLive() === true) {
+        completionRate = null;
+      } else if (session.exitType === "completed") {
+        completionRate = 100;
+      } else if (duration > 0) {
+        completionRate = currentTime / duration * 100;
+      } else if (lastKnownDuration > 0) {
+        completionRate = lastKnownCurrentTime / lastKnownDuration * 100;
+      }
+      return {
+        ...cumulativeMetrics(now2),
+        startupTime: session.startupTime,
+        rebufferRatio: session.watchTime > 0 ? session.rebufferDuration / session.watchTime * 100 : 0,
+        ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
+        exitType: session.exitType,
+        completionRate
+      };
+    }
+    function onHeartbeatTick() {
       if (!api) return;
       const now2 = Date.now();
       accrueTime(now2);
-      if (session.bitrateHistory.length > 0) {
-        const totalBitrateTime = session.bitrateHistory.reduce((sum, b, i, arr) => {
-          const nextTime = i < arr.length - 1 ? arr[i + 1]?.time : now2;
-          const duration = nextTime - b.time;
-          return sum + b.bitrate * duration;
-        }, 0);
-        const timeSpan = now2 - session.bitrateHistory[0].time;
-        session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : 0;
+      if (idleTimeout > 0 && now2 - lastPlayingAt >= idleTimeout) {
+        session.exitType = "abandoned";
+        sendViewEnd();
+        idleEnded = true;
+        api.logger.debug("Analytics ended an idle view", { viewId: session.viewId, idleTimeout });
+        return;
       }
-      const state = {
+      sendHeartbeat(now2);
+    }
+    function sendHeartbeat(now2 = Date.now()) {
+      if (!api) return;
+      accrueTime(now2);
+      settleLiveMode();
+      sendBeacon("heartbeat", {
+        ...cumulativeMetrics(now2),
         currentTime: api.getState("currentTime"),
         duration: api.getState("duration")
-      };
-      sendBeacon("heartbeat", {
-        watchTime: session.watchTime,
-        playTime: session.playTime,
-        currentTime: state.currentTime,
-        duration: state.duration,
-        rebufferCount: session.rebufferCount,
-        rebufferDuration: session.rebufferDuration,
-        avgBitrate: session.avgBitrate,
-        qoeScore: getQoEScore(),
-        qoeVersion: 2,
-        warningCount: session.warningCount,
-        ...latencySampler.summary() ?? {},
-        ...segmentSummary(),
-        ...frameSummary()
       });
     }
     function getQoEScore() {
@@ -53205,76 +53690,56 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         fatalErrorCategory: session.fatalErrorCategory
       });
     }
-    function sendViewEnd() {
-      if (!api) return;
+    function finalizeView(sendRebufferEnd) {
       accrueTime();
       commitPendingPause();
-      closeRebuffer(true);
+      closeRebuffer(sendRebufferEnd);
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
       }
+      playRequestPending = false;
+      pendingEchoes = 0;
+      idleEnded = false;
       session.viewEnd = Date.now();
-      const state = {
-        currentTime: api.getState("currentTime"),
-        duration: api.getState("duration")
-      };
-      let completionRate = 0;
-      if (session.exitType === "completed") {
-        completionRate = 100;
-      } else if (state.duration > 0) {
-        completionRate = state.currentTime / state.duration * 100;
-      } else if (lastKnownDuration > 0) {
-        completionRate = lastKnownCurrentTime / lastKnownDuration * 100;
-      }
-      sendBeacon("viewEnd", {
-        watchTime: session.watchTime,
-        playTime: session.playTime,
-        startupTime: session.startupTime,
-        rebufferCount: session.rebufferCount,
-        rebufferDuration: session.rebufferDuration,
-        rebufferRatio: session.watchTime > 0 ? session.rebufferDuration / session.watchTime * 100 : 0,
-        avgBitrate: session.avgBitrate,
-        maxBitrate: session.maxBitrate,
-        qualityChanges: session.qualityChanges,
-        pauseCount: session.pauseCount,
-        pauseDuration: session.pauseDuration,
-        seekCount: session.seekCount,
-        errorCount: session.errorCount,
-        warningCount: session.warningCount,
-        ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
-        exitType: session.exitType,
-        qoeScore: getQoEScore(),
-        qoeVersion: 2,
-        completionRate,
-        // Absent entirely on VOD: nothing ever emitted a live:latency reading
-        ...latencySampler.summary() ?? {},
-        ...segmentSummary(),
-        ...frameSummary()
-      });
+      settlePause(session.viewEnd);
+      settleOutage(session.viewEnd);
+      return session.viewEnd;
+    }
+    function sendViewEnd() {
+      if (!api) return;
+      const viewEnd = finalizeView(true);
+      sendBeacon("viewEnd", viewEndMetrics(viewEnd));
     }
     function startView(lastKnownIsLive = null) {
       commitPendingPause();
       cancelPendingRebuffer();
+      idleEnded = false;
       session = initSession();
       resetSegments();
       resetFrames();
       session.lastKnownIsLive = lastKnownIsLive;
       lastHeartbeatTime = Date.now();
+      lastPlayingAt = lastHeartbeatTime;
       lastKnownCurrentTime = 0;
       lastKnownDuration = 0;
       isRebuffering = false;
       rebufferStartTime = null;
+      outageStartedAt = null;
+      outageLongSent = false;
       pendingEchoes = 0;
       lastBusSeekAt = 0;
+      lastElementSeekAt = null;
+      elementSeekBeacons = 0;
       pauseStartTime = null;
       playRequestPending = false;
+      liveMode = "edge";
       sendBeacon("viewStart", viewContext);
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
       }
       heartbeatTimer = setInterval(
-        sendHeartbeat,
+        onHeartbeatTick,
         mergedConfig.heartbeatInterval || 1e4
       );
     }
@@ -53336,13 +53801,73 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       beginView(next);
     }
     function onPlayRequest() {
+      if (!api) return;
+      ensureOpenView(true);
       if (playRequestPending) return;
-      if (session.viewEnd !== null && api) {
-        startView(session.lastKnownIsLive);
-      }
       playRequestPending = true;
       session.playRequestTime = Date.now();
       sendBeacon("playRequest");
+    }
+    function ensureOpenView(playRequest = false) {
+      if (session.viewEnd === null || !api) return false;
+      if (!playRequest && !idleEnded) return false;
+      startView(session.lastKnownIsLive);
+      return true;
+    }
+    function onRecovered(payload) {
+      if (!api) return;
+      if (session.viewEnd === null && outageStartedAt !== null) {
+        const now2 = Date.now();
+        const duration = Math.max(0, now2 - outageStartedAt);
+        settleOutage(now2);
+        closeRebuffer(true);
+        sendBeacon("recovered", {
+          duration,
+          reconnectCount: session.reconnectCount,
+          ...finiteFields(payload, ["attempt", "elapsedMs"])
+        });
+      }
+      if (api.getState("paused") === true) return;
+      if (ensureOpenView() && api.getState("playing")) onFirstFrame();
+    }
+    function finiteFields(payload, keys) {
+      const result = {};
+      if (!payload || typeof payload !== "object") return result;
+      for (const key of keys) {
+        const value = payload[key];
+        if (typeof value === "number" && Number.isFinite(value)) result[key] = value;
+      }
+      return result;
+    }
+    function onReconnecting(payload) {
+      if (!api || session.viewEnd !== null) return;
+      const first = outageStartedAt === null;
+      const long = payload?.longOutage === true && !outageLongSent;
+      if (!first && !long) return;
+      if (first) {
+        const now2 = Date.now();
+        outageStartedAt = now2;
+        session.reconnectCount++;
+        if (!isRebuffering && session.firstFrameTime !== null && api.getState("paused") !== true) {
+          const startedAt = waitingSince ?? now2;
+          cancelPendingRebuffer();
+          openRebuffer(startedAt);
+        }
+      }
+      if (long) outageLongSent = true;
+      sendBeacon("reconnecting", {
+        reconnectCount: session.reconnectCount,
+        ...finiteFields(payload, ["attempt", "delayMs", "elapsedMs"]),
+        ...payload?.longOutage === true ? { longOutage: true } : {}
+      });
+    }
+    function onSourceUnloaded() {
+      if (!api || session.viewEnd !== null) return;
+      session.exitType = "abandoned";
+      sendViewEnd();
+    }
+    function markedReconnecting(detail) {
+      return !!detail && typeof detail === "object" && detail.reconnecting === true;
     }
     function onPlayEvent() {
       if (!api?.getState("playing")) {
@@ -53353,13 +53878,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function onStateChange(event) {
       if (event.key === "seeking" && event.previousValue === false && event.value === true) {
         if (session.viewEnd !== null) return;
+        markLiveSeek();
         if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1e3) {
           pendingEchoes--;
           return;
         }
         pendingEchoes = 0;
         cancelPendingRebuffer();
+        const now2 = Date.now();
+        session.elementSeekCount++;
+        const inBurst = lastElementSeekAt !== null && now2 >= lastElementSeekAt && now2 - lastElementSeekAt <= 2e3;
+        lastElementSeekAt = now2;
+        if (inBurst) return;
         session.seekCount++;
+        if (elementSeekBeacons >= 30) return;
+        elementSeekBeacons++;
         sendBeacon("seeking", {
           seekCount: session.seekCount,
           seekTo: api?.getState("currentTime"),
@@ -53373,7 +53906,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         return;
       }
+      if (event.key === "playing") {
+        if (session.viewEnd === null) accrueTime();
+        statePlaying = event.value === true;
+      }
       if (event.key === "playing" && event.value === true) {
+        ensureOpenView();
         playRequestPending = false;
         onFirstFrame();
         return;
@@ -53393,7 +53931,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       session.lastKnownIsLive = api.getState("live") === true;
     }
     function onFirstFrame() {
-      if (session.firstFrameTime !== null) return;
+      if (session.viewEnd !== null || session.firstFrameTime !== null) return;
       const now2 = Date.now();
       session.firstFrameTime = now2;
       session.startupTime = session.playRequestTime !== null ? now2 - session.playRequestTime : null;
@@ -53417,19 +53955,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     function onPlaying() {
+      if (ensureOpenView() && api?.getState("playing")) onFirstFrame();
+      if (!api || session.viewEnd !== null) return;
       const now2 = Date.now();
       accrueTime(now2);
       closeRebuffer(true);
       commitPendingPause();
-      if (pauseStartTime) {
-        const pauseDuration = now2 - pauseStartTime;
-        session.pauseDuration += pauseDuration;
-        pauseStartTime = null;
-      }
+      settlePause(now2);
       session.playbackState = "playing";
     }
     function onPause() {
-      if (!api) return;
+      if (!api || session.viewEnd !== null) return;
       accrueTime();
       closeRebuffer(true);
       playRequestPending = false;
@@ -53481,7 +54017,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     function onWaiting() {
-      if (!api) return;
+      if (!api || session.viewEnd !== null) return;
       if (session.firstFrameTime !== null && !isRebuffering && waitingSince === null && !api.getState("seeking")) {
         accrueTime();
         waitingSince = Date.now();
@@ -53516,6 +54052,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onSeeking(payload) {
       if (!api || session.viewEnd !== null) return;
+      markLiveSeek();
       cancelPendingRebuffer();
       const now2 = Date.now();
       if (now2 - lastBusSeekAt > 1e3) pendingEchoes = 0;
@@ -53533,15 +54070,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       discardPendingPause();
       accrueTime();
       session.playbackState = "ended";
-      session.exitType = "completed";
+      session.exitType = resolveIsLive() === true ? "liveEnded" : "completed";
       sendViewEnd();
     }
+    function errorContext() {
+      const context = {};
+      if (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") {
+        context.online = navigator.onLine;
+      }
+      const host = sourceHost(api?.getState("source")?.src);
+      if (host) context.sourceHost = host;
+      return context;
+    }
     function onError(payload) {
+      if (session.viewEnd !== null) return;
       const error = payload.error;
       session.errorCount++;
       const category = classifyError(error);
       const fatal = error.fatal === true;
-      if (fatal) session.fatalErrorCategory = category;
+      const terminal = fatal && !markedReconnecting(error.detail);
+      if (terminal) session.fatalErrorCategory = category;
       else session.warningCount++;
       const errorEvent = {
         time: Date.now(),
@@ -53559,10 +54107,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ...typeof error.code === "string" || typeof error.code === "number" ? { errorCode: error.code } : {},
         fatal: errorEvent.fatal,
         errorCategory: category,
-        errorSeverity: fatal ? "fatal" : "warning",
-        ...errorDetail(error.detail)
+        errorSeverity: terminal ? "fatal" : "warning",
+        ...errorDetail(error.detail),
+        ...errorContext()
       });
-      if (errorEvent.fatal) {
+      if (terminal) {
         accrueTime();
         session.playbackState = "error";
         session.exitType = "error";
@@ -53570,7 +54119,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     function onCoreError(err) {
-      if (!err) return;
+      if (!err || session.viewEnd !== null) return;
       const original = err.originalError || err;
       const code = typeof err.code === "string" ? err.code : typeof original.code === "string" ? original.code : void 0;
       let type;
@@ -53588,7 +54137,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       session.errorCount++;
       const category = classifyError(err);
       const fatal = err.fatal === true;
-      if (fatal) session.fatalErrorCategory = category;
+      const terminal = fatal && !markedReconnecting(err.detail);
+      if (terminal) session.fatalErrorCategory = category;
       else session.warningCount++;
       const errorEvent = {
         time: Date.now(),
@@ -53606,10 +54156,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ...code !== void 0 ? { errorCode: code } : {},
         fatal: errorEvent.fatal,
         errorCategory: category,
-        errorSeverity: fatal ? "fatal" : "warning",
-        ...errorDetail(err.detail)
+        errorSeverity: terminal ? "fatal" : "warning",
+        ...errorDetail(err.detail),
+        ...errorContext()
       });
-      if (errorEvent.fatal) {
+      if (terminal) {
         accrueTime();
         session.playbackState = "error";
         session.exitType = "error";
@@ -53617,25 +54168,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     function onQualityChange(payload) {
-      if (!api) return;
+      if (!api || session.viewEnd !== null) return;
       const now2 = Date.now();
       session.qualityChanges++;
       const qualities = api.getState("qualities");
       const currentQuality = qualities.find((q) => q.id === payload.quality);
       if (currentQuality) {
-        const bitrateChange = {
-          time: now2,
-          bitrate: currentQuality.bitrate,
-          width: currentQuality.width,
-          height: currentQuality.height
-        };
-        session.bitrateHistory.push(bitrateChange);
-        if (session.bitrateHistory.length > 500) {
-          session.bitrateHistory = session.bitrateHistory.slice(-500);
-        }
-        if (currentQuality.bitrate > session.maxBitrate) {
-          session.maxBitrate = currentQuality.bitrate;
-        }
+        if (currentQuality.bitrate > 0) recordBitrate(now2, currentQuality);
         sendBeacon("qualityChange", {
           bitrate: currentQuality.bitrate,
           width: currentQuality.width,
@@ -53644,13 +54183,64 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
       }
     }
+    function recordBitrate(now2, currentQuality) {
+      const bitrateChange = {
+        time: now2,
+        bitrate: currentQuality.bitrate,
+        width: currentQuality.width,
+        height: currentQuality.height
+      };
+      session.bitrateHistory.push(bitrateChange);
+      if (session.bitrateHistory.length > 500) {
+        session.bitrateHistory = session.bitrateHistory.slice(-500);
+      }
+      if (session.maxBitrate === null || currentQuality.bitrate > session.maxBitrate) {
+        session.maxBitrate = currentQuality.bitrate;
+      }
+    }
     function onLiveLatency(payload) {
-      latencySampler.add(payload.latency);
+      pendingLiveReading?.();
+      if (session.firstFrameTime === null) return;
+      if (liveMode === "edge") {
+        latencySampler.add(payload.latency);
+        return;
+      }
+      if (api?.getState("seeking")) return;
+      const reading = session;
+      const finish = () => {
+        if (pendingLiveReading !== finish) return;
+        pendingLiveReading = null;
+        if (!api || session !== reading || session.viewEnd !== null || api.getState("seeking")) return;
+        settleLiveMode();
+        if (liveMode === "edge") latencySampler.add(payload.latency);
+      };
+      pendingLiveReading = finish;
+      void Promise.resolve().then(finish);
+    }
+    function onLiveEdgeChange(payload) {
+      pendingLiveReading?.();
+      if (!api || session.viewEnd !== null) return;
+      if (liveMode === "dvr" && payload.atEdge) setLiveMode("edge");
+    }
+    function markLiveSeek() {
+      if (resolveIsLive() !== true && api?.getState("live") !== true) return;
+      pendingLiveReading = null;
+      setLiveMode("awaiting");
+    }
+    function settleLiveMode() {
+      if (liveMode === "edge" || !api || api.getState("seeking")) return;
+      setLiveMode(api.getState("liveEdge") === true ? "edge" : "dvr");
+    }
+    function setLiveMode(next) {
+      if (next === liveMode) return;
+      accrueTime();
+      liveMode = next;
     }
     function onLowLatencyChange(payload) {
       if (payload.enabled) latencySampler.markLowLatency();
     }
     function onVisibilityChange() {
+      if (session.viewEnd !== null) return;
       if (document.hidden) {
         session.exitType = "background";
         sendHeartbeat();
@@ -53661,34 +54251,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onBeforeUnload() {
       if (session.viewEnd) return;
-      accrueTime();
-      commitPendingPause();
-      closeRebuffer(false);
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-      session.viewEnd = Date.now();
+      const viewEnd = finalizeView(false);
       if (!session.exitType) {
         session.exitType = "abandoned";
       }
-      sendUnloadBeacon("viewEnd", {
-        watchTime: session.watchTime,
-        playTime: session.playTime,
-        startupTime: session.startupTime,
-        rebufferCount: session.rebufferCount,
-        rebufferDuration: session.rebufferDuration,
-        avgBitrate: session.avgBitrate,
-        maxBitrate: session.maxBitrate,
-        exitType: session.exitType,
-        warningCount: session.warningCount,
-        ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
-        // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
-        // view is the one most worth having latency for
-        ...latencySampler.summary() ?? {},
-        ...segmentSummary(),
-        ...frameSummary()
-      });
+      sendUnloadBeacon("viewEnd", viewEndMetrics(viewEnd));
     }
     return {
       id: "analytics",
@@ -53699,6 +54266,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       /** Begin the first view and subscribe to player and page events. @param pluginApi - Core plugin API. */
       async init(pluginApi) {
         api = pluginApi;
+        statePlaying = api.getState("playing") === true;
         viewContext = pageContext(mergedConfig.playerInitTime);
         startView();
         const unsubPlay = api.on("playback:play", onPlayEvent);
@@ -53711,9 +54279,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubTimeUpdate = api.on("playback:timeupdate", onTimeUpdate);
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
+        const unsubRecovered = api.on("error:recovered", onRecovered);
+        const unsubReconnecting = api.on("error:reconnecting", onReconnecting);
+        const unsubUnloaded = api.on("source:unloaded", onSourceUnloaded);
         const unsubQuality = api.on("quality:change", onQualityChange);
         const unsubSegment = api.on("media:segment", onSegment);
         const unsubLatency = api.on("live:latency", onLiveLatency);
+        const unsubEdgeChange = api.on("live:edgechange", onLiveEdgeChange);
         const unsubLowLatency = api.on("live:lowlatency", onLowLatencyChange);
         const unsubPlaylist = api.on("playlist:change", onPlaylistChange);
         cleanupFns.push(
@@ -53726,9 +54298,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubEnded,
           unsubError,
           unsubCoreError,
+          unsubRecovered,
+          unsubReconnecting,
+          unsubUnloaded,
           unsubQuality,
           unsubSegment,
           unsubLatency,
+          unsubEdgeChange,
           unsubLowLatency,
           unsubPlaylist,
           unsubTimeUpdate
@@ -54651,10 +55227,6 @@ ${indent}src: ${tsString(config.src)},`;
       });
       player.on("playback:play", () => {
         log(role, "info", "play");
-        if (role === "video" && live.status === "idle" && live.url && expected.video === live.url) {
-          safePause("video");
-          return;
-        }
         if (awaitingPlay === role) {
           awaitingPlay = null;
           if (role === activeRole()) setStatus("");
@@ -55381,29 +55953,26 @@ ${indent}src: ${tsString(config.src)},`;
       expected.video = check.url;
       syncAddress();
       renderSettings();
+      let failure = null;
       try {
         await deps.ready.video;
         if (gen !== generation) return;
         deps.players.video.setPoster("");
         await deps.players.video.load(check.url);
+        const state = stateOf("video");
+        if (hasFailed(state)) failure = state?.error ?? new Error("");
       } catch (error) {
-        if (gen === generation) {
-          live.status = "error";
-          live.error = loadErrorMessage(error);
-          whepError.textContent = `${live.error} Check the endpoint and try again.`;
-          whepConnect.disabled = false;
-          whepConnect.textContent = "Retry";
-          renderAll();
-        }
-        return;
+        failure = error;
       }
-      if (gen !== generation) {
-        if (live.status === "idle" && expected.video === check.url) {
-          try {
-            deps.players.video.pause();
-          } catch {
-          }
-        }
+      if (gen !== generation) return;
+      if (failure !== null) {
+        live.status = "error";
+        live.error = loadErrorMessage(failure);
+        whepError.textContent = `${live.error} Check the endpoint and try again.`;
+        whepConnect.disabled = false;
+        whepConnect.textContent = "Retry";
+        log("video", "error", "whep", live.error);
+        renderAll();
         return;
       }
       whepConnect.disabled = false;
@@ -55417,9 +55986,17 @@ ${indent}src: ${tsString(config.src)},`;
       if (options.autostart) await autoStart("video", gen);
       else notify("Connected. Press Play to watch your stream.");
     };
+    const unloadRole = (role) => {
+      expected[role] = null;
+      const player = deps.players[role];
+      if (!alive[role]) return;
+      void player.unload().catch((error) => {
+        log(role, "error", "unload failed", loadErrorMessage(error));
+      });
+    };
     const disconnectWhep = () => {
       generation++;
-      safePause("video");
+      unloadRole("video");
       awaitingPlay = null;
       live.status = "idle";
       whepConnect.disabled = false;
@@ -55486,6 +56063,7 @@ ${indent}src: ${tsString(config.src)},`;
     const changeCustom = () => {
       generation++;
       pauseAllBut(null);
+      unloadRole(custom.kind === "audio" ? "audio" : "video");
       awaitingPlay = null;
       if (custom.url) customUrl.value = custom.url;
       custom.status = "idle";

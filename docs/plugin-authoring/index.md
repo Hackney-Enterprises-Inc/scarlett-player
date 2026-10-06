@@ -34,7 +34,9 @@ export function createExamplePlugin(config: ExampleConfig = {}): Plugin {
 
 Anything you attach in `init()` must come off again - via `api.onDestroy(fn)` or in `destroy()`. `api.on(...)` returns its own unsubscribe function, so `api.onDestroy(api.on(...))` at the point of subscription is the pattern that cannot be forgotten later.
 
-Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every `load()`.
+Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every `load()`, and destroyed by `player.unload()`.
+
+A destroy can arrive while your `init()` is still running (a provider switch, or `unload()`, during a slow init). The player does not skip it: it waits for `init()` to settle and then calls `destroy()` once, so write `destroy()` to undo whatever `init()` finished. `player.destroy()` is the one case that does not wait: it returns without your `init()` having settled, and your `destroy()` is called afterwards if the init ever finishes, so an `init()` that resumes after a long wait should check that the player is still alive before installing anything. If `init()` throws, the cleanups it registered with `api.onDestroy()` still run.
 
 ### When `init()` runs
 
@@ -85,6 +87,32 @@ analytics ignores both seek paths until a play request starts the next view;
 a replay's pre-play seek does not mutate or beacon the finalized view. See the
 [analytics seek contract](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md#seek-tracking)
 for counting and drag semantics; do not assume bus events cover native controls.
+Element seeks each within 2 s of the previous one count as one seek there.
+
+### Errors from a provider
+
+Emit a structured `error` (`{ code, message, fatal, timestamp, detail }`) and
+fill in whatever `PlayerErrorDetail` fields you actually know: `type`,
+`httpStatus`, `url` (sanitised: no query string or fragment), `attempts`,
+`retriesExhausted`, `reconnectExhausted`, `timedOut`, and for a media element
+error `mediaErrorCode`, `mediaErrorMessage`, `networkState` and `readyState`
+(read when the error fires, before the element moves on). Analytics forwards
+the numeric and boolean ones, never `url`.
+
+A provider that auto-reconnects sets `detail.reconnecting: true` on a fatal
+error it will try to recover from, decided before emitting, since listeners
+act on the event as it arrives. Normally `error:reconnecting` follows, then either
+`error:recovered` or a terminal fatal error with `detail.reconnectExhausted:
+true`. Leave the flag out on terminal errors; `fatal` stays `true` either way.
+In HLS, a qualifying fatal error can still be marked when the reconnect
+window has already run out: the scheduler then emits `error:reconnect-exhausted`
+and the final unmarked fatal `error` immediately, with no intervening
+`error:reconnecting`. The marker signals entry into the recovery scheduler,
+not a guarantee that another attempt will be scheduled.
+
+Analytics relies on this: a marked error is reported as a warning and the view
+stays open through the outage, while an unmarked fatal error ends the view as
+`error`. The HLS and WHEP providers follow this contract.
 
 ## 2. State
 

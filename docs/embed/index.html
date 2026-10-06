@@ -205,7 +205,10 @@ source is loaded. Await it before calling anything on the player.</p>
 player.play();
 player.pause();
 player.setVolume(0.5);
+await player.unload();       // leave the source, keep the player for a later load()
 player.destroy();</code></pre>
+<p>When creation returns a player, it is a core <code>ScarlettPlayer</code>; its methods are listed in the
+<a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/core/README.md#api">core README</a>.</p>
 <p>The global surface is <code>ScarlettPlayerGlobal</code> in <code>src/types.ts</code>:</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>

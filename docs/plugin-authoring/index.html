@@ -90,7 +90,8 @@ export function createExamplePlugin(config: ExampleConfig = {}): Plugin {
   };
 }</code></pre>
 <p>Anything you attach in <code>init()</code> must come off again - via <code>api.onDestroy(fn)</code> or in <code>destroy()</code>. <code>api.on(...)</code> returns its own unsubscribe function, so <code>api.onDestroy(api.on(...))</code> at the point of subscription is the pattern that cannot be forgotten later.</p>
-<p>Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every <code>load()</code>.</p>
+<p>Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every <code>load()</code>, and destroyed by <code>player.unload()</code>.</p>
+<p>A destroy can arrive while your <code>init()</code> is still running (a provider switch, or <code>unload()</code>, during a slow init). The player does not skip it: it waits for <code>init()</code> to settle and then calls <code>destroy()</code> once, so write <code>destroy()</code> to undo whatever <code>init()</code> finished. <code>player.destroy()</code> is the one case that does not wait: it returns without your <code>init()</code> having settled, and your <code>destroy()</code> is called afterwards if the init ever finishes, so an <code>init()</code> that resumes after a long wait should check that the player is still alive before installing anything. If <code>init()</code> throws, the cleanups it registered with <code>api.onDestroy()</code> still run.</p>
 <h3 id="when-init-runs"><a class="anchor" href="#when-init-runs">When <code>init()</code> runs</a></h3>
 <p>Non-provider plugins are initialised by the player&#39;s first <code>init()</code> or first <code>load()</code>, whichever happens first, in registration order. A plugin registered later with <code>player.registerPlugin()</code> is initialised by the next of those calls. Provider plugins are initialised lazily, per source, once <code>selectProvider()</code> has picked one.</p>
 <p><code>player:ready</code> is emitted at the END of that first pass, after every non-provider plugin&#39;s <code>init()</code> has resolved. A plugin that subscribes to it inside its own <code>init()</code> therefore does receive it, and it fires exactly once for the life of the player.</p>
@@ -126,7 +127,28 @@ Both paths cancel pending rebuffer grace in an open view. After <code>viewEnd</c
 analytics ignores both seek paths until a play request starts the next view;
 a replay&#39;s pre-play seek does not mutate or beacon the finalized view. See the
 <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md#seek-tracking">analytics seek contract</a>
-for counting and drag semantics; do not assume bus events cover native controls.</p>
+for counting and drag semantics; do not assume bus events cover native controls.
+Element seeks each within 2 s of the previous one count as one seek there.</p>
+<h3 id="errors-from-a-provider"><a class="anchor" href="#errors-from-a-provider">Errors from a provider</a></h3>
+<p>Emit a structured <code>error</code> (<code>{ code, message, fatal, timestamp, detail }</code>) and
+fill in whatever <code>PlayerErrorDetail</code> fields you actually know: <code>type</code>,
+<code>httpStatus</code>, <code>url</code> (sanitised: no query string or fragment), <code>attempts</code>,
+<code>retriesExhausted</code>, <code>reconnectExhausted</code>, <code>timedOut</code>, and for a media element
+error <code>mediaErrorCode</code>, <code>mediaErrorMessage</code>, <code>networkState</code> and <code>readyState</code>
+(read when the error fires, before the element moves on). Analytics forwards
+the numeric and boolean ones, never <code>url</code>.</p>
+<p>A provider that auto-reconnects sets <code>detail.reconnecting: true</code> on a fatal
+error it will try to recover from, decided before emitting, since listeners
+act on the event as it arrives. Normally <code>error:reconnecting</code> follows, then either
+<code>error:recovered</code> or a terminal fatal error with <code>detail.reconnectExhausted: true</code>. Leave the flag out on terminal errors; <code>fatal</code> stays <code>true</code> either way.
+In HLS, a qualifying fatal error can still be marked when the reconnect
+window has already run out: the scheduler then emits <code>error:reconnect-exhausted</code>
+and the final unmarked fatal <code>error</code> immediately, with no intervening
+<code>error:reconnecting</code>. The marker signals entry into the recovery scheduler,
+not a guarantee that another attempt will be scheduled.</p>
+<p>Analytics relies on this: a marked error is reported as a warning and the view
+stays open through the outage, while an unmarked fatal error ends the view as
+<code>error</code>. The HLS and WHEP providers follow this contract.</p>
 <h2 id="2-state"><a class="anchor" href="#2-state">2. State</a></h2>
 <p>Two steps, because state is closed at runtime as well as in the type system - <code>getState</code>/<code>setState</code> throw for keys nobody registered, which catches typos on core keys.</p>
 <pre tabindex="0"><code class="language-ts">declare module &#39;@scarlett-player/core&#39; {

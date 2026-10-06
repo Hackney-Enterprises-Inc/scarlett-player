@@ -151,8 +151,12 @@ const player = await ScarlettPlayer.create({
 player.play();
 player.pause();
 player.setVolume(0.5);
+await player.unload();       // leave the source, keep the player for a later load()
 player.destroy();
 ```
+
+When creation returns a player, it is a core `ScarlettPlayer`; its methods are listed in the
+[core README](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/core/README.md#api).
 
 The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 
