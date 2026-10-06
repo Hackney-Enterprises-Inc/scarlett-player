@@ -70,6 +70,15 @@ plugin?.setVolume(0.5);
 plugin?.setMuted(true);
 ```
 
+### Unloading while casting
+
+`player.unload()` during a cast session stops the media on the receiver and
+keeps the session connected. Until media is next loaded on the receiver (a
+`media:load-request`, or a new session), the plugin syncs no receiver state
+into the player and routes no play, pause or seek to it, and a session that
+ends in that time resumes nothing locally. Call `endSession()` as well to
+disconnect.
+
 ## Events
 
 ```typescript

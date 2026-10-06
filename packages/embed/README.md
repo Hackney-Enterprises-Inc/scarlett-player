@@ -319,6 +319,8 @@ ScarlettPlayer.use('chapters', createChaptersPlugin);
 
 `ScarlettPlayer.addonRuntime` is also on the global. It is the embed's own copy of the few functions the addon files share with it, frozen, and not an API for host code.
 
+When `create()` returns a player, it is a core `ScarlettPlayer`, with the full [core API](../core/README.md#api). `await player.unload()` leaves the current source and keeps the player (the provider is destroyed, so a WHEP session closes and HLS stops loading) for a later `player.load(src)`; `player.destroy()` discards it. `create()` returns null if the container is not found or no source URL or playlist is supplied.
+
 To drive clips from script (`player.getPlugin('clips').open()`), call `player.play()` first: the clips plugin refuses to open until the media duration is known, and the HLS provider fetches nothing before the first play.
 
 ### 3. iframe Embed

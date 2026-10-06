@@ -641,13 +641,6 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     });
     player.on('playback:play', () => {
       log(role, 'info', 'play');
-      // A WHEP join abandoned through Change source / Disconnect is still
-      // retried by the provider (core has no unload), and a WHEP stream starts
-      // itself once it connects: keep it from playing behind the form.
-      if (role === 'video' && live.status === 'idle' && live.url && expected.video === live.url) {
-        safePause('video');
-        return;
-      }
       if (awaitingPlay === role) {
         awaitingPlay = null;
         if (role === activeRole()) setStatus('');
@@ -1507,36 +1500,30 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     expected.video = check.url;
     syncAddress();
     renderSettings();
+    let failure: unknown = null;
     try {
       await deps.ready.video;
       if (gen !== generation) return;
       deps.players.video.setPoster('');
       await deps.players.video.load(check.url);
+      // load() resolves on a failed join too (decision #162 keeps it that
+      // way): the error state is what says whether the join worked.
+      const state = stateOf('video');
+      if (hasFailed(state)) failure = state?.error ?? new Error('');
     } catch (error) {
-      if (gen === generation) {
-        live.status = 'error';
-        live.error = loadErrorMessage(error);
-        whepError.textContent = `${live.error} Check the endpoint and try again.`;
-        whepConnect.disabled = false;
-        whepConnect.textContent = 'Retry';
-        renderAll();
-      }
-      return;
+      failure = error;
     }
-    if (gen !== generation) {
-      // Abandoned and not replaced: the provider finished the join anyway.
-      // Pause without asking state first; the element may not report playing
-      // yet, and a play request left pending by the failed join would
-      // otherwise start the stream behind the form (see wirePlayer).
-      // (The cast undoes narrowing from before the await; the status has
-      // changed since.)
-      if ((live.status as LiveStatus) === 'idle' && expected.video === check.url) {
-        try {
-          deps.players.video.pause();
-        } catch {
-          // A player mid-teardown; nothing to pause.
-        }
-      }
+    // Abandoned (Disconnect, Change source or a newer connect): unload() or
+    // the newer load already superseded this one.
+    if (gen !== generation) return;
+    if (failure !== null) {
+      live.status = 'error';
+      live.error = loadErrorMessage(failure);
+      whepError.textContent = `${live.error} Check the endpoint and try again.`;
+      whepConnect.disabled = false;
+      whepConnect.textContent = 'Retry';
+      log('video', 'error', 'whep', live.error);
+      renderAll();
       return;
     }
     whepConnect.disabled = false;
@@ -1551,11 +1538,25 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     else notify('Connected. Press Play to watch your stream.');
   };
 
+  /**
+   * Unload a role's player: the provider goes (a WHEP join stops retrying
+   * and its peer connection closes) and the player waits empty for the next
+   * source.
+   */
+  const unloadRole = (role: PlayerRole): void => {
+    expected[role] = null;
+    const player = deps.players[role];
+    if (!alive[role]) return;
+    void player.unload().catch((error: unknown) => {
+      log(role, 'error', 'unload failed', loadErrorMessage(error));
+    });
+  };
+
   const disconnectWhep = (): void => {
     // Abandon any join still pending: without this, an endpoint that recovers
     // while the visitor is typing a new one would take the stage back.
     generation++;
-    safePause('video');
+    unloadRole('video');
     awaitingPlay = null;
     live.status = 'idle';
     whepConnect.disabled = false;
@@ -1624,13 +1625,14 @@ export function createSiteController(deps: ControllerDeps): SiteController {
 
   /**
    * Back to the Your stream form with the current URL in it, selected so
-   * typing replaces it. The old source stays loaded (paused) until a new one
-   * is submitted; that load is what tears it down.
+   * typing replaces it. The old source is unloaded, so nothing keeps
+   * playing or fetching behind the form.
    */
   const changeCustom = (): void => {
     // Abandon any load still pending, as disconnectWhep does.
     generation++;
     pauseAllBut(null);
+    unloadRole(custom.kind === 'audio' ? 'audio' : 'video');
     awaitingPlay = null;
     if (custom.url) customUrl.value = custom.url;
     custom.status = 'idle';

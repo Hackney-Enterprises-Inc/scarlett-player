@@ -10,18 +10,36 @@
  * holds here, and pinning it is also what keeps speed, captions and quality
  * reachable once the other controls have left.
  *
- * Speed is withdrawn on a live stream without a DVR window (`live` true and
- * `seekableRange` null): with nothing behind the edge to play through, a rate
- * above 1 only runs into the edge and one below 1 only drifts behind it. When
+ * Speed is withdrawn on a live stream without a real DVR window: with little
+ * or nothing behind the edge to play through, a rate above 1 only runs into
+ * the edge and one below 1 only drifts behind it. On live it is offered once
+ * the seekable window reaches {@link SPEED_SHOW_DVR_WINDOW} seconds and stays
+ * until it drops below {@link SPEED_HIDE_DVR_WINDOW} (or `seekableRange` goes
+ * null), per source, so a window hovering near a threshold does not flap. When
  * that leaves the menu with no rows at all, the gear itself is hidden.
  */
 
-import type { AudioTrack, IPluginAPI, QualityLevel, TextTrack } from '@scarlett-player/core';
+import type { AudioTrack, IPluginAPI, MediaSource, QualityLevel, TextTrack } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
 import { createElement, createButton } from '../utils';
 
 type Panel = 'main' | 'quality' | 'speed' | 'captions' | 'audio';
+
+/**
+ * Live seekable window, in seconds, at which Speed is first offered on a
+ * source (decision #254). Higher than {@link SPEED_HIDE_DVR_WINDOW} so a
+ * window hovering around one value does not make the row flap; on live the
+ * menu errs towards not offering Speed.
+ */
+const SPEED_SHOW_DVR_WINDOW = 90;
+
+/**
+ * Live seekable window, in seconds, below which Speed is withdrawn again once
+ * it was offered on a source. A sliding window of a few segments is not
+ * something to play through.
+ */
+const SPEED_HIDE_DVR_WINDOW = 60;
 
 const SPEED_OPTIONS = [
   { label: '0.5x', value: 0.5 },
@@ -32,6 +50,7 @@ const SPEED_OPTIONS = [
   { label: '2x', value: 2 },
 ];
 
+/** Consolidated settings control with per-source live Speed availability. */
 export class SettingsMenu implements Control {
   private el: HTMLDivElement;
   private api: IPluginAPI;
@@ -45,7 +64,16 @@ export class SettingsMenu implements Control {
   private lastSpeedAvailable = true;
   /** Rate taken away while Speed was withdrawn, and the source it belonged to. */
   private withdrawnRate: { rate: number; src: string | undefined } | null = null;
+  /**
+   * Live Speed latch: set once the window reaches {@link SPEED_SHOW_DVR_WINDOW}
+   * on the source, cleared below {@link SPEED_HIDE_DVR_WINDOW} or on a new source.
+   */
+  private speedLatch: { source: MediaSource | null | undefined; shown: boolean } = { source: undefined, shown: false };
 
+  /**
+   * Create the settings control and attach its document listeners.
+   * @param api - Player state, events and container.
+   */
   constructor(api: IPluginAPI) {
     this.api = api;
 
@@ -110,6 +138,7 @@ export class SettingsMenu implements Control {
     document.addEventListener('keydown', this.keyHandler);
   }
 
+  /** @returns The settings control element. */
   render(): HTMLElement {
     return this.el;
   }
@@ -175,18 +204,44 @@ export class SettingsMenu implements Control {
   }
 
   /**
-   * Whether the Speed control is offered for the current stream.
+   * Whether the Speed control is offered for the current stream. The single
+   * decision behind the Speed row, the gear's visibility and the rate
+   * reset/restore.
    *
-   * False only for live without a DVR window: `live` true and `seekableRange`
-   * null, the same test SkipButton and ProgressBar use. hls.js sets `live`
-   * from the level playlist and the native HLS path from an infinite duration;
-   * `seekableRange` is written by the hls plugin's live metrics. WHEP sets
-   * `live` true with `seekableRange` null, so it never offers Speed.
+   * Always true on VOD. On live (`live` true) it uses hysteresis per source:
+   * Speed is offered once the `seekableRange` spans
+   * {@link SPEED_SHOW_DVR_WINDOW} seconds and stays offered until the window
+   * drops below {@link SPEED_HIDE_DVR_WINDOW} seconds or `seekableRange` goes
+   * null; then it needs the show threshold again. A window between the two
+   * that never reached the show threshold on this source does not offer
+   * Speed. A new source object starts unlatched, including a reload of the same
+   * URL. This is stricter than the null test SkipButton and ProgressBar use.
    *
-   * @returns True on VOD and on live with DVR
+   * hls.js sets `live` from the level playlist and the native HLS path from an
+   * infinite duration; `seekableRange` is written by the hls plugin's live
+   * metrics. WHEP sets `live` true with `seekableRange` null, so it never
+   * offers Speed. {@link SettingsMenu.update} re-checks on every state change.
+   * The latch only moves on a threshold crossing, so calling this several
+   * times for the same state gives the same answer.
+   *
+   * @returns True on VOD, and on live while the DVR window latch is set
    */
   private isSpeedAvailable(): boolean {
-    return !(this.api.getState('live') && !this.api.getState('seekableRange'));
+    const source = this.api.getState('source');
+    if (this.speedLatch.source !== source) {
+      this.speedLatch = { source, shown: false };
+      this.withdrawnRate = null;
+    }
+    const live = this.api.getState('live');
+
+    const range = this.api.getState('seekableRange');
+    const length = range ? range.end - range.start : 0;
+    if (!range || length < SPEED_HIDE_DVR_WINDOW) {
+      this.speedLatch.shown = false;
+    } else if (live && length >= SPEED_SHOW_DVR_WINDOW) {
+      this.speedLatch.shown = true;
+    }
+    return !live || this.speedLatch.shown;
   }
 
   /**
@@ -199,7 +254,8 @@ export class SettingsMenu implements Control {
    *
    * The rate is remembered with its source so {@link SettingsMenu.restoreRate}
    * can give it back: native HLS reports `live` one event before its
-   * `seekableRange`, so a DVR stream looks live-only for a moment.
+   * `seekableRange`, so a DVR stream looks live-only for a moment, and a
+   * live window can start short and grow past the threshold.
    */
   private resetRate(): void {
     const video = this.api.container.querySelector('video');
@@ -215,8 +271,9 @@ export class SettingsMenu implements Control {
 
   /**
    * Give back a rate {@link SettingsMenu.resetRate} took, once Speed is
-   * offered again on the same source (its DVR window arrived late). A rate
-   * taken on one source is dropped, never applied to the next.
+   * offered again on the same source (its DVR window arrived late or grew to
+   * {@link SPEED_SHOW_DVR_WINDOW} seconds). A rate taken on one source is
+   * dropped, never applied to the next.
    */
   private restoreRate(): void {
     const withdrawn = this.withdrawnRate;
@@ -604,6 +661,7 @@ export class SettingsMenu implements Control {
   }
 
   private selectSpeed(rate: number): void {
+    if (!this.isSpeedAvailable()) return;
     this.api.emit('playback:ratechange', { rate });
 
     // Apply to video element directly
@@ -671,14 +729,17 @@ export class SettingsMenu implements Control {
     items[nextIndex].focus();
   }
 
+  /** @returns The currently selected settings panel. */
   getPanel(): Panel {
     return this.currentPanel;
   }
 
+  /** @returns Whether the settings menu is open. */
   isMenuOpen(): boolean {
     return this.isOpen;
   }
 
+  /** Remove the control element and its document listeners. */
   destroy(): void {
     document.removeEventListener('click', this.closeHandler);
     document.removeEventListener('keydown', this.keyHandler);

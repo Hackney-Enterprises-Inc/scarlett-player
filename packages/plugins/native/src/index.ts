@@ -19,7 +19,7 @@
  * - M4A (MPEG-4 Audio)
  */
 
-import { ErrorCode, type IPluginAPI, type PluginType, sanitizeUrl } from '@scarlett-player/core';
+import { ErrorCode, type IPluginAPI, type PlayerErrorDetail, type PluginType, sanitizeUrl } from '@scarlett-player/core';
 import { PKG_VERSION } from './version';
 
 /** Supported video extensions */
@@ -494,11 +494,20 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       api?.setState('playbackState', 'error');
       api?.setState('buffering', false);
 
+      // Read now: the element moves on, and telemetry needs the state the
+      // failure left it in to tell a network failure from a bad source
+      const detail: PlayerErrorDetail = {
+        networkState: videoEl.networkState,
+        readyState: videoEl.readyState,
+      };
+      if (typeof error?.code === 'number') detail.mediaErrorCode = error.code;
+
       api?.emit('error', {
         code,
         message,
         fatal: true,
         timestamp: Date.now(),
+        detail,
       });
     });
 

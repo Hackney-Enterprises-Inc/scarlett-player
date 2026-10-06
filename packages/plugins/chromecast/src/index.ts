@@ -71,6 +71,13 @@ export function chromecastPlugin(): IChromecastPlugin {
   let localTimeBeforeCast = 0;
   let localSrcBeforeCast = '';
 
+  /**
+   * True from `source:unloaded` during a cast session until media is next
+   * loaded on the receiver. The receiver was told to stop, so nothing it
+   * reports is synced into the unloaded player and no command is routed to it.
+   */
+  let remoteStopped = false;
+
   // Event handler references for cleanup
   let castStateHandler: ((event: CastFramework.CastStateEventData) => void) | null = null;
   let sessionStateHandler: ((event: CastFramework.SessionStateEventData) => void) | null = null;
@@ -189,6 +196,8 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     api.logger.info('Chromecast connected', { deviceName });
 
+    remoteStopped = false;
+
     // Store local state for resume
     localTimeBeforeCast = api.getState('currentTime') || 0;
     const source = api.getState('source');
@@ -221,6 +230,8 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     api.logger.info('Chromecast session resumed', { deviceName });
 
+    remoteStopped = false;
+
     // Pause local video (cast device is already playing)
     const video = api.container.querySelector('video');
     if (video) {
@@ -239,6 +250,13 @@ export function chromecastPlugin(): IChromecastPlugin {
     api.emit('chromecast:disconnected', undefined);
 
     api.logger.info('Chromecast disconnected', { resumeTime: castTime });
+
+    // The source was unloaded while casting: there is nothing to resume, and
+    // a video found here belongs to a later load.
+    if (remoteStopped) {
+      remoteStopped = false;
+      return;
+    }
 
     // Skip local seek for live streams — the cast position may be outside
     // the DVR window, and seeking there would confuse hls.js.
@@ -260,6 +278,8 @@ export function chromecastPlugin(): IChromecastPlugin {
    */
   const loadMediaOnCast = async (src: string, startTime: number): Promise<void> => {
     if (!currentSession || !window.chrome?.cast) return;
+
+    remoteStopped = false;
 
     // Determine content type
     const contentType = src.includes('.m3u8')
@@ -287,6 +307,11 @@ export function chromecastPlugin(): IChromecastPlugin {
     try {
       await currentSession.loadMedia(request);
       if (destroyed) return;
+      // Unloaded while the receiver was still loading: stop what just started.
+      if (remoteStopped) {
+        stopRemoteMedia();
+        return;
+      }
       api.logger.debug('Media loaded on Chromecast', { src, startTime });
     } catch (error) {
       // No chromecast:error for a player that is gone.
@@ -294,6 +319,32 @@ export function chromecastPlugin(): IChromecastPlugin {
       api.logger.error('Failed to load media on Chromecast', { error });
       api.emit('chromecast:error', { error: error as Error } as ChromecastErrorEvent);
     }
+  };
+
+  /**
+   * Stop the media on the receiver, leaving the cast session connected.
+   */
+  const stopRemoteMedia = (): void => {
+    try {
+      remotePlayerController?.stop();
+    } catch (error) {
+      api.logger.debug('Cast media was already gone when stopping it', { error });
+    }
+  };
+
+  /**
+   * Handle `source:unloaded` (`player.unload()`) during a cast session: stop
+   * the media on the receiver and stop syncing its state, so the unloaded
+   * player stays unloaded. The session stays connected; the next
+   * `media:load-request` loads on the receiver again.
+   */
+  const onSourceUnloaded = (): void => {
+    if (destroyed || !api.getState('chromecastActive')) return;
+    remoteStopped = true;
+    localTimeBeforeCast = 0;
+    localSrcBeforeCast = '';
+    stopRemoteMedia();
+    api.logger.debug('Cast media stopped on unload');
   };
 
   /**
@@ -305,6 +356,9 @@ export function chromecastPlugin(): IChromecastPlugin {
 
     // Only sync state when connected
     if (!api.getState('chromecastActive')) return;
+
+    // The source was unloaded: the receiver's state is no longer the player's
+    if (remoteStopped) return;
 
     // Detect media ended on Cast device via playerState and idleReason
     // on the media session.
@@ -346,26 +400,28 @@ export function chromecastPlugin(): IChromecastPlugin {
       // Command interception: when Chromecast is active, route play/pause/seek
       // to the remote player instead of the local element.
       const unsubPlay = api.on('playback:play', () => {
-        if (destroyed || !api.getState('chromecastActive')) return;
+        if (destroyed || remoteStopped || !api.getState('chromecastActive')) return;
         if (remotePlayer?.isPaused && remotePlayerController) {
           remotePlayerController.playOrPause();
         }
       });
 
       const unsubPause = api.on('playback:pause', () => {
-        if (destroyed || !api.getState('chromecastActive')) return;
+        if (destroyed || remoteStopped || !api.getState('chromecastActive')) return;
         if (remotePlayer && !remotePlayer.isPaused && remotePlayerController) {
           remotePlayerController.playOrPause();
         }
       });
 
       const unsubSeek = api.on('playback:seeking', ({ time }: { time: number }) => {
-        if (destroyed || !api.getState('chromecastActive')) return;
+        if (destroyed || remoteStopped || !api.getState('chromecastActive')) return;
         if (remotePlayer && remotePlayerController) {
           remotePlayer.currentTime = time;
           remotePlayerController.seek();
         }
       });
+
+      const unsubUnloaded = api.on('source:unloaded', onSourceUnloaded);
 
       // Subscribed before the await below: a player destroyed while the SDK
       // is still loading never calls this plugin's destroy(), and this is
@@ -383,6 +439,7 @@ export function chromecastPlugin(): IChromecastPlugin {
         unsubPlay();
         unsubPause();
         unsubSeek();
+        unsubUnloaded();
       });
 
       // Check if Cast is supported in this browser
@@ -447,6 +504,7 @@ export function chromecastPlugin(): IChromecastPlugin {
       }
 
       // Clear references
+      remoteStopped = false;
       castContext = null;
       currentSession = null;
       remotePlayer = null;

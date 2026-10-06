@@ -55,9 +55,11 @@ does (absolute inside the container, `playsInline`, no native controls, the
 4. polls `getStats()` once a second for a latency estimate (below).
 
 `destroy()` `DELETE`s the session, closes the connection, and removes the
-element. A closing or navigating tab also `DELETE`s on `pagehide`, with
-`keepalive`, so the monitor slot is free at once instead of after the server's
-ICE timeout.
+element. That is how a host leaves a session: `await player.unload()` (core)
+destroys the provider, so it `DELETE`s the session and stops any reconnect,
+while the player stays ready for the next `load()`. A closing or navigating
+tab also `DELETE`s on `pagehide`, with `keepalive`, so the monitor slot is
+free at once instead of after the server's ICE timeout.
 
 ## What the player reports
 
@@ -126,6 +128,12 @@ window (the stream deleted mid-outage, say) still emits its fatal `error` and
 ends the window, so a "reconnecting" overlay always has something to take it
 down.
 
+A fatal `error` that a reconnect will follow carries `detail.reconnecting:
+true`, decided before the event is emitted, so a listener (analytics, a host's
+telemetry) can tell it from a terminal failure. `fatal` stays `true` and the
+event order is unchanged; the flag is absent on terminal errors, including the
+final one carrying `detail.reconnectExhausted`.
+
 | Answer | Meaning (Tmesis) | Code | Reconnect |
 |---|---|---|---|
 | `201` | joined | | |
@@ -183,9 +191,9 @@ the dead session first.
 join needed (so a monitor opened before the producer starts plays as soon as
 the stream goes live; on Tmesis, which answers `409` until then. MediaMTX
 answers `404`, which is terminal on a first join, so open a MediaMTX monitor
-after the publisher), and returns on a terminal failure, on the window closing,
-or when a newer load or `destroy()` supersedes it - the first two leaving a
-fatal `error` behind them.
+after the publisher), and returns on a terminal failure, on the window
+closing, or when a newer load, `unload()` or `destroy()` supersedes it - the
+first two leaving a fatal `error` behind them.
 
 ### Not in v1
 

@@ -162,6 +162,17 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
       error.value = err as unknown as Error;
     });
 
+    // unload() writes the empty state without the events these refs follow,
+    // so reset them from its announcement instead.
+    playerInstance.on('source:unloaded', () => {
+      playing.value = false;
+      paused.value = true;
+      currentTime.value = 0;
+      duration.value = 0;
+      bufferedAmount.value = 0;
+      error.value = null;
+    });
+
     // Keys no event announces. Seeded from the current snapshot first, so a
     // player that is already buffering (or already live) is reported correctly
     // before the next change arrives.
@@ -204,6 +215,22 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
   async function load(src: string, options?: LoadOptions) {
     if (player.value) {
       await player.value.load(src, options);
+    }
+  }
+
+  /**
+   * Unload the current source and keep the player for the next `load()`.
+   *
+   * Destroys the provider (closing a WHEP connection, stopping HLS loading)
+   * and returns the player to its empty state; `playing`, `currentTime`,
+   * `duration`, `bufferedAmount` and `error` reset when the player emits
+   * `source:unloaded`. A no-op before `init()`.
+   *
+   * @returns Resolves once the player has unloaded
+   */
+  async function unload() {
+    if (player.value) {
+      await player.value.unload();
     }
   }
 
@@ -320,6 +347,7 @@ export function useScarlettPlayer(options: UseScarlettPlayerOptions) {
     pause,
     seek,
     load,
+    unload,
     setVolume,
     setMuted,
     setPoster,

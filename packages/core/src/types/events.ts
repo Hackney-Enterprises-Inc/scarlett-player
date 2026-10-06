@@ -365,6 +365,15 @@ export interface PlayerEventMap {
   /** Request to load a new media source (used by plugins like playlist) */
   'media:load-request': { src: string; autoplay?: boolean };
 
+  /**
+   * `player.unload()` finished: the provider is destroyed and the unloaded
+   * state applied. `src` is the source the last `load()` asked for (loaded,
+   * still loading, or failed). Not emitted by a no-op unload, nor when a
+   * newer `load()` superseded the unload before it finished (that load owns
+   * the state).
+   */
+  'source:unloaded': { src: string | null };
+
   // === Playlist Events ===
   /** Current playlist track changed */
   'playlist:change': { track: PlaylistTrack | null; index: number };

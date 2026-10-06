@@ -1457,3 +1457,394 @@ describe('SettingsMenu speed on live streams', () => {
     expect(api.emit).not.toHaveBeenCalledWith('playback:ratechange', expect.anything());
   });
 });
+
+// --- Speed needs a real DVR window (decision #254) ---
+//
+// A short sliding window (a few segments) is not a DVR window. On live, Speed
+// is offered once the seekable range reaches 90 s and withdrawn when it drops
+// below 60 s, per source, so a window hovering near one threshold never makes
+// the row (or the remembered rate) flap.
+describe('SettingsMenu speed needs a 60 s DVR window', () => {
+  let api: MockPluginAPI;
+  let menu: SettingsMenu;
+
+  const openRowLabels = (m: SettingsMenu): string[] => {
+    const el = m.render();
+    el.querySelector<HTMLButtonElement>('.sp-settings__btn')?.click();
+    return Array.from(el.querySelectorAll('.sp-settings-panel__row')).map(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent ?? ''
+    );
+  };
+
+  /** Speed row present on the main panel, without leaving the menu open. */
+  const speedShown = (m: SettingsMenu): boolean => {
+    const labels = openRowLabels(m);
+    m.close(false);
+    return labels.includes('Speed');
+  };
+
+  /** Set a live window of `length` seconds ending at `end` and re-render. */
+  const setWindow = (length: number, end = 1000): void => {
+    api.setState('seekableRange', { start: end - length, end });
+    menu.update();
+  };
+
+  const rateEvents = (): unknown[][] =>
+    api.emit.mock.calls.filter((c: unknown[]) => c[0] === 'playback:ratechange');
+
+  afterEach(() => {
+    menu.destroy();
+  });
+
+  it('omits the Speed row on a 3-segment sliding window', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: { start: 1200, end: 1218 },
+      qualities: MOCK_QUALITIES,
+    });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Quality']);
+  });
+
+  it('omits the Speed row on a window just short of 60 s', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 100, end: 159.9 }, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Quality']);
+  });
+
+  it('does not offer Speed on a window of 60 to 89 s that never reached 90 s', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 100, end: 160 }, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(openRowLabels(menu)).toEqual(['Quality']);
+    menu.close(false);
+
+    for (const length of [60, 75, 89, 89.9]) {
+      setWindow(length);
+      expect(speedShown(menu)).toBe(false);
+    }
+  });
+
+  it('offers the Speed row on a window of exactly 90 s', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 100, end: 190 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+  });
+
+  it('keeps Speed down to 60 s once shown, withdraws it below 60 s, and needs 90 s again', () => {
+    api = createMockApi({ live: true, seekableRange: null, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(speedShown(menu)).toBe(false);
+
+    setWindow(90);
+    expect(speedShown(menu)).toBe(true);
+
+    for (const length of [89, 75, 60.1, 60]) {
+      setWindow(length);
+      expect(speedShown(menu)).toBe(true);
+    }
+
+    setWindow(59.9);
+    expect(speedShown(menu)).toBe(false);
+
+    for (const length of [60, 75, 89.9]) {
+      setWindow(length);
+      expect(speedShown(menu)).toBe(false);
+    }
+
+    setWindow(90);
+    expect(speedShown(menu)).toBe(true);
+  });
+
+  it('withdraws a shown Speed when the seekable range goes null', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 120 }, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+
+    api.setState('seekableRange', null);
+    menu.update();
+    expect(speedShown(menu)).toBe(false);
+
+    setWindow(75);
+    expect(speedShown(menu)).toBe(false);
+  });
+
+  it('does not depend on how often availability is checked', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 75 }, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    for (let i = 0; i < 5; i++) menu.update();
+    expect(speedShown(menu)).toBe(false);
+
+    setWindow(95);
+    for (let i = 0; i < 5; i++) menu.update();
+    setWindow(75);
+    for (let i = 0; i < 5; i++) menu.update();
+    expect(speedShown(menu)).toBe(true);
+  });
+
+  it('never flaps on a window oscillating between 58 and 62 s', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: { start: 0, end: 58 },
+      playbackRate: 1.5,
+      qualities: MOCK_QUALITIES,
+      source: { src: 'https://x/event.m3u8', type: 'hls' },
+    });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(rateEvents()).toEqual([['playback:ratechange', { rate: 1 }]]);
+    api.emit.mockClear();
+
+    for (let i = 0; i < 10; i++) {
+      setWindow(i % 2 === 0 ? 62 : 58, 1000 + i * 2);
+      expect(speedShown(menu)).toBe(false);
+      expect(video.playbackRate).toBe(1);
+    }
+    expect(rateEvents()).toEqual([]);
+  });
+
+  it('does not carry the latch over to another source', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: { start: 0, end: 120 },
+      qualities: MOCK_QUALITIES,
+      source: { src: 'https://x/a.m3u8', type: 'hls' },
+    });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+
+    setWindow(75);
+    expect(speedShown(menu)).toBe(true);
+
+    // Same window length on a new source: unlatched, so no Speed until 90 s.
+    api.setState('source', { src: 'https://x/b.m3u8', type: 'hls' });
+    menu.update();
+    expect(speedShown(menu)).toBe(false);
+
+    setWindow(90);
+    expect(speedShown(menu)).toBe(true);
+  });
+
+  it('keeps the Speed row on VOD whatever the seekable range', () => {
+    api = createMockApi({ live: false, seekableRange: { start: 0, end: 10 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+  });
+
+  it('resets a non-1 rate to 1 on a short window', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 18 }, playbackRate: 1.5 });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(api.emit).toHaveBeenCalledWith('playback:ratechange', { rate: 1 });
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it('resets a non-1 rate on a 60 to 89 s window that never reached 90 s', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 75 }, playbackRate: 1.5 });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+
+    expect(api.emit).toHaveBeenCalledWith('playback:ratechange', { rate: 1 });
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it('restores the rate once the window reaches 90 s, and follows the latch after', () => {
+    api = createMockApi({
+      live: true,
+      seekableRange: { start: 0, end: 30 },
+      playbackRate: 1.5,
+      source: { src: 'https://x/event.m3u8', type: 'hls' },
+    });
+    const video = api.container.querySelector('video') as HTMLVideoElement;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+    expect(menu.render().style.display).toBe('none');
+
+    api.setState('seekableRange', { start: 0, end: 61 });
+    menu.update();
+    api.setState('seekableRange', { start: 0, end: 89 });
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+    expect(menu.render().style.display).toBe('none');
+
+    api.setState('seekableRange', { start: 0, end: 90 });
+    menu.update();
+
+    expect(api.emit).toHaveBeenLastCalledWith('playback:ratechange', { rate: 1.5 });
+    expect(video.playbackRate).toBe(1.5);
+    expect(menu.render().style.display).toBe('');
+    expect(openRowLabels(menu)).toEqual(['Speed']);
+
+    // Shrinking to 60 s keeps the latched rate.
+    api.emit.mockClear();
+    api.setState('seekableRange', { start: 10, end: 70 });
+    menu.update();
+    expect(video.playbackRate).toBe(1.5);
+    expect(api.emit).not.toHaveBeenCalled();
+
+    // Below 60 s the rate is withdrawn again, once.
+    api.setState('seekableRange', { start: 10, end: 69 });
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+    expect(api.emit).toHaveBeenCalledExactlyOnceWith('playback:ratechange', { rate: 1 });
+    expect(menu.render().style.display).toBe('none');
+    expect(menu.isMenuOpen()).toBe(false);
+
+    menu.update();
+    expect(api.emit).toHaveBeenCalledTimes(1);
+
+    // Back to 60 to 89 s: still withdrawn.
+    api.setState('seekableRange', { start: 10, end: 89 });
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+    expect(api.emit).toHaveBeenCalledTimes(1);
+
+    api.setState('seekableRange', { start: 10, end: 100 });
+    menu.update();
+    expect(video.playbackRate).toBe(1.5);
+    expect(api.emit).toHaveBeenLastCalledWith('playback:ratechange', { rate: 1.5 });
+    expect(menu.render().style.display).toBe('');
+  });
+
+  it.each(['same URL', 'null', 'different URL'])('starts unlatched on a %s source replacement', (kind) => {
+    const source = { src: 'https://x/a.m3u8', type: 'hls' };
+    api = createMockApi({ live: true, source, seekableRange: { start: 0, end: 90 }, qualities: MOCK_QUALITIES });
+    menu = new SettingsMenu(api);
+    menu.update();
+    setWindow(75);
+    expect(speedShown(menu)).toBe(true);
+    api.setState('source', kind === 'null' ? null : { ...source, src: kind === 'same URL' ? source.src : 'https://x/b.m3u8' });
+    menu.update();
+    expect(speedShown(menu)).toBe(false);
+    for (let i = 0; i < 3; i++) {
+      api.setState('currentTime', i);
+      menu.update();
+      expect(speedShown(menu)).toBe(false);
+    }
+    setWindow(90);
+    expect(speedShown(menu)).toBe(true);
+  });
+
+  it.each(['same URL', 'null round trip', 'VOD round trip'])('drops a withdrawn rate on a %s source replacement', (kind) => {
+    const source = { src: 'https://x/a.m3u8', type: 'hls' };
+    api = createMockApi({ live: true, source, seekableRange: null });
+    const video = api.container.querySelector('video')!;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(video.playbackRate).toBe(1);
+    if (kind === 'null round trip') {
+      api.setState('source', null);
+      menu.update();
+    }
+    if (kind === 'VOD round trip') api.setState('live', false);
+    api.setState('source', { ...source });
+    menu.update();
+    api.setState('live', true);
+    setWindow(90);
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it('clears the live latch when the range goes null during VOD on the same source', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 90 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+    api.setState('live', false);
+    api.setState('seekableRange', null);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+    api.setState('live', true);
+    setWindow(75);
+    expect(speedShown(menu)).toBe(false);
+  });
+
+  it.each(['click', 'Enter', ' '])('cannot apply a withdrawn Speed option with %s', (key) => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 90 } });
+    menu = new SettingsMenu(api);
+    document.body.appendChild(menu.render());
+    menu.update();
+    openRowLabels(menu);
+    menu.render().querySelector<HTMLElement>('.sp-settings-panel__row')!.click();
+    const option = menu.render().querySelector<HTMLElement>('[data-id="1.5"]')!;
+    option.focus();
+    setWindow(59);
+    expect(menu.isMenuOpen()).toBe(false);
+    expect(document.activeElement).toBe(option);
+    api.emit.mockClear();
+    if (key === 'click') option.click();
+    else option.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    expect(api.container.querySelector('video')!.playbackRate).toBe(1);
+    expect(rateEvents()).toEqual([]);
+  });
+
+
+  it('keeps a valid latch across live false then true on the same source', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 90 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+    setWindow(75);
+    api.setState('live', false);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+    api.setState('live', true);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+  });
+
+  it('does not latch from a VOD window before live becomes known', () => {
+    api = createMockApi({ live: false, seekableRange: { start: 0, end: 90 } });
+    menu = new SettingsMenu(api);
+    menu.update();
+    expect(speedShown(menu)).toBe(true);
+    setWindow(75);
+    api.setState('live', true);
+    menu.update();
+    expect(speedShown(menu)).toBe(false);
+  });
+
+  it('keeps latch and rate transitions independent of unrelated state updates', () => {
+    api = createMockApi({ live: true, seekableRange: { start: 0, end: 75 } });
+    const video = api.container.querySelector('video')!;
+    video.playbackRate = 1.5;
+    menu = new SettingsMenu(api);
+    menu.update();
+    const checkUnrelated = (shown: boolean, rate: number): void => {
+      api.emit.mockClear();
+      for (const [key, value] of [['currentTime', 20], ['qualities', MOCK_QUALITIES], ['playbackRate', rate], ['paused', true]] as const) {
+        api.setState(key, value);
+        for (let i = 0; i < 3; i++) menu.update();
+        expect(speedShown(menu)).toBe(shown);
+        expect(video.playbackRate).toBe(rate);
+      }
+      expect(rateEvents()).toEqual([]);
+    };
+    checkUnrelated(false, 1);
+    setWindow(90);
+    expect(video.playbackRate).toBe(1.5);
+    setWindow(75);
+    checkUnrelated(true, 1.5);
+    setWindow(59);
+    checkUnrelated(false, 1);
+  });
+
+});

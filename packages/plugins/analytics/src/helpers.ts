@@ -75,12 +75,35 @@ export function getAnonymousViewerId(): string {
 }
 
 /**
- * Detect browser information from user agent.
+ * In-app browsers, matched before Safari and Chrome because their webviews
+ * carry those engines' tokens too. The first entry whose test matches wins.
+ */
+const IN_APP_BROWSERS: Array<{ name: string; test: RegExp; version: RegExp }> = [
+  { name: 'Instagram', test: /Instagram/, version: /Instagram (\d+)/ },
+  { name: 'Facebook', test: /FBAN|FBAV/, version: /FBAV\/(\d+)/ },
+  { name: 'Google App', test: /GSA\//, version: /GSA\/(\d+)/ },
+  { name: 'LinkedIn', test: /LinkedInApp/, version: /LinkedInApp\]?\/(\d+)/ },
+  { name: 'TikTok', test: /musical_ly|BytedanceWebview/, version: /musical_ly_(\d+)|app_version\/(\d+)/ },
+];
+
+/**
+ * Detect browser information from user agent. In-app browsers (Instagram,
+ * Facebook, the Google app, LinkedIn, TikTok) are named as such rather than
+ * as the Safari or Chrome webview they run in.
  *
  * @returns Browser info
  */
 export function getBrowserInfo(): BrowserInfo {
   const ua = navigator.userAgent;
+
+  for (const app of IN_APP_BROWSERS) {
+    if (!app.test.test(ua)) continue;
+    const match = ua.match(app.version);
+    return {
+      name: app.name,
+      version: match ? match[1] ?? match[2] : undefined,
+    };
+  }
 
   // Edge (must check before Chrome since Edge includes "Chrome")
   if (ua.includes('Edg/')) {
@@ -92,8 +115,8 @@ export function getBrowserInfo(): BrowserInfo {
   }
 
   // Chrome
-  if (ua.includes('Chrome/') && !ua.includes('Edg/')) {
-    const match = ua.match(/Chrome\/(\d+)/);
+  if ((ua.includes('Chrome/') || ua.includes('CriOS/')) && !ua.includes('Edg/')) {
+    const match = ua.match(/(?:Chrome|CriOS)\/(\d+)/);
     return {
       name: 'Chrome',
       version: match ? match[1] : undefined,
@@ -305,7 +328,7 @@ export function calculateQoEScore(params: {
   rebufferCount: number;
   rebufferDuration: number;
   watchTime: number;
-  maxBitrate: number;
+  maxBitrate: number | null;
   exitType: string | null;
   warningCount: number;
   fatalErrorCategory: string | null;
@@ -328,7 +351,8 @@ export function calculateQoEScore(params: {
       100 * Math.exp(-10 * rebufferDuration / Math.max(1, watchTime))
     ),
   ];
-  if (maxBitrate > 0) scores.push(clamp(20 + 15 * Math.log2(maxBitrate / 250000), 10, 100));
+  // An unknown bitrate (null) is no bitrate factor, not a low one
+  if (maxBitrate !== null && maxBitrate > 0) scores.push(clamp(20 + 15 * Math.log2(maxBitrate / 250000), 10, 100));
   return Math.round(clamp(scores.reduce((sum, score) => sum + score, 0) / scores.length - Math.min(20, 3 * warningCount), 0, 100));
 }
 

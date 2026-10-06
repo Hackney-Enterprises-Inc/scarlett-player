@@ -385,6 +385,34 @@ describe('PluginManager', () => {
       });
     });
 
+    it('runs the cleanups a failed init registered, with no destroy asked for', async () => {
+      const cleanup = vi.fn();
+      const listener = vi.fn();
+      const onStateChange = vi.fn();
+      const plugin = createMockPlugin({
+        onStateChange,
+        init: vi.fn((api: any) => {
+          api.onDestroy(cleanup);
+          api.onDestroy(api.on('playback:play', listener));
+          throw new Error('Init failed');
+        }),
+      });
+      pluginManager.register(plugin);
+
+      await expect(pluginManager.initPlugin('test-plugin')).rejects.toThrow('Init failed');
+
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      eventBus.emit('playback:play', undefined);
+      expect(listener).not.toHaveBeenCalled();
+      stateManager.set('volume', 0.25);
+      expect(onStateChange).not.toHaveBeenCalled();
+
+      // A later destroy has nothing left to run
+      await pluginManager.destroyPlugin('test-plugin');
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(plugin.destroy).not.toHaveBeenCalled();
+    });
+
     it('should update state to error on failure', async () => {
       const plugin = createMockPlugin({
         init: vi.fn(() => { throw new Error('Init failed'); }),
@@ -501,6 +529,26 @@ describe('PluginManager', () => {
   });
 
   describe('destroyAll()', () => {
+    it('does not wait for a plugin whose init never settles, and destroys it if it does', async () => {
+      let settleInit!: () => void;
+      const plugin = createMockPlugin({
+        id: 'slow',
+        init: vi.fn(() => new Promise<void>((resolve) => { settleInit = resolve; })),
+      });
+      pluginManager.register(plugin);
+      const init = pluginManager.initPlugin('slow');
+      await Promise.resolve();
+
+      // Would hang here if destroyAll() waited for the init
+      await pluginManager.destroyAll();
+      expect(plugin.destroy).not.toHaveBeenCalled();
+
+      settleInit();
+      await init;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(plugin.destroy).toHaveBeenCalledTimes(1);
+    });
+
     it('should destroy all ready plugins', async () => {
       const plugin1 = createMockPlugin({ id: 'plugin-1' });
       const plugin2 = createMockPlugin({ id: 'plugin-2' });
@@ -616,6 +664,113 @@ describe('PluginManager', () => {
 
       // State is reset to 'registered' so plugin can be re-initialized
       expect(pluginManager.getPluginState('test-plugin')).toBe('registered');
+    });
+
+    describe('while the plugin is initializing', () => {
+      /** A plugin whose init() stays pending until the test settles it. */
+      const createDeferredPlugin = () => {
+        let settleInit!: (error?: Error) => void;
+        const listener = vi.fn();
+        const cleanup = vi.fn();
+        const plugin = createMockPlugin({
+          init: vi.fn(
+            (api: IPluginAPI) =>
+              new Promise<void>((resolve, reject) => {
+                api.onDestroy(api.on('playback:play', listener));
+                api.onDestroy(cleanup);
+                settleInit = (error) => (error ? reject(error) : resolve());
+              })
+          ),
+        });
+        return { plugin, listener, cleanup, settle: (error?: Error) => settleInit(error) };
+      };
+
+      it('waits for init to settle, then destroys the plugin once', async () => {
+        const { plugin, listener, cleanup, settle } = createDeferredPlugin();
+        pluginManager.register(plugin);
+
+        const init = pluginManager.initPlugin('test-plugin');
+        const destroyed = pluginManager.destroyPlugin('test-plugin');
+        await Promise.resolve();
+        expect(plugin.destroy).not.toHaveBeenCalled();
+
+        settle();
+        await init;
+        await destroyed;
+
+        expect(plugin.destroy).toHaveBeenCalledTimes(1);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(pluginManager.getPluginState('test-plugin')).toBe('registered');
+
+        // The listener the init wired is gone with it
+        eventBus.emit('playback:play', undefined);
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it('destroys once when several destroys race the same init', async () => {
+        const { plugin, cleanup, settle } = createDeferredPlugin();
+        pluginManager.register(plugin);
+
+        const init = pluginManager.initPlugin('test-plugin');
+        const first = pluginManager.destroyPlugin('test-plugin');
+        const second = pluginManager.destroyPlugin('test-plugin');
+        settle();
+        await Promise.all([init, first, second]);
+
+        expect(plugin.destroy).toHaveBeenCalledTimes(1);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+      });
+
+      it('destroys once when two destroys race a ready plugin', async () => {
+        const plugin = createMockPlugin();
+        pluginManager.register(plugin);
+        await pluginManager.initPlugin('test-plugin');
+
+        await Promise.all([
+          pluginManager.destroyPlugin('test-plugin'),
+          pluginManager.destroyPlugin('test-plugin'),
+        ]);
+
+        expect(plugin.destroy).toHaveBeenCalledTimes(1);
+      });
+
+      it('resolves without destroying when the init fails', async () => {
+        const { plugin, listener, cleanup, settle } = createDeferredPlugin();
+        pluginManager.register(plugin);
+
+        const init = pluginManager.initPlugin('test-plugin').catch(() => {});
+        const destroyed = pluginManager.destroyPlugin('test-plugin');
+        settle(new Error('init failed'));
+        await init;
+
+        await expect(destroyed).resolves.toBeUndefined();
+        expect(plugin.destroy).not.toHaveBeenCalled();
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        eventBus.emit('playback:play', undefined);
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it('lets a later init start fresh once the pending destroy finishes', async () => {
+        const { plugin, settle } = createDeferredPlugin();
+        pluginManager.register(plugin);
+
+        const firstInit = pluginManager.initPlugin('test-plugin');
+        const destroyed = pluginManager.destroyPlugin('test-plugin');
+        // Asked for again while the destroy is still waiting on the first init
+        const secondInit = pluginManager.initPlugin('test-plugin');
+
+        settle();
+        await firstInit;
+        await destroyed;
+        // The second init runs a fresh init() rather than reusing the
+        // instance the destroy just tore down
+        await vi.waitFor(() => expect(plugin.init).toHaveBeenCalledTimes(2));
+        settle();
+        await secondInit;
+
+        expect(plugin.destroy).toHaveBeenCalledTimes(1);
+        expect(pluginManager.getPluginState('test-plugin')).toBe('ready');
+      });
     });
   });
 

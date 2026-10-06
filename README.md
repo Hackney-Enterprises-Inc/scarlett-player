@@ -286,10 +286,13 @@ Analytics requires a host-supplied `beaconUrl`; there is no default collection
 endpoint. Its 250 ms rebuffer grace (`rebufferGraceMs: 0` restores immediate
 counting) excludes short waits from play time while retaining confirmed stalls'
 full duration. Every sent beacon carries per-view `beaconSeq`; `seeking` has
-`seekSource: 'player' | 'element'`. Heartbeats and ordinary final `viewEnd`
-carry `qoeVersion: 2` and a continuous `qoeScore` (`null` for fatal access
-denial); unload retains its smaller field subset. Error beacons include a
+`seekSource: 'player' | 'element'`. Heartbeats and both `viewEnd`s (ordinary
+and page unload) carry the same counters, `qoeVersion: 2` and a continuous
+`qoeScore` (`null` for fatal access denial). Error beacons include a
 structured category, severity and validated diagnostics, not raw detail URLs.
+A failure the provider auto-reconnects from keeps the view open and is
+reported as `reconnecting`/`recovered` beacons; a view not playing for
+`idleTimeout` (30 minutes by default) ends as `abandoned`.
 
 `respectDoNotTrack` suppresses sends when DNT/GPC opts out; `anonymous` uses
 new IDs per view without storage. `beforeSend` can alter or drop beacons

@@ -23,6 +23,7 @@ vi.mock('@scarlett-player/core', () => {
     init = vi.fn().mockResolvedValue(undefined);
     destroy = vi.fn();
     on = vi.fn();
+    unload = vi.fn().mockResolvedValue(undefined);
     getState = vi.fn(() => snapshot);
     subscribeToState = vi.fn((cb: (event: StateChangeEvent) => void) => {
       stateSubscribers.push(cb);
@@ -105,6 +106,36 @@ describe('useScarlettPlayer reactivity', () => {
 
     expect(result.isBuffering.value).toBe(true);
     expect(result.live.value).toBe(true);
+  });
+
+  it('resets the event-fed refs when the player announces source:unloaded', async () => {
+    const result = await mount();
+    const player = result.player.value as unknown as {
+      on: { mock: { calls: Array<[string, (payload: unknown) => void]> } };
+    };
+    /** Fire a player event at the handlers the composable registered. */
+    const fire = (event: string, payload?: unknown): void =>
+      player.on.mock.calls
+        .filter(([name]) => name === event)
+        .forEach(([, handler]) => handler(payload));
+
+    fire('playback:play');
+    fire('playback:timeupdate', { currentTime: 42 });
+    fire('media:loadedmetadata', { duration: 600 });
+    fire('media:progress', { buffered: 0.5 });
+    fire('error', { message: 'gone' });
+    expect(result.playing.value).toBe(true);
+
+    fire('source:unloaded', { src: 'https://example.com/video.m3u8' });
+    await nextTick();
+
+    expect(result.playing.value).toBe(false);
+    expect(result.paused.value).toBe(true);
+    expect(result.currentTime.value).toBe(0);
+    expect(result.duration.value).toBe(0);
+    expect(result.bufferedAmount.value).toBe(0);
+    expect(result.progress.value).toBe(0);
+    expect(result.error.value).toBeNull();
   });
 
   it('ignores state changes for other keys', async () => {

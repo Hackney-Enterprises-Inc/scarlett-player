@@ -1,0 +1,28 @@
+#!/bin/sh
+# Keep generated site output out of branch commits.
+#
+# release.yml rebuilds and commits these on every push to main, so committing
+# them from a branch only creates merge conflicts with that bot commit. This
+# hook unstages them and lets the rest of the commit through. The working tree
+# is left alone; see AGENTS rules ("Generated outputs").
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Skip for one commit:    git commit --no-verify
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+[ "$branch" = "main" ] && exit 0
+
+generated='^(docs/demo/|docs/site/|demo/assets/|demo/site\.css$|demo/demo\.bundle\.js|docs/(documentation|architecture|plugin-authoring|embed|contributing|vs-videojs|vs-mux|vs-bitmovin)/|docs/llms(-full)?\.txt$)'
+
+staged=$(git diff --cached --name-only | grep -E "$generated")
+[ -z "$staged" ] && exit 0
+
+echo "pre-commit: leaving generated site output out of this commit:"
+echo "$staged" | sed 's/^/  /'
+echo "$staged" | tr '\n' '\0' | xargs -0 git restore --staged --
+
+if git diff --cached --quiet; then
+  echo "pre-commit: nothing else is staged, so there is nothing to commit."
+  exit 1
+fi
+exit 0

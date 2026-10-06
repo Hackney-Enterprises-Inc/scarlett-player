@@ -813,10 +813,11 @@ describe('Chromecast Plugin', () => {
       expect(vi.mocked(api.setState).mock.calls.length).toBe(writesAtDestroy);
     });
 
-    // Fails today: player.destroy() during loadCastSDK() never reaches the
-    // plugin's destroy() (PluginManager skips a record still 'initializing'),
-    // so the late SDK installs four listeners on a dead player and the next
-    // SDK callback throws `Manager is destroyed`. Uses the real core.
+    // player.destroy() during loadCastSDK() does not wait for the SDK, and
+    // the plugin's destroy() only runs once its init settles, so the plugin's
+    // own guard must keep the late SDK from installing listeners on a dead
+    // player (the next SDK callback would throw `Manager is destroyed`).
+    // Uses the real core.
     it('installs nothing when the Cast SDK arrives after the player was destroyed', async () => {
       // This test installs the SDK itself, after destroy.
       delete (window as any).cast;
@@ -845,9 +846,9 @@ describe('Chromecast Plugin', () => {
       }
       expect(mockSDK.mockCastContext.addEventListener).not.toHaveBeenCalled();
       expect(mockSDK.mockRemotePlayerController.addEventListener).not.toHaveBeenCalled();
-      // Documents the core hole this guard contains: an initializing plugin
-      // gets no destroy() call when the player is destroyed.
-      expect(destroySpy).not.toHaveBeenCalled();
+      // player.destroy() did not wait for the SDK (it may never arrive); core
+      // destroys the plugin once its init settles.
+      expect(destroySpy).toHaveBeenCalledTimes(1);
 
       container.remove();
     });
@@ -873,6 +874,134 @@ describe('Chromecast Plugin', () => {
       expect(api.logger.warn).not.toHaveBeenCalledWith('Failed to load Cast SDK', expect.anything());
       const errors = vi.mocked(api.emit).mock.calls.filter(([event]) => event === 'chromecast:error');
       expect(errors).toEqual([]);
+    });
+  });
+
+  describe('player.unload() while casting', () => {
+    beforeEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 Chrome/120.0.0.0',
+        configurable: true,
+      });
+      mockSDK = createMockCastSDK();
+      mockSDK.setup();
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 jsdom',
+        configurable: true,
+      });
+    });
+
+    /** The handler the plugin registered for a bus event. */
+    const handlerFor = (api: IPluginAPI, event: string): ((payload?: any) => any) => {
+      const call = (api.on as any).mock.calls.find((args: any[]) => args[0] === event);
+      expect(call).toBeDefined();
+      return call[1];
+    };
+
+    /** Start a cast session with media playing on the receiver. */
+    const startCasting = async () => {
+      const mock = createMockApi();
+      const plugin = chromecastPlugin();
+      await plugin.init(mock.api);
+      mockSDK.sessionHandlers.forEach((handler) => handler({ sessionState: 'SESSION_STARTED' }));
+      await Promise.resolve();
+      mockSDK.mockRemotePlayer.isPaused = false;
+      mockSDK.mockRemotePlayer.isMediaLoaded = true;
+      return { ...mock, plugin };
+    };
+
+    it('stops the media on the receiver and keeps the session', async () => {
+      const { api, state } = await startCasting();
+
+      handlerFor(api, 'source:unloaded')({ src: 'https://example.com/video.m3u8' });
+
+      expect(mockSDK.mockRemotePlayerController.stop).toHaveBeenCalledTimes(1);
+      expect(mockSDK.mockSession.endSession).not.toHaveBeenCalled();
+      expect(state.chromecastActive).toBe(true);
+    });
+
+    it('does not sync receiver state into the unloaded player', async () => {
+      const { api, state } = await startCasting();
+      handlerFor(api, 'source:unloaded')({ src: null });
+      state.playing = false;
+      state.currentTime = 0;
+
+      mockSDK.mockRemotePlayer.currentTime = 42;
+      mockSDK.remotePlayerHandlers.forEach((handler) => handler({}));
+
+      expect(state.playing).toBe(false);
+      expect(state.currentTime).toBe(0);
+    });
+
+    it('routes no play, pause or seek to the stopped receiver', async () => {
+      const { api } = await startCasting();
+      handlerFor(api, 'source:unloaded')({ src: null });
+
+      mockSDK.mockRemotePlayer.isPaused = true;
+      handlerFor(api, 'playback:play')();
+      mockSDK.mockRemotePlayer.isPaused = false;
+      handlerFor(api, 'playback:pause')();
+      handlerFor(api, 'playback:seeking')({ time: 10 });
+
+      expect(mockSDK.mockRemotePlayerController.playOrPause).not.toHaveBeenCalled();
+      expect(mockSDK.mockRemotePlayerController.seek).not.toHaveBeenCalled();
+    });
+
+    it('stops media whose load on the receiver finishes after the unload', async () => {
+      const mock = createMockApi();
+      const plugin = chromecastPlugin();
+      await plugin.init(mock.api);
+      let finishLoad!: () => void;
+      mockSDK.mockSession.loadMedia.mockReturnValueOnce(
+        new Promise<void>((resolve) => { finishLoad = resolve; })
+      );
+      mockSDK.sessionHandlers.forEach((handler) => handler({ sessionState: 'SESSION_STARTED' }));
+
+      handlerFor(mock.api, 'source:unloaded')({ src: null });
+      mockSDK.mockRemotePlayerController.stop.mockClear();
+      finishLoad();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockSDK.mockRemotePlayerController.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resume a local video at the old cast position when the session ends', async () => {
+      const { api, video } = await startCasting();
+      const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+      handlerFor(api, 'source:unloaded')({ src: null });
+
+      mockSDK.mockRemotePlayer.currentTime = 42;
+      mockSDK.sessionHandlers.forEach((handler) => handler({ sessionState: 'SESSION_ENDED' }));
+
+      expect(play).not.toHaveBeenCalled();
+      expect(video.currentTime).toBe(0);
+    });
+
+    it('syncs again once a media:load-request loads on the receiver', async () => {
+      const { api, state } = await startCasting();
+      handlerFor(api, 'source:unloaded')({ src: null });
+
+      await handlerFor(api, 'media:load-request')({ src: 'https://example.com/next.m3u8' });
+      mockSDK.mockRemotePlayer.currentTime = 7;
+      mockSDK.remotePlayerHandlers.forEach((handler) => handler({}));
+
+      expect(mockSDK.mockSession.loadMedia).toHaveBeenCalledTimes(2);
+      expect(state.currentTime).toBe(7);
+      expect(state.playing).toBe(true);
+    });
+
+    it('sends nothing to the receiver when not casting', async () => {
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+      await plugin.init(api);
+
+      handlerFor(api, 'source:unloaded')({ src: null });
+
+      expect(mockSDK.mockRemotePlayerController.stop).not.toHaveBeenCalled();
     });
   });
 

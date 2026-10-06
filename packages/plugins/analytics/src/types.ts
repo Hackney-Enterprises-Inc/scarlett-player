@@ -18,7 +18,9 @@ export type AnalyticsEventType =
   | 'rebufferStart'
   | 'rebufferEnd'
   | 'qualityChange'
-  | 'error';
+  | 'error'
+  | 'reconnecting'
+  | 'recovered';
 
 /**
  * Viewer plan/subscription type.
@@ -26,9 +28,10 @@ export type AnalyticsEventType =
 export type ViewerPlan = 'free' | 'ppv' | 'subscriber' | 'premium' | string;
 
 /**
- * Exit type enumeration.
+ * Exit type enumeration. `liveEnded` is a live stream that ended: the
+ * broadcast is over, which is not the viewer completing it.
  */
-export type ExitType = 'completed' | 'abandoned' | 'error' | 'background' | null;
+export type ExitType = 'completed' | 'liveEnded' | 'abandoned' | 'error' | 'background' | null;
 
 /**
  * Playback state for session tracking.
@@ -62,10 +65,13 @@ export interface AnalyticsConfig {
    * `Content-Type` and `X-API-Key`, so either can be overridden.
    *
    * The unload beacon (`viewEnd` on pagehide) goes out through
-   * `navigator.sendBeacon`, which carries no headers at all; its fetch
-   * fallback merges a static object but never calls a function, because a
-   * promise awaited in a pagehide handler may never settle. Authenticate that
-   * one with `apiKey`, which rides the URL.
+   * `navigator.sendBeacon`, which carries no headers at all. Its fetch
+   * fallback merges a static object, and calls a function once without
+   * waiting: a plain object it returns is used, but a promise is not awaited
+   * (one awaited in a pagehide handler may never settle), so an async
+   * function's headers are left off that request. A throwing or rejecting
+   * function is logged at debug and the beacon still goes out. Authenticate
+   * the unload beacon with `apiKey`, which rides the URL.
    */
   headers?:
     | Record<string, string>
@@ -109,6 +115,17 @@ export interface AnalyticsConfig {
    * timestamp is its send time, not the original waiting time.
    */
   rebufferGraceMs?: number;
+
+  /**
+   * End a view that has not been playing for this long (ms, default: 1800000,
+   * 30 minutes). Paused, stalled, still loading or never started all count as
+   * not playing. The view sends its `viewEnd` with exitType `abandoned` and
+   * stops its heartbeat; playback that resumes later (a play, a stall that
+   * recovers, a reconnect) starts a new view. Checked at each heartbeat, so the
+   * end can come up to one `heartbeatInterval` late. Zero disables; negative or
+   * non-finite values use the default.
+   */
+  idleTimeout?: number;
 
   /** Error sampling rate 0-1 (default: 1.0 = 100%) */
   errorSampleRate?: number;
@@ -208,14 +225,31 @@ export interface ViewSession {
   /** Actual playback time (excludes waiting, including dropped grace, and pauses) (ms) */
   playTime: number;
 
+  /**
+   * Playback time spent behind the live edge after a seek (ms): the
+   * `playTime` rule, counted only while the view is in DVR mode. Zero on VOD,
+   * and only sent on live views.
+   */
+  dvrTime: number;
+
   /** Number of times user paused */
   pauseCount: number;
 
   /** Total time spent paused (ms) */
   pauseDuration: number;
 
-  /** Number of seek operations */
+  /**
+   * Number of seeks: player seeks plus element seek bursts (element seeks
+   * each within 2 s of the previous one count once).
+   */
   seekCount: number;
+
+  /**
+   * Every element (native controls or media) seek that was not the echo of
+   * a player seek, uncoalesced, so a seek storm shows without one beacon per
+   * seek.
+   */
+  elementSeekCount: number;
 
   // === Quality of Experience (QoE) Metrics ===
   /** Time from play request to first frame (ms) */
@@ -226,6 +260,16 @@ export interface ViewSession {
 
   /** Total rebuffer time (ms) */
   rebufferDuration: number;
+
+  /**
+   * Provider auto-reconnect outages in this view: each run of
+   * `error:reconnecting` up to its `error:recovered` or the view's end
+   * counts once, however many attempts it took.
+   */
+  reconnectCount: number;
+
+  /** Total time spent in those outages within this view (ms) */
+  reconnectDuration: number;
 
   /** Number of errors encountered */
   errorCount: number;
@@ -246,11 +290,14 @@ export interface ViewSession {
   /** Number of quality level changes */
   qualityChanges: number;
 
-  /** Maximum bitrate achieved (bps) */
-  maxBitrate: number;
+  /** Maximum bitrate achieved (bps), or null until a quality change supplies one */
+  maxBitrate: number | null;
 
-  /** Average bitrate during playback (bps) */
-  avgBitrate: number;
+  /**
+   * Average bitrate during playback (bps), weighted by time at each level, or
+   * null until a quality change supplies one
+   */
+  avgBitrate: number | null;
 
   // === Exit Information ===
   /** Current playback state */
@@ -322,6 +369,11 @@ export interface BeaconPayload {
   retriesExhausted?: boolean;
   /** Whether reconnect attempts were exhausted. */
   reconnectExhausted?: boolean;
+  /**
+   * On an error beacon: the provider will auto-reconnect, so the fatal
+   * error is reported as a warning and the view stays open.
+   */
+  reconnecting?: boolean;
   /** Whether the provider reported a timeout. */
   timedOut?: boolean;
   /** Non-fatal errors accumulated for this view. */
