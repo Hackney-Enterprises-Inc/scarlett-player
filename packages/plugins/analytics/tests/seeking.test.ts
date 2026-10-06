@@ -157,9 +157,9 @@ describe('element-driven seeking', () => {
     vi.advanceTimersByTime(1001);
     h.elementSeek(40);
     h.state.set('seeking', false);
-    h.elementSeek(50);
-    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([20, 30, 40, 50]);
-    expect(h.plugin.getMetrics().seekCount).toBe(4);
+    h.elementSeek(50); // Within 2 s of 40: the same element seek burst (HEI-32).
+    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([20, 30, 40]);
+    expect(h.plugin.getMetrics()).toMatchObject({ seekCount: 3, elementSeekCount: 2 });
   });
 
   it.each([1000, 1001, 1100])('expires coalesced echoes before a new bus request at %i ms', (delay) => {

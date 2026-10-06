@@ -98,6 +98,7 @@ const player = await createPlayer({
   // Behavior
   heartbeatInterval?: number;     // Default: 10000ms (10 seconds)
   rebufferGraceMs?: number;       // Default: 250ms; 0 opens synchronously; negative/non-finite uses 250
+  idleTimeout?: number;           // Default: 1800000ms (30 min); 0 disables; negative/non-finite uses the default (see Idle views)
   errorSampleRate?: number;       // Default: 1.0 (100%)
   disableInDev?: boolean;         // Default: false
   respectDoNotTrack?: boolean;    // Default: false; suppress beacons for DNT=1 or GPC
@@ -107,7 +108,7 @@ const player = await createPlayer({
   batch?: boolean | { intervalMs?: number; maxEvents?: number }; // Off by default; 10s/20 events
   apiKey?: string;                // HTTPS endpoints only: X-API-Key header, or ?api_key= on unload (see API key transport)
   headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
-                                  // Extra headers for the fetch transport; a function is resolved per beacon (CSRF, Bearer)
+                                  // Extra headers for the fetch transport; a function is resolved per beacon (CSRF, Bearer), unload has limits (see Extra headers)
   customBeacon?: (url: string, payload: BeaconPayload) => void; // Replace the transport (see Testing)
 }
 ```
@@ -123,14 +124,36 @@ The plugin automatically tracks these events:
 | `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment, pageUrl (origin + pathname only), optional referrerOrigin, pageLoadToInitMs, optional playerInitMs |
 | `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
-| `heartbeat` | Periodic update (10s default) | watchTime, playTime (only the time actually spent playing, not stalled or paused), warningCount, qoeScore, qoeVersion: 2 |
+| `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 2, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional interval fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames (see below) |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
-| `seeking` | A player-requested or element-driven seek started (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount, seekSource: `'player'` or `'element'` |
+| `seeking` | A player-requested seek, or the first element-driven seek of a burst, started (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount, seekSource: `'player'` or `'element'` |
 | `rebufferStart` | Buffering persisted through `rebufferGraceMs` (250 ms default); duration is measured from the first eligible `waiting`, not this beacon's timestamp | rebufferCount |
 | `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
-| `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), errorCode, fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, attempts, retriesExhausted, reconnectExhausted, timedOut when provided. Classification uses code/detail, not message text; no raw detail or signed URL is sent |
-| `viewEnd` | View ended: the video ended, a fatal error, another video, the page unloading, or the plugin being destroyed | Final metrics, exitType, warningCount, optional fatalErrorCategory, qoeScore, qoeVersion: 2 (except unload's 1.19.3 field subset). watchTime and playTime include the time since the last heartbeat. completionRate is 100 for a `completed` view; otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them |
+| `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), optional errorCode (string or number), fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, networkState, readyState, attempts, retriesExhausted, reconnectExhausted, reconnecting, timedOut when the provider supplies them; online (boolean, when `navigator.onLine` is available); sourceHost (the source's host name only: no scheme, port, path, query or fragment; absent for `blob:`/`data:` sources). Classification uses code/detail, not message text: an element error with no player code is classified by its MediaError code (2 `network`, 3 `media`, 4 `source`). No raw detail or signed URL is sent. A fatal error marked `reconnecting` is sent with errorSeverity `warning` (see [Reconnects](#reconnects)) |
+| `reconnecting` | The provider started auto-reconnecting (see [Reconnects](#reconnects)) | reconnectCount; attempt, delayMs and elapsedMs when supplied as finite numbers; longOutage (when true) |
+| `recovered` | A reconnect succeeded (see [Reconnects](#reconnects)) | duration (ms of the outage), reconnectCount; attempt and elapsedMs when supplied as finite numbers |
+| `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, optional fatalErrorCategory and completionRate. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or 0 if no duration is known. startupTime is null until the first frame |
+
+The segment and frame fields are interval measurements, not cumulative counters.
+`segmentCount`, `segmentBytes`, `segmentLoadAvgMs`, `segmentLoadMaxMs` and
+`segmentErrors` are present only when measurable segment requests arrived since
+the previous metrics beacon; load times are in ms. `segmentThroughputBps` is
+present only with a positive main-segment load interval and measures bits per
+second. `decodedFrames` and `droppedFrames` are deltas between valid readings
+of the same media element's `getVideoPlaybackQuality()` counters; unavailable
+or reset counters omit them. Both `viewEnd` paths use these same rules.
+
+A closed view stays closed. Once its `viewEnd` has gone, no `error`, `pause`,
+`rebufferStart`, `qualityChange` or visibility heartbeat is sent for it and its
+counters stay as they were; a second fatal error sends no second `viewEnd`.
+Custom events from `trackEvent()` still go out. What opens the next view is
+covered in [Views and track changes](#views-and-track-changes).
+
+`maxBitrate` and `avgBitrate` are `null`, not 0, until a quality change reports
+a level with a bitrate above 0 (native HLS, MP4 and WHEP often never do), in
+beacons and in `getMetrics()`. `avgBitrate` is weighted by time at each level
+and current on every heartbeat and `viewEnd`.
 
 ### Rebuffer grace and time accounting
 
@@ -150,9 +173,13 @@ rebuffer beacons or an increase in `rebufferCount`.
   `rebufferEnd.duration`, `totalRebufferTime` and the `rebufferDuration` metric
   include the full stall from the original waiting, including the grace. Do
   not derive stall duration by subtracting the two beacon timestamps.
-- `watchTime` includes elapsed time in the view, including pending waiting.
-  `playTime` accrues only while playing, with neither a pending nor a confirmed
-  stall. Even an 11 ms blip that is dropped from rebuffer metrics counts as
+- `watchTime` is the time the view was open: wall time from `viewStart` to the
+  view's end, paused, stalled and pending waiting included. `playTime` is
+  engaged time and accrues only while playing, with neither a pending nor a confirmed
+  stall. Playing means the player's `playing` state key is true: a play
+  request still waiting for its first frame, and a view whose playback a
+  `load()` stopped with no pause, accrue none. A custom provider must
+  therefore keep the `playing` key current. Even an 11 ms blip that is dropped from rebuffer metrics counts as
   watch time but not play time; a heartbeat during the grace follows the same
   rule. A 400 ms stall confirmed at 250 ms therefore excludes all 400 ms from
   play time, not just the final 150 ms.
@@ -163,7 +190,8 @@ there is no embed data attribute for it.
 
 ### Seek tracking
 
-While the view is open, both seek paths send `seeking` and increment `seekCount`:
+While the view is open, both seek paths count in `seekCount`, which is player
+seeks plus element seek bursts:
 
 - **`seekSource: 'player'`**: a `playback:seeking { time }` bus request. This
   includes core `player.seek()`, gesture seeks, media-session seek actions,
@@ -177,6 +205,12 @@ While the view is open, both seek paths send `seeking` and increment `seekCount`
   does not emit a seek request). HLS (including native Safari) and native providers
   publish the element's new `currentTime` before setting `seeking: true`, so
   `seekTo` is the target rather than the previous timeupdate position.
+  Element seeks each within 2 s of the previous one are one burst: only its
+  first sends `seeking` and counts in `seekCount`. A view sends at most 30
+  element `seeking` beacons; bursts after that still count in `seekCount`.
+  `elementSeekCount` (heartbeat and both `viewEnd`s) counts every element seek
+  that was not a player seek's echo, uncoalesced, so a seek storm shows in one number rather than a flood of
+  beacons.
 
 `seekSource` identifies the path, not a particular input device: an OS action
 handled by media-session is `'player'`, not `'element'`. Analytics consumes
@@ -197,10 +231,81 @@ play request still starts exactly one new view with fresh counts and sequence.
 
 ### Exit Types
 
-- `completed` - Video played to the end
-- `abandoned` - User left before completion, or moved to another video
-- `error` - Fatal error stopped playback
+- `completed` - VOD played to the end
+- `liveEnded` - The media element reported an end on a live-classified view;
+  this does not establish whether the broadcast is over. The QoE score treats
+  it like `completed`
+- `abandoned` - User left before completion, moved to another video, the host
+  called `player.unload()`, or the view hit the [idle timeout](#idle-views)
+- `error` - Fatal error stopped playback (a failure the provider will
+  reconnect from does not; see [Reconnects](#reconnects))
 - `background` - Tab/window was backgrounded
+
+### Idle views
+
+A view that has not been playing for `idleTimeout` (default 30 minutes) ends:
+it sends its `viewEnd` with exitType `abandoned` and its heartbeat stops.
+Paused, stalled, still loading, never started, a play request that never
+reached a frame, and stopped by a `load()` without autoplay all count as not
+playing. The
+check runs on the heartbeat tick, so the end can come up to one
+`heartbeatInterval` late. `0` disables it; negative or non-finite values use
+the default. Before this, a tab left paused kept its view open and its
+heartbeat running for as long as the page stayed open.
+
+What reopens a view afterwards: a play request reopens any ended view (as a
+replay does), including after `pagehide` or `beforeunload`. A passive resume, meaning `playing` turning true, a stall
+recovering, or `error:recovered` while the player is not paused, reopens only
+a view that the idle timeout ended. Either way it is a new view of the same
+video, with its own `viewStart`.
+
+### Live latency
+
+On live views, heartbeats and both `viewEnd` paths carry `liveLatencySamples`
+(a count), `liveLatencyMean`, `liveLatencyP95` and `liveLatencyMax` (seconds) and
+`lowLatency` (whether the stream was ever effectively low latency), from the
+first sampled reading on. They are absent on VOD.
+They measure delivery latency at the live edge: readings before the view's
+first frame are left out, and so are readings while the viewer watches the
+DVR window after seeking back, since that offset is the viewer's choice. After
+a seek, sampling waits until seeking settles and a fresh reading (or the next
+heartbeat's state check) determines whether playback is at the edge. Sampling
+resumes at the edge; time awaiting that decision counts as neither latency nor
+`dvrTime`. A viewer who
+drifts behind without seeking is still sampled.
+
+`dvrTime` (ms, live views only) is the play time spent behind the edge after a
+seek, counted by the same rule as `playTime`.
+
+### Reconnects
+
+The HLS and WHEP providers auto-reconnect after some failures, and mark the
+fatal `error` that opens such an outage with `detail.reconnecting: true`. The
+plugin follows that marker:
+
+- The marked error is sent as an `error` beacon with `errorSeverity: 'warning'`
+  and `reconnecting: true`, counts in `warningCount` (and `errorCount`), and
+  does not end the view.
+- The first `error:reconnecting` of an outage sends a `reconnecting` beacon
+  (reconnectCount, and the provider's attempt, delayMs and elapsedMs), counts
+  the outage in `reconnectCount` and starts its `reconnectDuration` clock.
+  Later attempts in the same outage send nothing, except the first one
+  flagged as a long outage, which sends `reconnecting` once more with
+  `longOutage: true`.
+- After the first frame, and unless the viewer is paused, the outage is also a
+  rebuffer: `rebufferStart` goes out at once and the outage's time counts in
+  `rebufferDuration`.
+- `error:recovered` sends `recovered` (duration of the outage in ms,
+  reconnectCount, and the provider's attempt and elapsedMs), closes the
+  rebuffer with `rebufferEnd`, and adds the outage to `reconnectDuration`.
+- The view ends as `error` only on a terminal failure: a reconnect that gave
+  up (`detail.reconnectExhausted`), or a fatal error without the marker.
+  An outage still open when the view ends for another reason is counted up to
+  that end.
+
+`reconnectCount` and `reconnectDuration` (ms, an open outage included) are on
+every heartbeat and both `viewEnd`s. A provider without the marker behaves as
+before: every fatal error ends the view.
 
 ## Custom Event Tracking
 
@@ -256,7 +361,8 @@ Every beacon sent includes:
   playerName: string;
 
   // Environment
-  browser: string;            // 'Chrome', 'Safari', etc.
+  browser: string;            // 'Chrome' (Chrome on iOS too), 'Safari', etc.; in-app browsers are named:
+                              // 'Instagram', 'Facebook', 'Google App', 'LinkedIn', 'TikTok'
   os: string;                 // 'Windows', 'macOS', 'iOS' (iPhone, iPad), 'Android', etc.
   deviceType: string;         // 'desktop', 'mobile', 'tablet'
   screenSize: string;         // '1920x1080'
@@ -325,9 +431,13 @@ its own `viewStart`.
   view. The plugin only knows the video changed when told its ID, never from
   the URL.
 - **Playing again after the view ended** (a replay after `ended`, a retry
-  after a fatal error) starts a new view of the same video. A replay keeps
-  the ended view's `isLive`, since nothing reloads the source to classify it
-  again.
+  after a fatal error, a play after `player.unload()` or the
+  [idle timeout](#idle-views)) starts a new view of the same video. A replay
+  keeps the ended view's `isLive`, since nothing reloads the source to
+  classify it again.
+- **`player.unload()`** ends the open view as `abandoned` with the full
+  `viewEnd` (the `source:unloaded` event). The next play request starts a new
+  view.
 
 A playlist tells the plugin by itself. After `playlist:change`, the next
 source load starts a view for that track. The view reports the track's
@@ -512,10 +622,14 @@ being dropped.
 
 The unload beacon is the exception, and it is the same exception as everywhere
 else here: it travels by `navigator.sendBeacon`, which carries no headers at
-all. Its fetch fallback merges a static object, but never calls a function -
-the handler runs during pagehide, where a promise may never settle and a beacon
-that waits for a token is a beacon that never leaves. Authenticate that one
-with `apiKey`, which rides the URL.
+all. Its fetch fallback merges a static object, and calls a function once
+without waiting: a plain object it returns synchronously is used, but an async
+result is neither awaited nor used - the handler runs during pagehide, where a
+promise may never settle and a beacon that waits for a token is a beacon that
+never leaves. A function that throws or rejects there is logged at debug and
+the beacon still goes out without its headers. Authenticate that one with
+`apiKey`: `sendBeacon` uses the URL query parameter; the fetch fallback uses
+`X-API-Key` on HTTPS endpoints.
 
 The key is attached only when `beaconUrl` resolves to HTTPS (a relative URL
 counts when the page itself is HTTPS). Over plain HTTP it is sent on neither

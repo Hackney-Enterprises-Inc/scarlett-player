@@ -141,6 +141,23 @@ export class ScarlettPlayer {
   /** Counter to detect stale load() calls */
   private loadGeneration = 0;
 
+  /**
+   * The source the last `load()` asked for, cleared by `unload()`. Unlike the
+   * `source` state key it is set before the provider is chosen, so an unload
+   * can tell an in-flight load from an empty player.
+   */
+  private requestedSource: string | null = null;
+
+  /**
+   * An `unload()`'s provider destroy while it is in flight, so an `unload()`
+   * that follows a newer `load()` in that window waits for the same teardown
+   * instead of resolving before the provider is gone.
+   */
+  private providerTeardown: Promise<void> | null = null;
+
+  /** The in-flight `unload()`, shared by a repeat call made before it ends. */
+  private pendingUnload: { generation: number; promise: Promise<void> } | null = null;
+
   /** True once the lifecycle listeners have been wired (they are wired once) */
   private listenersWired = false;
 
@@ -465,6 +482,7 @@ export class ScarlettPlayer {
 
     // Increment generation to invalidate any in-flight load
     const generation = ++this.loadGeneration;
+    this.requestedSource = source;
 
     try {
       this.logger.info('Loading source', { source });
@@ -489,6 +507,14 @@ export class ScarlettPlayer {
         this.logger.info('Destroying previous provider', { provider: previousProviderId });
         await this.pluginManager.destroyPlugin(previousProviderId);
         this._currentProvider = null;
+      }
+
+      // An unload() still tearing its provider down (it waits for a pending
+      // init) has already cleared _currentProvider, so the block above saw
+      // nothing. Wait for it: a teardown that lands after another provider
+      // has loaded removes that provider's reused media element.
+      if (this.providerTeardown) {
+        await this.providerTeardown;
       }
 
       // Initialise non-provider plugins and the lifecycle listeners before a
@@ -570,6 +596,150 @@ export class ScarlettPlayer {
         }
       }
     }
+  }
+
+  /**
+   * Unload the current source and return the player to its empty state.
+   *
+   * Supersedes any in-flight `load()` (it bails at its next checkpoint),
+   * cancels a pending post-seek resume, and destroys the active provider,
+   * which closes its connection or pipeline and removes its media element. A
+   * provider still inside its `init()` is destroyed as soon as that settles.
+   * Then applies the unloaded state: `source` null, `playbackState` idle,
+   * not playing, paused, not ended, not buffering, waiting or seeking,
+   * `currentTime`, `duration` and `bufferedAmount` 0, no error, not live, and
+   * the provider-owned track, quality and live keys cleared. `poster`,
+   * `title`, `chapters` and the user's settings (volume, rate, autoplay) are
+   * left as they are.
+   *
+   * Emits `source:unloaded` once the provider is gone and the state applied.
+   * A no-op, with no event, when nothing is loaded or loading. When a newer
+   * `load()` is called before the unload finishes, that load owns the state:
+   * the unload still destroys the old provider but applies no state and emits
+   * nothing, and the load selects its provider only once that teardown is
+   * done, whichever provider it is.
+   *
+   * The player stays usable: the next `load()` works as on a fresh instance.
+   * Use `destroy()` instead to discard the player for good.
+   *
+   * @returns Resolves once the provider is destroyed and the state applied
+   * @throws When the player has been destroyed
+   *
+   * @example
+   * ```ts
+   * await player.unload(); // leave the stream, keep the player
+   * await player.load('next.m3u8');
+   * ```
+   */
+  async unload(): Promise<void> {
+    this.checkDestroyed();
+
+    // A second unload() before the first finished, with no load() between
+    if (this.pendingUnload && this.pendingUnload.generation === this.loadGeneration) {
+      return this.pendingUnload.promise;
+    }
+
+    const provider = this._currentProvider;
+    const src = this.requestedSource;
+    if (!provider && src === null && !this.providerTeardown) {
+      return;
+    }
+
+    // Invalidate any in-flight load through the same counter load() trusts
+    const generation = ++this.loadGeneration;
+    const promise = this.runUnload(generation, provider, src);
+    const pending = { generation, promise };
+    this.pendingUnload = pending;
+    try {
+      await promise;
+    } finally {
+      if (this.pendingUnload === pending) {
+        this.pendingUnload = null;
+      }
+    }
+  }
+
+  /**
+   * The body of `unload()`, run once per effective unload.
+   *
+   * @param generation - The load generation this unload claimed
+   * @param provider - The provider to destroy, if one was selected
+   * @param src - The source the last `load()` asked for
+   */
+  private async runUnload(
+    generation: number,
+    provider: Plugin | null,
+    src: string | null
+  ): Promise<void> {
+    this.logger.info('Unloading source');
+
+    this._currentProvider = null;
+    this.requestedSource = null;
+
+    this.seekingWhilePlaying = false;
+    if (this.seekResumeTimeout !== null) {
+      clearTimeout(this.seekResumeTimeout);
+      this.seekResumeTimeout = null;
+    }
+
+    if (provider) {
+      const teardown = this.pluginManager.destroyPlugin(provider.id).catch((error) => {
+        this.logger.error('Error destroying provider during unload', {
+          provider: provider.id,
+          error: (error as Error).message,
+        });
+      });
+      this.providerTeardown = teardown;
+      try {
+        await teardown;
+      } finally {
+        if (this.providerTeardown === teardown) {
+          this.providerTeardown = null;
+        }
+      }
+    } else if (this.providerTeardown) {
+      await this.providerTeardown;
+    }
+
+    // A newer load() (or destroy()) took over while the provider went down
+    if (generation !== this.loadGeneration) {
+      return;
+    }
+
+    const wasLowLatency = this.stateManager.getValue('lowLatencyMode');
+    this.stateManager.update({
+      source: null,
+      playbackState: 'idle',
+      playing: false,
+      paused: true,
+      ended: false,
+      buffering: false,
+      waiting: false,
+      seeking: false,
+      currentTime: 0,
+      duration: 0,
+      buffered: null,
+      bufferedAmount: 0,
+      error: null,
+      mediaType: 'unknown',
+      qualities: [],
+      currentQuality: null,
+      audioTracks: [],
+      currentAudioTrack: null,
+      textTracks: [],
+      currentTextTrack: null,
+      live: false,
+      liveEdge: false,
+      seekableRange: null,
+      liveLatency: 0,
+      lowLatencyMode: false,
+    });
+    if (wasLowLatency) {
+      this.eventBus.emit('live:lowlatency', { enabled: false });
+    }
+
+    this.logger.info('Source unloaded');
+    this.eventBus.emit('source:unloaded', { src });
   }
 
   /**

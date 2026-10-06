@@ -85,10 +85,13 @@
  *      and leaving the scenario drops the parameters. A failed source keeps a
  *      way back to the form. A WHEP endpoint answering 503 keeps the join
  *      pending and retrying; typing a second endpoint re-enables Connect and
- *      the first endpoint's reconnect timers stop (zero further POSTs). When
- *      the first endpoint recovers (a real WebRTC answer) while the visitor
- *      is still typing after Change source, the form, the typed URL and the
- *      address bar are left alone. A shared link whose autoplay is still
+ *      the first endpoint's reconnect timers stop (zero further POSTs). Change
+ *      source unloads the player, so an endpoint that would recover while the
+ *      visitor is still typing gets no further POST, and the form, the typed
+ *      URL and the address bar are left alone. Disconnect and Change source
+ *      on a joined WHEP stream close the player's RTCPeerConnection, DELETE
+ *      the session and leave the player unloaded (HEI-27); a WHEP endpoint
+ *      answering 404 shows Failed, not Connected. A shared link whose autoplay is still
  *      pending (first segment held) does not start playing once the visitor
  *      has pressed Change source or left the scenario. Every
  *      malformed parameter (another scheme, markup, unknown type, absurd
@@ -2485,8 +2488,10 @@ ${addonTags}
   }
 
   // --- 13g: the old endpoint recovers while the visitor is typing a new one.
-  // Change source must abandon the pending join: a real WebRTC answer from the
-  // recovered endpoint may not take the stage or the address bar back.
+  // Change source unloads the player, so the pending join stops retrying: the
+  // recovered endpoint is never asked again, and nothing may take the stage
+  // or the address bar back. (Before player.unload() the join kept retrying
+  // and a real answer arrived; the answer route stays to catch a regression.)
   {
     const endpointOld = 'http://127.0.0.1:8899/live/scenario-13-g/whep';
     const endpointNew = 'http://127.0.0.1:8899/live/scenario-13-g-new/whep';
@@ -2494,8 +2499,10 @@ ${addonTags}
     const { page, collect } = tracked;
     let recover = false;
     let answered = 0;
+    let postsAfterChange = 0;
     await page.route(endpointOld, async (route) => {
       if (route.request().method() !== 'POST') return route.fulfill({ status: 204 });
+      if (recover) postsAfterChange += 1;
       if (!recover) return route.fulfill({ status: 503, headers: { 'Retry-After': '1', 'Access-Control-Allow-Origin': '*' }, body: '' });
       const answer = await page.evaluate(async (offer) => {
         const pc = new RTCPeerConnection();
@@ -2524,10 +2531,9 @@ ${addonTags}
     await page.click('#source-change');
     await page.fill('#whep-url', endpointNew);
     recover = true;
-    const deadline = Date.now() + 20000;
-    while (answered < 1 && Date.now() < deadline) await page.waitForTimeout(250);
-    // Give the abandoned continuation time to act if it were still live.
-    await page.waitForTimeout(4000);
+    // Long enough for several Retry-After: 1 reconnects had the join survived,
+    // and for an abandoned continuation to act if it were still live.
+    await page.waitForTimeout(6000);
     const after = await page.evaluate(() => ({
       formVisible: !document.querySelector('#stage-whep').hidden,
       videoStageHidden: document.querySelector('#stage-video').hidden,
@@ -2535,7 +2541,7 @@ ${addonTags}
       src: new URL(location.href).searchParams.get('src'),
       playing: window.player.getState().playing,
     }));
-    record('13g the old endpoint recovered with a real answer while the form was open', answered >= 1, `answers: ${answered}`);
+    record('13g Change source stops the pending join (no POST to the old endpoint after it)', postsAfterChange === 0 && answered === 0, `POSTs after: ${postsAfterChange}, answers: ${answered}`);
     record('13g the form stays up with the visitor\'s new URL', after.formVisible && after.videoStageHidden && after.input === endpointNew, JSON.stringify(after));
     record('13g the address bar is not taken back by the old endpoint', after.src === null, String(after.src));
     record('13g the abandoned source does not start playing', after.playing === false, String(after.playing));
@@ -2563,15 +2569,130 @@ ${addonTags}
     await page.waitForFunction(() => document.querySelector('#stage-video').hidden, {}, { timeout: 10000 });
     release();
     await page.waitForTimeout(3000);
-    const after = await page.evaluate(() => ({
-      hidden: document.querySelector('#stage-video').hidden,
-      paused: document.querySelector('#player video').paused,
-      playing: window.player.getState().playing,
-      time: document.querySelector('#player video').currentTime,
-    }));
+    // Change source unloads the player, which removes the element with the
+    // provider; leaving the scenario only pauses it.
+    const after = await page.evaluate(() => {
+      const video = document.querySelector('#player video');
+      return {
+        hidden: document.querySelector('#stage-video').hidden,
+        paused: video ? video.paused : true,
+        playing: window.player.getState().playing,
+        time: video ? video.currentTime : 0,
+      };
+    });
     record(`13h ${action}: a pending autoplay does not start behind the hidden stage`, after.hidden && after.paused && !after.playing && after.time < 0.1, JSON.stringify(after));
     const errs = await collect();
     record(`13h ${action}: zero uncaught errors`, errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13i: Disconnect and Change source on a joined WHEP stream unload the
+  // player (HEI-27): its RTCPeerConnection closes, the session is DELETEd, no
+  // join follows, and the player is left empty for the next source.
+  for (const action of ['disconnect', 'change-source']) {
+    const endpoint = `http://127.0.0.1:8899/live/scenario-13-i-${action}/whep`;
+    const tracked = await newTrackedPage();
+    const { page, collect } = tracked;
+    // Count the player's own peer connections; the answering side below uses
+    // the unwrapped constructor so it is not counted.
+    await page.addInitScript(() => {
+      const Native = window.RTCPeerConnection;
+      window.__NativeRTCPeerConnection = Native;
+      window.__playerPeers = [];
+      window.RTCPeerConnection = class extends Native {
+        constructor(...args) {
+          super(...args);
+          window.__playerPeers.push(this);
+        }
+      };
+    });
+    let posts = 0;
+    let deletes = 0;
+    await page.route(new RegExp(`/live/scenario-13-i-${action}/`), async (route) => {
+      const method = route.request().method();
+      if (method === 'DELETE') {
+        deletes += 1;
+        return route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' } });
+      }
+      if (method !== 'POST') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*' } });
+      posts += 1;
+      const answer = await page.evaluate(async (offer) => {
+        const pc = new window.__NativeRTCPeerConnection();
+        window.__scenario13iServer = pc;
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; canvas.height = 180;
+        const context = canvas.getContext('2d');
+        setInterval(() => { context.fillStyle = `hsl(${Date.now() % 360} 50% 50%)`; context.fillRect(0, 0, 320, 180); }, 50);
+        const stream = canvas.captureStream(20);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        await pc.setRemoteDescription({ type: 'offer', sdp: offer });
+        await pc.setLocalDescription(await pc.createAnswer());
+        await new Promise((resolve) => {
+          if (pc.iceGatheringState === 'complete') return resolve();
+          pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') resolve(); });
+          setTimeout(resolve, 1500);
+        });
+        return pc.localDescription.sdp;
+      }, route.request().postData());
+      return route.fulfill({ status: 201, headers: { 'Content-Type': 'application/sdp', Location: `/live/scenario-13-i-${action}/session`, 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Location' }, body: answer });
+    });
+    // Chromium hides host candidates behind mDNS names unless the origin holds
+    // a camera or microphone grant, and headless cannot resolve them, so the
+    // two in-page peers never connect without it.
+    await page.context().grantPermissions(['camera', 'microphone'], { origin: 'http://127.0.0.1:8899' });
+    await page.goto(linkFor(endpoint, 'whep'), { waitUntil: 'domcontentloaded' });
+    const joined = await page.waitForFunction(
+      () => document.getElementById('whep-state-badge')?.textContent === 'Connected'
+        && window.__playerPeers.some((pc) => pc.connectionState === 'connected'),
+      {}, { timeout: 30000 }
+    ).then(() => true, () => false);
+    record(`13i ${action}: the WHEP stream joins over a real peer connection`, joined, `posts=${posts}`);
+
+    const postsBefore = posts;
+    await page.click(action === 'disconnect' ? '#whep-disconnect' : '#source-change');
+    const closed = await page.waitForFunction(
+      () => window.__playerPeers.length > 0 && window.__playerPeers.every((pc) => pc.connectionState === 'closed'),
+      {}, { timeout: 5000 }
+    ).then(() => true, () => false);
+    // Room for the DELETE in flight, and for any join that should not happen.
+    await page.waitForTimeout(3000);
+    const after = await page.evaluate(() => ({
+      peers: window.__playerPeers.map((pc) => pc.connectionState),
+      source: window.player.getState().source,
+      playbackState: window.player.getState().playbackState,
+      live: window.player.getState().live,
+      video: !!document.querySelector('#player video'),
+      formVisible: !document.querySelector('#stage-whep').hidden,
+    }));
+    record(`13i ${action}: the player's peer connection closes`, closed, JSON.stringify(after.peers));
+    record(`13i ${action}: the session is DELETEd and no join follows`, deletes >= 1 && posts === postsBefore, `deletes=${deletes} posts ${postsBefore} -> ${posts}`);
+    record(`13i ${action}: the player is unloaded, the form is back`, after.source === null && after.playbackState === 'idle' && after.live === false && !after.video && after.formVisible, JSON.stringify(after));
+    const errs = await collect();
+    record(`13i ${action}: zero uncaught errors`, errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
+    await page.close();
+  }
+
+  // --- 13j: a WHEP join that fails terminally (404) shows Failed. load()
+  // resolves on a failed join (decision #162), so the demo reads the error
+  // state after it rather than trusting the resolution.
+  {
+    const endpoint = 'http://127.0.0.1:8899/live/scenario-13-j/whep';
+    const tracked = await newTrackedPage();
+    const { page, collect } = tracked;
+    await page.route(endpoint, (route) => route.fulfill({ status: 404, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' }));
+    await page.goto(linkFor(endpoint, 'whep'), { waitUntil: 'domcontentloaded' });
+    const settled = await page.waitForFunction(
+      () => ['Failed', 'Connected', 'Playback error'].includes(document.getElementById('whep-state-badge')?.textContent ?? ''),
+      {}, { timeout: 20000 }
+    ).then(() => true, () => false);
+    const after = await page.evaluate(() => ({
+      badge: document.getElementById('whep-state-badge')?.textContent,
+      error: document.getElementById('whep-error')?.textContent,
+      connect: document.getElementById('whep-connect')?.textContent,
+    }));
+    record('13j a 404 WHEP endpoint reports Failed, not Connected', settled && after.badge === 'Failed' && /404/.test(after.error ?? '') && after.connect === 'Retry', JSON.stringify(after));
+    const errs = await collect();
+    record('13j zero uncaught errors', errs.pageErrors.length === 0 && errs.rejections.length === 0, [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | '));
     await page.close();
   }
 

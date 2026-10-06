@@ -616,12 +616,15 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
    * recoverable failures that follow inside the window emit only
    * `error:reconnecting` again, so a stream that is not live for a while
    * does not flash an error every poll. A terminal failure always emits the
-   * fatal `error`, ends the window, and rejects the pending load.
+   * fatal `error`, ends the window, and rejects the pending load. A fatal
+   * `error` that a reconnect will follow carries `detail.reconnecting: true`;
+   * a terminal one does not.
    *
    * @param failure - The classification
    */
   const handleFailure = (failure: WHEPFailure): void => {
     if (!api) return;
+    const session = loadSession;
     const recoverable = failure.recoverable || (hasJoined && failure.detail.httpStatus === 404);
     const willReconnect = recoverable && autoReconnect && currentSrc !== '';
     // Quiet only while the window stays open: a terminal failure inside it
@@ -642,11 +645,21 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
         message: failure.message,
         fatal: true,
         timestamp: Date.now(),
-        detail: { ...failure.detail, attempts: reconnectAttempts },
+        // The provider contract: a fatal error auto-reconnect will handle
+        // says so, since it is emitted before the reconnect is scheduled.
+        detail: {
+          ...failure.detail,
+          attempts: reconnectAttempts,
+          ...(willReconnect && !reconnectExhausted ? { reconnecting: true } : {}),
+        },
       });
     } else {
       api.logger.warn(`WHEP: reconnect attempt ${reconnectAttempts} failed: ${failure.message}`);
     }
+
+    // An error listener can destroy the provider or load another source.
+    // Its cleanup must not be followed by a retry for this failed session.
+    if (!api || session !== loadSession) return;
 
     if (!willReconnect) {
       cancelReconnect();

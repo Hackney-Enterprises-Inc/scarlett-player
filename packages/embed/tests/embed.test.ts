@@ -125,6 +125,7 @@ vi.mock('@scarlett-player/core', () => ({
       container: config.container,
       config,
       destroy: vi.fn(),
+      unload: vi.fn().mockResolvedValue(undefined),
       seek: vi.fn(),
       // Records handlers so a suite can fire the event the player would.
       once: vi.fn(),
@@ -1027,6 +1028,14 @@ describe('createScarlettPlayerAPI', () => {
 
     expect(player).not.toBeNull();
     expect(fullPluginCreators.audioUI).toHaveBeenCalled();
+  });
+  it('hands back the core player itself, so unload() reaches the host', async () => {
+    const api = createScarlettPlayerAPI(fullPluginCreators, fullAvailableTypes, '1.0.0');
+    const player = await api.create({ container, src: 'live.m3u8' });
+
+    expect(player).toBe(await vi.mocked(createPlayer).mock.results[0]?.value);
+    await player.unload();
+    expect(player.unload).toHaveBeenCalledTimes(1);
   });
 });
 

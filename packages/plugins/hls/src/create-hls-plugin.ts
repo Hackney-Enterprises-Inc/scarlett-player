@@ -424,6 +424,50 @@ export function createHLSPluginWith(
   };
 
   /**
+   * Put a reloaded native live source at the live sync position.
+   *
+   * Wait for a seekable window when metadata arrives first. A viewer seek
+   * cancels the pending rejoin; pipeline teardown removes its listeners.
+   * hls.js owns its own start selection and never enters this path.
+   */
+  const rejoinNativeLiveEdge = (): void => {
+    if (!video || !isNative || !api?.getState('live')) return;
+    const media = video;
+    const events = ['canplay', 'progress', 'durationchange'];
+    const remove = (): void => {
+      for (const event of events) media.removeEventListener(event, rejoin);
+      media.removeEventListener('seeking', remove);
+    };
+    const rejoin = (): void => {
+      if (media.seeking || api?.getState('seeking')) {
+        remove();
+        return;
+      }
+      const metrics = readLiveMetrics();
+      if (!metrics) return;
+      remove();
+      if (metrics.atEdge) return;
+      const syncPosition = computeLiveSyncPosition(
+        metrics,
+        metrics.targetLatency ?? DEFAULT_TARGET_LATENCY
+      );
+      if (syncPosition === undefined) return;
+      // The newest range can be shorter than the hold-back. Do not land in
+      // the gap before it when a discontinuity splits the window.
+      const start = media.seekable.start(media.seekable.length - 1);
+      media.currentTime = Math.max(start, safeSeekTarget(syncPosition));
+    };
+    for (const event of events) media.addEventListener(event, rejoin);
+    media.addEventListener('seeking', remove);
+    const previousCleanup = cleanupVideoEvents;
+    cleanupVideoEvents = () => {
+      remove();
+      previousCleanup?.();
+    };
+    rejoin();
+  };
+
+  /**
    * Mirror the `poster` state key onto the media element.
    *
    * Called at element creation, at the top of every `loadSource()`, and from
@@ -788,12 +832,19 @@ export function createHLSPluginWith(
     api?.setState('playbackState', 'error');
     api?.setState('buffering', false);
 
+    // Decided before emitting so listeners (analytics) can tell a failure
+    // auto-reconnect will handle from a terminal one. `fatal` stays true.
+    const detail = buildErrorDetail(error, retriesExhausted);
+    if (canAutoReconnect(error) && !reconnectExhausted) {
+      detail.reconnecting = true;
+    }
+
     api?.emit('error', {
       code: mapFatalErrorCode(error),
       message,
       fatal: true,
       timestamp: Date.now(),
-      detail: buildErrorDetail(error, retriesExhausted),
+      detail,
     });
 
     maybeScheduleReconnect(error);
@@ -1007,7 +1058,9 @@ export function createHLSPluginWith(
 
       // Live streams rejoin at the live edge, which is where a viewer of a
       // live event wants to be after a blip
-      if (!was_live && video && resumePosition > 0) {
+      if (was_live) {
+        rejoinNativeLiveEdge();
+      } else if (video && resumePosition > 0) {
         video.currentTime = resumePosition;
       }
 
@@ -1635,6 +1688,29 @@ export function createHLSPluginWith(
   };
 
   /**
+   * Whether a fatal error qualifies for auto-reconnect.
+   *
+   * The gate of maybeScheduleReconnect(), shared with emitFatalError() so the
+   * fatal `error` can carry `detail.reconnecting` before the reconnect is
+   * scheduled. A window that has already run out is still reported by the
+   * scheduler, with its own terminal error.
+   *
+   * @param error - Parsed HLS error
+   * @returns True when auto-reconnect is on, a source is loaded, the stream
+   *          is live or has played, and the failure is network or media
+   */
+  const canAutoReconnect = (error: HLSError): boolean => {
+    if (mergedConfig.autoReconnect === false) return false;
+    if (!currentSrc) return false;
+    // For live streams, allow reconnect even before first playback (e.g.
+    // viewer loading during pre-event intermission). VOD requires that
+    // content has played at least once so a wrong URL does not retry forever.
+    const isLive = (api?.getState('live') ?? false) && isLiveClassified;
+    if (!isLive && !hasPlayedContent) return false;
+    return error.type === 'network' || error.type === 'media';
+  };
+
+  /**
    * Start auto-reconnecting after a fatal error, when it makes sense.
    *
    * Only kicks in when the stream had previously worked (manifest parsed) and
@@ -1643,14 +1719,7 @@ export function createHLSPluginWith(
    * because auto-retrying a wrong URL forever would just mask the problem.
    */
   const maybeScheduleReconnect = (error: HLSError) => {
-    if (mergedConfig.autoReconnect === false) return;
-    if (!currentSrc) return;
-    // For live streams, allow reconnect even before first playback (e.g.
-    // viewer loading during pre-event intermission). VOD requires that
-    // content has played at least once so a wrong URL does not retry forever.
-    const isLive = (api?.getState('live') ?? false) && isLiveClassified;
-    if (!isLive && !hasPlayedContent) return;
-    if (error.type !== 'network' && error.type !== 'media') return;
+    if (!canAutoReconnect(error)) return;
 
     if (reconnectWindowStart === 0) {
       reconnectWindowStart = Date.now();
@@ -1714,7 +1783,10 @@ export function createHLSPluginWith(
 
       // Restore position for VOD; live streams rejoin at the live edge,
       // which is where a viewer of a live event wants to be after an outage
-      if (!was_live && video && resume_position > 0) {
+      // (hls.js picks it itself, native is seeked there)
+      if (was_live) {
+        rejoinNativeLiveEdge();
+      } else if (video && resume_position > 0) {
         video.currentTime = resume_position;
       }
 

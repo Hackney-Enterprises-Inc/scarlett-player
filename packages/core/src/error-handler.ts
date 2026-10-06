@@ -62,6 +62,14 @@ export interface PlayerErrorDetail {
    * on this: nothing further will be attempted.
    */
   reconnectExhausted?: boolean;
+  /**
+   * True on a fatal error the provider will try to recover from by
+   * auto-reconnecting: `error:reconnecting` follows, then either
+   * `error:recovered` or a terminal error with `reconnectExhausted`.
+   * Providers that auto-reconnect set it before emitting the error; absent
+   * means the failure is terminal.
+   */
+  reconnecting?: boolean;
   /** HTTP status of the failed request, when the provider knows it */
   httpStatus?: number;
   /**
@@ -74,6 +82,10 @@ export interface PlayerErrorDetail {
   mediaErrorCode?: number;
   /** `MediaError.message` of the media element error behind the failure, when there was one */
   mediaErrorMessage?: string;
+  /** `HTMLMediaElement.networkState` read when the media element error fired */
+  networkState?: number;
+  /** `HTMLMediaElement.readyState` read when the media element error fired */
+  readyState?: number;
   /** True when the provider's load watchdog ended the load, whatever budget was left */
   timedOut?: boolean;
 }

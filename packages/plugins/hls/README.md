@@ -202,6 +202,30 @@ automatically (emitting `error:reconnecting` and `error:recovered` for the
 UI), and reconnects immediately when the browser comes back online. Only after
 the reconnect window closes does the viewer see the retry UI.
 
+Where a recovered stream resumes: VOD goes back to the position the viewer had
+when the first failure hit. Native HLS live reloads (error recovery and
+auto-reconnect) rejoin the live edge even if the viewer was behind it in the
+DVR window. The plugin seeks to the last seekable range's end minus target
+latency, clamped to that range's start, unless playback already sits within
+the edge tolerance or a viewer seek is in progress. If no range exists at
+metadata, it waits for `canplay`, `progress` or `durationchange`; a viewer
+seek or pipeline teardown cancels that pending rejoin. The first native load
+keeps Safari's or the host's chosen start position. On hls.js, reconnect
+keeps the configured `startPosition`: the default `-1` selects
+`liveSyncPosition` unless the playlist supplies `EXT-X-START`, which takes
+precedence. No saved DVR position is restored on a live hls.js reconnect.
+
+The fatal `error` that opens such a reconnect carries `detail.reconnecting:
+true`, decided before the event is emitted, so a listener (analytics, a host's
+telemetry) can tell a failure the plugin will try to recover from from a
+terminal one. `fatal` stays `true`. Normally `error:reconnecting` follows,
+then either `error:recovered` or `error:reconnect-exhausted` and a final fatal
+`error` with `detail.reconnectExhausted: true`. If the reconnect window has
+already run out, a qualifying fatal error can still carry the marker, but
+the scheduler goes straight to `error:reconnect-exhausted` and the final fatal
+`error`, with no intervening `error:reconnecting`. The final error has no
+`reconnecting` flag.
+
 `maxNetworkRetries` and `maxMediaRetries` also cover the first load on native
 HLS (Safari, iOS). A media element error before `loadedmetadata` re-requests
 the source on the same backoff instead of failing at once. On that first load,
@@ -221,6 +245,13 @@ host never sees a generic `SOURCE_LOAD_FAILED` for it. Its `detail` carries
 | `mediaErrorCode` | `MediaError.code` of the element error (1 aborted, 2 network, 3 decode, 4 source not supported) |
 | `mediaErrorMessage` | `MediaError.message`, when the browser gave one |
 | `timedOut` | `true` when `loadTimeoutMs` ended the load. The message stays `Video took too long to load (network timeout)`, and the media error fields describe the last error seen, if any |
+
+Every media element error is also reported on `media:error`, as an
+`Error` whose numeric `code` is the `MediaError.code` and whose `detail`
+carries `mediaErrorCode`, `networkState` and `readyState` (the element's state
+when the error fired). When the browser gives no message, codes 4 and 2 read
+"Media source not supported" and "Media network error" rather than the generic
+"Video playback error".
 
 `player.load(url)` resolves when the manifest has been parsed and the source is
 playable, and stays pending while that reconnect window is open rather than

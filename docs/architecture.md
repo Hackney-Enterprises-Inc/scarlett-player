@@ -226,6 +226,38 @@ race the promise themselves. Terminal failures - a refused token, a missing
 stream, an endpoint that does not speak the protocol - are not scheduled for
 reconnect and settle in seconds.
 
+### Unloading a source
+
+`unload()` leaves the current source and keeps the player. With nothing loaded
+or loading it returns without doing anything. Otherwise it:
+
+1. Increments `loadGeneration`, so an in-flight `load()` bails at its next
+   checkpoint, and clears the pending seek-resume timeout. A second `unload()`
+   before the first finishes, with no `load()` between, shares its promise.
+2. Destroys the active provider through `PluginManager.destroyPlugin()`, which
+   closes its connection or pipeline and removes its media element; a provider
+   still inside its `init()` is destroyed once that settles.
+3. Applies the unloaded state: `source` null, `playbackState` `idle`, the
+   `playing` false, `paused` true, `ended`, `buffering`, `waiting` and
+   `seeking` false, `currentTime`, `duration` and `bufferedAmount` 0,
+   `buffered` and `error` null, `mediaType` `unknown`, `qualities`,
+   `audioTracks` and `textTracks` empty, `currentQuality`, `currentAudioTrack`
+   and `currentTextTrack` null, `live` and `liveEdge` false, `seekableRange`
+   null, `liveLatency` 0 and `lowLatencyMode` false. `poster`, `title`, `chapters`, `thumbnails` and the
+   viewer's volume, mute, rate and autoplay settings are left alone by this
+   core reset. The [core README](../packages/core/README.md#unload) lists every
+   key it resets and leaves alone; plugins can update state during teardown.
+4. Emits `source:unloaded` with `{ src }`, the source the last `load()` asked
+   for.
+
+When a newer `load()` starts while the provider is going down, that load owns
+the state: the unload applies nothing and emits nothing, and the load waits
+for that teardown before it selects a provider, the same one or another. `unload()` rejects
+after `destroy()`, and the next `load()` works as on a fresh instance. The
+analytics plugin ends its open view as `abandoned` on `source:unloaded`, and
+the Chromecast plugin stops the media on the receiver while keeping the
+session.
+
 ### Destruction
 
 `destroy()` increments `loadGeneration` so in-flight loads self-cancel through
@@ -254,7 +286,15 @@ rethrows.
 
 `destroyPlugin(id)` awaits `plugin.destroy()`, runs the API's registered cleanup
 functions and resets the record to `registered` so the plugin can be
-initialised again. `initAll()` and `destroyAll()` walk
+initialised again. A destroy requested while the plugin's `init()` is still
+running waits for that init to settle and then destroys it, so a provider switch
+or `unload()` mid-init cannot leave it running with live listeners; an init
+that fails still has its registered cleanups run. Concurrent calls share one
+teardown, and an `initPlugin()` made during a teardown waits for it and then
+runs a fresh `init()`. `destroyAll()` is the exception to the waiting: the
+player's own `destroy()` does not wait for a plugin still inside `init()`
+(that init may depend on a script that never arrives), so that plugin is
+destroyed later, if and when its init settles. `initAll()` and `destroyAll()` walk
 `resolveDependencyOrder()`, a topological sort that throws
 `Circular dependency detected` with the cycle path; `destroyAll()` walks it in
 reverse.
@@ -449,11 +489,18 @@ that drops heartbeats sees sequence gaps. `seeking` carries `seekSource`
 ordering/source fields, **not** opt-in batch envelopes.
 
 Heartbeats and ordinary final `viewEnd` carry continuous QoE
-`qoeVersion: 2`; fatal access denial produces `qoeScore: null`. The unload
-`viewEnd` keeps its smaller field subset without QoE. Structured `error`
-beacons classify code/detail into `errorCategory` and `errorSeverity`, expose
-only validated diagnostic fields and avoid raw signed URLs. `warningCount`
-and (on fatal ends) `fatalErrorCategory` accompany view metrics.
+`qoeVersion: 2`; fatal access denial produces `qoeScore: null`. Heartbeats and
+both `viewEnd`s (ordinary and unload) are built from one cumulative-metrics
+builder, so they carry the same counters and scores. Structured `error`
+beacons classify code/detail into `errorCategory` and `errorSeverity` (an
+element error falls back to its MediaError code), expose only validated
+diagnostic fields plus `online` and the source's host name, and avoid raw
+signed URLs. `warningCount` and (on fatal ends) `fatalErrorCategory`
+accompany view metrics. A closed view stays closed: after its `viewEnd` no
+error, pause, rebuffer, quality or visibility beacon is sent for it. A fatal
+error whose `detail.reconnecting` is true is a warning that leaves the view
+open, with the outage reported as `reconnecting`/`recovered` beacons. A view
+not playing for `idleTimeout` (30 minutes by default) ends as `abandoned`.
 
 Analytics has no default endpoint: the host must configure `beaconUrl`.
 `respectDoNotTrack` honors DNT/GPC by suppressing beacons; `anonymous` uses
@@ -496,8 +543,11 @@ playback and media (`PLAYBACK_FAILED`, `MEDIA_DECODE_ERROR`,
 `PROVIDER_NOT_FOUND` and `MEDIA_DECODE_ERROR` are classified fatal by default.
 
 Providers attach diagnostics through `PlayerErrorDetail`: `type`,
-`retriesExhausted`, `attempts`, `reconnectExhausted`, `httpStatus`, `url`,
-`mediaErrorCode`, `mediaErrorMessage` and `timedOut`.
+`retriesExhausted`, `attempts`, `reconnectExhausted`, `reconnecting`,
+`httpStatus`, `url`, `mediaErrorCode`, `mediaErrorMessage`, `networkState`,
+`readyState` and `timedOut`. `reconnecting: true` marks a fatal error the
+provider will try to recover from by auto-reconnecting; it is absent on
+terminal errors.
 `url` must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported `sanitizeUrl()`, which strips the query string and the
 fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
@@ -523,11 +573,26 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   in `detail`, so core's `load()` keeps the provider's code.
 - `emitFatalError()` emits the fatal `error` and then calls
   `maybeScheduleReconnect()`, which hands over to the auto-reconnect scheduler
-  only when playback had already started and the failure was a network or media
-  one. `scheduleReconnectAttempt()` emits `error:reconnecting`
-  (`{ attempt, delayMs, elapsedMs?, windowMs? }`) and `attemptReconnect()`
-  rebuilds the pipeline, resuming VOD at the previous position and rejoining
-  live at the edge.
+  only when playback had already started (or the stream is live) and the failure
+  was a network or media one. That gate, `canAutoReconnect()`, is checked before
+  the emit as well, so the fatal `error` already carries `detail.reconnecting:
+  true` when a reconnect will follow. `scheduleReconnectAttempt()` emits
+  `error:reconnecting` (`{ attempt, delayMs, elapsedMs?, windowMs? }`) and
+  `attemptReconnect()` rebuilds the pipeline, resuming VOD at the position
+  captured at the first failure. Native live reloads rejoin the edge even
+  when the viewer was behind it in the DVR window. On hls.js the new instance
+  retains configured `startPosition`; the default `-1` selects
+  `liveSyncPosition` unless `EXT-X-START` takes precedence. No saved live DVR
+  position is restored. On native HLS, `rejoinNativeLiveEdge()` seeks to the
+  last seekable end minus target latency, clamped to that range's start,
+  unless playback is within edge tolerance or a viewer seek is in progress.
+  When no range exists at metadata, it waits for `canplay`, `progress` or
+  `durationchange`; a viewer seek or teardown cancels the pending rejoin.
+  Native error recovery does the same. The initial native load preserves
+  Safari's or the host's chosen start. A qualifying fatal error can still
+  carry the marker after the window has run out; the scheduler then emits
+  `error:reconnect-exhausted` and the final unmarked fatal `error` immediately,
+  with no intervening `error:reconnecting`.
 - Giving up is decided by a TIME WINDOW (`reconnectWindowMs`, default 300000ms),
   not by an attempt count, which is why the payload reports
   `elapsedMs`/`windowMs` and there is no `maxAttempts` to render against.
@@ -537,7 +602,8 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   `detail.reconnectExhausted`. The final error deliberately does not go through
   `emitFatalError()`, which would re-enter the scheduler.
 
-The ordering guarantee a UI can rely on: one or more `error:reconnecting`, then
+For a scheduled reconnect cycle, the ordering a UI can rely on is one or more
+`error:reconnecting`, then
 exactly one of `error:recovered` or `error:reconnect-exhausted`. A consumer that
 shows a reconnecting state on the first can take it down on either terminator
 and will never be stranded.

@@ -62,6 +62,34 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
     });
   }
 
+  /**
+   * Headers for the unload fetch fallback, resolved without waiting: pagehide
+   * cannot await, so a headers() function is called once and only a plain
+   * object result is used. A promise result is dropped, with a rejection
+   * handler so a failing token fetch never becomes an unhandled rejection.
+   */
+  function unloadHeaders(): Record<string, string> {
+    const configured = config.headers;
+    if (typeof configured !== 'function') return configured ?? {};
+    try {
+      const result = configured();
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        Promise.resolve(result).catch((error) => {
+          logger.debug('Analytics headers() rejected on unload; sent without them', { error });
+        });
+        return {};
+      }
+      if (result && typeof result === 'object') {
+        const prototype = Object.getPrototypeOf(result);
+        if (prototype === Object.prototype || prototype === null) return result as Record<string, string>;
+      }
+      return {};
+    } catch (error) {
+      logger.debug('Analytics headers() failed on unload; sending without them', { error });
+      return {};
+    }
+  }
+
   /** Send one body on the unload transport, with the legacy fetch fallback. */
   function unload(body: string): void {
     if (blocked()) return;
@@ -80,8 +108,7 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
       try { if (!blocked() && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) return; } catch { /* Fetch fallback. */ }
     }
     if (blocked()) return;
-    // The unload fallback deliberately does not invoke an async headers() function.
-    const extra = typeof config.headers === 'function' ? {} : config.headers ?? {};
+    const extra = unloadHeaders();
     try {
       fetch(config.beaconUrl, { method: 'POST', headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {});
     } catch { /* Transport must never interrupt playback. */ }

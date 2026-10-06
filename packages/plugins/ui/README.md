@@ -92,14 +92,21 @@ Lower ranks leave first. Ties go to the control that is later in the layout.
 Settings never moves, so playback speed and captions are at most two taps away
 at every width.
 
-Speed is offered on VOD and on live streams with a DVR window. On a live
-stream without one (`live` true, `seekableRange` null, as with WHEP) the Speed
-row is left out and any rate other than 1 is reset to 1, since there is nothing
-behind the edge to play through. The menu follows the stream as live and DVR
-state arrive after the manifest, and the settings button hides while the menu
-has no rows at all. If the DVR window turns up afterwards on the same source
-(native HLS reports `live` just before its seekable range), the rate that was
-reset is put back.
+Speed is always offered on VOD. On a live stream it is offered once the DVR
+window (`seekableRange`) reaches 90 seconds on the current source, and stays
+until the window drops below 60 seconds or `seekableRange` goes null; after
+that it needs 90 seconds again. A window between 60 and 90 seconds that never
+reached 90 on this source does not offer it, so a sliding window of a few
+segments, or one hovering near a threshold, neither shows Speed nor makes it
+flicker. WHEP (no seekable range) never offers it. While Speed is withdrawn the
+row is left out and any rate other than 1 is reset to 1, since there is too
+little behind the edge to play through; when Speed comes back on the same
+source (native HLS reports `live` just before its seekable range, and a live
+window can grow past 90 seconds), the rate that was reset is put back. A new
+source starts over. The menu follows the stream as live and DVR state arrive
+after the manifest, and the settings button hides while the menu has no rows
+at all. The skip buttons, progress bar and arrow keys keep the simpler rule:
+on live they work with a `seekableRange` of any length.
 
 Because `quality` hides, a layout with `quality` and no `settings` would lose
 quality selection entirely below the width where the bar fits. `uiPlugin()`

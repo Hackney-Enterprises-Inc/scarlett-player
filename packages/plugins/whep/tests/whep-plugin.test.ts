@@ -725,6 +725,49 @@ describe('teardown', () => {
     expect(fetchMock.posts()).toHaveLength(1);
   });
 
+  it('destroy mid-retry closes the retry peer and nothing follows it', async () => {
+    const fetchMock = installFetch([envelope(409, 'not_live', 'x', '5'), answer()]);
+    const { plugin, api } = await setup();
+    const { loading } = await load(plugin);
+    expect(fetchMock.posts()).toHaveLength(1);
+
+    // The retry attempt is under way and stuck gathering when destroy lands
+    FakePeerConnection.options.gathers = false;
+    await settle(5000);
+    const retryPeer = FakePeerConnection.instances[1];
+    expect(retryPeer).toBeDefined();
+    expect(retryPeer.closed).toBe(false);
+
+    await plugin.destroy();
+    await expect(loading).rejects.toThrow(/destroyed/);
+    const emittedAtDestroy = api.emit.mock.calls.length;
+    await settle(120000);
+
+    expect(retryPeer.closed).toBe(true);
+    expect(fetchMock.posts()).toHaveLength(1);
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    expect(api.emit.mock.calls.length).toBe(emittedAtDestroy);
+  });
+
+  it('destroy while connecting closes the peer, frees the session and emits nothing later', async () => {
+    FakePeerConnection.options.outcome = 'never';
+    const fetchMock = installFetch([answer()]);
+    const { plugin, api } = await setup({ loadTimeoutMs: 10000 });
+    const { loading } = await load(plugin);
+    const pc = FakePeerConnection.instances[0];
+
+    await plugin.destroy();
+    await expect(loading).rejects.toThrow(/destroyed/);
+    const emittedAtDestroy = api.emit.mock.calls.length;
+    // Past the load watchdog and any reconnect it could have scheduled
+    await settle(120000);
+
+    expect(pc.closed).toBe(true);
+    expect(fetchMock.deletes()).toHaveLength(1);
+    expect(fetchMock.posts()).toHaveLength(1);
+    expect(api.emit.mock.calls.length).toBe(emittedAtDestroy);
+  });
+
   it('frees the session on pagehide with keepalive', async () => {
     const fetchMock = installFetch([answer()]);
     const { plugin } = await setup();

@@ -789,9 +789,12 @@ describe('Analytics Plugin', () => {
 
       const errorBeacon = beacons.find((b) => b.event === 'error');
       expect(errorBeacon).toMatchObject({
-        errorMessage: 'Video playback error',
+        errorMessage: 'Media source not supported',
         errorCode: 4,
+        errorCategory: 'source',
         mediaErrorCode: 4,
+        networkState: video.networkState,
+        readyState: video.readyState,
       });
       expect(plugin.getMetrics().errorCount).toBe(1);
     });
@@ -941,8 +944,9 @@ describe('Analytics Plugin', () => {
 
       await plugin.init(api);
 
-      // Start playing
-      (api as any)._trigger('playback:play');
+      // Start playing, the way a provider reports it: play time needs the
+      // `playing` state key, not just the play request
+      (api as any)._updateState({ paused: false, playing: true });
       (api as any)._trigger('playback:play');
       beacons = [];
 
@@ -960,8 +964,10 @@ describe('Analytics Plugin', () => {
   // in production, and the reason the sampler aggregates rather than stores:
   // the provider emits `live:latency` at the timeupdate cadence.
   describe('Live latency', () => {
-    /** Feed a sequence of latency readings through the event bus. */
+    /** Feed a sequence of latency readings through the event bus, after the first frame. */
     const feed = (latencies: number[]) => {
+      // Readings before the view's first frame are not latency (HEI-35)
+      (api as any)._updateState({ paused: false, playing: true });
       for (const latency of latencies) {
         (api as any)._trigger('live:latency', { latency });
       }

@@ -268,6 +268,7 @@ playerRef.value.requestFullscreen();
 - `pause()` - Pause playback
 - `seek(time: number)` - Seek to time in seconds
 - `load(src: string, options?: LoadOptions)` - Load new source. `options.autoplay` plays (`true`) or stays paused (`false`) for this load only; omitted, the player's current autoplay state decides (the `autoplay` prop sets it). Setting the `src` prop to the same source in the same update does not load it a second time
+- `unload()` - Leave the current source and keep the player: core's [`unload()`](../core/README.md#unload) (destroys the provider, resets the player to its empty state, emits `source:unloaded`). Ready for the next `load()`; a no-op before mounting
 - `setVolume(volume: number)` - Set volume (0-1)
 - `setMuted(muted: boolean)` - Set muted state
 - `setPoster(url: string)` - Set the poster ('' clears it)
@@ -317,6 +318,7 @@ const {
   pause,
   seek,
   load,
+  unload,
   setVolume,
   setMuted,
   setPoster,
@@ -345,6 +347,12 @@ import type { LoadOptions } from '@scarlett-player/core';
 const next: LoadOptions = { autoplay: false };
 await load('https://cdn.example.com/next.m3u8', next);
 ```
+
+`unload()` calls core's `unload()`: the provider is destroyed (a WHEP session
+closes, HLS stops loading) and the player keeps running for the next `load()`.
+`playing`, `paused`, `currentTime`, `duration`, `bufferedAmount` and `error`
+reset when the player emits `source:unloaded`. It does nothing before
+`init()`.
 
 ## Global Plugin Installation
 

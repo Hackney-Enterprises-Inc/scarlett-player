@@ -49,6 +49,7 @@ const player = await createPlayer({
 player.init()                  // Initialise plugins and load `src` (createPlayer calls this)
 player.load(src)               // Load a source (initialises the player first if needed)
 player.load(src, { autoplay }) // Same, with `autoplay` overriding the option for this load
+player.unload()                // Leave the current source, keep the player (see below)
 player.play()                  // Start playback
 player.pause()                 // Pause playback
 player.seek(time)              // Seek to time in seconds
@@ -84,6 +85,42 @@ import type { LoadOptions } from '@scarlett-player/core';
 const next: LoadOptions = { autoplay: false }; // stay paused for this load only
 await player.load('next.m3u8', next);
 ```
+
+### unload()
+
+`player.unload(): Promise<void>` leaves the current source without destroying
+the player. It supersedes a `load()` still in flight, destroys the active
+provider (closing its connection or pipeline and removing its media element; a
+provider still inside its `init()` is destroyed as soon as that settles), then
+applies the unloaded state and emits `source:unloaded` with `{ src }`, the
+source the last `load()` asked for. The next `load()` works as on a fresh
+instance.
+
+```typescript
+await player.unload(); // leave the stream, keep the player
+await player.load('next.m3u8');
+```
+
+The core unloaded-state reset sets `source`, `buffered` and `error` to null,
+`playbackState` to `'idle'`, `playing`, `ended`, `buffering`, `waiting` and
+`seeking` to false, `paused` to true, `currentTime`, `duration` and
+`bufferedAmount` to 0, and `mediaType` to `'unknown'`. It empties `qualities`,
+`audioTracks` and `textTracks`, sets `currentQuality`, `currentAudioTrack` and
+`currentTextTrack` to null, and resets `live` and `liveEdge` to false,
+`seekableRange` to null, `liveLatency` to 0 and `lowLatencyMode` to false.
+
+That reset leaves the other core keys alone: `poster`, `title`, `chapters`,
+`currentChapter`, `thumbnails`, `volume`, `muted`, `playbackRate`, `autoplay`,
+`loop`, `fullscreen`, `pip`, `controlsVisible`, `bandwidth`, `airplayAvailable`,
+`airplayActive`, `chromecastAvailable`, `chromecastActive`, `interacting`,
+`hovering` and `focused`. Plugins can still update their state during teardown.
+
+With nothing loaded or loading it is a no-op and emits nothing. A `load()`
+called before the unload finishes owns the state: the unload still destroys the
+old provider, but applies no state and emits no `source:unloaded`, and the
+load starts its provider only after that teardown. It rejects
+once `destroy()` has been called; use `destroy()` to discard the player for
+good.
 
 ### State getters
 
@@ -122,10 +159,11 @@ player.on('volume:change', ({ volume, muted }) => {});
 player.on('fullscreen:change', ({ fullscreen }) => {});
 player.on('quality:change', ({ quality, auto }) => {});  // quality: 'level-<index>' (an id in `qualities`) or 'auto'
 player.on('media:segment', ({ durationMs, bytes, ok, kind }) => {}); // hls.js segment request measurement
-player.on('error', (error) => {});                    // Structured PlayerError { code, message, fatal }
+player.on('error', (error) => {});                    // Structured PlayerError { code, message, fatal, detail? }; detail.reconnecting: true when a self-heal follows
 player.on('error:reconnecting', ({ attempt, delayMs }) => {}); // Self-heal attempt scheduled
 player.on('error:recovered', () => {});               // Self-heal succeeded, playback resumed
 player.on('error:retry', ({ src }) => {});            // Viewer pressed Try Again
+player.on('source:unloaded', ({ src }) => {});        // unload() finished (not sent by a no-op or superseded unload)
 ```
 
 `player:ready` is emitted once, at the end of the first initialisation pass, so

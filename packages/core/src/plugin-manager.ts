@@ -21,6 +21,8 @@ interface PluginRecord extends PluginDescriptor {
 export class PluginManager {
   private plugins = new Map<string, PluginRecord>();
   private initPromises = new Map<string, Promise<void>>();
+  /** In-flight teardowns, shared by concurrent destroyPlugin() callers. */
+  private destroyPromises = new Map<string, Promise<void>>();
   private initializingStack = new Set<string>();
   private eventBus: EventBus;
   private stateManager: StateManager;
@@ -89,11 +91,27 @@ export class PluginManager {
     }
   }
 
-  /** Initialize a specific plugin. */
+  /**
+   * Initialize a specific plugin, its dependencies first.
+   *
+   * Concurrent calls share one init. A call made while a destroy of the same
+   * plugin is in flight waits for that destroy to finish and then runs a fresh
+   * `init()`, rather than handing back the instance being torn down.
+   *
+   * @param id - Plugin ID
+   * @returns Resolves when the plugin is ready
+   * @throws When the plugin is not registered, a dependency is missing, a
+   *   dependency cycle is detected, or the plugin's `init()` throws
+   */
   async initPlugin(id: string): Promise<void> {
     const record = this.plugins.get(id);
     if (!record) {
       throw new Error(`Plugin "${id}" not found`);
+    }
+
+    const pendingDestroy = this.destroyPromises.get(id);
+    if (pendingDestroy) {
+      await pendingDestroy;
     }
 
     if (record.state === 'ready') return;
@@ -165,30 +183,87 @@ export class PluginManager {
     return initPromise;
   }
 
-  /** Destroy all plugins in reverse dependency order. */
+  /**
+   * Destroy all plugins in reverse dependency order.
+   *
+   * A plugin still initializing is not waited for: its `init()` may depend on
+   * something that never arrives (a blocked third-party script), and the
+   * player's own `destroy()` must not hang on it. Its teardown is still
+   * queued, so it is destroyed if and when that init settles.
+   *
+   * @returns Resolves when every ready plugin has been torn down
+   */
   async destroyAll(): Promise<void> {
     const order = this.resolveDependencyOrder().reverse();
 
     for (const id of order) {
-      await this.destroyPlugin(id);
+      const teardown = this.destroyPlugin(id);
+      if (this.initPromises.has(id)) {
+        // Runs after the player is gone; nothing is left to report to
+        void teardown.catch(() => {});
+        continue;
+      }
+      await teardown;
     }
   }
 
-  /** Destroy a specific plugin. */
+  /**
+   * Destroy a specific plugin: its `destroy()`, then its `onDestroy` cleanups.
+   *
+   * A plugin that is still initializing is not skipped: the destroy waits for
+   * that init to settle and then tears the plugin down, so a teardown that
+   * lands mid-init (a provider switch or `unload()` during a slow `init()`)
+   * cannot leave the plugin to become ready afterwards with its listeners
+   * live. An init that fails still runs its registered cleanups. Concurrent calls share
+   * one teardown, so `destroy()` and the cleanups run exactly once. Emits
+   * `plugin:destroyed` when a teardown ran.
+   *
+   * @param id - Plugin ID
+   * @returns Resolves when the teardown has finished (or there was none)
+   */
   async destroyPlugin(id: string): Promise<void> {
-    const record = this.plugins.get(id);
-    if (!record || record.state !== 'ready') return;
+    const pending = this.destroyPromises.get(id);
+    if (pending) return pending;
 
+    const record = this.plugins.get(id);
+    if (!record) return;
+
+    const pendingInit = this.initPromises.get(id);
+    if (!pendingInit && record.state !== 'ready') return;
+
+    const teardown = (async () => {
+      if (pendingInit) {
+        try {
+          await pendingInit;
+        } catch {
+          // The init failed and was reported there; nothing became ready.
+        }
+      }
+      if (record.state !== 'ready') {
+        record.api.runCleanups();
+        return;
+      }
+
+      try {
+        await record.plugin.destroy();
+      } catch (error) {
+        this.logger.error(`Plugin destroy failed: ${id}`, { error });
+      } finally {
+        // runCleanups() must run even when destroy() throws, so listeners
+        // and timers registered via api.onDestroy() are always released.
+        record.api.runCleanups();
+        record.state = 'registered';
+        this.eventBus.emit('plugin:destroyed', { name: id });
+      }
+    })();
+
+    this.destroyPromises.set(id, teardown);
     try {
-      await record.plugin.destroy();
-    } catch (error) {
-      this.logger.error(`Plugin destroy failed: ${id}`, { error });
+      await teardown;
     } finally {
-      // runCleanups() must run even when destroy() throws, so listeners
-      // and timers registered via api.onDestroy() are always released.
-      record.api.runCleanups();
-      record.state = 'registered';
-      this.eventBus.emit('plugin:destroyed', { name: id });
+      if (this.destroyPromises.get(id) === teardown) {
+        this.destroyPromises.delete(id);
+      }
     }
   }
 

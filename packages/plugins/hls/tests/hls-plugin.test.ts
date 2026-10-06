@@ -1256,12 +1256,16 @@ describe('event-map', () => {
 
       expect(mockApi.logger.error).toHaveBeenCalledWith('Video element error', { code: 4, message: '' });
       const emitted = mockApi.emit.mock.calls.find(([name]) => name === 'media:error')?.[1] as {
-        error: Error & { code?: number; detail?: { mediaErrorCode: number } };
+        error: Error & { code?: number; detail?: Record<string, unknown> };
       };
       expect(emitted.error).toBeInstanceOf(Error);
-      expect(emitted.error.message).toBe('Video playback error');
+      expect(emitted.error.message).toBe('Media source not supported');
       expect(emitted.error.code).toBe(4);
-      expect(emitted.error.detail).toEqual({ mediaErrorCode: 4 });
+      expect(emitted.error.detail).toEqual({
+        mediaErrorCode: 4,
+        networkState: video.networkState,
+        readyState: video.readyState,
+      });
     });
 
     it('leaves the native error unadorned when its code is zero', () => {
@@ -1274,7 +1278,7 @@ describe('event-map', () => {
       video.dispatchEvent(new Event('error'));
 
       const emitted = mockApi.emit.mock.calls.find(([name]) => name === 'media:error')?.[1] as {
-        error: Error & { code?: number; detail?: { mediaErrorCode: number } };
+        error: Error & { code?: number; detail?: Record<string, unknown> };
       };
       expect(emitted.error.message).toBe('Media load error');
       expect(emitted.error).not.toHaveProperty('code');

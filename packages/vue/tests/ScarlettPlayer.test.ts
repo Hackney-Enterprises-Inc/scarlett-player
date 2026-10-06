@@ -18,6 +18,7 @@ const mockPlayer = {
   init: vi.fn().mockResolvedValue(undefined),
   destroy: vi.fn(),
   load: vi.fn().mockResolvedValue(undefined),
+  unload: vi.fn().mockResolvedValue(undefined),
   setVolume: vi.fn(),
   setMuted: vi.fn(),
   setAutoplay: vi.fn(),
@@ -307,6 +308,24 @@ describe('ScarlettPlayer.vue load()', () => {
     expect(mockPlayer.load).toHaveBeenCalledWith('https://cdn.test/second.m3u8', {
       autoplay: false,
     });
+  });
+
+  it('forwards unload() from the exposed handle', async () => {
+    const { exposed } = await mountWithRef('https://cdn.test/first.m3u8');
+
+    await exposed.value!.unload();
+
+    expect(mockPlayer.unload).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the src prop again after an unload', async () => {
+    const { src, exposed } = await mountWithRef('https://cdn.test/first.m3u8');
+
+    await exposed.value!.unload();
+    src.value = 'https://cdn.test/second.m3u8';
+    await nextTick();
+
+    expect(mockPlayer.load).toHaveBeenLastCalledWith('https://cdn.test/second.m3u8');
   });
 
   it('consumes the matching src change once, so a later prop change loads again', async () => {

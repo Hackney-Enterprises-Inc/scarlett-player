@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ScarlettPlayer, createPlayer } from '../src/scarlett-player';
-import type { Plugin } from '../src/types/plugin';
+import type { Plugin, IPluginAPI } from '../src/types/plugin';
 
 /** Let queued microtasks and zero-delay timers run. */
 const tick = (): Promise<void> =>
@@ -372,6 +372,385 @@ describe('ScarlettPlayer', () => {
       await player.load('video.mp4');
 
       expect(playSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('unload()', () => {
+    /**
+     * A provider that keeps its plugin API, wires one listener in init() and
+     * can hold init() open until the test settles it.
+     */
+    const createProvider = (options: { deferInit?: boolean; id?: string } = {}) => {
+      let api!: IPluginAPI;
+      let settleInit: (() => void) | null = null;
+      const listener = vi.fn();
+      const provider = createMockPlugin({
+        id: options.id ?? 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockResolvedValue(undefined),
+        init: vi.fn((pluginApi: IPluginAPI) => {
+          api = pluginApi;
+          pluginApi.onDestroy(pluginApi.on('playback:play', listener));
+          if (!options.deferInit) return;
+          return new Promise<void>((resolve) => {
+            settleInit = resolve;
+          });
+        }),
+      });
+      return {
+        provider,
+        listener,
+        get api() {
+          return api;
+        },
+        settle: () => settleInit?.(),
+      };
+    };
+
+    it('destroys the provider and applies the unloaded state', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('video.m3u8');
+
+      await player.unload();
+
+      expect(provider.destroy).toHaveBeenCalledTimes(1);
+      expect(player.currentProvider).toBeNull();
+      const state = player.getState();
+      expect(state).toMatchObject({
+        source: null,
+        playbackState: 'idle',
+        playing: false,
+        paused: true,
+        ended: false,
+        buffering: false,
+        waiting: false,
+        seeking: false,
+        currentTime: 0,
+        duration: 0,
+        bufferedAmount: 0,
+        error: null,
+        live: false,
+      });
+    });
+
+    it('clears the source-owned keys a provider leaves behind', async () => {
+      const handle = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+      await player.load('live.m3u8');
+
+      const level = { id: '0', label: '720p', width: 1280, height: 720, bitrate: 1, active: true };
+      handle.api.setState('qualities', [level]);
+      handle.api.setState('currentQuality', level);
+      handle.api.setState('audioTracks', [{ id: 'a', label: 'English', active: true }]);
+      handle.api.setState('currentAudioTrack', { id: 'a', label: 'English', active: true });
+      handle.api.setState('textTracks', [
+        { id: 't', label: 'English', language: 'en', kind: 'subtitles', active: true },
+      ]);
+      handle.api.setState('seekableRange', { start: 0, end: 60 });
+      handle.api.setState('liveEdge', true);
+      handle.api.setState('liveLatency', 4);
+      handle.api.setState('mediaType', 'video');
+      handle.api.setState('chapters', [{ time: 0, label: 'Intro' } as never]);
+
+      await player.unload();
+
+      expect(player.getState()).toMatchObject({
+        qualities: [],
+        currentQuality: null,
+        audioTracks: [],
+        currentAudioTrack: null,
+        textTracks: [],
+        currentTextTrack: null,
+        seekableRange: null,
+        liveEdge: false,
+        liveLatency: 0,
+        lowLatencyMode: false,
+        mediaType: 'unknown',
+        buffered: null,
+      });
+      // Chapters belong to the chapters plugin's config, not the source
+      expect(player.getState().chapters).toHaveLength(1);
+    });
+
+    // Each key notifies as it is written (StateManager.update), as on load():
+    // the snapshot is whole by the time `source:unloaded` fires.
+    it('has the whole unloaded state when source:unloaded fires', async () => {
+      const handle = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+      await player.load('video.m3u8');
+      handle.api.setState('waiting', true);
+      handle.api.setState('seeking', true);
+      const snapshots: ReturnType<typeof player.getState>[] = [];
+      player.on('source:unloaded', () => { snapshots.push(player.getState()); });
+
+      await player.unload();
+
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]).toMatchObject({
+        source: null, playbackState: 'idle', buffering: false,
+        waiting: false, seeking: false,
+      });
+    });
+
+    it('clears waiting and buffering left by a stalled source', async () => {
+      const handle = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+      await player.load('video.m3u8');
+      handle.api.setState('playing', true);
+      handle.api.setState('paused', false);
+      handle.api.setState('playbackState', 'playing');
+      handle.api.setState('waiting', true);
+      handle.api.setState('buffering', true);
+
+      await player.unload();
+
+      expect(player.getState()).toMatchObject({
+        waiting: false,
+        buffering: false,
+        playing: false,
+        paused: true,
+        playbackState: 'idle',
+      });
+    });
+
+    it('clears seeking and cancels a pending seek resume', async () => {
+      vi.useFakeTimers();
+      try {
+        const handle = createProvider();
+        const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+        const loading = player.load('video.mp4');
+        await vi.runAllTimersAsync();
+        await loading;
+        handle.api.setState('playing', true);
+        handle.api.setState('seeking', true);
+        player.seek(10);
+
+        const playSpy = vi.fn();
+        player.on('playback:play', playSpy);
+        const unloading = player.unload();
+        await vi.runAllTimersAsync();
+        await unloading;
+
+        expect(player.getState().seeking).toBe(false);
+        expect(playSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('emits source:unloaded with the source it unloaded', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('video.mp4');
+      const spy = vi.fn();
+      player.on('source:unloaded', spy);
+
+      await player.unload();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith({ src: 'video.mp4' });
+    });
+
+    it('emits source:unloaded after the provider is destroyed', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('video.mp4');
+      let destroyedFirst = false;
+      player.on('source:unloaded', () => {
+        destroyedFirst = (provider.destroy as ReturnType<typeof vi.fn>).mock.calls.length === 1;
+      });
+
+      await player.unload();
+
+      expect(destroyedFirst).toBe(true);
+    });
+
+    it('is a no-op when nothing is loaded', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      const spy = vi.fn();
+      player.on('source:unloaded', spy);
+
+      await player.unload();
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(provider.destroy).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op the second time', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('video.mp4');
+      const spy = vi.fn();
+      player.on('source:unloaded', spy);
+
+      await player.unload();
+      await player.unload();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(provider.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the error a failed load left behind', async () => {
+      const player = new ScarlettPlayer({ container });
+      await player.load('video.mp4'); // no provider: fatal error state
+      expect(player.getState().error).not.toBeNull();
+
+      await player.unload();
+
+      expect(player.getState().error).toBeNull();
+      expect(player.getState().playbackState).toBe('idle');
+    });
+
+    it('leaves the player usable: a later load() works as on a fresh instance', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+      await player.load('a.mp4');
+      await player.unload();
+
+      await player.load('b.mp4');
+
+      expect(provider.init).toHaveBeenCalledTimes(2);
+      expect(provider.loadSource).toHaveBeenLastCalledWith('b.mp4');
+      expect(player.getState().source).toEqual({ src: 'b.mp4', type: 'video/mp4' });
+      expect(player.currentProvider).toBe(provider);
+    });
+
+    it('tears down a provider whose init is still pending, once it settles', async () => {
+      const handle = createProvider({ deferInit: true });
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+
+      const loading = player.load('video.mp4');
+      await vi.waitFor(() => expect(handle.provider.init).toHaveBeenCalled());
+
+      const unloading = player.unload();
+      handle.settle();
+      await loading;
+      await unloading;
+
+      expect(handle.provider.destroy).toHaveBeenCalledTimes(1);
+      expect(handle.provider.loadSource).not.toHaveBeenCalled();
+      expect(player.currentProvider).toBeNull();
+      expect(player.getState().source).toBeNull();
+
+      // The listener the provider wired in init() is gone with it
+      await player.play();
+      expect(handle.listener).not.toHaveBeenCalled();
+    });
+
+    it('lets load() succeed after an unload that interrupted a pending init', async () => {
+      const handle = createProvider({ deferInit: true });
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+
+      const loading = player.load('a.mp4');
+      await vi.waitFor(() => expect(handle.provider.init).toHaveBeenCalled());
+      const unloading = player.unload();
+      handle.settle();
+      await Promise.all([loading, unloading]);
+
+      const reloading = player.load('b.mp4');
+      await vi.waitFor(() => expect(handle.provider.init).toHaveBeenCalledTimes(2));
+      handle.settle();
+      await reloading;
+
+      expect(handle.provider.loadSource).toHaveBeenCalledTimes(1);
+      expect(handle.provider.loadSource).toHaveBeenCalledWith('b.mp4');
+      expect(player.currentProvider).toBe(handle.provider);
+      expect(player.getState().source).toEqual({ src: 'b.mp4', type: 'video/mp4' });
+    });
+
+    it('holds a load on another provider until the unloaded provider is torn down', async () => {
+      const first = createProvider({ deferInit: true, id: 'first' });
+      (first.provider.canPlay as any).mockImplementation((src: string) => src.endsWith('.m3u8'));
+      const second = createProvider({ id: 'second' });
+      const player = new ScarlettPlayer({ container, plugins: [first.provider, second.provider] });
+
+      const loadingFirst = player.load('first.m3u8');
+      await vi.waitFor(() => expect(first.provider.init).toHaveBeenCalled());
+      const unloading = player.unload();
+      const loadingSecond = player.load('second.mp4');
+
+      // The old provider's teardown waits on its init: nothing of the new
+      // provider may start before it, or the teardown lands on top of it
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(second.provider.init).not.toHaveBeenCalled();
+
+      first.settle();
+      await Promise.all([loadingFirst, unloading, loadingSecond]);
+
+      expect(first.provider.destroy).toHaveBeenCalledTimes(1);
+      expect((first.provider.destroy as any).mock.invocationCallOrder[0]).toBeLessThan(
+        (second.provider.init as any).mock.invocationCallOrder[0]
+      );
+      expect(second.provider.loadSource).toHaveBeenCalledWith('second.mp4');
+      expect(player.currentProvider).toBe(second.provider);
+      expect(player.getState().source).toEqual({ src: 'second.mp4', type: 'video/mp4' });
+    });
+
+    it('load() then unload() without awaiting ends unloaded', async () => {
+      const { provider } = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider] });
+
+      const loading = player.load('video.mp4');
+      const unloading = player.unload();
+      await Promise.all([loading, unloading]);
+
+      expect(provider.loadSource).not.toHaveBeenCalled();
+      expect(player.currentProvider).toBeNull();
+      expect(player.getState()).toMatchObject({ source: null, playbackState: 'idle' });
+    });
+
+    it('unload() then load() without awaiting ends loaded', async () => {
+      const handle = createProvider();
+      const player = new ScarlettPlayer({ container, plugins: [handle.provider] });
+      await player.load('a.mp4');
+      const spy = vi.fn();
+      player.on('source:unloaded', spy);
+
+      const unloading = player.unload();
+      const loading = player.load('b.mp4');
+      await Promise.all([unloading, loading]);
+
+      expect(handle.provider.destroy).toHaveBeenCalledTimes(1);
+      expect(handle.provider.init).toHaveBeenCalledTimes(2);
+      expect(handle.provider.loadSource).toHaveBeenLastCalledWith('b.mp4');
+      expect(player.currentProvider).toBe(handle.provider);
+      expect(player.getState().source).toEqual({ src: 'b.mp4', type: 'video/mp4' });
+      expect(player.getState().playbackState).not.toBe('idle');
+      // The newer load owns the state: no unloaded announcement over it
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('a provider switch mid-init destroys the half-initialised provider', async () => {
+      const first = createProvider({ deferInit: true, id: 'first' });
+      const second = createProvider({ id: 'second' });
+      (first.provider.canPlay as ReturnType<typeof vi.fn>).mockImplementation((src: string) =>
+        src.endsWith('.m3u8')
+      );
+      const player = new ScarlettPlayer({
+        container,
+        plugins: [first.provider, second.provider],
+      });
+
+      const loadingFirst = player.load('a.m3u8');
+      await vi.waitFor(() => expect(first.provider.init).toHaveBeenCalled());
+      const loadingSecond = player.load('b.mp4');
+      first.settle();
+      await Promise.all([loadingFirst, loadingSecond]);
+
+      expect(first.provider.destroy).toHaveBeenCalledTimes(1);
+      expect(player.currentProvider).toBe(second.provider);
+      await player.play();
+      expect(first.listener).not.toHaveBeenCalled();
+    });
+
+    it('throws after destroy()', async () => {
+      const player = new ScarlettPlayer({ container });
+      await player.destroy();
+
+      await expect(player.unload()).rejects.toThrow();
     });
   });
 

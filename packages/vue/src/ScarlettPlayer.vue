@@ -376,6 +376,16 @@ defineExpose({
     await playerInstance.value?.load(src, options);
   },
 
+  /**
+   * Unload the source, destroy its provider and emit `source:unloaded`.
+   * The player stays usable for the next `load()`. A no-op before mounting.
+   * @returns Resolves when the player has unloaded
+   * @throws When the underlying player has been destroyed
+   */
+  async unload() {
+    await playerInstance.value?.unload();
+  },
+
   // Destroy
   destroy() {
     playerInstance.value?.destroy();

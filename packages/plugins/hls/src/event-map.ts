@@ -648,11 +648,20 @@ export function setupVideoEventHandlers(
     const error = video.error;
     if (error) {
       api.logger.error('Video element error', { code: error.code, message: error.message });
-      const playbackError = new Error(error.message || 'Video playback error');
+      // Browsers often leave MediaError.message empty; name the two codes
+      // that matter most rather than report a generic error.
+      const fallbackMessage = error.code === 4 ? 'Media source not supported'
+        : error.code === 2 ? 'Media network error'
+          : 'Video playback error';
+      const playbackError = new Error(error.message || fallbackMessage);
       if (typeof error.code === 'number' && error.code > 0) {
         Object.assign(playbackError, {
           code: error.code,
-          detail: { mediaErrorCode: error.code },
+          detail: {
+            mediaErrorCode: error.code,
+            networkState: video.networkState,
+            readyState: video.readyState,
+          },
         });
       }
       api.emit('media:error', { error: playbackError });

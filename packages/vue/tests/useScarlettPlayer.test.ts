@@ -13,6 +13,7 @@ vi.mock('@scarlett-player/core', () => {
     pause: vi.fn(),
     seek: vi.fn(),
     load: vi.fn().mockResolvedValue(undefined),
+    unload: vi.fn().mockResolvedValue(undefined),
     setVolume: vi.fn(),
     setMuted: vi.fn(),
     setPoster: vi.fn(),
@@ -76,6 +77,7 @@ describe('useScarlettPlayer', () => {
     expect(typeof result.pause).toBe('function');
     expect(typeof result.seek).toBe('function');
     expect(typeof result.load).toBe('function');
+    expect(typeof result.unload).toBe('function');
     expect(typeof result.setVolume).toBe('function');
     expect(typeof result.setMuted).toBe('function');
     expect(typeof result.setPoster).toBe('function');
@@ -239,5 +241,44 @@ describe('useScarlettPlayer load', () => {
     });
 
     await expect(result.load('https://example.com/next.m3u8')).resolves.toBeUndefined();
+  });
+});
+
+describe('useScarlettPlayer unload', () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+    vi.clearAllMocks();
+  });
+
+  it('forwards unload to the player', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    const result = useScarlettPlayer({
+      container: ref<HTMLElement | null>(container),
+      autoInit: false,
+    });
+
+    await result.init();
+    await result.unload();
+
+    expect(result.player.value?.unload).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op before init', async () => {
+    const { useScarlettPlayer } = await import('../src/composables/useScarlettPlayer');
+
+    const result = useScarlettPlayer({
+      container: ref<HTMLElement | null>(container),
+      autoInit: false,
+    });
+
+    await expect(result.unload()).resolves.toBeUndefined();
   });
 });

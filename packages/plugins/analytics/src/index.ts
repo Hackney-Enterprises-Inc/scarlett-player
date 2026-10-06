@@ -41,7 +41,7 @@ import {
 import { createTransport } from './transport';
 import { privacyOptOut } from './privacy';
 import { pageContext } from './context';
-import { classifyError, errorDetail, safeErrorMessage } from './errors';
+import { classifyError, errorDetail, safeErrorMessage, sourceHost } from './errors';
 import { PKG_VERSION } from './version';
 
 // Re-export types
@@ -68,12 +68,16 @@ export type {
 const PLUGIN_VERSION = PKG_VERSION;
 const PLUGIN_NAME = 'scarlett-player';
 
+/** How long a view may go without playing before it ends (ms): 30 minutes. */
+const DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1000;
+
 /**
  * Default analytics configuration.
  */
 const DEFAULT_CONFIG: Partial<AnalyticsConfig> = {
   heartbeatInterval: 10000,
   rebufferGraceMs: 250,
+  idleTimeout: DEFAULT_IDLE_TIMEOUT,
   errorSampleRate: 1.0,
   disableInDev: false,
 };
@@ -124,6 +128,10 @@ export function createAnalyticsPlugin(
     && Number.isFinite(mergedConfig.rebufferGraceMs) && mergedConfig.rebufferGraceMs >= 0
     ? mergedConfig.rebufferGraceMs
     : 250;
+  const idleTimeout = typeof mergedConfig.idleTimeout === 'number'
+    && Number.isFinite(mergedConfig.idleTimeout) && mergedConfig.idleTimeout >= 0
+    ? mergedConfig.idleTimeout
+    : DEFAULT_IDLE_TIMEOUT;
 
   // The configured video: the first view's, and the one a playlist track
   // without its own `videoId` reports.
@@ -143,6 +151,14 @@ export function createAnalyticsPlugin(
   let heartbeatTimer: NodeJS.Timeout | null = null;
   // When watch/play time was last accrued (see accrueTime)
   let lastHeartbeatTime = 0;
+  // When the view was last seen playing, or its start (see onHeartbeatTick)
+  let lastPlayingAt = 0;
+  // The player's `playing` state key as of the last accrual. `playbackState`
+  // alone says playing from a core play request that has not reached a frame,
+  // and after a load() that stopped playback with no pause event.
+  let statePlaying = false;
+  // Only idle ends may reopen without a new play request.
+  let idleEnded = false;
   // The last position and duration seen with a duration, so a view whose
   // state was already reset by a load() still reports how far it got (see
   // onTimeUpdate)
@@ -152,10 +168,19 @@ export function createAnalyticsPlugin(
   let rebufferStartTime: number | null = null;
   let waitingSince: number | null = null;
   let graceTimer: ReturnType<typeof setTimeout> | null = null;
+  // The provider auto-reconnect outage open in this view, from its first
+  // `error:reconnecting`, and whether its long-outage beacon went (see
+  // onReconnecting). Reset with every view, so nothing crosses a view end.
+  let outageStartedAt: number | null = null;
+  let outageLongSent = false;
   // Bus seeks precede asynchronous element events. Keep one echo per request,
   // expiring the batch so a coalesced/missing echo cannot hide a later seek.
   let pendingEchoes = 0;
   let lastBusSeekAt = 0;
+  // Element seek bursts (see onStateChange): when the last non-echo element
+  // seek happened, and how many element seeking beacons this view has sent.
+  let lastElementSeekAt: number | null = null;
+  let elementSeekBeacons = 0;
   let pauseStartTime: number | null = null;
   // A pause near the end of the media, held until it is known whether
   // `ended` follows it (see onPause)
@@ -175,6 +200,13 @@ export function createAnalyticsPlugin(
   // Reset alongside the session so a second view does not inherit the first
   // one's readings.
   let latencySampler = createLatencySampler();
+  // Whether latency readings are delivery latency: 'edge' samples them,
+  // 'awaiting' waits for the first reading after a seek on a live view, and
+  // 'dvr' (behind the edge after a seek) counts play time as dvrTime instead
+  // (see onLiveLatency)
+  let liveMode: 'edge' | 'awaiting' | 'dvr' = 'edge';
+  // Finish a reading once its edge flag lands, or before the next reading.
+  let pendingLiveReading: (() => void) | null = null;
   let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
   let viewContext: Record<string, string | number> = {};
   // Only retain interval totals, never fragment data or signed segment URLs.
@@ -277,20 +309,24 @@ export function createAnalyticsPlugin(
       viewEnd: null,
       watchTime: 0,
       playTime: 0,
+      dvrTime: 0,
       pauseCount: 0,
       pauseDuration: 0,
       seekCount: 0,
+      elementSeekCount: 0,
       startupTime: null,
       rebufferCount: 0,
       rebufferDuration: 0,
+      reconnectCount: 0,
+      reconnectDuration: 0,
       errorCount: 0,
       warningCount: 0,
       fatalErrorCategory: null,
       errors: [],
       bitrateHistory: [],
       qualityChanges: 0,
-      maxBitrate: 0,
-      avgBitrate: 0,
+      maxBitrate: null,
+      avgBitrate: null,
       playbackState: 'loading',
       exitType: null,
       lastKnownIsLive: null,
@@ -376,20 +412,25 @@ export function createAnalyticsPlugin(
    * Accrue watch and play time up to now.
    *
    * Adds the time since the last accrual to `watchTime`, and to `playTime`
-   * only while playback is running and not stalled. Called by every
-   * heartbeat, before every change to `playbackState` or `isRebuffering`
-   * (so each stretch is credited under the state it was spent in), and
+   * only while playback is running and not stalled: the view's
+   * `playbackState` is playing and the player's `playing` state key is true.
+   * Called by every heartbeat, before every change to `playbackState`,
+   * `isRebuffering` or the `playing` key (so each stretch is credited under
+   * the state it was spent in), and
    * before either viewEnd payload (so the final partial interval is not
    * lost). Also records the position and duration while the duration is
-   * known, for `completionRate` once a `load()` has zeroed them.
+   * known, for `completionRate` once a `load()` has zeroed them, and the last
+   * time the view was playing, for the idle timeout.
    *
    * @param now - The accrual time; defaults to `Date.now()`
    */
   function accrueTime(now: number = Date.now()): void {
     const elapsed = now - lastHeartbeatTime;
     session.watchTime += elapsed;
-    if (session.playbackState === 'playing' && !isRebuffering && waitingSince === null) {
+    if (session.playbackState === 'playing' && statePlaying && !isRebuffering && waitingSince === null) {
       session.playTime += elapsed;
+      if (liveMode === 'dvr') session.dvrTime += elapsed;
+      lastPlayingAt = now;
     }
     lastHeartbeatTime = now;
 
@@ -401,6 +442,180 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * Update `avgBitrate` to now: the bitrate of each level weighted by the
+   * time spent at it. Left null while no level has supplied a bitrate.
+   *
+   * @param now - The end of the last level's stretch
+   */
+  function updateAvgBitrate(now: number): void {
+    const history = session.bitrateHistory;
+    if (history.length === 0) return;
+    const totalBitrateTime = history.reduce((sum, b, i, arr) => {
+      const nextTime = i < arr.length - 1 ? arr[i + 1].time : now;
+      return sum + b.bitrate * (nextTime - b.time);
+    }, 0);
+    const timeSpan = now - history[0].time;
+    // No time spent yet: the level just switched to is the average so far
+    session.avgBitrate = timeSpan > 0
+      ? Math.round(totalBitrateTime / timeSpan)
+      : history[history.length - 1].bitrate;
+  }
+
+  /**
+   * Time spent paused in this view up to `now`, the pause still in progress
+   * included. Reads only: `settlePause()` folds the open interval in.
+   *
+   * @param now - The time to measure an open pause up to
+   * @returns Total pause time (ms)
+   */
+  function pauseDurationAt(now: number): number {
+    return session.pauseDuration + (pauseStartTime !== null ? Math.max(0, now - pauseStartTime) : 0);
+  }
+
+  /**
+   * Fold the pause still in progress into `pauseDuration` and close it. No-op
+   * when none is open. Called when playback resumes and by every finalizer
+   * of a view, so each pause is counted exactly once.
+   *
+   * @param now - When the pause ended
+   */
+  function settlePause(now: number = Date.now()): void {
+    if (pauseStartTime === null) return;
+    session.pauseDuration = pauseDurationAt(now);
+    pauseStartTime = null;
+  }
+
+  /**
+   * Time spent in reconnect outages in this view up to `now`, the outage
+   * still open included. Reads only: `settleOutage()` folds the open one in.
+   *
+   * @param now - The time to measure an open outage up to
+   * @returns Total outage time (ms)
+   */
+  function reconnectDurationAt(now: number): number {
+    return session.reconnectDuration + (outageStartedAt !== null ? Math.max(0, now - outageStartedAt) : 0);
+  }
+
+  /**
+   * Fold the open reconnect outage into `reconnectDuration` and close it.
+   * No-op when none is open. Called at `error:recovered` and by every
+   * finalizer of a view, so each outage is counted exactly once and none
+   * reaches the next view.
+   *
+   * @param now - When the outage ended
+   */
+  function settleOutage(now: number = Date.now()): void {
+    if (outageStartedAt !== null) session.reconnectDuration = reconnectDurationAt(now);
+    outageStartedAt = null;
+    outageLongSent = false;
+  }
+
+  /**
+   * The cumulative metrics of the current view, current to `now`.
+   *
+   * The one builder behind the heartbeat and both viewEnd payloads (see
+   * `viewEndMetrics()`), so no payload can drift from the others. Updates
+   * `avgBitrate`; otherwise reads only, and reports an open pause without
+   * settling it. Callers accrue time first.
+   *
+   * @param now - The time the metrics are measured at
+   * @returns The counters and running scores every one of those beacons carries
+   */
+  function cumulativeMetrics(now: number): Record<string, unknown> {
+    updateAvgBitrate(now);
+    return {
+      watchTime: session.watchTime,
+      playTime: session.playTime,
+      rebufferCount: session.rebufferCount,
+      rebufferDuration: session.rebufferDuration,
+      reconnectCount: session.reconnectCount,
+      reconnectDuration: reconnectDurationAt(now),
+      avgBitrate: session.avgBitrate,
+      maxBitrate: session.maxBitrate,
+      qualityChanges: session.qualityChanges,
+      pauseCount: session.pauseCount,
+      pauseDuration: pauseDurationAt(now),
+      seekCount: session.seekCount,
+      elementSeekCount: session.elementSeekCount,
+      errorCount: session.errorCount,
+      warningCount: session.warningCount,
+      qoeScore: getQoEScore(),
+      qoeVersion: 2,
+      // Absent entirely on VOD: nothing ever emitted a live:latency reading
+      ...(latencySampler.summary() ?? {}),
+      ...(resolveIsLive() === true ? { dvrTime: session.dvrTime } : {}),
+      ...segmentSummary(),
+      ...frameSummary(),
+    };
+  }
+
+  /**
+   * The final metrics of a view: the cumulative ones plus startup time,
+   * rebuffer ratio, exit type and completion. Shared by the full and the
+   * unload viewEnd so the two carry the same fields.
+   *
+   * @param now - The time the view ended
+   * @returns The viewEnd payload data
+   */
+  function viewEndMetrics(now: number): Record<string, unknown> {
+    const currentTime = api?.getState('currentTime') ?? 0;
+    const duration = api?.getState('duration') ?? 0;
+
+    // A completed view is 100 even when a host's own `ended` listener already
+    // called load(), which zeroes currentTime and duration before this runs.
+    // Otherwise the live state, or the last position seen with a duration.
+    // A live view has none: a position over a sliding window is no completion.
+    let completionRate: number | null = 0;
+    if (resolveIsLive() === true) {
+      completionRate = null;
+    } else if (session.exitType === 'completed') {
+      completionRate = 100;
+    } else if (duration > 0) {
+      completionRate = (currentTime / duration) * 100;
+    } else if (lastKnownDuration > 0) {
+      completionRate = (lastKnownCurrentTime / lastKnownDuration) * 100;
+    }
+
+    return {
+      ...cumulativeMetrics(now),
+      startupTime: session.startupTime,
+      rebufferRatio:
+        session.watchTime > 0
+          ? (session.rebufferDuration / session.watchTime) * 100
+          : 0,
+      ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
+      exitType: session.exitType,
+      completionRate,
+    };
+  }
+
+  /**
+   * The heartbeat timer's tick: end the view as abandoned when it has not been
+   * playing for `idleTimeout`, otherwise send the heartbeat.
+   *
+   * A view counts as playing only while it accrues play time, so a pause, a
+   * stall, a load that never reached a frame, or no play at all lets the
+   * timeout run. Checked here rather than on a timer of its own, so the end
+   * comes at the first tick past the timeout.
+   */
+  function onHeartbeatTick(): void {
+    if (!api) return;
+
+    const now = Date.now();
+    accrueTime(now);
+
+    if (idleTimeout > 0 && now - lastPlayingAt >= idleTimeout) {
+      session.exitType = 'abandoned';
+      sendViewEnd();
+      idleEnded = true;
+      api.logger.debug('Analytics ended an idle view', { viewId: session.viewId, idleTimeout });
+      return;
+    }
+
+    sendHeartbeat();
+  }
+
+  /**
    * Send periodic heartbeat with current metrics.
    */
   function sendHeartbeat(): void {
@@ -408,37 +623,13 @@ export function createAnalyticsPlugin(
 
     const now = Date.now();
     accrueTime(now);
-
-    // Calculate average bitrate (weighted by time spent at each level)
-    if (session.bitrateHistory.length > 0) {
-      const totalBitrateTime = session.bitrateHistory.reduce((sum, b, i, arr) => {
-        const nextTime = i < arr.length - 1 ? arr[i + 1]?.time : now;
-        const duration = nextTime - b.time;
-        return sum + b.bitrate * duration;
-      }, 0);
-      const timeSpan = now - session.bitrateHistory[0].time;
-      session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : 0;
-    }
-
-    const state = {
-      currentTime: api.getState('currentTime'),
-      duration: api.getState('duration'),
-    };
+    // A seek that no fresh reading followed is decided from state instead
+    settleLiveMode();
 
     sendBeacon('heartbeat', {
-      watchTime: session.watchTime,
-      playTime: session.playTime,
-      currentTime: state.currentTime,
-      duration: state.duration,
-      rebufferCount: session.rebufferCount,
-      rebufferDuration: session.rebufferDuration,
-      avgBitrate: session.avgBitrate,
-      qoeScore: getQoEScore(),
-      qoeVersion: 2,
-      warningCount: session.warningCount,
-      ...(latencySampler.summary() ?? {}),
-      ...segmentSummary(),
-      ...frameSummary(),
+      ...cumulativeMetrics(now),
+      currentTime: api.getState('currentTime'),
+      duration: api.getState('duration'),
     });
   }
 
@@ -459,11 +650,20 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Send view end event with final metrics.
+   * Close the current view: the steps every finalizer shares (the full
+   * viewEnd, which the idle end and every other in-page end use, and the
+   * unload viewEnd).
+   *
+   * Accrues the last interval, commits a held near-end pause, closes an open
+   * rebuffer, stops the heartbeat, stamps `viewEnd`, settles an open pause,
+   * and clears the per-request state, so a play request still waiting for a
+   * first frame or a seek echo cannot reach into the next view.
+   *
+   * @param sendRebufferEnd - Send `rebufferEnd` for a rebuffer still open.
+   *   False on unload, where only the unload viewEnd should go out.
+   * @returns The time the view ended
    */
-  function sendViewEnd(): void {
-    if (!api) return;
-
+  function finalizeView(sendRebufferEnd: boolean): number {
     // The time since the last heartbeat belongs to this view too
     accrueTime();
 
@@ -471,8 +671,8 @@ export function createAnalyticsPlugin(
     commitPendingPause();
 
     // A rebuffer still open when the view ends (ended, a fatal error, a view
-    // switch, destroy()) would otherwise lose its time entirely.
-    closeRebuffer(true);
+    // switch, destroy(), idle, unload) would otherwise lose its time entirely.
+    closeRebuffer(sendRebufferEnd);
 
     // Stop heartbeat so it does not keep ticking after viewEnd
     if (heartbeatTimer) {
@@ -480,53 +680,25 @@ export function createAnalyticsPlugin(
       heartbeatTimer = null;
     }
 
+    playRequestPending = false;
+    pendingEchoes = 0;
+
+    idleEnded = false;
     session.viewEnd = Date.now();
+    settlePause(session.viewEnd);
+    // An outage still open (exhaustion, idle, unload) ends with its view
+    settleOutage(session.viewEnd);
+    return session.viewEnd;
+  }
 
-    const state = {
-      currentTime: api.getState('currentTime'),
-      duration: api.getState('duration'),
-    };
+  /**
+   * Send view end event with final metrics.
+   */
+  function sendViewEnd(): void {
+    if (!api) return;
 
-    // A completed view is 100 even when a host's own `ended` listener already
-    // called load(), which zeroes currentTime and duration before this runs.
-    // Otherwise the live state, or the last position seen with a duration.
-    let completionRate = 0;
-    if (session.exitType === 'completed') {
-      completionRate = 100;
-    } else if (state.duration > 0) {
-      completionRate = (state.currentTime / state.duration) * 100;
-    } else if (lastKnownDuration > 0) {
-      completionRate = (lastKnownCurrentTime / lastKnownDuration) * 100;
-    }
-
-    sendBeacon('viewEnd', {
-      watchTime: session.watchTime,
-      playTime: session.playTime,
-      startupTime: session.startupTime,
-      rebufferCount: session.rebufferCount,
-      rebufferDuration: session.rebufferDuration,
-      rebufferRatio:
-        session.watchTime > 0
-          ? (session.rebufferDuration / session.watchTime) * 100
-          : 0,
-      avgBitrate: session.avgBitrate,
-      maxBitrate: session.maxBitrate,
-      qualityChanges: session.qualityChanges,
-      pauseCount: session.pauseCount,
-      pauseDuration: session.pauseDuration,
-      seekCount: session.seekCount,
-      errorCount: session.errorCount,
-      warningCount: session.warningCount,
-      ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
-      exitType: session.exitType,
-      qoeScore: getQoEScore(),
-      qoeVersion: 2,
-      completionRate,
-      // Absent entirely on VOD: nothing ever emitted a live:latency reading
-      ...(latencySampler.summary() ?? {}),
-      ...segmentSummary(),
-      ...frameSummary(),
-    });
+    const viewEnd = finalizeView(true);
+    sendBeacon('viewEnd', viewEndMetrics(viewEnd));
   }
 
   /**
@@ -544,19 +716,26 @@ export function createAnalyticsPlugin(
     // A held pause belongs to the view it happened in, never the next one
     commitPendingPause();
     cancelPendingRebuffer();
+    idleEnded = false;
     session = initSession();
     resetSegments();
     resetFrames();
     session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
+    lastPlayingAt = lastHeartbeatTime;
     lastKnownCurrentTime = 0;
     lastKnownDuration = 0;
     isRebuffering = false;
     rebufferStartTime = null;
+    outageStartedAt = null;
+    outageLongSent = false;
     pendingEchoes = 0;
     lastBusSeekAt = 0;
+    lastElementSeekAt = null;
+    elementSeekBeacons = 0;
     pauseStartTime = null;
     playRequestPending = false;
+    liveMode = 'edge';
 
     sendBeacon('viewStart', viewContext);
 
@@ -564,7 +743,7 @@ export function createAnalyticsPlugin(
       clearInterval(heartbeatTimer);
     }
     heartbeatTimer = setInterval(
-      sendHeartbeat,
+      onHeartbeatTick,
       mergedConfig.heartbeatInterval || 10000
     );
   }
@@ -734,18 +913,161 @@ export function createAnalyticsPlugin(
    * absorbed until the request settles at the next `playing: true` or pause.
    */
   function onPlayRequest(): void {
+    // Before the dedup: a request the closed view left pending must not
+    // swallow the one that reopens it
+    if (!api) return;
+    ensureOpenView(true);
     if (playRequestPending) return;
-
-    // Playing again after the view ended (a replay after `ended`, a retry
-    // after a fatal error) is a new view of the same video, not a request
-    // inside one that already sent its viewEnd.
-    if (session.viewEnd !== null && api) {
-      startView(session.lastKnownIsLive);
-    }
 
     playRequestPending = true;
     session.playRequestTime = Date.now();
     sendBeacon('playRequest');
+  }
+
+  /**
+   * Start a new view of the same video if the current one has ended.
+   *
+   * Playing again after the view ended (a replay after `ended`, a retry after
+   * a fatal error, a resume after an idle end) is a new view, not activity
+   * inside one that already sent its viewEnd. Passive signals only reopen
+   * idle-ended views. A play request reopens any closed view, one closed by
+   * the unload viewEnd included: a page restored from bfcache, or one whose
+   * beforeunload was cancelled, is still there. Called by the play-request path
+   * and by the paths where playback resumes with no request: `playing` turning
+   * true, `playback:play` while already playing (a stall recovering), and
+   * `error:recovered`.
+   *
+   * @param playRequest - A new request may replay a completed or failed view.
+   *   Passive resume signals may reopen only an idle-ended view.
+   * @returns True when a new view was started
+   */
+  function ensureOpenView(playRequest = false): boolean {
+    if (session.viewEnd === null || !api) return false;
+    if (!playRequest && !idleEnded) return false;
+    startView(session.lastKnownIsLive);
+    return true;
+  }
+
+  /**
+   * Handle `error:recovered`: the end of a reconnect outage.
+   *
+   * In a view that saw the outage's `error:reconnecting`, closes it: folds
+   * its time into `reconnectDuration`, closes the rebuffer it opened, and
+   * sends `recovered` with the outage's `duration` (plus the provider's
+   * `attempt` and `elapsedMs` when the payload has them). A view that never
+   * saw the `error:reconnecting` (one the outage outlasted, or a recovery
+   * with no reconnect) gets no `recovered` beacon.
+   *
+   * A reconnect that succeeds resumes playback, so it also reopens a view
+   * the outage outlasted. Not while the viewer is paused: the provider keeps
+   * a paused player paused, and nothing is being watched. Its `videoStart`
+   * comes now if `playing` is already true, otherwise from the `playing`
+   * change that follows.
+   *
+   * @param payload - `{ attempt, elapsedMs }`, or nothing from an older provider
+   */
+  function onRecovered(payload?: PlayerEventMap['error:recovered']): void {
+    if (!api) return;
+    if (session.viewEnd === null && outageStartedAt !== null) {
+      const now = Date.now();
+      const duration = Math.max(0, now - outageStartedAt);
+      settleOutage(now);
+      closeRebuffer(true);
+      sendBeacon('recovered', {
+        duration,
+        reconnectCount: session.reconnectCount,
+        ...finiteFields(payload, ['attempt', 'elapsedMs']),
+      });
+    }
+    if (api.getState('paused') === true) return;
+    if (ensureOpenView() && api.getState('playing')) onFirstFrame();
+  }
+
+  /**
+   * The finite numeric fields of a provider payload, by name.
+   *
+   * @param payload - The event payload, possibly absent
+   * @param keys - The fields to copy
+   * @returns Only those of `keys` the payload has as finite numbers
+   */
+  function finiteFields(payload: unknown, keys: string[]): Record<string, number> {
+    const result: Record<string, number> = {};
+    if (!payload || typeof payload !== 'object') return result;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'number' && Number.isFinite(value)) result[key] = value;
+    }
+    return result;
+  }
+
+  /**
+   * Handle `error:reconnecting`: the provider is auto-reconnecting.
+   *
+   * The first one in a view opens an outage: counts it in `reconnectCount`,
+   * starts its `reconnectDuration` clock, and sends `reconnecting` with the
+   * `attempt`, `delayMs` and `elapsedMs` the payload provides. The outage is
+   * also a stall: a rebuffer opens at once (a `waiting` still in its grace is
+   * confirmed from when it began), unless one is open already, or nobody is
+   * waiting on playback: before the first frame or while paused the outage
+   * still counts in `reconnectCount` and `reconnectDuration`, but not as a
+   * rebuffer. Later attempts send
+   * nothing, except the first carrying `longOutage`, which sends
+   * `reconnecting` once more with `longOutage: true`. Ignored after the
+   * view's viewEnd: a closed view hears nothing of an outage.
+   *
+   * @param payload - The provider's attempt, delay and window progress
+   */
+  function onReconnecting(payload: PlayerEventMap['error:reconnecting']): void {
+    if (!api || session.viewEnd !== null) return;
+
+    const first = outageStartedAt === null;
+    const long = payload?.longOutage === true && !outageLongSent;
+    if (!first && !long) return;
+
+    if (first) {
+      const now = Date.now();
+      outageStartedAt = now;
+      session.reconnectCount++;
+      // A stall only where a viewer is waiting on playback, the same rule as
+      // onWaiting(): not before the first frame (that is startup) and not
+      // while paused (a pause closes a rebuffer, see onPause)
+      if (!isRebuffering && session.firstFrameTime !== null && api.getState('paused') !== true) {
+        const startedAt = waitingSince ?? now;
+        cancelPendingRebuffer();
+        openRebuffer(startedAt);
+      }
+    }
+    if (long) outageLongSent = true;
+
+    sendBeacon('reconnecting', {
+      reconnectCount: session.reconnectCount,
+      ...finiteFields(payload, ['attempt', 'delayMs', 'elapsedMs']),
+      ...(payload?.longOutage === true ? { longOutage: true } : {}),
+    });
+  }
+
+  /**
+   * Handle `source:unloaded` (`player.unload()`): the host stopped playback,
+   * so the open view ends as `abandoned` with the full viewEnd. A no-op on a
+   * closed view. The next source's play request starts a new view.
+   */
+  function onSourceUnloaded(): void {
+    if (!api || session.viewEnd !== null) return;
+    session.exitType = 'abandoned';
+    sendViewEnd();
+  }
+
+  /**
+   * Whether a player error's `detail` says the provider will auto-reconnect
+   * (`reconnecting: true`). A fatal error so marked is reported as a
+   * warning and the view stays open.
+   *
+   * @param detail - The error's `detail`, if any
+   * @returns True when marked `reconnecting`
+   */
+  function markedReconnecting(detail: unknown): boolean {
+    return !!detail && typeof detail === 'object'
+      && (detail as Record<string, unknown>).reconnecting === true;
   }
 
   /**
@@ -773,13 +1095,23 @@ export function createAnalyticsPlugin(
     if (event.key === 'seeking' && event.previousValue === false && event.value === true) {
       // Replay preparation must not change an already-finalized view.
       if (session.viewEnd !== null) return;
+      markLiveSeek();
       if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1000) {
         pendingEchoes--;
         return;
       }
       pendingEchoes = 0;
       cancelPendingRebuffer();
+      // Element seeks each within 2 s of the previous one are one burst: only
+      // its first counts in seekCount and may send a beacon (HEI-32).
+      const now = Date.now();
+      session.elementSeekCount++;
+      const inBurst = lastElementSeekAt !== null && now >= lastElementSeekAt && now - lastElementSeekAt <= 2000;
+      lastElementSeekAt = now;
+      if (inBurst) return;
       session.seekCount++;
+      if (elementSeekBeacons >= 30) return;
+      elementSeekBeacons++;
       // Providers write the element's target before setting seeking true.
       sendBeacon('seeking', {
         seekCount: session.seekCount,
@@ -796,7 +1128,14 @@ export function createAnalyticsPlugin(
       return;
     }
 
+    if (event.key === 'playing') {
+      // Credit the stretch that just ended under the value it was spent in
+      if (session.viewEnd === null) accrueTime();
+      statePlaying = event.value === true;
+    }
+
     if (event.key === 'playing' && event.value === true) {
+      ensureOpenView();
       playRequestPending = false;
       onFirstFrame();
       return;
@@ -836,7 +1175,7 @@ export function createAnalyticsPlugin(
    * with a start of its own.
    */
   function onFirstFrame(): void {
-    if (session.firstFrameTime !== null) return;
+    if (session.viewEnd !== null || session.firstFrameTime !== null) return;
 
     const now = Date.now();
     session.firstFrameTime = now;
@@ -884,8 +1223,14 @@ export function createAnalyticsPlugin(
 
   /**
    * Handle playback started/resumed.
+   *
+   * A resume with no request (a stall recovering on its own after the view
+   * ended) opens a new view, whose first frame is this one.
    */
   function onPlaying(): void {
+    if (ensureOpenView() && api?.getState('playing')) onFirstFrame();
+    if (!api || session.viewEnd !== null) return;
+
     const now = Date.now();
     accrueTime(now);
 
@@ -895,11 +1240,7 @@ export function createAnalyticsPlugin(
     commitPendingPause();
 
     // End pause?
-    if (pauseStartTime) {
-      const pauseDuration = now - pauseStartTime;
-      session.pauseDuration += pauseDuration;
-      pauseStartTime = null;
-    }
+    settlePause(now);
 
     session.playbackState = 'playing';
   }
@@ -916,10 +1257,10 @@ export function createAnalyticsPlugin(
    * (`setTimeout(0)`): `onEnded()` discards it, and otherwise it is counted
    * as the viewer's, with its own time and position. A pause anywhere else
    * is counted immediately. Every pause still settles a pending play request
-   * and closes an open rebuffer.
+   * and closes an open rebuffer. A pause after the view's viewEnd is ignored.
    */
   function onPause(): void {
-    if (!api) return;
+    if (!api || session.viewEnd !== null) return;
 
     accrueTime();
 
@@ -1031,10 +1372,10 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle buffering/waiting.
+   * Handle buffering/waiting. Ignored after the view's viewEnd.
    */
   function onWaiting(): void {
-    if (!api) return;
+    if (!api || session.viewEnd !== null) return;
 
     // Only count as rebuffer if we've started playing AND are not
     // mid-seek (seeks trigger waiting which is not a rebuffer).
@@ -1095,6 +1436,7 @@ export function createAnalyticsPlugin(
   function onSeeking(payload?: { time?: number }): void {
     if (!api || session.viewEnd !== null) return;
 
+    markLiveSeek();
     cancelPendingRebuffer();
     const now = Date.now();
     // Coalesced requests can leave unused echoes. Do not renew expired ones.
@@ -1114,26 +1456,50 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle playback ended.
+   * Handle playback ended: `completed` for VOD, `liveEnded` for a live
+   * stream, whose end is the broadcast's, not the viewer finishing it.
    */
   function onEnded(): void {
     // The pause just before this was the element's, not the viewer's
     discardPendingPause();
     accrueTime();
     session.playbackState = 'ended';
-    session.exitType = 'completed';
+    session.exitType = resolveIsLive() === true ? 'liveEnded' : 'completed';
     sendViewEnd();
   }
 
   /**
+   * Context for an error beacon: whether the browser reports itself online,
+   * and the playing source's host name (no scheme, path, query or fragment).
+   * @returns `online`, and `sourceHost` when the source has one
+   */
+  function errorContext(): { online?: boolean; sourceHost?: string } {
+    const context: { online?: boolean; sourceHost?: string } = {};
+    if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') {
+      context.online = navigator.onLine;
+    }
+    const host = sourceHost(api?.getState('source')?.src);
+    if (host) context.sourceHost = host;
+    return context;
+  }
+
+  /**
    * Handle errors (from media:error subscription).
+   *
+   * An error after the view's viewEnd belongs to no open view: no beacon,
+   * no count. A fatal error marked `detail.reconnecting` is sent as a
+   * warning and leaves the view open; the outage is reported by
+   * onReconnecting and onRecovered.
    */
   function onError(payload: { error: Error }): void {
+    if (session.viewEnd !== null) return;
     const error = payload.error;
     session.errorCount++;
     const category = classifyError(error as Error & { code?: unknown; detail?: unknown });
     const fatal = (error as Error & { fatal?: boolean }).fatal === true;
-    if (fatal) session.fatalErrorCategory = category;
+    // A fatal the provider will reconnect from does not end the view
+    const terminal = fatal && !markedReconnecting((error as Error & { detail?: unknown }).detail);
+    if (terminal) session.fatalErrorCategory = category;
     else session.warningCount++;
 
     const errorEvent: ErrorEvent = {
@@ -1156,11 +1522,12 @@ export function createAnalyticsPlugin(
         ? { errorCode: (error as any).code } : {}),
       fatal: errorEvent.fatal,
       errorCategory: category,
-      errorSeverity: fatal ? 'fatal' : 'warning',
+      errorSeverity: terminal ? 'fatal' : 'warning',
       ...errorDetail((error as Error & { detail?: unknown }).detail),
+      ...errorContext(),
     });
 
-    if (errorEvent.fatal) {
+    if (terminal) {
       accrueTime();
       session.playbackState = 'error';
       session.exitType = 'error';
@@ -1179,10 +1546,12 @@ export function createAnalyticsPlugin(
    * emit `{ code, message, fatal }` with no `Error` at all. An `Error` keeps
    * its `name` as the error type; a structured error without one reports its
    * `code`. Either way `errorCode` carries the code when there is one. A
-   * payload with neither a string `code` nor a string `message` is ignored.
+   * payload with neither a string `code` nor a string `message` is ignored,
+   * as is any error after the view's viewEnd. A fatal error marked
+   * `detail.reconnecting` is sent as a warning and leaves the view open.
    */
   function onCoreError(err: any): void {
-    if (!err) return;
+    if (!err || session.viewEnd !== null) return;
     const original = err.originalError || err;
     const code: string | undefined =
       typeof err.code === 'string' ? err.code
@@ -1207,7 +1576,9 @@ export function createAnalyticsPlugin(
     session.errorCount++;
     const category = classifyError(err);
     const fatal = err.fatal === true;
-    if (fatal) session.fatalErrorCategory = category;
+    // A fatal the provider will reconnect from does not end the view
+    const terminal = fatal && !markedReconnecting(err.detail);
+    if (terminal) session.fatalErrorCategory = category;
     else session.warningCount++;
     const errorEvent: ErrorEvent = {
       time: Date.now(),
@@ -1227,11 +1598,12 @@ export function createAnalyticsPlugin(
       ...(code !== undefined ? { errorCode: code } : {}),
       fatal: errorEvent.fatal,
       errorCategory: category,
-      errorSeverity: fatal ? 'fatal' : 'warning',
+      errorSeverity: terminal ? 'fatal' : 'warning',
       ...errorDetail(err.detail),
+      ...errorContext(),
     });
 
-    if (errorEvent.fatal) {
+    if (terminal) {
       accrueTime();
       session.playbackState = 'error';
       session.exitType = 'error';
@@ -1240,10 +1612,10 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle quality/bitrate changes.
+   * Handle quality/bitrate changes. Ignored after the view's viewEnd.
    */
   function onQualityChange(payload: { quality: string; auto: boolean }): void {
-    if (!api) return;
+    if (!api || session.viewEnd !== null) return;
 
     const now = Date.now();
     session.qualityChanges++;
@@ -1253,22 +1625,9 @@ export function createAnalyticsPlugin(
     const currentQuality = qualities.find((q: QualityLevel) => q.id === payload.quality);
 
     if (currentQuality) {
-      const bitrateChange: BitrateChange = {
-        time: now,
-        bitrate: currentQuality.bitrate,
-        width: currentQuality.width,
-        height: currentQuality.height,
-      };
-
-      session.bitrateHistory.push(bitrateChange);
-      // Cap bitrate history to prevent memory growth during long sessions
-      if (session.bitrateHistory.length > 500) {
-        session.bitrateHistory = session.bitrateHistory.slice(-500);
-      }
-
-      if (currentQuality.bitrate > session.maxBitrate) {
-        session.maxBitrate = currentQuality.bitrate;
-      }
+      // A level with no known bitrate (0) leaves the bitrate fields null
+      // rather than averaging a 0 into them
+      if (currentQuality.bitrate > 0) recordBitrate(now, currentQuality);
 
       sendBeacon('qualityChange', {
         bitrate: currentQuality.bitrate,
@@ -1280,6 +1639,31 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * Add a level's bitrate to the history and to `maxBitrate`.
+   *
+   * @param now - When playback switched to the level
+   * @param currentQuality - The level switched to, with a known bitrate
+   */
+  function recordBitrate(now: number, currentQuality: QualityLevel): void {
+    const bitrateChange: BitrateChange = {
+      time: now,
+      bitrate: currentQuality.bitrate,
+      width: currentQuality.width,
+      height: currentQuality.height,
+    };
+
+    session.bitrateHistory.push(bitrateChange);
+    // Cap bitrate history to prevent memory growth during long sessions
+    if (session.bitrateHistory.length > 500) {
+      session.bitrateHistory = session.bitrateHistory.slice(-500);
+    }
+
+    if (session.maxBitrate === null || currentQuality.bitrate > session.maxBitrate) {
+      session.maxBitrate = currentQuality.bitrate;
+    }
+  }
+
+  /**
    * Record a live latency reading.
    *
    * Accumulated rather than beaconed: the provider emits this several times a
@@ -1287,10 +1671,85 @@ export function createAnalyticsPlugin(
    * the host's own endpoint. The heartbeat and viewEnd payloads carry the
    * mean, p95 and max instead.
    *
+   * Only readings at the live edge are latency. A reading before the view's
+   * first frame is dropped (the position is not yet where playback will be),
+   * and so is one taken while the viewer watches the DVR window after a seek:
+   * that offset is the viewer's choice, not delivery latency. A viewer who
+   * drifts behind without seeking is still sampled.
+   *
+   * After a seek the first reading with `seeking` false decides, from the
+   * `liveEdge` state, whether the view is back at the edge or in DVR mode.
+   * The provider emits `live:latency` before it writes `liveEdge` for the
+   * same reading (hls `applyLiveMetrics`), so the decision waits for its edge
+   * event or a microtask. A following reading finishes the preceding one
+   * before its own edge flag is written; a new seek discards a pending reading.
+   *
    * @param payload - Latency behind the live edge, in seconds
    */
   function onLiveLatency(payload: { latency: number }): void {
-    latencySampler.add(payload.latency);
+    pendingLiveReading?.();
+    if (session.firstFrameTime === null) return;
+    if (liveMode === 'edge') {
+      latencySampler.add(payload.latency);
+      return;
+    }
+    if (api?.getState('seeking')) return;
+
+    const reading = session;
+    const finish = () => {
+      if (pendingLiveReading !== finish) return;
+      pendingLiveReading = null;
+      if (!api || session !== reading || session.viewEnd !== null || api.getState('seeking')) return;
+      settleLiveMode();
+      if (liveMode === 'edge') latencySampler.add(payload.latency);
+    };
+    pendingLiveReading = finish;
+    void Promise.resolve().then(finish);
+  }
+
+  /**
+   * Finish a pending fresh reading with its edge flag, and leave DVR mode
+   * when playback reaches the live edge again. Without a pending reading,
+   * an edge change does not settle an awaiting seek.
+   *
+   * @param payload - The `live:edgechange` payload
+   */
+  function onLiveEdgeChange(payload: { atEdge: boolean }): void {
+    pendingLiveReading?.();
+    if (!api || session.viewEnd !== null) return;
+    if (liveMode === 'dvr' && payload.atEdge) setLiveMode('edge');
+  }
+
+  /**
+   * Mark a seek on a live view: latency readings wait for the first fresh
+   * reading after the seek settles. No-op on VOD.
+   */
+  function markLiveSeek(): void {
+    if (resolveIsLive() !== true && api?.getState('live') !== true) return;
+    pendingLiveReading = null;
+    setLiveMode('awaiting');
+  }
+
+  /**
+   * Decide a pending or DVR live mode from the `liveEdge` state: at the edge,
+   * sampling resumes; behind it, the view is in DVR mode. No-op at the edge
+   * or while a seek is still in progress.
+   */
+  function settleLiveMode(): void {
+    if (liveMode === 'edge' || !api || api.getState('seeking')) return;
+    setLiveMode(api.getState('liveEdge') === true ? 'edge' : 'dvr');
+  }
+
+  /**
+   * Switch live mode, accruing first so each stretch of play time is credited
+   * to the mode it was spent in.
+   *
+   * @param next - The mode to switch to
+   */
+  function setLiveMode(next: typeof liveMode): void {
+    if (next === liveMode) return;
+    accrueTime();
+    liveMode = next;
   }
 
   /**
@@ -1307,9 +1766,11 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle page visibility change.
+   * Handle page visibility change. Ignored after the view's viewEnd, whose
+   * exit type stands.
    */
   function onVisibilityChange(): void {
+    if (session.viewEnd !== null) return;
     if (document.hidden) {
       session.exitType = 'background';
       sendHeartbeat();
@@ -1332,44 +1793,17 @@ export function createAnalyticsPlugin(
   function onBeforeUnload(): void {
     if (session.viewEnd) return;
 
-    // The time since the last heartbeat belongs to this view too
-    accrueTime();
-
-    // A near-end pause still held as the page goes was the viewer's
-    commitPendingPause();
-
     // The page is going away: fold an open rebuffer's time into
     // rebufferDuration, but without its own beacon - only the unload viewEnd
     // below is sent.
-    closeRebuffer(false);
-
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-    }
-
-    session.viewEnd = Date.now();
+    const viewEnd = finalizeView(false);
 
     if (!session.exitType) {
       session.exitType = 'abandoned';
     }
-    sendUnloadBeacon('viewEnd', {
-      watchTime: session.watchTime,
-      playTime: session.playTime,
-      startupTime: session.startupTime,
-      rebufferCount: session.rebufferCount,
-      rebufferDuration: session.rebufferDuration,
-      avgBitrate: session.avgBitrate,
-      maxBitrate: session.maxBitrate,
-      exitType: session.exitType,
-      warningCount: session.warningCount,
-      ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
-      // Absent entirely on VOD, exactly as in sendViewEnd(): an abandoned live
-      // view is the one most worth having latency for
-      ...(latencySampler.summary() ?? {}),
-      ...segmentSummary(),
-      ...frameSummary(),
-    });
+    // The same metrics as sendViewEnd(), latency included: an abandoned live
+    // view is the one most worth having it for
+    sendUnloadBeacon('viewEnd', viewEndMetrics(viewEnd));
   }
 
   // === Plugin Interface ===
@@ -1384,6 +1818,7 @@ export function createAnalyticsPlugin(
     /** Begin the first view and subscribe to player and page events. @param pluginApi - Core plugin API. */
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
+      statePlaying = api.getState('playing') === true;
       viewContext = pageContext(mergedConfig.playerInitTime);
 
       // First view: viewStart and the heartbeat
@@ -1400,12 +1835,16 @@ export function createAnalyticsPlugin(
       const unsubTimeUpdate = api.on('playback:timeupdate', onTimeUpdate);
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
+      const unsubRecovered = api.on('error:recovered', onRecovered);
+      const unsubReconnecting = api.on('error:reconnecting', onReconnecting);
+      const unsubUnloaded = api.on('source:unloaded', onSourceUnloaded);
       const unsubQuality = api.on('quality:change', onQualityChange);
       const unsubSegment = api.on('media:segment', onSegment);
       // Live latency. The HLS provider emits this at the timeupdate cadence
       // for live content only, so a VOD session records nothing and the live
       // keys stay out of its beacons entirely.
       const unsubLatency = api.on('live:latency', onLiveLatency);
+      const unsubEdgeChange = api.on('live:edgechange', onLiveEdgeChange);
       const unsubLowLatency = api.on('live:lowlatency', onLowLatencyChange);
       // A playlist track change is a new video once its source loads
       const unsubPlaylist = api.on('playlist:change', onPlaylistChange);
@@ -1420,9 +1859,13 @@ export function createAnalyticsPlugin(
         unsubEnded,
         unsubError,
         unsubCoreError,
+        unsubRecovered,
+        unsubReconnecting,
+        unsubUnloaded,
         unsubQuality,
         unsubSegment,
         unsubLatency,
+        unsubEdgeChange,
         unsubLowLatency,
         unsubPlaylist,
         unsubTimeUpdate
