@@ -612,16 +612,18 @@ export function createAnalyticsPlugin(
       return;
     }
 
-    sendHeartbeat();
+    sendHeartbeat(now);
   }
 
   /**
    * Send periodic heartbeat with current metrics.
+   *
+   * @param now - The heartbeat time; the tick passes the one it accrued at,
+   *   so the accrual here adds nothing a second time
    */
-  function sendHeartbeat(): void {
+  function sendHeartbeat(now: number = Date.now()): void {
     if (!api) return;
 
-    const now = Date.now();
     accrueTime(now);
     // A seek that no fresh reading followed is decided from state instead
     settleLiveMode();

@@ -96,7 +96,9 @@ export class PluginManager {
    *
    * Concurrent calls share one init. A call made while a destroy of the same
    * plugin is in flight waits for that destroy to finish and then runs a fresh
-   * `init()`, rather than handing back the instance being torn down.
+   * `init()`, rather than handing back the instance being torn down. When
+   * `init()` throws, the cleanups it registered with `api.onDestroy()` run
+   * before the error is rethrown.
    *
    * @param id - Plugin ID
    * @returns Resolves when the plugin is ready
@@ -171,6 +173,10 @@ export class PluginManager {
       } catch (error) {
         record.state = 'error';
         record.error = error as Error;
+        // Nothing became ready, so no destroy will come for this attempt:
+        // release what it registered now, or its listeners stay live and a
+        // later init registers them a second time.
+        record.api.runCleanups();
         this.logger.error(`Plugin init failed: ${id}`, { error });
         this.eventBus.emit('plugin:error', { name: id, error: error as Error });
         throw error;

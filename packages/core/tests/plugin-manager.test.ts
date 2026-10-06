@@ -385,6 +385,34 @@ describe('PluginManager', () => {
       });
     });
 
+    it('runs the cleanups a failed init registered, with no destroy asked for', async () => {
+      const cleanup = vi.fn();
+      const listener = vi.fn();
+      const onStateChange = vi.fn();
+      const plugin = createMockPlugin({
+        onStateChange,
+        init: vi.fn((api: any) => {
+          api.onDestroy(cleanup);
+          api.onDestroy(api.on('playback:play', listener));
+          throw new Error('Init failed');
+        }),
+      });
+      pluginManager.register(plugin);
+
+      await expect(pluginManager.initPlugin('test-plugin')).rejects.toThrow('Init failed');
+
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      eventBus.emit('playback:play', undefined);
+      expect(listener).not.toHaveBeenCalled();
+      stateManager.set('volume', 0.25);
+      expect(onStateChange).not.toHaveBeenCalled();
+
+      // A later destroy has nothing left to run
+      await pluginManager.destroyPlugin('test-plugin');
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(plugin.destroy).not.toHaveBeenCalled();
+    });
+
     it('should update state to error on failure', async () => {
       const plugin = createMockPlugin({
         init: vi.fn(() => { throw new Error('Init failed'); }),
