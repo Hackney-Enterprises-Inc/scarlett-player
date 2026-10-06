@@ -1,5 +1,15 @@
 # @scarlett-player/hls
 
+## 1.22.0
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Video element errors now include the element's `networkState` and `readyState` in `detail`, and name codes 4 ("Media source not supported") and 2 ("Media network error") when the browser gives no message.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Native HLS (Safari/iOS) live streams now resume at the live edge after a reconnect or error recovery, instead of at the start of a long DVR window.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - A fatal `error` that auto-reconnect will recover from now carries `detail.reconnecting: true`, so listeners can tell it from a terminal failure; the event and its order are otherwise unchanged.
+
 ## 1.21.0
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @scarlett-player/chromecast
 
+## 1.22.0
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - `player.unload()` during a cast session now stops the media on the receiver (the session stays connected) and the receiver's state is no longer written back into the unloaded player.
+
 ## 1.21.0
 
 ## 1.20.0
