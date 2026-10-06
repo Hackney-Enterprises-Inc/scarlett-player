@@ -1,5 +1,11 @@
 # @scarlett-player/native
 
+## 1.22.0
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Error `detail` gains optional `reconnecting`, `networkState` and `readyState` fields, and the native provider's media element errors now report `mediaErrorCode`, `networkState` and `readyState` in `detail`.
+
 ## 1.21.0
 
 ## 1.20.0

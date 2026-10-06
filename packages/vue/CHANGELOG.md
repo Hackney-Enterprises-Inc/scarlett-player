@@ -1,5 +1,11 @@
 # @scarlett-player/vue
 
+## 1.22.0
+
+### Minor Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - New `player.unload()` leaves the current source without destroying the player: it stops any load in progress, tears down the provider (a WHEP stream closes its connection and stops retrying), resets the player to its empty state and emits `source:unloaded`, ready for the next `load()`. Available on the Vue component and `useScarlettPlayer()`, and on the player the embed's `ScarlettPlayer.create()` returns.
+
 ## 1.21.0
 
 ## 1.20.0

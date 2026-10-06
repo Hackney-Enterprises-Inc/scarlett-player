@@ -1,5 +1,33 @@
 # @scarlett-player/analytics
 
+## 1.22.0
+
+### Minor Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Heartbeats now include pause, seek, error and quality counters and maximum bitrate; page-unload `viewEnd` includes the same metrics and scores as a normal `viewEnd`, including completion. `pauseDuration` includes a pause still in progress, final average bitrate is current between heartbeats, and `maxBitrate`/`avgBitrate` are `null` instead of `0` until the player reports a positive bitrate.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Video element errors are now classified from their MediaError code (2 network, 3 media, 4 source) instead of reporting `unknown`, and every `error` beacon carries `online`, `sourceHost` (host name only) and, when the provider supplies them, the element's `networkState` and `readyState`.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - A view that has not been playing for `idleTimeout` (default 30 minutes, `0` disables) now ends as `abandoned` and stops its heartbeat, and playback that comes back later (a play, a stall that recovers by itself, a successful reconnect) starts a new view instead of going unreported.
+
+  A late resume signal after a fatal error, completion or page unload no longer starts an unintended view; only a new play request does.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - A live stream that ends now reports exitType `liveEnded` instead of `completed`, and live views report `completionRate: null` however they end, since a position in a sliding window is not a completion.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - A view now stays open while the player auto-reconnects: the failure is reported as a warning, the outage as `reconnecting` and `recovered` beacons and a rebuffer, and every view carries `reconnectCount` and `reconnectDuration`; only a reconnect that gives up or a terminal failure ends the view as `error`. `player.unload()` now ends the open view as `abandoned`.
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Once a view has sent its `viewEnd`, later errors, pauses, stalls, quality changes and page visibility changes no longer send beacons or change its counters, so a second fatal error no longer sends a second `viewEnd`.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Element seeks (native controls, or the browser seeking by itself) that follow each other within 2 seconds now send one `seeking` beacon and count once in `seekCount`, with at most 30 such beacons per view. Bursts still count in `seekCount` after the cap; the new `elementSeekCount` on heartbeats and `viewEnd` counts every non-echo element seek. Echoes of player seeks are excluded, so a seek storm no longer floods the beacons.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - Analytics now names in-app browsers (Instagram, Facebook, Google App, LinkedIn, TikTok) instead of reporting them as Safari, Chrome or Unknown, recognizes Chrome on iOS, and the page-unload fetch fallback now uses plain headers returned synchronously by a `headers()` function while safely ignoring invalid or async results (async results are still not awaited on unload).
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - `liveLatency*` now measures delivery latency at the live edge only: readings before the first frame, and readings while a viewer watches the DVR window after seeking back, are left out, and the time played back there is reported as a new `dvrTime` (ms) on live heartbeats and `viewEnd`.
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - `playTime` no longer counts time while the player is not actually playing: a play request that never reaches its first frame, or playback stopped by a `load()` without autoplay, used to keep accruing play time and kept the view from ever reaching `idleTimeout`.
+
 ## 1.21.0
 
 ## 1.20.0

@@ -1,5 +1,11 @@
 # @scarlett-player/ui
 
+## 1.22.0
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - On a live stream, Speed is now offered only once the DVR window reaches 90 seconds, and withdrawn again (with the rate reset to 1) if it drops below 60 seconds; a short sliding window of a few segments, or one hovering around 60 seconds, no longer shows it or makes it flicker.
+
 ## 1.21.0
 
 ### Minor Changes

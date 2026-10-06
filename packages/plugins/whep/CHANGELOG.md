@@ -1,5 +1,11 @@
 # @scarlett-player/whep
 
+## 1.22.0
+
+### Patch Changes
+
+- [#135](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/135) [`8af72af`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/8af72af75a4cefed37cefa0e17404a033053656d) Thanks [@alexhackney](https://github.com/alexhackney)! - A fatal `error` that the provider will attempt to recover from now carries `detail.reconnecting: true`, so listeners can tell it from a terminal failure; destroying or replacing the source from an error listener no longer leaves a reconnect timer behind.
+
 ## 1.21.0
 
 ## 1.20.0
