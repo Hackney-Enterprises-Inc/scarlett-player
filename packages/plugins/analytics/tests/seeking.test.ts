@@ -130,7 +130,13 @@ describe('element-driven seeking', () => {
       h.elementSeek(time);
       h.state.set('seeking', false);
     }
-    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10, 20, 30]);
+    // Every request still counts and absorbs its echo; the burst sends its
+    // leading request and, at the window deadline, the latest target once
+    // (HEI-SCARLETT-42).
+    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10]);
+    expect(h.plugin.getMetrics().seekCount).toBe(3);
+    vi.advanceTimersByTime(1000);
+    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10, 30]);
     expect(h.plugin.getMetrics().seekCount).toBe(3);
   });
 
@@ -140,7 +146,15 @@ describe('element-driven seeking', () => {
       h.elementSeek(time);
       h.state.set('seeking', false);
     }
-    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10, 20, 30, 40]);
+    // The fourth transition is no echo: the held player target 30 flushes
+    // first with its own count, then the element beacon follows.
+    expect(h.sent('seeking').map((b) => [b.seekTo, b.seekCount, b.seekSource])).toEqual([
+      [10, 1, 'player'], [30, 3, 'player'], [40, 4, 'element'],
+    ]);
+    vi.advanceTimersByTime(1000);
+    expect(h.sent('seeking').map((b) => [b.seekTo, b.seekCount, b.seekSource])).toEqual([
+      [10, 1, 'player'], [30, 3, 'player'], [40, 4, 'element'],
+    ]);
     expect(h.plugin.getMetrics().seekCount).toBe(4);
   });
 
@@ -172,8 +186,13 @@ describe('element-driven seeking', () => {
     h.elementSeek(30);
     h.state.set('seeking', false);
     h.elementSeek(40);
+    vi.advanceTimersByTime(1000); // Run the trailing emission window to quiescence.
 
     const expired = delay > 1000;
+    // Same event timing and echo bookkeeping as before HEI-SCARLETT-42: at
+    // exactly 1000 ms the second request's echo still absorbs 40; after it,
+    // 40 is an element seek. A held player seek flushes before the element
+    // beacon, so the wire order follows the seek order.
     expect(h.sent('seeking').map((b) => b.seekTo)).toEqual(expired ? [10, 20, 30, 40] : [10, 20, 30]);
     expect(h.sent('seeking').map((b) => b.seekSource)).toEqual(
       expired ? ['player', 'player', 'player', 'element'] : ['player', 'player', 'player']
@@ -268,6 +287,13 @@ describe('element-driven seeking', () => {
     }
     write(70, true);
     h.state.set('seeking', false);
+    // The release's forced request lands inside the press's emission window:
+    // its target is the one trailing beacon at the window deadline, 500 ms
+    // after the release (HEI-SCARLETT-42).
+    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10]);
+    vi.advanceTimersByTime(499);
+    expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10]);
+    vi.advanceTimersByTime(1);
     expect(h.sent('seeking').map((b) => b.seekTo)).toEqual([10, 70]);
     expect(h.plugin.getMetrics().seekCount).toBe(2);
   });

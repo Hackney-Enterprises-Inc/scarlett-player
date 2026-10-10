@@ -126,14 +126,14 @@ The plugin automatically tracks these events:
 | `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
 | `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 2, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional interval fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames (see below) |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
-| `seeking` | A player-requested seek, or the first element-driven seek of a burst, started (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount, seekSource: `'player'` or `'element'` |
+| `seeking` | A player-requested seek started: the first request of a burst, then the burst's latest target once per second; or the first element-driven seek of a burst (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount at emission, seekSource: `'player'` or `'element'` |
 | `rebufferStart` | Buffering persisted through `rebufferGraceMs` (250 ms default); duration is measured from the first eligible `waiting`, not this beacon's timestamp | rebufferCount |
 | `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
 | `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), optional errorCode (string or number), fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, networkState, readyState, attempts, retriesExhausted, reconnectExhausted, reconnecting, timedOut when the provider supplies them; online (boolean, when `navigator.onLine` is available); sourceHost (the source's host name only: no scheme, port, path, query or fragment; absent for `blob:`/`data:` sources). Classification uses code/detail, not message text: an element error with no player code is classified by its MediaError code (2 `network`, 3 `media`, 4 `source`). No raw detail or signed URL is sent. A fatal error marked `reconnecting` is sent with errorSeverity `warning` (see [Reconnects](#reconnects)) |
 | `reconnecting` | The provider started auto-reconnecting (see [Reconnects](#reconnects)) | reconnectCount; attempt, delayMs and elapsedMs when supplied as finite numbers; longOutage (when true) |
 | `recovered` | A reconnect succeeded (see [Reconnects](#reconnects)) | duration (ms of the outage), reconnectCount; attempt and elapsedMs when supplied as finite numbers |
-| `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, optional fatalErrorCategory and completionRate. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or 0 if no duration is known. startupTime is null until the first frame |
+| `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, optional fatalErrorCategory, completionRate and gaugeScale. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or null when no finite duration is known. startupTime is null until the first frame. Both gauges are declared by gaugeScale and bounded as described in [Gauge units](#gauge-units) |
 
 The segment and frame fields are interval measurements, not cumulative counters.
 `segmentCount`, `segmentBytes`, `segmentLoadAvgMs`, `segmentLoadMaxMs` and
@@ -154,6 +154,30 @@ covered in [Views and track changes](#views-and-track-changes).
 a level with a bitrate above 0 (native HLS, MP4 and WHEP often never do), in
 beacons and in `getMetrics()`. `avgBitrate` is weighted by time at each level
 and current on every heartbeat and `viewEnd`.
+
+### Gauge units
+
+Every `viewEnd` declares the units of its two gauges with `gaugeScale`. This
+plugin always sends `gaugeScale: 'percent'`:
+
+| Gauge | Meaning | Bounds |
+|-------|---------|--------|
+| `completionRate` | Percent of the media watched: position over duration, 100 for a `completed` VOD, null on every live view and whenever no finite duration is known | 0..100 or null |
+| `rebufferRatio` | Percent of watch time spent rebuffering: rebufferDuration over watchTime, 0 when the view accrued no watch time, null when either input is unusable | 0..100 or null |
+
+Finite positions are bounded to the contract: a negative position reports 0, a
+position beyond the duration reports 100. The raw counters the gauges derive
+from (`currentTime`, `duration`, `rebufferDuration`, `watchTime`) are sent as
+measured and are not clamped. An unavailable gauge is `null`, never `NaN` or
+`Infinity`; the plugin keeps the last known finite position/duration pair for
+completion when a `load()` zeroes the state, and a non-finite state (a live
+element's `Infinity` duration, `NaN` positions) cannot overwrite it.
+
+`'ratio'` (0..1) is reserved for explicitly compatible external producers; an
+ingest that stores these gauges normalizes the declared scale into canonical
+0..1 columns and never infers units from a value's magnitude. A host
+`customDimensions` entry named `gaugeScale` cannot override the marker: the
+plugin's own value is applied after custom dimensions.
 
 ### Rebuffer grace and time accounting
 
@@ -198,6 +222,17 @@ seeks plus element seek bursts:
   audio UI and playlist seek requests, and the video UI's progress-bar
   presses/releases, keyboard arrows and Home/End on the focused progress bar,
   the skip-backward/forward buttons, and control-bar replay to zero. `seekTo` uses the requested target.
+  Every request counts in `seekCount`, but beacons are bounded by a fixed
+  one-second emission window per view: the first request sends immediately,
+  further requests inside the window replace one pending target, and that
+  latest target sends once at the window's deadline. Continuous scrubbing
+  therefore sends at most one `seeking` beacon per second after the first,
+  always with the most recent target, and a single isolated seek stays a
+  single immediate beacon. A trailing beacon's `seekCount` is the cumulative
+  count at emission, so it includes element seeks counted in between, and
+  its timestamp is its send time. A target still held when an element seek
+  beacon is due is sent first, so beacons keep the order the seeks happened
+  in. The window is an internal policy, not a configuration option.
 - **`seekSource: 'element'`**: the provider reports `seeking` changing from
   false to true without a recent pending bus echo. This covers browser/native
   controls, OS seeks that reach the media element directly, and direct
@@ -222,6 +257,14 @@ and release (two bus requests for a drag), not each throttled mid-drag write.
 Mid-drag element transitions not absorbed as echoes can still count as element
 seeks. Providers do not re-emit `playback:seeking` from the element, which
 would feed back into their seek command handler. WHEP is not seekable.
+
+A player target held by the emission window is never lost with its view: it
+flushes ahead of the `viewEnd` when the view ends (the media ending, a fatal
+error, a video change, an explicit new view, the idle timeout or `destroy()`),
+ahead of the heartbeat and batch flush when the page goes to background, and
+on page unload through the synchronous unload transport, ahead of the unload
+`viewEnd`. No `seeking` beacon is sent after a view's `viewEnd`, and the
+window's timer never crosses into the next view.
 
 After `viewEnd`, both bus requests and element transitions are ignored for
 seek accounting until playback starts a new view. In particular, a replay's
@@ -530,6 +573,27 @@ console.log({
   qoeScore: analytics.getQoEScore(),
 });
 ```
+
+## Diagnostics API
+
+Get a synchronous, side-effect free snapshot of player state, provider contributions,
+whitelisted session metrics, and continuous QoE v2:
+
+```typescript
+const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
+const snapshot = analytics.getDiagnostics();
+
+console.log(snapshot.schemaVersion); // 1
+console.log(snapshot.viewId);        // Current generated view ID
+console.log(snapshot.playbackState); // Whitelisted playback state projection
+console.log(snapshot.providers);     // Ready provider contributions
+console.log(snapshot.metrics);       // Whitelisted session totals (settled vs open)
+console.log(snapshot.qoe);           // { score: number | null, version: 2 }
+console.log(snapshot.errors);        // Bounded recent structured errors (max 20)
+```
+
+`getDiagnostics()` is side-effect free: repeated calls never mutate session metrics,
+never start timers, never send beacons, and never alter heartbeat sequence numbers.
 
 ## Backend Integration
 

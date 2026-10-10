@@ -339,6 +339,7 @@ interface Plugin<TConfig extends PluginConfig = PluginConfig> {
 
   onStateChange?(event: StateChangeEvent): void;
   onError?(error: Error): void;
+  getDiagnostics?(): unknown;
 }
 
 type PluginType = 'provider' | 'ui' | 'feature' | 'analytics' | 'utility';
@@ -360,6 +361,30 @@ Plugins expose an imperative API by hanging methods off the same object
 `PluginFactory` is the exported type for the `createXPlugin(config?)` factory
 functions every package ships.
 
+### Diagnostics snapshots
+
+`player.getDiagnostics()` returns a synchronous, side-effect free
+`PlayerDiagnosticsSnapshot` with `schemaVersion: 1`: a whitelisted projection of
+playback state, the recent structured errors from the error handler's history,
+and a `providers` map keyed by plugin id. It works before playback, during an
+outage and after `destroy()` (which returns a `destroyed` snapshot with no
+errors or providers), and it never mutates player or analytics state.
+
+Only ready plugins of type `provider` are asked for a contribution, through the
+optional `getDiagnostics()` hook. Core treats every contribution as untrusted:
+a provider without the hook maps to `null`; one that throws or returns a promise
+maps to `{ unavailable: true }`. Anything else is reduced to finite numbers,
+booleans, `null` and a short allowlist of categorical strings (the HLS engine and
+the WebRTC connection, ICE and signaling states), inside plain objects and arrays
+capped in depth, key count and length. Every other string is dropped, because a
+secret or an identifier can sit anywhere in free text and no redaction pattern
+makes it safe; sensitive-looking keys, cycles and prototype keys are dropped too.
+The snapshot's `truncatedProviders` lists the providers whose contribution lost
+anything that way. A hook that calls back into collection gets an empty map. The
+HLS, native and WHEP providers contribute their own fields; the analytics plugin
+exposes a separate `getDiagnostics()` with its current, non-mutating metric
+totals and only known error codes and categories.
+
 ## IPluginAPI
 
 The whole surface a plugin is handed. `PluginAPI` in
@@ -380,6 +405,7 @@ The whole surface a plugin is handed. `PluginAPI` in
 | `getPlugin(id)` | Another plugin, only if it is `ready` |
 | `onDestroy(cleanup)` | Register a cleanup function |
 | `subscribeToState(callback)` | Every state change, as a `StateChangeEvent` |
+| `getProviderDiagnostics()` | Sanitized diagnostics from the ready providers, keyed by plugin id (what `player.getDiagnostics()` puts under `providers`) |
 
 There is no `play()`, `pause()` or `seek()` on the API: a plugin drives playback
 by emitting `playback:play`, `playback:pause` or `playback:seeking`, which the

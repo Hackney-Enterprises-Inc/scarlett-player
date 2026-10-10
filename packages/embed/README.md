@@ -152,7 +152,7 @@ The simplest way to embed a player. Just add the script and use data attributes:
 | `data-width` | string | - | Player width (e.g., `100%`, `640px`) |
 | `data-height` | string | - | Player height |
 | `data-aspect-ratio` | string | - | Aspect ratio (e.g., `16:9`, `4:3`) |
-| `data-keyboard` | boolean | `true` | Enable keyboard shortcuts |
+| `data-keyboard` | boolean | `true` | Keyboard shortcuts (video only). Set `false` to turn all of the player's shortcuts off |
 | `data-loop` | boolean | `false` | Loop playback |
 | `data-playback-rate` | number | `1.0` | Playback speed; reset to `1` on a live stream without a DVR window |
 | `data-start-time` | number | `0` | Start position (seconds) |
@@ -359,6 +359,7 @@ or camelCase):
 - `poster`
 - `brand-color`, `brand-text-color`, `primary-color`, `background-color`
 - `big-play-button` - omit to keep the centred play button, `false` or `0` to hide it
+- `keyboard` - omit to keep the player's keyboard shortcuts, `false` or `0` to turn them all off
 - `hide-delay`, `playback-rate`, `start-time`
 - `share-url` - the page the viewer should be sent to. Setting it adds the share button; omitting it leaves the control bar unchanged. See [Sharing](#sharing)
 - `embed-base-url` - optional canonical embed URL. Enables the **Embed** snippet target in the share sheet without leaking signed playback parameters
@@ -571,11 +572,14 @@ All three bundles are built for ES2020.
 
 ## Keyboard Shortcuts
 
-When `data-keyboard` is enabled (default):
+Video players only. When `data-keyboard` is enabled (default); `data-keyboard="false"` turns all of these off:
 
 - `Space` / `K` - Play/Pause
 - `M` - Mute/Unmute
 - `F` - Fullscreen
+- `?` - Open the keyboard shortcut dialog
+- `C` - Toggle captions (needs caption tracks)
+- `0`-`9` - Seek to 0-90% of the video (of the DVR window on live; nothing on live without DVR)
 - `<-` / `->` - Seek -5s / +5s
 - `↑` / `↓` - Volume +10% / -10%
 

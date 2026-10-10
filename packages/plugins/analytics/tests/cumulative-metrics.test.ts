@@ -118,6 +118,21 @@ describe('cumulative metrics', () => {
       expect(h.sent('viewEnd')[0]).toMatchObject({ avgBitrate: 1500000, maxBitrate: 3000000, qualityChanges: 3 });
     });
 
+    it('reports the time-weighted average in the diagnostics snapshot after the view ends', async () => {
+      h = await createHarness({ heartbeatInterval: 100000 });
+      offerQualities();
+      h.play();
+      h.bus.emit('quality:change', { quality: 'low', auto: true });
+      vi.advanceTimersByTime(10000);
+      h.bus.emit('quality:change', { quality: 'high', auto: true });
+      vi.advanceTimersByTime(10000);
+      window.dispatchEvent(new Event('pagehide'));
+
+      const settled = h.plugin.getMetrics().avgBitrate;
+      expect(settled).toBe(2000000);
+      expect(h.plugin.getDiagnostics().metrics.avgBitrate).toBe(settled);
+    });
+
     it('is current on a viewEnd sent between heartbeats', async () => {
       h = await createHarness({ heartbeatInterval: 100000 });
       offerQualities();

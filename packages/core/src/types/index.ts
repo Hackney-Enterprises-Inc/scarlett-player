@@ -50,3 +50,14 @@ export type {
 
 // Load Types
 export type { LoadOptions } from './load';
+
+// Diagnostics Types
+export type {
+  DiagnosticPrimitive,
+  DiagnosticValue,
+  DiagnosticTimeRange,
+  DiagnosticsPlaybackState,
+  DiagnosticError,
+  PlayerDiagnosticsSnapshot,
+} from './diagnostics';
+

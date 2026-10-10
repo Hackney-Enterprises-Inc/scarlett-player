@@ -134,6 +134,13 @@ export interface IPluginAPI {
    * @returns Unsubscribe function
    */
   subscribeToState(callback: (event: StateChangeEvent) => void): () => void;
+
+  /**
+   * Collect sanitized diagnostic contributions from ready provider plugins.
+   *
+   * @returns Map of provider plugin ID to sanitized diagnostic values
+   */
+  getProviderDiagnostics?(): Record<string, unknown>;
 }
 
 /**
@@ -184,6 +191,14 @@ export interface Plugin<TConfig extends PluginConfig = PluginConfig> {
    * @param error - Error that occurred
    */
   onError?(error: Error): void;
+
+  /**
+   * Optional: Synchronous contribution to diagnostics snapshots.
+   *
+   * Providers expose concrete diagnostics; third-party contributions are
+   * treated as untrusted and bounded/sanitized by core.
+   */
+  getDiagnostics?(): unknown;
 }
 
 /**

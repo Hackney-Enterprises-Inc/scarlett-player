@@ -260,7 +260,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 
 | Package | Description |
 |---------|-------------|
-| `@scarlett-player/core` | Core engine - reactive state, event bus (including measured `media:segment`), plugin system, error handling |
+| `@scarlett-player/core` | Core engine - reactive state, event bus (including measured `media:segment`), plugin system, error handling, `getDiagnostics()` troubleshooting snapshots with provider contributions |
 | `@scarlett-player/hls` | HLS provider - hls.js + native Safari fallback, ABR, quality selection, live DVR, self-healing error recovery, measured hls.js fragment success/failure via `media:segment` (not native HLS). A smaller `@scarlett-player/hls/light` entry (hls.js/light, no subtitles/ID3/DRM) shares the same machinery |
 | `@scarlett-player/native` | Native provider - video (MP4, WebM, MOV, MKV, OGV) and audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
 | `@scarlett-player/whep` | WHEP provider - WebRTC playback over WHEP for sub-second live monitoring; bearer token or async token provider, the HLS provider's reconnect knobs, a receiver-side latency estimate. Answers only (no server counter-offers) |
@@ -268,7 +268,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
 | `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
 | `@scarlett-player/chromecast` | Chromecast - Google Cast SDK, session management, remote control |
-| `@scarlett-player/analytics` | Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls and opt-in batching for compatible ingests |
+| `@scarlett-player/analytics` | Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics |
 | `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
 | `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
@@ -290,6 +290,11 @@ full duration. Every sent beacon carries per-view `beaconSeq`; `seeking` has
 and page unload) carry the same counters, `qoeVersion: 2` and a continuous
 `qoeScore` (`null` for fatal access denial). Error beacons include a
 structured category, severity and validated diagnostics, not raw detail URLs.
+Player-requested `seeking` beacons are coalesced to at most one per second
+per view (the first seek of a burst sends at once, then the latest target), while
+`seekCount` still counts every request. Both `viewEnd`s mark their gauges with
+`gaugeScale: 'percent'`: `completionRate` and `rebufferRatio` stay percentages,
+bounded to 0..100, and `completionRate` is `null` when no finite duration is known.
 A failure the provider auto-reconnects from keeps the view open and is
 reported as `reconnecting`/`recovered` beacons; a view not playing for
 `idleTimeout` (30 minutes by default) ends as `abandoned`.
@@ -322,10 +327,16 @@ segment metrics are omitted instead of reported as zero.
 | Space / K | Play/Pause |
 | M | Toggle mute |
 | F | Toggle fullscreen |
+| ? | Open the keyboard shortcut dialog |
+| C | Toggle captions (needs caption tracks) |
+| 0-9 | Seek to 0-90% of the video (of the DVR window on live; no-op on live without DVR) |
 | Left Arrow | Seek -5s |
 | Right Arrow | Seek +5s |
 | Up Arrow | Volume +10% |
 | Down Arrow | Volume -10% |
+
+The UI package's optional `keyboard-help` control opens the same dialog from the
+control bar. See the [UI README](./packages/plugins/ui/README.md#keyboard-shortcuts).
 
 ## Theming
 

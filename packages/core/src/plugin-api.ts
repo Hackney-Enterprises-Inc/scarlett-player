@@ -23,6 +23,7 @@ export interface PluginAPIDeps {
   logger: Logger;
   container: HTMLElement;
   getPlugin: <T = unknown>(id: string) => T | null;
+  getProviderDiagnostics?: () => Record<string, unknown>;
 }
 
 /**
@@ -73,6 +74,9 @@ export class PluginAPI implements IPluginAPI {
   /** Function to get other plugins */
   private getPluginFn: <T = unknown>(id: string) => T | null;
 
+  /** Optional function to get provider diagnostics */
+  private getProviderDiagnosticsFn?: () => Record<string, unknown>;
+
   /** Cleanup functions registered by this plugin */
   private cleanupFns: Array<() => void> = [];
 
@@ -80,7 +84,7 @@ export class PluginAPI implements IPluginAPI {
    * Create a new PluginAPI.
    *
    * @param pluginId - ID of the plugin this API belongs to
-   * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin)
+   * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin, getProviderDiagnostics)
    */
   constructor(pluginId: string, deps: PluginAPIDeps) {
     this.pluginId = pluginId;
@@ -88,6 +92,7 @@ export class PluginAPI implements IPluginAPI {
     this.eventBus = deps.eventBus;
     this.container = deps.container;
     this.getPluginFn = deps.getPlugin;
+    this.getProviderDiagnosticsFn = deps.getProviderDiagnostics;
 
     // Create scoped logger for this plugin
     this.logger = {
@@ -189,6 +194,18 @@ export class PluginAPI implements IPluginAPI {
    */
   subscribeToState(callback: (event: StateChangeEvent) => void): () => void {
     return this.stateManager.subscribe(callback);
+  }
+
+  /**
+   * Collect sanitized diagnostic contributions from ready provider plugins.
+   *
+   * @returns Map of provider plugin ID to sanitized diagnostic values
+   */
+  getProviderDiagnostics(): Record<string, unknown> {
+    if (this.getProviderDiagnosticsFn) {
+      return this.getProviderDiagnosticsFn();
+    }
+    return {};
   }
 
   /**

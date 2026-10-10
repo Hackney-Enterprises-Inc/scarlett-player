@@ -91,7 +91,7 @@ export interface EmbedConfig {
   height?: string;
   /** Aspect ratio (e.g., "16:9", "4:3") - video only */
   aspectRatio?: string;
-  /** Enable/disable keyboard shortcuts */
+  /** Enable/disable the video player's keyboard shortcuts (`false` turns them all off) - video only */
   keyboard?: boolean;
   /** Loop the media */
   loop?: boolean;

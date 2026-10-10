@@ -13,16 +13,28 @@
  * - Persistent viewer identification
  */
 
-import type { IPluginAPI, PlayerEventMap, Plugin, QualityLevel, StateChangeEvent } from '@scarlett-player/core';
+import {
+  ErrorCode,
+  type IPluginAPI,
+  type PlayerEventMap,
+  type QualityLevel,
+  type StateChangeEvent,
+  type DiagnosticsPlaybackState,
+  type DiagnosticError,
+} from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
   ViewSession,
   BitrateChange,
   ErrorEvent,
   BeaconPayload,
-  IAnalyticsPlugin,
+  AnalyticsPluginInstance,
   AnalyticsEventType,
   AnalyticsVideo,
+  AnalyticsDiagnosticsSnapshot,
+  AnalyticsMetricsSnapshot,
+  AnalyticsQoESnapshot,
+  ErrorCategory,
 } from './types';
 import {
   generateId,
@@ -36,13 +48,29 @@ import {
   getConnectionType,
   calculateQoEScore,
   createLatencySampler,
+  finitePercent,
   isDevelopment,
 } from './helpers';
 import { createTransport } from './transport';
+import { createSeekEmissionWindow } from './seek-window';
 import { privacyOptOut } from './privacy';
 import { pageContext } from './context';
 import { classifyError, errorDetail, safeErrorMessage, sourceHost } from './errors';
 import { PKG_VERSION } from './version';
+
+/** Error codes the diagnostics snapshot may export (core's ErrorCode values). */
+const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set(Object.values(ErrorCode) as string[]);
+
+/** Error categories the diagnostics snapshot may export. */
+const KNOWN_ERROR_CATEGORIES: ReadonlySet<string> = new Set<ErrorCategory>([
+  'access',
+  'network',
+  'media',
+  'source',
+  'playback',
+  'player',
+  'unknown',
+]);
 
 // Re-export types
 export type {
@@ -52,8 +80,12 @@ export type {
   ErrorEvent,
   BeaconPayload,
   IAnalyticsPlugin,
+  AnalyticsPluginInstance,
   AnalyticsEventType,
   AnalyticsVideo,
+  AnalyticsDiagnosticsSnapshot,
+  AnalyticsMetricsSnapshot,
+  AnalyticsQoESnapshot,
 } from './types';
 
 /**
@@ -70,6 +102,13 @@ const PLUGIN_NAME = 'scarlett-player';
 
 /** How long a view may go without playing before it ends (ms): 30 minutes. */
 const DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1000;
+
+/**
+ * The fixed emission window for player-requested `seeking` beacons, in ms
+ * (HEI-SCARLETT-42): at most one beacon per window after the leading send.
+ * An internal policy constant, not a configuration switch.
+ */
+const SEEK_EMISSION_INTERVAL_MS = 1000;
 
 /**
  * Default analytics configuration.
@@ -112,7 +151,7 @@ const DEFAULT_CONFIG: Partial<AnalyticsConfig> = {
  */
 export function createAnalyticsPlugin(
   config: AnalyticsConfig
-): Plugin & IAnalyticsPlugin {
+): AnalyticsPluginInstance {
   // Validate required config
   if (!config.beaconUrl) {
     throw new Error('Analytics plugin requires beaconUrl');
@@ -177,6 +216,24 @@ export function createAnalyticsPlugin(
   // expiring the batch so a coalesced/missing echo cannot hide a later seek.
   let pendingEchoes = 0;
   let lastBusSeekAt = 0;
+  // Player-requested seeking beacons are bounded by one fixed per-view
+  // emission window (HEI-SCARLETT-42). Raw accounting stays in onSeeking: every
+  // request still counts in seekCount, reserves its echo, marks live seeks and
+  // cancels pending waiting, beacon or not. The callbacks read the CURRENT
+  // session at emission, so a trailing beacon carries the cumulative
+  // seekCount, intervening element bursts included. The guards keep a stray
+  // callback from emitting into a closed or replaced view.
+  const seekWindow = createSeekEmissionWindow({
+    intervalMs: SEEK_EMISSION_INTERVAL_MS,
+    emit: (seekTo) => {
+      if (!api || session.viewEnd !== null) return;
+      sendBeacon('seeking', { seekCount: session.seekCount, seekSource: 'player', seekTo });
+    },
+    emitUnload: (seekTo) => {
+      if (!api || session.viewEnd !== null) return;
+      sendUnloadBeacon('seeking', { seekCount: session.seekCount, seekSource: 'player', seekTo });
+    },
+  });
   // Element seek bursts (see onStateChange): when the last non-echo element
   // seek happened, and how many element seeking beacons this view has sent.
   let lastElementSeekAt: number | null = null;
@@ -207,7 +264,7 @@ export function createAnalyticsPlugin(
   let liveMode: 'edge' | 'awaiting' | 'dvr' = 'edge';
   // Finish a reading once its edge flag lands, or before the next reading.
   let pendingLiveReading: (() => void) | null = null;
-  let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
+  const transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
   let viewContext: Record<string, string | number> = {};
   // Only retain interval totals, never fragment data or signed segment URLs.
   let segmentCount = 0;
@@ -418,9 +475,9 @@ export function createAnalyticsPlugin(
    * `isRebuffering` or the `playing` key (so each stretch is credited under
    * the state it was spent in), and
    * before either viewEnd payload (so the final partial interval is not
-   * lost). Also records the position and duration while the duration is
-   * known, for `completionRate` once a `load()` has zeroed them, and the last
-   * time the view was playing, for the idle timeout.
+   * lost). Also records the position and duration while both are finite and
+   * the duration is known, for `completionRate` once a `load()` has zeroed
+   * them, and the last time the view was playing, for the idle timeout.
    *
    * @param now - The accrual time; defaults to `Date.now()`
    */
@@ -434,11 +491,35 @@ export function createAnalyticsPlugin(
     }
     lastHeartbeatTime = now;
 
+    // Only a pair that is finite right now is trustworthy later, once a load()
+    // has zeroed the state: Infinity durations and NaN positions must not
+    // clobber the last good one (see viewEndMetrics).
     const duration = api?.getState('duration');
-    if (typeof duration === 'number' && duration > 0) {
+    const position = api?.getState('currentTime');
+    if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0
+      && typeof position === 'number' && Number.isFinite(position)) {
       lastKnownDuration = duration;
-      lastKnownCurrentTime = api?.getState('currentTime') ?? 0;
+      lastKnownCurrentTime = position;
     }
+  }
+
+  /**
+   * Pure derivation of current average bitrate without mutating session state.
+   *
+   * @param now - The end of the last level's stretch
+   * @returns Weighted average bitrate or null if no history
+   */
+  function computeAvgBitrate(now: number): number | null {
+    const history = session.bitrateHistory;
+    if (!history || history.length === 0) return session.avgBitrate;
+    const totalBitrateTime = history.reduce((sum, b, i, arr) => {
+      const nextTime = i < arr.length - 1 ? arr[i + 1].time : now;
+      return sum + b.bitrate * (nextTime - b.time);
+    }, 0);
+    const timeSpan = now - history[0].time;
+    return timeSpan > 0
+      ? Math.round(totalBitrateTime / timeSpan)
+      : history[history.length - 1].bitrate;
   }
 
   /**
@@ -448,17 +529,10 @@ export function createAnalyticsPlugin(
    * @param now - The end of the last level's stretch
    */
   function updateAvgBitrate(now: number): void {
-    const history = session.bitrateHistory;
-    if (history.length === 0) return;
-    const totalBitrateTime = history.reduce((sum, b, i, arr) => {
-      const nextTime = i < arr.length - 1 ? arr[i + 1].time : now;
-      return sum + b.bitrate * (nextTime - b.time);
-    }, 0);
-    const timeSpan = now - history[0].time;
-    // No time spent yet: the level just switched to is the average so far
-    session.avgBitrate = timeSpan > 0
-      ? Math.round(totalBitrateTime / timeSpan)
-      : history[history.length - 1].bitrate;
+    const avg = computeAvgBitrate(now);
+    if (avg !== null) {
+      session.avgBitrate = avg;
+    }
   }
 
   /**
@@ -558,34 +632,51 @@ export function createAnalyticsPlugin(
    * @returns The viewEnd payload data
    */
   function viewEndMetrics(now: number): Record<string, unknown> {
-    const currentTime = api?.getState('currentTime') ?? 0;
-    const duration = api?.getState('duration') ?? 0;
+    const currentTime = api?.getState('currentTime');
+    const duration = api?.getState('duration');
 
     // A completed view is 100 even when a host's own `ended` listener already
     // called load(), which zeroes currentTime and duration before this runs.
-    // Otherwise the live state, or the last position seen with a duration.
     // A live view has none: a position over a sliding window is no completion.
-    let completionRate: number | null = 0;
+    // Otherwise the position over the duration, or the last known pair when a
+    // load() has already zeroed the state. When neither pair is usable the
+    // gauge is unavailable (null), never an accidental 0. Finite positions
+    // are bounded to 0..100.
+    let completionRate: number | null;
     if (resolveIsLive() === true) {
       completionRate = null;
     } else if (session.exitType === 'completed') {
       completionRate = 100;
-    } else if (duration > 0) {
-      completionRate = (currentTime / duration) * 100;
-    } else if (lastKnownDuration > 0) {
-      completionRate = (lastKnownCurrentTime / lastKnownDuration) * 100;
+    } else {
+      completionRate = finitePercent(currentTime, duration)
+        ?? finitePercent(lastKnownCurrentTime, lastKnownDuration);
+    }
+
+    // Zero finite watch time has no rebuffer share. Invalid or non-finite
+    // inputs are unavailable rather than a fabricated number. The public gauge
+    // is bounded to 0..100; the raw counters keep whatever the accounting
+    // produced.
+    const watchTime = session.watchTime;
+    const rebufferDuration = session.rebufferDuration;
+    let rebufferRatio: number | null;
+    if (!Number.isFinite(rebufferDuration) || rebufferDuration < 0
+      || !Number.isFinite(watchTime) || watchTime < 0) {
+      rebufferRatio = null;
+    } else {
+      rebufferRatio = watchTime === 0 ? 0 : finitePercent(rebufferDuration, watchTime);
     }
 
     return {
       ...cumulativeMetrics(now),
       startupTime: session.startupTime,
-      rebufferRatio:
-        session.watchTime > 0
-          ? (session.rebufferDuration / session.watchTime) * 100
-          : 0,
+      rebufferRatio,
       ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
       exitType: session.exitType,
       completionRate,
+      // Declares the units of both gauges. It rides the viewEnd data, which
+      // buildPayload spreads after customDimensions, so a host dimension of
+      // the same name cannot override it.
+      gaugeScale: 'percent',
     };
   }
 
@@ -656,16 +747,27 @@ export function createAnalyticsPlugin(
    * viewEnd, which the idle end and every other in-page end use, and the
    * unload viewEnd).
    *
-   * Accrues the last interval, commits a held near-end pause, closes an open
-   * rebuffer, stops the heartbeat, stamps `viewEnd`, settles an open pause,
-   * and clears the per-request state, so a play request still waiting for a
-   * first frame or a seek echo cannot reach into the next view.
+   * Delivers a player seek target still held by the emission window (ahead
+   * of the viewEnd it precedes in creation order, on the unload transport
+   * when `sendRebufferEnd` is false), accrues the last interval, commits a
+   * held near-end pause, closes an open rebuffer, stops the heartbeat,
+   * stamps `viewEnd`, settles an open pause, and clears the per-request
+   * state, so a play request still waiting for a first frame or a seek echo
+   * cannot reach into the next view.
    *
    * @param sendRebufferEnd - Send `rebufferEnd` for a rebuffer still open.
    *   False on unload, where only the unload viewEnd should go out.
    * @returns The time the view ended
    */
   function finalizeView(sendRebufferEnd: boolean): number {
+    // A player seek target still held by the emission window belongs to this
+    // view: deliver it once, ahead of the viewEnd it precedes in creation
+    // order, and close the window so nothing seek-related outlives the view.
+    // The unload path (sendRebufferEnd false) uses the synchronous unload
+    // transport, so the trailing seeking and the unload viewEnd go out as two
+    // dispatches in creation order; no seeking beacon may follow a viewEnd.
+    seekWindow.end(!sendRebufferEnd);
+
     // The time since the last heartbeat belongs to this view too
     accrueTime();
 
@@ -733,6 +835,8 @@ export function createAnalyticsPlugin(
     outageLongSent = false;
     pendingEchoes = 0;
     lastBusSeekAt = 0;
+    // The new view inherits nothing from the last view's emission window.
+    seekWindow.reset();
     lastElementSeekAt = null;
     elementSeekBeacons = 0;
     pauseStartTime = null;
@@ -1089,6 +1193,18 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * The allowlisted part of a provider's error detail, for retention in the
+   * view's error list; raw detail can carry request and response objects.
+   *
+   * @param detail - The provider's error detail, if any
+   * @returns The allowlisted keys, or undefined when none apply
+   */
+  function retainedDetail(detail: unknown): Record<string, number | boolean> | undefined {
+    const kept = errorDetail(detail);
+    return Object.keys(kept).length > 0 ? kept : undefined;
+  }
+
+  /**
    * Handle a player state change.
    *
    * @param event - The change, dispatched only when the value actually changed
@@ -1111,6 +1227,7 @@ export function createAnalyticsPlugin(
       const inBurst = lastElementSeekAt !== null && now >= lastElementSeekAt && now - lastElementSeekAt <= 2000;
       lastElementSeekAt = now;
       if (inBurst) return;
+      seekWindow.flushPending(false);
       session.seekCount++;
       if (elementSeekBeacons >= 30) return;
       elementSeekBeacons++;
@@ -1366,7 +1483,7 @@ export function createAnalyticsPlugin(
     const duration = api.getState('duration');
     if (
       typeof currentTime === 'number' && Number.isFinite(currentTime)
-      && typeof duration === 'number' && duration > 0
+      && typeof duration === 'number' && Number.isFinite(duration) && duration > 0
     ) {
       lastKnownCurrentTime = currentTime;
       lastKnownDuration = duration;
@@ -1425,13 +1542,23 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Handle seeking in an open view: count the seek and send a `seeking` beacon.
-   * Ignore seeks after viewEnd; only a play request starts the replay view.
+   * Handle seeking in an open view: count the seek and route its beacon
+   * through the per-view emission window (HEI-SCARLETT-42). Ignore seeks
+   * after viewEnd; only a play request starts the replay view.
+   *
+   * The raw accounting is unbounded by design: every request increments
+   * `seekCount`, reserves one element echo (expiring unused ones), marks a
+   * live seek for latency classification and cancels pending waiting,
+   * whether or not it produces a beacon. The window bounds only emission:
+   * the first request of a burst sends at once, a scrub sends its latest
+   * target once per second, and the trailing beacon reads the cumulative
+   * `seekCount` at emission.
    *
    * `seekTo` is the seek target from the event payload. Core emits
    * `playback:seeking` before it writes `currentTime`, so the state still
    * holds the position the seek started from; it is only the fallback for an
-   * emit without a finite `time`.
+   * emit without a finite `time`. The target is resolved to a scalar at
+   * request time and never re-read at the trailing flush.
    *
    * @param payload - The `playback:seeking` payload, `{ time }` (the target)
    */
@@ -1448,13 +1575,11 @@ export function createAnalyticsPlugin(
     session.seekCount++;
 
     const target = payload?.time;
-    sendBeacon('seeking', {
-      seekCount: session.seekCount,
-      seekSource: 'player',
-      seekTo: typeof target === 'number' && Number.isFinite(target)
+    seekWindow.request(
+      typeof target === 'number' && Number.isFinite(target)
         ? target
-        : api.getState('currentTime'),
-    });
+        : api.getState('currentTime')
+    );
   }
 
   /**
@@ -1504,11 +1629,14 @@ export function createAnalyticsPlugin(
     if (terminal) session.fatalErrorCategory = category;
     else session.warningCount++;
 
-    const errorEvent: ErrorEvent = {
+    const errorEvent: ErrorEvent & { category?: ErrorCategory; detail?: unknown } = {
       time: Date.now(),
       type: error.name || 'Error',
       message: error.message || 'Unknown error',
       fatal,
+      code: (error as any).code,
+      category,
+      detail: retainedDetail((error as Error & { detail?: unknown }).detail),
     };
 
     session.errors.push(errorEvent);
@@ -1582,11 +1710,14 @@ export function createAnalyticsPlugin(
     const terminal = fatal && !markedReconnecting(err.detail);
     if (terminal) session.fatalErrorCategory = category;
     else session.warningCount++;
-    const errorEvent: ErrorEvent = {
+    const errorEvent: ErrorEvent & { category?: ErrorCategory; detail?: unknown } = {
       time: Date.now(),
       type,
       message,
       fatal,
+      code,
+      category,
+      detail: retainedDetail(err.detail),
     };
 
     session.errors.push(errorEvent);
@@ -1775,6 +1906,8 @@ export function createAnalyticsPlugin(
     if (session.viewEnd !== null) return;
     if (document.hidden) {
       session.exitType = 'background';
+      // A held player seek target goes out ahead of the heartbeat/flush.
+      seekWindow.flushPending(false);
       sendHeartbeat();
       transport.flush();
     } else {
@@ -1907,6 +2040,8 @@ export function createAnalyticsPlugin(
 
       discardPendingPause();
       cancelPendingRebuffer();
+      // Defensive: a finalized view already closed its emission window.
+      seekWindow.reset();
 
       // Cleanup event listeners
       cleanupFns.forEach((fn) => fn());
@@ -1962,6 +2097,238 @@ export function createAnalyticsPlugin(
     /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
     trackEvent(name: string, data: Record<string, unknown> = {}): void {
       sendBeacon(`custom:${name}`, data);
+    },
+
+    /**
+     * Get synchronous troubleshooting snapshot of player state, provider contributions,
+     * whitelisted session metrics and QoE v2.
+     *
+     * Side-effect free; does not alter heartbeats, timers, sequence numbers or session metrics.
+     *
+     * @returns AnalyticsDiagnosticsSnapshot adhering to schemaVersion: 1
+     */
+    getDiagnostics(): AnalyticsDiagnosticsSnapshot {
+      const now = Date.now();
+      const playerVersion = PKG_VERSION;
+
+      if (!api) {
+        return {
+          schemaVersion: 1,
+          timestamp: now,
+          playerVersion,
+          viewId: null,
+          playbackState: {
+            playbackState: 'destroyed',
+            playing: false,
+            paused: false,
+            ended: false,
+            buffering: false,
+            seeking: false,
+            currentTime: null,
+            duration: null,
+            volume: null,
+            muted: null,
+            playbackRate: null,
+            mediaType: null,
+            live: null,
+            seekableRange: null,
+            liveEdge: null,
+            liveLatency: null,
+            dimensions: null,
+            source: null,
+          },
+          errors: [],
+          providers: {},
+          metrics: {
+            watchTime: 0,
+            playTime: 0,
+            settledPlayTime: 0,
+            rebufferCount: 0,
+            rebufferDuration: 0,
+            reconnectCount: 0,
+            reconnectDuration: 0,
+            settledReconnectDuration: 0,
+            pauseCount: 0,
+            pauseDuration: 0,
+            settledPauseDuration: 0,
+            seekCount: 0,
+            errorCount: 0,
+            warningCount: 0,
+            qualityChanges: 0,
+            avgBitrate: null,
+            maxBitrate: null,
+            startupTime: null,
+          },
+          qoe: {
+            score: null,
+            version: 2,
+          },
+        };
+      }
+
+      const isViewEnded = !!session.viewEnd;
+      const elapsed = isViewEnded ? 0 : Math.max(0, now - lastHeartbeatTime);
+      const isActivelyPlaying =
+        session.playbackState === 'playing' &&
+        statePlaying &&
+        !isRebuffering &&
+        waitingSince === null &&
+        !isViewEnded;
+      const openPlay = isActivelyPlaying ? elapsed : 0;
+      const currentWatchTime = session.watchTime + elapsed;
+      const currentPlayTime = session.playTime + openPlay;
+      const currentPauseDuration = isViewEnded ? session.pauseDuration : pauseDurationAt(now);
+      const currentReconnectDuration = isViewEnded ? session.reconnectDuration : reconnectDurationAt(now);
+      const currentAvgBitrate = isViewEnded ? session.avgBitrate : computeAvgBitrate(now);
+
+      const metrics: AnalyticsMetricsSnapshot = {
+        watchTime: currentWatchTime,
+        playTime: currentPlayTime,
+        settledPlayTime: session.playTime,
+        rebufferCount: session.rebufferCount,
+        rebufferDuration: session.rebufferDuration,
+        reconnectCount: session.reconnectCount,
+        reconnectDuration: currentReconnectDuration,
+        settledReconnectDuration: session.reconnectDuration,
+        pauseCount: session.pauseCount,
+        pauseDuration: currentPauseDuration,
+        settledPauseDuration: session.pauseDuration,
+        seekCount: session.seekCount,
+        errorCount: session.errorCount,
+        warningCount: session.warningCount,
+        qualityChanges: session.qualityChanges,
+        avgBitrate: currentAvgBitrate,
+        maxBitrate: Number.isFinite(session.maxBitrate) ? session.maxBitrate : null,
+        startupTime: Number.isFinite(session.startupTime) ? session.startupTime : null,
+        ...(resolveIsLive() === true
+          ? { dvrTime: session.dvrTime + (liveMode === 'dvr' ? openPlay : 0) }
+          : {}),
+      };
+
+      const qoe: AnalyticsQoESnapshot = {
+        score: getQoEScore(),
+        version: 2,
+      };
+
+      const rawPlaybackState = api.getState('playbackState') || 'idle';
+      const currentTime = Number.isFinite(api.getState('currentTime')) ? api.getState('currentTime') : null;
+      const duration = Number.isFinite(api.getState('duration')) ? api.getState('duration') : null;
+      const volume = Number.isFinite(api.getState('volume')) ? api.getState('volume') : null;
+      const playbackRate = Number.isFinite(api.getState('playbackRate')) ? api.getState('playbackRate') : null;
+
+      let mediaType: string | null = null;
+      const rawMediaType = api.getState('mediaType');
+      if (rawMediaType === 'video' || rawMediaType === 'audio') {
+        mediaType = rawMediaType;
+      }
+
+      let seekableRange: { start: number; end: number } | null = null;
+      const rawSr = api.getState('seekableRange');
+      if (
+        rawSr &&
+        typeof rawSr.start === 'number' &&
+        typeof rawSr.end === 'number' &&
+        Number.isFinite(rawSr.start) &&
+        Number.isFinite(rawSr.end)
+      ) {
+        seekableRange = { start: rawSr.start, end: rawSr.end };
+      }
+
+      const isLive = Boolean(api.getState('live'));
+      const liveEdge = isLive
+        ? typeof api.getState('liveEdge') === 'boolean'
+          ? api.getState('liveEdge')
+          : null
+        : null;
+      const liveLatency =
+        isLive && Number.isFinite(api.getState('liveLatency'))
+          ? api.getState('liveLatency')
+          : null;
+
+      let dimensions: { width: number; height: number } | null = null;
+      if (api.container) {
+        const video = api.container.querySelector('video') as HTMLVideoElement | null;
+        if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+          dimensions = { width: video.videoWidth, height: video.videoHeight };
+        }
+      }
+
+      let source: { hostname: string | null; type?: string | null } | null = null;
+      const rawSource = api.getState('source');
+      if (rawSource && rawSource.src) {
+        source = {
+          hostname: typeof rawSource.src === 'string' && rawSource.src.trim() === '' ? null : (sourceHost(rawSource.src) ?? null),
+          ...(rawSource.type ? { type: rawSource.type } : {}),
+        };
+      }
+
+      const playbackState: DiagnosticsPlaybackState = {
+        playbackState: rawPlaybackState,
+        playing: Boolean(api.getState('playing')),
+        paused: Boolean(api.getState('paused')),
+        ended: Boolean(api.getState('ended')),
+        buffering: Boolean(api.getState('buffering')),
+        seeking: Boolean(api.getState('seeking')),
+        currentTime,
+        duration,
+        volume,
+        muted: typeof api.getState('muted') === 'boolean' ? api.getState('muted') : false,
+        playbackRate,
+        mediaType,
+        live: isLive,
+        seekableRange,
+        liveEdge,
+        liveLatency,
+        dimensions,
+        source,
+      };
+
+      let providers: Record<string, unknown> = {};
+      if (typeof (api as any)?.getProviderDiagnostics === 'function') {
+        try {
+          providers = (api as any).getProviderDiagnostics();
+        } catch {
+          providers = {};
+        }
+      }
+
+      const errors: DiagnosticError[] = (session.errors || []).slice(-20).map((err) => {
+        // Only known enum strings leave the snapshot; an error name or a
+        // host-supplied code becomes the unknown marker.
+        const rawCode = (err as any).code;
+        const code = typeof rawCode === 'string' && KNOWN_ERROR_CODES.has(rawCode) ? rawCode : 'UNKNOWN_ERROR';
+        const rawCategory = (err as any).category;
+        const category =
+          typeof rawCategory === 'string' && KNOWN_ERROR_CATEGORIES.has(rawCategory) ? rawCategory : 'unknown';
+        const fatal = Boolean(err.fatal);
+        const timestamp = Number.isFinite(err.time) ? err.time : Date.now();
+        const entry: DiagnosticError = {
+          code,
+          category,
+          fatal,
+          timestamp,
+        };
+        const detail = (err as any).detail;
+        if (detail && typeof detail === 'object') {
+          const d = errorDetail(detail);
+          if (Object.keys(d).length > 0) {
+            entry.detail = d;
+          }
+        }
+        return entry;
+      });
+
+      return {
+        schemaVersion: 1,
+        timestamp: now,
+        playerVersion,
+        viewId: session.viewId,
+        playbackState,
+        errors,
+        providers,
+        metrics,
+        qoe,
+      };
     },
   };
 }

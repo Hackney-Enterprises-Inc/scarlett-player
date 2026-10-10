@@ -1099,6 +1099,133 @@ export const styles = `
 }
 
 /* ============================================
+   Keyboard Help Dialog
+   ============================================ */
+
+/* The dialog itself is a scrim over the whole player, rendered inside the
+   player's container (never portalled to document.body) so container-scoped
+   themes and the player's focus scoping keep applying to it. Above every
+   other layer: menus sit at 20 and the error overlay at 25, and help must
+   cover both. */
+.sp-kbd-help {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* Bounded to the player's box so a short or narrow player still shows a
+   usable dialog: the body below is the part that scrolls, and everything
+   else stays pinned. */
+.sp-kbd-help__panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.sp-kbd-help__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sp-kbd-help__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sp-kbd-help__close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.sp-kbd-help__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.sp-kbd-help__close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.sp-kbd-help__close svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* The bounded scrollable body: the list scrolls inside the panel while the
+   header and its close button stay reachable. */
+.sp-kbd-help__body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 16px 12px;
+}
+
+.sp-kbd-help__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sp-kbd-help__keys {
+  white-space: nowrap;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sp-kbd-help__action {
+  text-align: right;
+}
+
+.sp-kbd-help__notes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sp-kbd-help__note {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sp-kbd-help__note:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================
    Buffering Indicator
    ============================================ */
 .sp-buffering {

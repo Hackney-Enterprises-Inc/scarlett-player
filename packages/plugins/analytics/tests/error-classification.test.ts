@@ -88,6 +88,21 @@ describe('error beacon context', () => {
     expect(JSON.stringify(h.sent('error')[0])).not.toContain('secret');
   });
 
+  it('retains only allowlisted detail keys on the errors getMetrics returns', async () => {
+    h = await createHarness();
+    h.play();
+
+    const error = Object.assign(new Error('forbidden'), {
+      code: 'MEDIA_NETWORK_ERROR',
+      detail: { httpStatus: 403, url: 'https://x/y?sig=1', response: { code: 403, url: 'https://x/y?sig=1' } },
+    });
+    h.bus.emit('media:error', { error });
+
+    const stored = (h.plugin.getMetrics().errors ?? []) as Array<{ detail?: unknown }>;
+    expect(stored[stored.length - 1]?.detail).toEqual({ httpStatus: 403 });
+    expect(JSON.stringify(stored)).not.toContain('sig=1');
+  });
+
   it('reports offline and the host on a core error beacon', async () => {
     h = await createHarness();
     h.state.set('source', { src: 'https://origin.example.com/live/index.m3u8' });

@@ -30,7 +30,7 @@
   <meta name="twitter:image:alt" content="Scarlett Player key art with the Signal logo in the corner">
   <link rel="preload" href="../assets/fonts/carter-one-400-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="../assets/fonts/cantarell-400-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="../site.css?v=dfde0bc8">
+  <link rel="stylesheet" href="../site.css?v=f6e4a442">
   <script src="https://cdn.usefathom.com/script.js" data-site="OFIAHQME" defer></script>
 </head>
 <body>
@@ -438,6 +438,7 @@ positive <code>HTMLMediaElement.canPlayType()</code> answer for the mapped MIME 
 
   onStateChange?(event: StateChangeEvent): void;
   onError?(error: Error): void;
+  getDiagnostics?(): unknown;
 }
 
 type PluginType = &#39;provider&#39; | &#39;ui&#39; | &#39;feature&#39; | &#39;analytics&#39; | &#39;utility&#39;;</code></pre>
@@ -453,6 +454,27 @@ provider that implements none of them still works.</p>
 <code>previous()</code>), which a host reaches through <code>player.getPlugin(id)</code>.</p>
 <p><code>PluginFactory</code> is the exported type for the <code>createXPlugin(config?)</code> factory
 functions every package ships.</p>
+<h3 id="diagnostics-snapshots"><a class="anchor" href="#diagnostics-snapshots">Diagnostics snapshots</a></h3>
+<p><code>player.getDiagnostics()</code> returns a synchronous, side-effect free
+<code>PlayerDiagnosticsSnapshot</code> with <code>schemaVersion: 1</code>: a whitelisted projection of
+playback state, the recent structured errors from the error handler&#39;s history,
+and a <code>providers</code> map keyed by plugin id. It works before playback, during an
+outage and after <code>destroy()</code> (which returns a <code>destroyed</code> snapshot with no
+errors or providers), and it never mutates player or analytics state.</p>
+<p>Only ready plugins of type <code>provider</code> are asked for a contribution, through the
+optional <code>getDiagnostics()</code> hook. Core treats every contribution as untrusted:
+a provider without the hook maps to <code>null</code>; one that throws or returns a promise
+maps to <code>{ unavailable: true }</code>. Anything else is reduced to finite numbers,
+booleans, <code>null</code> and a short allowlist of categorical strings (the HLS engine and
+the WebRTC connection, ICE and signaling states), inside plain objects and arrays
+capped in depth, key count and length. Every other string is dropped, because a
+secret or an identifier can sit anywhere in free text and no redaction pattern
+makes it safe; sensitive-looking keys, cycles and prototype keys are dropped too.
+The snapshot&#39;s <code>truncatedProviders</code> lists the providers whose contribution lost
+anything that way. A hook that calls back into collection gets an empty map. The
+HLS, native and WHEP providers contribute their own fields; the analytics plugin
+exposes a separate <code>getDiagnostics()</code> with its current, non-mutating metric
+totals and only known error codes and categories.</p>
 <h2 id="ipluginapi"><a class="anchor" href="#ipluginapi">IPluginAPI</a></h2>
 <p>The whole surface a plugin is handed. <code>PluginAPI</code> in
 <code>packages/core/src/plugin-api.ts</code> is the implementation; the interface lives in
@@ -511,6 +533,10 @@ functions every package ships.</p>
 <tr>
 <td><code>subscribeToState(callback)</code></td>
 <td>Every state change, as a <code>StateChangeEvent</code></td>
+</tr>
+<tr>
+<td><code>getProviderDiagnostics()</code></td>
+<td>Sanitized diagnostics from the ready providers, keyed by plugin id (what <code>player.getDiagnostics()</code> puts under <code>providers</code>)</td>
 </tr>
 </tbody></table></div>
 <p>There is no <code>play()</code>, <code>pause()</code> or <code>seek()</code> on the API: a plugin drives playback

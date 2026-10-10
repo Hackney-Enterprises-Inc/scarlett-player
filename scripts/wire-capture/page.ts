@@ -10,9 +10,14 @@
  * Query parameters, all set by the runner:
  *   beacon  - the HTTPS beacon recorder's origin (required)
  *   src     - playlist path on the page origin (default: the local fixture)
- *   video   - `vod` (default) or `live`: the videoId/videoTitle the beacons
- *             carry. `isLive` is never configured; analytics reads it from
- *             player state, which is what the live fixtures verify.
+ *   video      - `vod` (default) or `live`: the videoId/videoTitle the beacons
+ *                carry. `isLive` is never configured; analytics reads it from
+ *                player state, which is what the live fixtures verify.
+ *   reconnect  - shorten existing HLS retry/reconnect delays for the recovery
+ *                fixture. Production defaults otherwise.
+ *   extended   - fail playlist loads fast for the ten-minute long-outage
+ *                fixture; reconnect delays and analytics idleTimeout stay at
+ *                production defaults.
  *
  * Bundled by the runner with esbuild into a temp directory, with
  * `__PKG_VERSION__` defined from packages/plugins/analytics/package.json so
@@ -65,6 +70,17 @@ const video = params.get('video') === 'live' ? 'live' : 'vod';
 const privacy = params.has('privacy');
 const batch = params.has('batch');
 const native = params.has('native');
+const reconnect = params.has('reconnect');
+const extended = params.has('extended');
+
+const hlsConfig = {
+  maxBufferLength: 4,
+  maxMaxBufferLength: 6,
+  ...(reconnect
+    ? { maxNetworkRetries: 0, retryDelayMs: 50, reconnectBaseDelayMs: 250 }
+    : {}),
+  ...(extended ? { maxNetworkRetries: 0, retryDelayMs: 50 } : {}),
+};
 
 /**
  * Read a `<meta name>` tag's content, the way a Laravel page exposes its CSRF
@@ -159,7 +175,7 @@ handle.ready = createPlayer({
     // A short forward buffer so holding segment responses for a few seconds
     // starves playback and yields a real rebufferStart/rebufferEnd pair; at
     // the 30 s default the whole fixture buffers ahead and never stalls.
-    ...(native ? [createNativePlugin()] : [createHLSPlugin({ maxBufferLength: 4, maxMaxBufferLength: 6 })]),
+    ...(native ? [createNativePlugin()] : [createHLSPlugin(hlsConfig)]),
     qualityProbe,
     analytics,
     clips,

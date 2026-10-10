@@ -103,7 +103,9 @@ const UNKNOWN_RANK = 3;
  *   plugin covers the same seek by double tap on exactly the devices where the
  *   bar runs out of room.
  * - `pip` (2) is desktop-shaped and unavailable on iPhone.
- * - registered controls (3, see {@link UNKNOWN_RANK}).
+ * - registered controls (3, see {@link UNKNOWN_RANK}), alongside the optional
+ *   `keyboard-help` button: it is a convenience, `?` opens the same dialog at
+ *   every width, so it relocates to the tray rather than displacing anything.
  * - the cast buttons (4) go to the tray and are never hidden: AirPlay is how an
  *   iPhone viewer gets the stream onto a television.
  * - `volume` (5) is close to inert on iOS, where `video.volume` is read only
@@ -131,6 +133,7 @@ export const DEFAULT_PRIORITY: Readonly<Record<string, FitRule>> = {
   'skip-backward': { rank: 1, exit: 'overflow' },
   'skip-forward': { rank: 1, exit: 'overflow' },
   pip: { rank: 2, exit: 'overflow' },
+  'keyboard-help': { rank: 3, exit: 'overflow' },
   chromecast: { rank: 4, exit: 'overflow' },
   airplay: { rank: 4, exit: 'overflow' },
   volume: { rank: 5, exit: 'overflow' },

@@ -69,6 +69,7 @@ player.requestAirPlay()        // Show the AirPlay picker (needs the airplay plu
 player.requestChromecast()     // Start a Cast session (needs the chromecast plugin)
 player.stopCasting()           // End the active cast session
 player.getState()              // Read-only snapshot of the state store
+player.getDiagnostics()        // Synchronous, typed and bounded troubleshooting snapshot
 player.getPlugin(id)           // Registered plugin instance, or null
 player.registerPlugin(plugin)  // Register a plugin after construction
 player.on(event, handler)      // Subscribe; returns an unsubscribe function
@@ -121,6 +122,31 @@ old provider, but applies no state and emits no `source:unloaded`, and the
 load starts its provider only after that teardown. It rejects
 once `destroy()` has been called; use `destroy()` to discard the player for
 good.
+
+### getDiagnostics()
+
+`player.getDiagnostics(): PlayerDiagnosticsSnapshot` returns a synchronous, typed,
+bounded and side-effect free snapshot of playback state, recent structured errors, and
+ready-provider contributions. Usable before playback, during outages, and after unload/destroy:
+
+```typescript
+const snapshot = player.getDiagnostics();
+console.log(snapshot.schemaVersion); // 1
+console.log(snapshot.playbackState); // Whitelisted playback state projection
+console.log(snapshot.errors);        // Bounded recent structured errors (newest 20)
+console.log(snapshot.providers);     // Ready provider contributions keyed by plugin ID
+console.log(snapshot.truncatedProviders); // Providers whose contribution lost values to sanitization
+```
+
+Provider contributions are untrusted: core keeps finite numbers, booleans, `null`
+and a short allowlist of categorical strings (`SAFE_DIAGNOSTIC_STRINGS`) inside plain
+objects and arrays, and drops everything else, including every other string. Caps per
+contribution: 4 levels of nesting (primitives included), 64 keys per object, 50 items per
+array and 500 values in total. Keys must be short identifiers (`[A-Za-z][A-Za-z0-9_]{0,39}`);
+identity and location-like keys (`id`, `userId`, `viewerId`, `uid`, `email`, `ip`, `url`,
+`uri`, `src`, `href`, `key`) and token-, secret- or credential-like keys are dropped.
+Typed arrays, `Map`, `Set`, `Date`, class instances and DOM nodes are dropped.
+A provider whose hook throws or returns a promise appears as `{ unavailable: true }`.
 
 ### State getters
 

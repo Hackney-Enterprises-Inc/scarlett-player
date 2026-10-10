@@ -39,8 +39,10 @@ export interface LatencyEstimate {
    * came up, when there was no previous sample).
    */
   jitterBufferSeconds: number;
-  /** Round trip on the selected candidate pair, in seconds (0 when unknown). */
+  /** Round trip on the selected candidate pair, in seconds (0 when unknown, which the estimate counts as 0). */
   rttSeconds: number;
+  /** Whether the selected candidate pair reported a round trip; false means `rttSeconds` is a placeholder 0. */
+  rttKnown: boolean;
   /** The counters this estimate was read from; pass to the next call. */
   sample: LatencySample;
 }
@@ -117,11 +119,14 @@ export function estimateLatency(
   if (!pair) pair = pairs.find((p) => p.state === 'succeeded' && p.nominated);
   if (!pair) pair = pairs.find((p) => p.state === 'succeeded');
   const rttSeconds = pair?.currentRoundTripTime ?? 0;
+  const rttKnown =
+    typeof pair?.currentRoundTripTime === 'number' && Number.isFinite(pair.currentRoundTripTime);
 
   return {
     latency: jitterBufferSeconds + rttSeconds / 2,
     jitterBufferSeconds,
     rttSeconds,
+    rttKnown,
     sample,
   };
 }

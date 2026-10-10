@@ -76,6 +76,22 @@ export interface NativePluginConfig {
   loadTimeoutMs?: number;
 }
 
+/**
+ * Diagnostic contribution from the native provider, read from the media element.
+ */
+export interface NativeDiagnostics {
+  /** The element's `readyState` (0-4); `null` without an element. */
+  readyState: number | null;
+  /** The element's `networkState` (0-3); `null` without an element. */
+  networkState: number | null;
+  /** Decoded video size in pixels; `null` until the dimensions are known. */
+  dimensions: { width: number; height: number } | null;
+  /** Buffered ranges in seconds, at most 32. */
+  buffered: Array<{ start: number; end: number }>;
+  /** Seekable ranges in seconds, at most 32. */
+  seekable: Array<{ start: number; end: number }>;
+}
+
 export interface INativePlugin {
   id: string;
   name: string;
@@ -86,6 +102,7 @@ export interface INativePlugin {
   init(api: IPluginAPI): Promise<void>;
   destroy(): Promise<void>;
   loadSource(src: string): Promise<void>;
+  getDiagnostics(): NativeDiagnostics;
 }
 
 /**
@@ -837,6 +854,41 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
         videoEl.src = src;
         videoEl.load();
       });
+    },
+
+    getDiagnostics(): NativeDiagnostics {
+      const currentVideo = video ?? (api?.container?.querySelector('video') as HTMLVideoElement | null);
+
+      const extractRanges = (timeRanges: TimeRanges | null): Array<{ start: number; end: number }> => {
+        if (!timeRanges) return [];
+        const ranges: Array<{ start: number; end: number }> = [];
+        const count = Math.min(timeRanges.length, 32);
+        for (let i = 0; i < count; i++) {
+          try {
+            const start = timeRanges.start(i);
+            const end = timeRanges.end(i);
+            if (Number.isFinite(start) && Number.isFinite(end)) {
+              ranges.push({ start, end });
+            }
+          } catch {
+            // Detached buffer / state error
+          }
+        }
+        return ranges;
+      };
+
+      let dimensions: { width: number; height: number } | null = null;
+      if (currentVideo && currentVideo.videoWidth > 0 && currentVideo.videoHeight > 0) {
+        dimensions = { width: currentVideo.videoWidth, height: currentVideo.videoHeight };
+      }
+
+      return {
+        readyState: currentVideo ? currentVideo.readyState : null,
+        networkState: currentVideo ? currentVideo.networkState : null,
+        dimensions,
+        buffered: extractRanges(currentVideo ? currentVideo.buffered : null),
+        seekable: extractRanges(currentVideo ? currentVideo.seekable : null),
+      };
     },
   };
 

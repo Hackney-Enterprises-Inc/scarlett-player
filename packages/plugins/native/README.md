@@ -64,6 +64,23 @@ createNativePlugin({
 });
 ```
 
+## Diagnostics
+
+The plugin implements the optional `getDiagnostics()` hook for troubleshooting snapshots:
+
+```typescript
+const native = player.getPlugin<INativePlugin>('native-provider');
+const diag = native.getDiagnostics();
+
+console.log(diag.readyState);   // HTMLMediaElement.readyState
+console.log(diag.networkState); // HTMLMediaElement.networkState
+console.log(diag.dimensions);   // { width, height } or null
+console.log(diag.buffered);     // Bounded buffered time ranges (max 32)
+console.log(diag.seekable);     // Bounded seekable time ranges (max 32)
+```
+
+Never exposes `currentSrc`, raw URLs or track locations.
+
 ## License
 
 MIT

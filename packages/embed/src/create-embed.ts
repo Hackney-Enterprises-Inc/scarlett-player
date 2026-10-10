@@ -359,6 +359,9 @@ export async function createEmbedPlayer(
         // default is not duplicated in two packages. The audio UIs below have
         // no big play button, which is why this sits in the video branch.
         if (config.bigPlayButton !== undefined) uiConfig.bigPlayButton = config.bigPlayButton;
+        // Same rule: the ui plugin owns the default (shortcuts on). The audio
+        // UIs have no global shortcuts, so this stays in the video branch too.
+        if (config.keyboard !== undefined) uiConfig.keyboard = config.keyboard;
         // A registered control has to be in the layout to be built at all,
         // and neither share, chapters nor clip is in the UI plugin's default.
         // With none of them installed, leave `controls` unset so the UI

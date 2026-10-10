@@ -171,7 +171,7 @@ The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 
 `iframe.html` reads its configuration from the query string: `src`, `poster`,
 `autoplay`, `muted`, `loop`, `controls`, `start-time`, `playback-rate`,
-`hide-delay`, `big-play-button`, `brand-color`, `primary-color`,
+`hide-delay`, `big-play-button`, `keyboard`, `brand-color`, `primary-color`,
 `background-color`, `share-url` and `embed-base-url`.
 
 ```html

@@ -54,6 +54,14 @@
       config.bigPlayButton = bigPlayButton !== 'false' && bigPlayButton !== '0';
     }
 
+    // Global keyboard shortcuts. Set only when the parameter is present, so an
+    // untouched iframe URL keeps the ui plugin's default (on). '0' counts as
+    // off alongside 'false', matching the parameters above.
+    const keyboard = params.get('keyboard');
+    if (keyboard !== null) {
+      config.keyboard = keyboard !== 'false' && keyboard !== '0';
+    }
+
     // Share button. This is the parameter the share plugin's iframe story is
     // built on: in here window.location.href is the PLAYER page, and
     // cross-origin rules stop anything reading the parent, so the real page

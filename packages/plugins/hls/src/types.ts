@@ -213,6 +213,49 @@ export interface IHLSPlugin extends Plugin<HLSPluginConfig> {
 
   /** Switch from native HLS back to hls.js */
   switchToHlsJs(): Promise<void>;
+
+  /**
+   * Get synchronous diagnostic troubleshooting contribution.
+   *
+   * @returns Bounded snapshot of HLS engine state, quality, retry/reconnect, and media metrics
+   */
+  getDiagnostics(): HLSDiagnostics;
+}
+
+/**
+ * Diagnostic contribution from HLS provider.
+ */
+export interface HLSDiagnostics {
+  /** Playback engine in use: `hls.js`, the browser's `native` HLS, or `null` before a source loads. */
+  engine: 'hls.js' | 'native' | null;
+  /** Index of the playing hls.js level; -1 while adaptive selection has not settled, `null` without hls.js. */
+  selectedLevel: number | null;
+  /** Bitrate (bits per second) and size (pixels) of the playing level; fields are left out when unknown, `null` without a selected level. */
+  quality: { bitrate?: number; width?: number; height?: number } | null;
+  /** Estimated bandwidth in bits per second, rounded; `null` when unknown. */
+  bandwidthEstimate: number | null;
+  /** Whether the stream is live. */
+  live: boolean;
+  /** Whether low-latency mode is active. */
+  lowLatency: boolean;
+  /** Recovery attempts so far: `networkRetryCount` plus `mediaRetryCount`. */
+  retryCount: number;
+  /** Network error recovery attempts so far. */
+  networkRetryCount: number;
+  /** Media error recovery attempts so far. */
+  mediaRetryCount: number;
+  /** Live reconnect attempts since the last successful join. */
+  reconnectAttempts: number;
+  /** Whether a live reconnect is in progress or scheduled. */
+  isReconnecting: boolean;
+  /** The media element's `readyState` (0-4); `null` without an element. */
+  readyState: number | null;
+  /** The media element's `networkState` (0-3); `null` without an element. */
+  networkState: number | null;
+  /** Buffered ranges in seconds, at most 32. */
+  buffered: Array<{ start: number; end: number }>;
+  /** Seekable ranges in seconds, at most 32. */
+  seekable: Array<{ start: number; end: number }>;
 }
 
 /** Type guard for hls.js level */

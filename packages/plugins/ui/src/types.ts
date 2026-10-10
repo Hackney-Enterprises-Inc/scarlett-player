@@ -24,7 +24,8 @@ export type BuiltinControlSlot =
   | 'pip'
   | 'fullscreen'
   | 'spacer'
-  | 'bandwidth-indicator';
+  | 'bandwidth-indicator'
+  | 'keyboard-help';
 
 /**
  * A control slot: a built-in, or any id a plugin registered through
@@ -104,6 +105,15 @@ export interface UIPluginConfig extends LayoutConfig {
    * host page draws its own play affordance over the player.
    */
   bigPlayButton?: boolean;
+  /**
+   * Enable the player's global keyboard shortcuts (default: true).
+   *
+   * `false` attaches no document keydown listener, so Space/K, M, F, arrows,
+   * ?, C and 0-9 do nothing. The controls' own keyboard handling (Enter/Space
+   * on buttons, arrow keys in the settings menu, the help dialog's own keys)
+   * is unchanged and the container stays focusable.
+   */
+  keyboard?: boolean;
   /**
    * Let the bar move low-priority controls into a tray when it does not fit
    * (default: true).

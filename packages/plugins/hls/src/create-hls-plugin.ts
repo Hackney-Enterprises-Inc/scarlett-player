@@ -25,6 +25,7 @@ import type {
   HLSError,
   HLSLiveInfo,
   IHLSPlugin,
+  HLSDiagnostics,
   HlsInstance,
   HlsConstructor,
   HlsSupportProbes,
@@ -2375,6 +2376,74 @@ export function createHLSPluginWith(
       }
 
       api?.logger.info('Switched to hls.js');
+    },
+
+    getDiagnostics(): HLSDiagnostics {
+      const engine = isNative ? 'native' : (hls ? 'hls.js' : null);
+      let selectedLevel: number | null = null;
+      let levelDetails: { bitrate?: number; width?: number; height?: number } | null = null;
+
+      if (hls && typeof hls.currentLevel === 'number') {
+        selectedLevel = hls.currentLevel;
+        if (hls.levels && selectedLevel >= 0 && hls.levels[selectedLevel]) {
+          const lvl = hls.levels[selectedLevel];
+          levelDetails = {};
+          if (typeof lvl.bitrate === 'number' && Number.isFinite(lvl.bitrate)) levelDetails.bitrate = lvl.bitrate;
+          if (typeof lvl.width === 'number' && Number.isFinite(lvl.width)) levelDetails.width = lvl.width;
+          if (typeof lvl.height === 'number' && Number.isFinite(lvl.height)) levelDetails.height = lvl.height;
+        }
+      }
+
+      let bandwidthEstimate: number | null = null;
+      if (hls && typeof hls.bandwidthEstimate === 'number' && Number.isFinite(hls.bandwidthEstimate)) {
+        bandwidthEstimate = Math.round(hls.bandwidthEstimate);
+      } else if (api) {
+        const bw = api.getState('bandwidth');
+        if (typeof bw === 'number' && Number.isFinite(bw) && bw > 0) {
+          bandwidthEstimate = Math.round(bw);
+        }
+      }
+
+      const live = api ? Boolean(api.getState('live')) : false;
+      const lowLatency = api ? Boolean(api.getState('lowLatencyMode')) : false;
+
+      const extractRanges = (timeRanges: TimeRanges | null): Array<{ start: number; end: number }> => {
+        if (!timeRanges) return [];
+        const ranges: Array<{ start: number; end: number }> = [];
+        const count = Math.min(timeRanges.length, 32);
+        for (let i = 0; i < count; i++) {
+          try {
+            const start = timeRanges.start(i);
+            const end = timeRanges.end(i);
+            if (Number.isFinite(start) && Number.isFinite(end)) {
+              ranges.push({ start, end });
+            }
+          } catch {
+            // Detached buffer / state error
+          }
+        }
+        return ranges;
+      };
+
+      const currentVideo = video ?? (api?.container?.querySelector('video') as HTMLVideoElement | null);
+
+      return {
+        engine,
+        selectedLevel,
+        quality: levelDetails,
+        bandwidthEstimate,
+        live,
+        lowLatency,
+        retryCount: (networkRetryCount || 0) + (mediaRetryCount || 0),
+        networkRetryCount: networkRetryCount || 0,
+        mediaRetryCount: mediaRetryCount || 0,
+        reconnectAttempts: reconnectAttempts || 0,
+        isReconnecting: Boolean(isReconnecting),
+        readyState: currentVideo ? currentVideo.readyState : null,
+        networkState: currentVideo ? currentVideo.networkState : null,
+        buffered: extractRanges(currentVideo ? currentVideo.buffered : null),
+        seekable: extractRanges(currentVideo ? currentVideo.seekable : null),
+      };
     },
   };
 

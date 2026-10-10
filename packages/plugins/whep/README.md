@@ -250,6 +250,33 @@ restarted inside `reconnectWindowMs` (five minutes by default). Past that
 the scheduler gives up (`error:reconnect-exhausted`, a final fatal `error`,
 and `load()` returns), so restart ffmpeg and press Join again.
 
+## Diagnostics
+
+The plugin implements the optional `getDiagnostics()` hook for troubleshooting snapshots:
+
+```typescript
+const whep = player.getPlugin<IWHEPPlugin>('whep-provider');
+const diag = whep.getDiagnostics();
+
+console.log(diag.connectionState);    // RTCPeerConnectionState | null
+console.log(diag.iceConnectionState); // RTCIceConnectionState | null
+console.log(diag.signalingState);     // RTCSignalingState | null
+console.log(diag.receiverLatency);    // Estimated receiver latency in seconds
+console.log(diag.stats);              // Numeric aggregates from latest cached stats
+console.log(diag.reconnectAttempts);  // Reconnect attempts
+console.log(diag.isReconnecting);     // boolean
+```
+
+`receiverLatency` and `stats` are `null` whenever there is no live connection
+to measure: before the first join, and from the moment a connection drops
+until the reconnected one produces its first estimate. They never carry the
+last values from a connection that has gone. `isReconnecting` is `true` for
+the whole reconnect window, including while an attempt is in flight, and
+`false` once the stream rejoins or the window is exhausted.
+
+Collection is synchronous and side-effect free: never starts polling timers,
+initiates `getStats()` calls, or leaks peer objects, SDP, tokens, or session URLs.
+
 ## License
 
 MIT

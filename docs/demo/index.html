@@ -28,7 +28,7 @@
   <meta name="twitter:image:alt" content="Scarlett Player key art with the Signal logo in the corner">
   <link rel="preload" href="assets/fonts/carter-one-400-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/cantarell-400-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="site.css?v=dfde0bc8">
+  <link rel="stylesheet" href="site.css?v=f6e4a442">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -203,7 +203,11 @@
             <h2 class="sr-only">Diagnostics</h2>
 
             <div class="diag-section" id="diag-state">
-              <h3>Player state</h3>
+              <h3>Player state <span><button type="button" id="copy-diagnostics">Copy diagnostics</button> <span id="copy-diagnostics-status" class="copy-diagnostics-status" role="status" aria-live="polite"></span></span></h3>
+              <div id="copy-diagnostics-fallback" class="copy-diagnostics-fallback" hidden>
+                <label for="copy-diagnostics-text">Diagnostics JSON (clipboard unavailable):</label>
+                <textarea id="copy-diagnostics-text" readonly rows="6" spellcheck="false"></textarea>
+              </div>
               <div class="diag-grid">
                 <div class="diag-stat"><div class="diag-label">State</div><div class="diag-value" id="state">—</div></div>
                 <div class="diag-stat"><div class="diag-label">Time</div><div class="diag-value" id="time">0:00 / 0:00</div></div>
