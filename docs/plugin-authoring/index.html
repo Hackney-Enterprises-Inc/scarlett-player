@@ -326,9 +326,15 @@ allowlists (<code>SAFE_DIAGNOSTIC_STRINGS</code>: the HLS engine names and the W
 connection, ICE and signaling states), so report states as numbers or booleans,
 or as one of those values. Do not return a promise; a promise or a thrown error
 is recorded as <code>{ unavailable: true }</code> and never breaks the snapshot.</p>
-<p>Core also caps nesting depth, key counts and array lengths, drops keys that look
-like tokens, secrets or credentials, and lists your plugin id in the snapshot&#39;s
-<code>truncatedProviders</code> when anything was dropped. Still leave source URLs, headers,
+<p>Core also caps each contribution at 4 levels of nesting (primitives included),
+64 keys per object, 50 items per array and 500 values in total. Only plain
+objects and arrays survive: typed arrays, <code>Map</code>, <code>Set</code>, <code>Date</code>, class instances
+and DOM nodes are dropped. Keys must be short identifiers
+(<code>[A-Za-z][A-Za-z0-9_]{0,39}</code>, so a URL can never be a key), and keys that look
+like identity or location (<code>id</code>, <code>userId</code>, <code>viewerId</code>, <code>uid</code>, <code>email</code>, <code>ip</code>,
+<code>url</code>, <code>uri</code>, <code>src</code>, <code>href</code>, <code>key</code>) or like tokens, secrets or credentials are
+dropped. Name your fields accordingly (<code>retryCount</code>, not <code>key</code>). Core lists your
+plugin id in the snapshot&#39;s <code>truncatedProviders</code> when anything was dropped. Still leave source URLs, headers,
 tokens and viewer identifiers out of the contribution in the first place.</p>
 <h2 id="testing"><a class="anchor" href="#testing">Testing</a></h2>
 <p>Plugins are tested against a mock <code>IPluginAPI</code> - see <code>packages/plugins/captions/tests/captions.test.ts</code> for the pattern. Two things to know:</p>

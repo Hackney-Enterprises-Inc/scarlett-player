@@ -1538,6 +1538,16 @@
     }
   }
   function sanitizeUntrustedContribution(value, depth = 1, seen = /* @__PURE__ */ new WeakSet(), report = { omitted: 0 }) {
+    if (value === void 0) return void 0;
+    if (depth > DIAGNOSTIC_LIMITS.MAX_NESTING_DEPTH) {
+      report.omitted++;
+      return void 0;
+    }
+    report.nodes = (report.nodes ?? 0) + 1;
+    if (report.nodes > DIAGNOSTIC_LIMITS.MAX_NODES) {
+      report.omitted++;
+      return void 0;
+    }
     if (value === null) return null;
     if (typeof value === "boolean") return value;
     if (typeof value === "number") {
@@ -1549,10 +1559,6 @@
       return void 0;
     }
     if (typeof value !== "object" || typeof value.then === "function" || value instanceof Promise) {
-      if (value !== void 0) report.omitted++;
-      return void 0;
-    }
-    if (depth > DIAGNOSTIC_LIMITS.MAX_NESTING_DEPTH) {
       report.omitted++;
       return void 0;
     }
@@ -1566,26 +1572,34 @@
       const limit = Math.min(value.length, DIAGNOSTIC_LIMITS.MAX_ARRAY_ITEMS);
       report.omitted += value.length - limit;
       for (let i = 0; i < limit; i++) {
-        const sanitized = sanitizeUntrustedContribution(value[i], depth + 1, seen, report);
-        if (sanitized !== void 0) {
-          result2.push(sanitized);
+        if (report.nodes >= DIAGNOSTIC_LIMITS.MAX_NODES) {
+          report.omitted += limit - i;
+          break;
+        }
+        try {
+          const sanitized = sanitizeUntrustedContribution(value[i], depth + 1, seen, report);
+          if (sanitized !== void 0) {
+            result2.push(sanitized);
+          }
+        } catch {
+          report.omitted++;
         }
       }
       return result2;
     }
-    if (typeof HTMLElement !== "undefined" && value instanceof HTMLElement || value instanceof Error) {
+    if (!isPlainObject(value)) {
       report.omitted++;
       return void 0;
     }
     const result = /* @__PURE__ */ Object.create(null);
     const keys = Object.keys(value);
-    let keyCount = 0;
-    for (const key of keys) {
-      if (keyCount >= DIAGNOSTIC_LIMITS.MAX_OBJECT_KEYS) {
-        report.omitted++;
-        continue;
+    for (let i = 0; i < keys.length; i++) {
+      if (i >= DIAGNOSTIC_LIMITS.MAX_OBJECT_KEYS || report.nodes >= DIAGNOSTIC_LIMITS.MAX_NODES) {
+        report.omitted += keys.length - i;
+        break;
       }
-      if (FORBIDDEN_KEYS.has(key) || SENSITIVE_KEY_RE.test(key)) {
+      const key = keys[i];
+      if (!isAllowedKey(key)) {
         report.omitted++;
         continue;
       }
@@ -1594,13 +1608,23 @@
         const sanitized = sanitizeUntrustedContribution(val, depth + 1, seen, report);
         if (sanitized !== void 0) {
           result[key] = sanitized;
-          keyCount++;
         }
       } catch {
         report.omitted++;
       }
     }
     return result;
+  }
+  function isPlainObject(value) {
+    try {
+      const proto = Object.getPrototypeOf(value);
+      return proto === null || proto === Object.prototype;
+    } catch {
+      return false;
+    }
+  }
+  function isAllowedKey(key) {
+    return SAFE_KEY_RE.test(key) && !FORBIDDEN_KEYS.has(key) && !IDENTITY_KEYS.has(key.toLowerCase()) && !SENSITIVE_KEY_RE.test(key);
   }
   function collectProviderDiagnostics(providers, truncated) {
     const contributions = /* @__PURE__ */ Object.create(null);
@@ -1668,7 +1692,7 @@
   function projectDiagnosticErrors(errors, limit = DIAGNOSTIC_LIMITS.MAX_ERRORS) {
     const result = [];
     const knownCodes = new Set(Object.values(ErrorCode));
-    const slice = errors.slice(0, limit);
+    const slice = limit > 0 ? errors.slice(-limit) : [];
     for (const err of slice) {
       const code = knownCodes.has(err.code) ? err.code : "UNKNOWN_ERROR";
       const category = classifyDiagnosticErrorCategory(err);
@@ -1818,7 +1842,7 @@
       truncatedProviders
     };
   }
-  var DIAGNOSTIC_LIMITS, FORBIDDEN_KEYS, SENSITIVE_KEY_RE, SAFE_DIAGNOSTIC_STRINGS, collecting, KNOWN_ERROR_CATEGORIES, WHITELISTED_DETAIL_NUMERICS, WHITELISTED_DETAIL_BOOLEANS;
+  var DIAGNOSTIC_LIMITS, FORBIDDEN_KEYS, SENSITIVE_KEY_RE, SAFE_KEY_RE, IDENTITY_KEYS, SAFE_DIAGNOSTIC_STRINGS, collecting, KNOWN_ERROR_CATEGORIES, WHITELISTED_DETAIL_NUMERICS, WHITELISTED_DETAIL_BOOLEANS;
   var init_diagnostics = __esm({
     "packages/core/src/diagnostics.ts"() {
       "use strict";
@@ -1828,10 +1852,25 @@
         MAX_TIME_RANGES: 32,
         MAX_OBJECT_KEYS: 64,
         MAX_ARRAY_ITEMS: 50,
-        MAX_NESTING_DEPTH: 4
+        MAX_NESTING_DEPTH: 4,
+        MAX_NODES: 500
       };
       FORBIDDEN_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
       SENSITIVE_KEY_RE = /(token|secret|password|credential|auth|authorization|cookie|session|signature)/i;
+      SAFE_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+      IDENTITY_KEYS = /* @__PURE__ */ new Set([
+        "id",
+        "userid",
+        "viewerid",
+        "uid",
+        "email",
+        "ip",
+        "url",
+        "uri",
+        "src",
+        "href",
+        "key"
+      ]);
       SAFE_DIAGNOSTIC_STRINGS = /* @__PURE__ */ new Set([
         "hls.js",
         "native",
@@ -40543,7 +40582,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               this.close();
               return;
             }
-            if (e.key === "Tab" && this.el.contains(document.activeElement)) {
+            if (e.key === "Tab") {
               e.preventDefault();
               e.stopPropagation();
               this.trapTab(e.shiftKey);
@@ -40584,7 +40623,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
          *
          * A no-op while already open: a held or repeated `?` must not toggle the
          * dialog closed again, and opening never moves focus out of another modal
-         * (a clip title editor, a host dialog) that currently owns it.
+         * (a clip title editor, a host dialog) that currently owns it. A modal that
+         * contains the player itself does not count as foreign.
          *
          * @param invoker - Element to hand focus back to on close; defaults to
          *   whatever holds focus now. Falls back to the player container.
@@ -40595,12 +40635,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const active = document.activeElement;
           if (active instanceof HTMLElement) {
             const foreignModal = active.closest('[role="dialog"], [aria-modal="true"]');
-            if (foreignModal && !this.el.contains(foreignModal)) {
+            if (foreignModal && !this.el.contains(foreignModal) && !foreignModal.contains(this.api.container)) {
               return false;
             }
           }
           this.opened = true;
-          this.invoker = invoker instanceof HTMLElement && invoker.isConnected ? invoker : this.api.container;
+          this.invoker = invoker instanceof HTMLElement && this.api.container.contains(invoker) ? invoker : this.api.container;
           this.api.container.appendChild(this.el);
           document.addEventListener("keydown", this.keyHandler);
           this.closeBtn.focus();
@@ -40609,20 +40649,31 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         /**
          * Close the dialog and hand focus back.
          *
-         * The invoking element gets focus again when it is still in the document;
-         * when it is gone (a rebuild took the control, the source changed) focus
-         * lands on the player container, which is the player's own tab stop.
+         * The invoking element gets focus again when it is still in the document
+         * and accepts it; when it is gone (a rebuild took the control, the source
+         * changed) or hidden (it sat in a popover that closed, so the browser
+         * refuses focus) focus lands on the player container, which is the player's
+         * own tab stop. Without that, focus would drop to `<body>` and every
+         * player shortcut would stop working.
+         *
+         * @param restoreFocus - False skips focus handoff entirely (used by
+         *   `destroy`, where the host is tearing the player down)
          */
-        close() {
+        close(restoreFocus = true) {
           if (!this.opened) return;
           this.opened = false;
           document.removeEventListener("keydown", this.keyHandler);
           this.el.remove();
-          const target = this.invoker?.isConnected ? this.invoker : this.api.container;
+          const invoker = this.invoker;
+          this.invoker = null;
+          if (!restoreFocus) return;
+          const target = invoker?.isConnected ? invoker : this.api.container;
           if (target.isConnected) {
             target.focus();
+            if (document.activeElement !== target && this.api.container.isConnected) {
+              this.api.container.focus();
+            }
           }
-          this.invoker = null;
         }
         /**
          * @returns True while the dialog is open and owns its keys
@@ -40647,11 +40698,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         /**
          * Remove the dialog and its listeners.
          *
-         * Closes first when open, so focus is released to the invoker (or the
-         * container) rather than dropped on `<body>` with the removed element.
+         * Closes first when open but leaves focus alone: the host is tearing the
+         * player down, so handing focus to its container would only strand it.
          */
         destroy() {
-          this.close();
+          this.close(false);
           this.closeBtn.removeEventListener("click", this.closeHandler);
         }
       };
@@ -41164,6 +41215,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const layout = config.controls || DEFAULT_LAYOUT;
     const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
     const showBigPlayButton = config.bigPlayButton !== false;
+    const enableKeyboard = config.keyboard !== false;
     const responsive = config.responsive !== false;
     if (responsive) {
       assertFitLayout(layout, config.priority);
@@ -41213,7 +41265,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         case "spacer":
           return new Spacer();
         case "keyboard-help":
-          return new KeyboardHelpButton(openHelpDialog);
+          return enableKeyboard ? new KeyboardHelpButton(openHelpDialog) : null;
         default: {
           const factory = getControlFactory(slot, api.container);
           if (factory) {
@@ -41764,7 +41816,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         container.addEventListener("mouseleave", handleMouseLeave);
         container.addEventListener("touchstart", handleInteraction, { passive: true });
         container.addEventListener("click", handleInteraction);
-        document.addEventListener("keydown", handleKeyDown);
+        if (enableKeyboard) document.addEventListener("keydown", handleKeyDown);
         stateUnsubscribe = api.subscribeToState(scheduleUpdate);
         updateControls();
         if (!container.hasAttribute("tabindex")) {
@@ -41818,7 +41870,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           api.container.removeEventListener("touchstart", handleInteraction);
           api.container.removeEventListener("click", handleInteraction);
         }
-        document.removeEventListener("keydown", handleKeyDown);
+        if (enableKeyboard) document.removeEventListener("keydown", handleKeyDown);
         controlRegistryUnsubscribe?.();
         controlRegistryUnsubscribe = null;
         rebuildQueued = false;
@@ -44894,10 +44946,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     if (!pair) pair = pairs.find((p) => p.state === "succeeded" && p.nominated);
     if (!pair) pair = pairs.find((p) => p.state === "succeeded");
     const rttSeconds = pair?.currentRoundTripTime ?? 0;
+    const rttKnown = typeof pair?.currentRoundTripTime === "number" && Number.isFinite(pair.currentRoundTripTime);
     return {
       latency: jitterBufferSeconds + rttSeconds / 2,
       jitterBufferSeconds,
       rttSeconds,
+      rttKnown,
       sample
     };
   }
@@ -45070,6 +45124,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const startLatencyPoll = (pc) => {
       stopLatencyPoll();
+      latestLatencyEstimate = null;
+      latestStatsSummary = null;
       const session = loadSession;
       let lastSample = null;
       latencyTimer = setInterval(() => {
@@ -45078,7 +45134,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return;
         }
         void pc.getStats().then((report) => {
-          if (session !== loadSession || !api) return;
+          if (session !== loadSession || peer !== pc || !api) return;
           const estimate = estimateLatency(report, lastSample);
           if (!estimate) return;
           lastSample = estimate.sample;
@@ -45107,9 +45163,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               }
             }
           }
-          if (estimate.rttSeconds !== void 0 && Number.isFinite(estimate.rttSeconds)) {
+          if (estimate.rttKnown && Number.isFinite(estimate.rttSeconds)) {
             statsObj.roundTripTime = estimate.rttSeconds;
             hasStats = true;
+          } else {
+            statsObj.roundTripTime = null;
           }
           if (hasStats) {
             latestStatsSummary = statsObj;
@@ -45131,6 +45189,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
     const closeConnection = (keepalive) => {
       stopLatencyPoll();
+      latestLatencyEstimate = null;
+      latestStatsSummary = null;
       clearDisconnectTimer();
       const pc = peer;
       peer = null;
@@ -45597,7 +45657,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return sessionUrl;
       },
       getDiagnostics() {
-        const currentLatency = latestLatencyEstimate ?? (api ? api.getState("liveLatency") || null : null);
+        const currentLatency = latestLatencyEstimate ?? (api && !hasJoined ? api.getState("liveLatency") || null : null);
         const receiverLatency = typeof currentLatency === "number" && Number.isFinite(currentLatency) && currentLatency > 0 ? currentLatency : null;
         return {
           connectionState: peer ? peer.connectionState : null,
@@ -45607,7 +45667,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           stats: latestStatsSummary,
           autoReconnect,
           reconnectAttempts,
-          isReconnecting: reconnectTimer !== null
+          isReconnecting
         };
       }
     };
@@ -54447,6 +54507,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "player",
     "unknown"
   ]);
+  function isPlainRecord(value) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    if (typeof value.then === "function") return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  }
   var PLUGIN_VERSION = PKG_VERSION17;
   var PLUGIN_NAME = "scarlett-player";
   var DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1e3;
@@ -54514,7 +54580,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let latencySampler = createLatencySampler();
     let liveMode = "edge";
     let pendingLiveReading = null;
-    let transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
+    const transport = createTransport(mergedConfig, { debug: (...args) => api?.logger.debug(...args) }, () => privacyOptOut(mergedConfig.respectDoNotTrack));
     let viewContext = {};
     let segmentCount = 0;
     let segmentBytes = 0;
@@ -55004,6 +55070,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       onPlaying();
     }
+    function retainedDetail(detail) {
+      const kept = errorDetail(detail);
+      return Object.keys(kept).length > 0 ? kept : void 0;
+    }
     function onStateChange(event) {
       if (event.key === "seeking" && event.previousValue === false && event.value === true) {
         if (session.viewEnd !== null) return;
@@ -55019,6 +55089,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const inBurst = lastElementSeekAt !== null && now2 >= lastElementSeekAt && now2 - lastElementSeekAt <= 2e3;
         lastElementSeekAt = now2;
         if (inBurst) return;
+        seekWindow.flushPending(false);
         session.seekCount++;
         if (elementSeekBeacons >= 30) return;
         elementSeekBeacons++;
@@ -55225,7 +55296,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         fatal,
         code: error.code,
         category,
-        detail: error.detail
+        detail: retainedDetail(error.detail)
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -55277,7 +55348,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         fatal,
         code,
         category,
-        detail: err.detail
+        detail: retainedDetail(err.detail)
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -55576,14 +55647,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }
           };
         }
-        const elapsed = Math.max(0, now2 - lastHeartbeatTime);
-        const isActivelyPlaying = session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null;
+        const isViewEnded = !!session.viewEnd;
+        const elapsed = isViewEnded ? 0 : Math.max(0, now2 - lastHeartbeatTime);
+        const isActivelyPlaying = session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null && !isViewEnded;
         const openPlay = isActivelyPlaying ? elapsed : 0;
         const currentWatchTime = session.watchTime + elapsed;
         const currentPlayTime = session.playTime + openPlay;
-        const currentPauseDuration = pauseDurationAt(now2);
-        const currentReconnectDuration = reconnectDurationAt(now2);
-        const currentAvgBitrate = computeAvgBitrate(now2);
+        const currentPauseDuration = isViewEnded ? session.pauseDuration : pauseDurationAt(now2);
+        const currentReconnectDuration = isViewEnded ? session.reconnectDuration : reconnectDurationAt(now2);
+        const currentAvgBitrate = isViewEnded ? session.avgBitrate : computeAvgBitrate(now2);
         const metrics = {
           watchTime: currentWatchTime,
           playTime: currentPlayTime,
@@ -55638,7 +55710,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const rawSource = api.getState("source");
         if (rawSource && rawSource.src) {
           source = {
-            hostname: extractHostname(rawSource.src),
+            hostname: typeof rawSource.src === "string" && rawSource.src.trim() === "" ? null : sourceHost(rawSource.src) ?? null,
             ...rawSource.type ? { type: rawSource.type } : {}
           };
         }
@@ -55665,7 +55737,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         let providers = {};
         if (typeof api?.getProviderDiagnostics === "function") {
           try {
-            providers = api.getProviderDiagnostics();
+            const raw = api.getProviderDiagnostics();
+            if (isPlainRecord(raw)) providers = raw;
           } catch {
             providers = {};
           }

@@ -376,9 +376,15 @@ a provider without the hook maps to `null`; one that throws or returns a promise
 maps to `{ unavailable: true }`. Anything else is reduced to finite numbers,
 booleans, `null` and a short allowlist of categorical strings (the HLS engine and
 the WebRTC connection, ICE and signaling states), inside plain objects and arrays
-capped in depth, key count and length. Every other string is dropped, because a
-secret or an identifier can sit anywhere in free text and no redaction pattern
-makes it safe; sensitive-looking keys, cycles and prototype keys are dropped too.
+(typed arrays, `Map`, `Set`, `Date`, class instances and DOM nodes are dropped).
+Each contribution is capped at 4 levels of nesting (applied to primitives too),
+64 keys per object, 50 items per array and 500 values in total. Keys must match
+`[A-Za-z][A-Za-z0-9_]{0,39}` and must not be identity or location-like (`id`,
+`userId`, `viewerId`, `uid`, `email`, `ip`, `url`, `uri`, `src`, `href`, `key`).
+Every other string is dropped, because a secret or an identifier can sit anywhere
+in free text and no redaction pattern makes it safe; sensitive-looking keys,
+cycles and prototype keys are dropped too. When the error history is longer than
+the cap of 20, the newest errors are kept.
 The snapshot's `truncatedProviders` lists the providers whose contribution lost
 anything that way. A hook that calls back into collection gets an empty map. The
 HLS, native and WHEP providers contribute their own fields; the analytics plugin

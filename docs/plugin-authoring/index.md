@@ -342,9 +342,15 @@ connection, ICE and signaling states), so report states as numbers or booleans,
 or as one of those values. Do not return a promise; a promise or a thrown error
 is recorded as `{ unavailable: true }` and never breaks the snapshot.
 
-Core also caps nesting depth, key counts and array lengths, drops keys that look
-like tokens, secrets or credentials, and lists your plugin id in the snapshot's
-`truncatedProviders` when anything was dropped. Still leave source URLs, headers,
+Core also caps each contribution at 4 levels of nesting (primitives included),
+64 keys per object, 50 items per array and 500 values in total. Only plain
+objects and arrays survive: typed arrays, `Map`, `Set`, `Date`, class instances
+and DOM nodes are dropped. Keys must be short identifiers
+(`[A-Za-z][A-Za-z0-9_]{0,39}`, so a URL can never be a key), and keys that look
+like identity or location (`id`, `userId`, `viewerId`, `uid`, `email`, `ip`,
+`url`, `uri`, `src`, `href`, `key`) or like tokens, secrets or credentials are
+dropped. Name your fields accordingly (`retryCount`, not `key`). Core lists your
+plugin id in the snapshot's `truncatedProviders` when anything was dropped. Still leave source URLs, headers,
 tokens and viewer identifiers out of the contribution in the first place.
 
 ## Testing

@@ -380,9 +380,15 @@ a provider without the hook maps to `null`; one that throws or returns a promise
 maps to `{ unavailable: true }`. Anything else is reduced to finite numbers,
 booleans, `null` and a short allowlist of categorical strings (the HLS engine and
 the WebRTC connection, ICE and signaling states), inside plain objects and arrays
-capped in depth, key count and length. Every other string is dropped, because a
-secret or an identifier can sit anywhere in free text and no redaction pattern
-makes it safe; sensitive-looking keys, cycles and prototype keys are dropped too.
+(typed arrays, `Map`, `Set`, `Date`, class instances and DOM nodes are dropped).
+Each contribution is capped at 4 levels of nesting (applied to primitives too),
+64 keys per object, 50 items per array and 500 values in total. Keys must match
+`[A-Za-z][A-Za-z0-9_]{0,39}` and must not be identity or location-like (`id`,
+`userId`, `viewerId`, `uid`, `email`, `ip`, `url`, `uri`, `src`, `href`, `key`).
+Every other string is dropped, because a secret or an identifier can sit anywhere
+in free text and no redaction pattern makes it safe; sensitive-looking keys,
+cycles and prototype keys are dropped too. When the error history is longer than
+the cap of 20, the newest errors are kept.
 The snapshot's `truncatedProviders` lists the providers whose contribution lost
 anything that way. A hook that calls back into collection gets an empty map. The
 HLS, native and WHEP providers contribute their own fields; the analytics plugin
@@ -1177,9 +1183,15 @@ connection, ICE and signaling states), so report states as numbers or booleans,
 or as one of those values. Do not return a promise; a promise or a thrown error
 is recorded as `{ unavailable: true }` and never breaks the snapshot.
 
-Core also caps nesting depth, key counts and array lengths, drops keys that look
-like tokens, secrets or credentials, and lists your plugin id in the snapshot's
-`truncatedProviders` when anything was dropped. Still leave source URLs, headers,
+Core also caps each contribution at 4 levels of nesting (primitives included),
+64 keys per object, 50 items per array and 500 values in total. Only plain
+objects and arrays survive: typed arrays, `Map`, `Set`, `Date`, class instances
+and DOM nodes are dropped. Keys must be short identifiers
+(`[A-Za-z][A-Za-z0-9_]{0,39}`, so a URL can never be a key), and keys that look
+like identity or location (`id`, `userId`, `viewerId`, `uid`, `email`, `ip`,
+`url`, `uri`, `src`, `href`, `key`) or like tokens, secrets or credentials are
+dropped. Name your fields accordingly (`retryCount`, not `key`). Core lists your
+plugin id in the snapshot's `truncatedProviders` when anything was dropped. Still leave source URLs, headers,
 tokens and viewer identifiers out of the contribution in the first place.
 
 ## Testing
@@ -1378,7 +1390,7 @@ The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 
 `iframe.html` reads its configuration from the query string: `src`, `poster`,
 `autoplay`, `muted`, `loop`, `controls`, `start-time`, `playback-rate`,
-`hide-delay`, `big-play-button`, `brand-color`, `primary-color`,
+`hide-delay`, `big-play-button`, `keyboard`, `brand-color`, `primary-color`,
 `background-color`, `share-url` and `embed-base-url`.
 
 ```html
