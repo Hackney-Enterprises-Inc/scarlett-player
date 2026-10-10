@@ -46,7 +46,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # ---- Unit gates: pull requests only ----
+      #
+      # Lint, the package checks, typecheck, tests and the docs check run on
+      # the pull request, which GitHub tests as the merge result. A push to
+      # main is that same merge, so repeating them there proved nothing, and
+      # release.yml runs the full gate again before anything is published.
+      # The push run keeps the build (the browser harnesses below need it) and
+      # adds only what pull requests skip. Assumes main only moves through
+      # pull requests; a direct push gets the browser harnesses but not these.
       - name: Lint
+        if: github.event_name == 'pull_request'
         run: pnpm run lint
 
       - name: Build
@@ -58,6 +68,7 @@ jobs:
       # deleted (confirmed against both tarballs on 2026-09-02), and both
       # publishes were green.
       - name: Check package artifacts
+        if: github.event_name == 'pull_request'
         run: node scripts/check-package-artifacts.mjs
 
       # Catches an embed bundle importing a chunk the build did not emit: the
@@ -65,6 +76,7 @@ jobs:
       # 404'd on the CDN from the v1.6.0 release (2026-08-11) through v1.7.0,
       # still reproducible 2026-09-02, while every build stayed green.
       - name: Check embed chunks
+        if: github.event_name == 'pull_request'
         run: node scripts/check-embed-chunks.mjs
 
       # Catches a declaration file that exists but does not compile for a
@@ -73,20 +85,24 @@ jobs:
       # not publish, so every consumer TypeScript build broke while the file
       # itself was present and every check above stayed green.
       - name: Check package types
+        if: github.event_name == 'pull_request'
         run: node scripts/check-package-types.mjs
 
       # Catches a package with no `typecheck` or `test` script. pnpm's recursive
       # run skips those silently, so the two steps below would pass vacuously
       # for it, which is how ten packages went unchecked.
       - name: Check package scripts
+        if: github.event_name == 'pull_request'
         run: node scripts/check-package-scripts.mjs
 
       - name: Type check
+        if: github.event_name == 'pull_request'
         run: pnpm run typecheck
 
       # Vitest 3 runs on Node 24 as is; the NODE_OPTIONS teardown workaround for
       # vitest 1.x was removed with the upgrade on 2026-09-23.
       - name: Run tests
+        if: github.event_name == 'pull_request'
         run: pnpm run test
 
       # Renders every documentation page and agent file in memory and writes
@@ -96,6 +112,7 @@ jobs:
       # pass review and first fail on main. Cheap (no browser), so it runs
       # on pull requests too.
       - name: Check documentation build
+        if: github.event_name == 'pull_request'
         run: node demo/docs-build.mjs --check
 
       # ---- Real-browser verification: push to main only ----

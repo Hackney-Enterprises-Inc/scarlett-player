@@ -353,8 +353,6 @@ implementation and plugins should not depend on it.
 - `refactor/description` - Refactoring
 - `docs/description` - Documentation
 
-`changeset-release/main` is created and owned by the release automation. Do not
-branch from it or push to it.
 
 ### Commit Messages
 
@@ -436,12 +434,18 @@ nothing about Node 24 needs working around.
 
 ### Releasing
 
-Merging a changeset to `main` makes `release.yml` open (or update) a
-`chore: release packages` PR on the `changeset-release/main` branch. Merging
-that PR versions all nineteen packages together, publishes each to npm through
-trusted publishing (OIDC, no token), tags `v<version>`, creates the GitHub
-release, and uploads the embed bundles to the CDN through
-`scripts/upload-cdn.sh`. Versions are never bumped by hand.
+Merging a pull request with a changeset to `main` is the release; there is no
+release PR to approve. `release.yml` versions all nineteen packages together,
+commits `chore: release packages` to `main`, runs the full gate, then publishes
+each package to npm through trusted publishing (OIDC, no token), tags
+`v<version>`, creates the GitHub release, and uploads the embed bundles to the
+CDN through `scripts/upload-cdn.sh`. A merge without a changeset releases
+nothing and only rebuilds the demo. Versions are never bumped by hand.
+
+If a publish target fails, fix the cause and start the workflow again from
+Actions > Release > Run workflow on `main`. Packages already on npm are
+skipped. Do not use "Re-run jobs" on the failed run: it would version the old
+merge commit again and stop when `main` already has the release commit.
 
 Never commit `demo/demo.bundle.js` or `docs/demo/demo.bundle.js`. The release
 workflow rebuilds and commits both on every push to `main`, so a bundle
