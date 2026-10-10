@@ -618,6 +618,34 @@ describe('Player Diagnostics Snapshots (Core)', () => {
       obj.attempts = 2;
       expect(sanitizeUntrustedContribution(obj)).toEqual({ attempts: 2 });
     });
+
+    it('drops array elements whose then getter throws', () => {
+      const el: Record<string, unknown> = {};
+      Object.defineProperty(el, 'then', {
+        get() {
+          throw new Error('boom');
+        },
+      });
+      const report: SanitizeReport = { omitted: 0 };
+      const out = sanitizeUntrustedContribution([1, el, 3], 1, new WeakSet(), report);
+
+      expect(out).toEqual([1, 3]);
+      expect(report.omitted).toBeGreaterThanOrEqual(1);
+    });
+
+    it('drops array elements whose index accessor throws', () => {
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, 1, {
+        get() {
+          throw new Error('boom');
+        },
+      });
+      const report: SanitizeReport = { omitted: 0 };
+      const out = sanitizeUntrustedContribution(arr, 1, new WeakSet(), report);
+
+      expect(out).toEqual([1, 3]);
+      expect(report.omitted).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe('error projection', () => {

@@ -19,8 +19,6 @@ import {
   type PlayerEventMap,
   type QualityLevel,
   type StateChangeEvent,
-  type DiagnosticsPlaybackState,
-  type DiagnosticError,
 } from '@scarlett-player/core';
 import type {
   AnalyticsConfig,
@@ -35,6 +33,8 @@ import type {
   AnalyticsMetricsSnapshot,
   AnalyticsQoESnapshot,
   ErrorCategory,
+  AnalyticsDiagnosticsPlaybackState,
+  AnalyticsDiagnosticError,
 } from './types';
 import {
   generateId,
@@ -2262,7 +2262,7 @@ export function createAnalyticsPlugin(
         };
       }
 
-      const playbackState: DiagnosticsPlaybackState = {
+      const playbackState: AnalyticsDiagnosticsPlaybackState = {
         playbackState: rawPlaybackState,
         playing: Boolean(api.getState('playing')),
         paused: Boolean(api.getState('paused')),
@@ -2292,7 +2292,7 @@ export function createAnalyticsPlugin(
         }
       }
 
-      const errors: DiagnosticError[] = (session.errors || []).slice(-20).map((err) => {
+      const errors: AnalyticsDiagnosticError[] = (session.errors || []).slice(-20).map((err) => {
         // Only known enum strings leave the snapshot; an error name or a
         // host-supplied code becomes the unknown marker.
         const rawCode = (err as any).code;
@@ -2302,7 +2302,7 @@ export function createAnalyticsPlugin(
           typeof rawCategory === 'string' && KNOWN_ERROR_CATEGORIES.has(rawCategory) ? rawCategory : 'unknown';
         const fatal = Boolean(err.fatal);
         const timestamp = Number.isFinite(err.time) ? err.time : Date.now();
-        const entry: DiagnosticError = {
+        const entry: AnalyticsDiagnosticError = {
           code,
           category,
           fatal,

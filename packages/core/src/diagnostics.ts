@@ -225,9 +225,15 @@ export function sanitizeUntrustedContribution(
         report.omitted += limit - i;
         break;
       }
-      const sanitized = sanitizeUntrustedContribution(value[i], depth + 1, seen, report);
-      if (sanitized !== undefined) {
-        result.push(sanitized);
+      try {
+        // Read the element (index getter or own property may throw) and
+        // recurse; dropping one bad element instead of aborting the array.
+        const sanitized = sanitizeUntrustedContribution(value[i], depth + 1, seen, report);
+        if (sanitized !== undefined) {
+          result.push(sanitized);
+        }
+      } catch {
+        report.omitted++;
       }
     }
     return result;

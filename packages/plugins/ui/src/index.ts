@@ -1568,8 +1568,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       stateUnsubscribe?.();
       stateUnsubscribe = null;
 
-      // Close the keyboard help dialog while the container still exists, so
-      // its focus hand-back lands inside the player instead of on <body>.
+      // Close the keyboard help dialog and drop its document listener before
+      // the container goes away. destroy() skips the focus hand-back on purpose.
       helpDialog?.destroy();
       helpDialog = null;
 
