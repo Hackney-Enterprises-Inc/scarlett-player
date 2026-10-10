@@ -362,8 +362,6 @@ api.emit(&#39;myplugin:actionCompleted&#39;, { data: &#39;value&#39; });</code><
 <li><code>refactor/description</code> - Refactoring</li>
 <li><code>docs/description</code> - Documentation</li>
 </ul>
-<p><code>changeset-release/main</code> is created and owned by the release automation. Do not
-branch from it or push to it.</p>
 <h3 id="commit-messages"><a class="anchor" href="#commit-messages">Commit Messages</a></h3>
 <p>Follow <a href="https://www.conventionalcommits.org/">Conventional Commits</a>:</p>
 <pre tabindex="0"><code>type(scope): subject
@@ -432,12 +430,17 @@ embed build.</p>
 <p>CI runs the test step on Node 24 with no extra flags: since the move to vitest 3
 nothing about Node 24 needs working around.</p>
 <h3 id="releasing"><a class="anchor" href="#releasing">Releasing</a></h3>
-<p>Merging a changeset to <code>main</code> makes <code>release.yml</code> open (or update) a
-<code>chore: release packages</code> PR on the <code>changeset-release/main</code> branch. Merging
-that PR versions all nineteen packages together, publishes each to npm through
-trusted publishing (OIDC, no token), tags <code>v&lt;version&gt;</code>, creates the GitHub
-release, and uploads the embed bundles to the CDN through
-<code>scripts/upload-cdn.sh</code>. Versions are never bumped by hand.</p>
+<p>Merging a pull request with a changeset to <code>main</code> is the release; there is no
+release PR to approve. <code>release.yml</code> versions all nineteen packages together,
+commits <code>chore: release packages</code> to <code>main</code>, runs the full gate, then publishes
+each package to npm through trusted publishing (OIDC, no token), tags
+<code>v&lt;version&gt;</code>, creates the GitHub release, and uploads the embed bundles to the
+CDN through <code>scripts/upload-cdn.sh</code>. A merge without a changeset releases
+nothing and only rebuilds the demo. Versions are never bumped by hand.</p>
+<p>If a publish target fails, fix the cause and start the workflow again from
+Actions &gt; Release &gt; Run workflow on <code>main</code>. Packages already on npm are
+skipped. Do not use &quot;Re-run jobs&quot; on the failed run: it would version the old
+merge commit again and stop when <code>main</code> already has the release commit.</p>
 <p>Never commit <code>demo/demo.bundle.js</code> or <code>docs/demo/demo.bundle.js</code>. The release
 workflow rebuilds and commits both on every push to <code>main</code>, so a bundle
 committed from a branch only produces binary merge conflicts with that commit.

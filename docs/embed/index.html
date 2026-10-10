@@ -474,9 +474,9 @@ pnpm --filter @scarlett-player/embed typecheck</code></pre>
 <h2 id="releasing"><a class="anchor" href="#releasing">Releasing</a></h2>
 <p>The embed package releases with everything else: it is in the fixed Changesets
 group, so it ships the same version number as the other eighteen packages.
-Merging a changeset to <code>main</code> opens a <code>chore: release packages</code> PR; merging that
-publishes to npm through trusted publishing (OIDC, no token), tags the release,
-and runs the CDN upload described above. Versions are never bumped by hand and
+Merging a changeset to <code>main</code> releases it in the same workflow run: the
+packages are versioned on <code>main</code>, published to npm through trusted publishing
+(OIDC, no token), tagged, and the CDN upload described above runs. Versions are never bumped by hand and
 <code>npm publish</code> is never run manually - see <code>docs/contributing.md</code>.</p>
 <p>Before opening the PR:</p>
 <ul>
