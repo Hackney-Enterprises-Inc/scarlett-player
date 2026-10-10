@@ -1,5 +1,7 @@
 # @scarlett-player/playlist
 
+## 1.23.0
+
 ## 1.22.0
 
 ## 1.21.0

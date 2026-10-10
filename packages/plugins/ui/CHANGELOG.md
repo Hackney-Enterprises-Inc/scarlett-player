@@ -1,5 +1,13 @@
 # @scarlett-player/ui
 
+## 1.23.0
+
+### Minor Changes
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - Keyboard help and new shortcuts: `?` opens a dialog listing the player's shortcuts, `0`-`9` seek to 0-90% of the video (across the DVR window on live), and `C` toggles captions. An optional `keyboard-help` bar control offers a visible entry point into the same dialog.
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - New `keyboard` option: `uiPlugin({ keyboard: false })` turns off the player's global keyboard shortcuts, and leaves out the `keyboard-help` control since its dialog would list keys that no longer work.
+
 ## 1.22.0
 
 ### Patch Changes

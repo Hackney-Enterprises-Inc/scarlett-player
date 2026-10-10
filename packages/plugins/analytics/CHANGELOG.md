@@ -1,5 +1,17 @@
 # @scarlett-player/analytics
 
+## 1.23.0
+
+### Minor Changes
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - Add synchronous, typed, and bounded diagnostics troubleshooting snapshots and provider contributions
+
+### Patch Changes
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - viewEnd beacons declare their gauge units with `gaugeScale: 'percent'` and keep the released percentage meaning. `completionRate` and `rebufferRatio` are finite and bounded to 0..100; a completion with no known finite duration is null (was 0), live views stay null, and non-finite positions or durations can no longer reach the wire or overwrite the last known good pair. Raw counters are unchanged.
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - Player-requested `seeking` beacons are coalesced into a fixed one-second window per view: the first seek of a burst sends at once and continuous scrubbing sends its latest target once per second, instead of one beacon per request. `seekCount` and `elementSeekCount` still count every request (a trailing beacon carries the cumulative count at emission), and element-seek coalescing, echo suppression, live and rebuffer bookkeeping are unchanged. A held player seek is sent before a later element-seek beacon, so beacons keep seek order, and a trailing beacon's timestamp is its send time.
+
 ## 1.22.0
 
 ### Minor Changes

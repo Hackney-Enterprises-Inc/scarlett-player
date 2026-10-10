@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.23.0
+
+### Patch Changes
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - `data-keyboard="false"` and the iframe's `keyboard=false` (or `0`) query parameter now turn off the video player's keyboard shortcuts; the attribute was parsed but ignored.
+
+- Updated dependencies [[`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269)]:
+  - @scarlett-player/core@1.23.0
+
 ## 1.22.0
 
 ### Minor Changes
