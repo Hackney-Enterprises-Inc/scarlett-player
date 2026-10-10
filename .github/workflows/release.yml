@@ -12,16 +12,13 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     # main only, on both triggers. workflow_dispatch lets a person pick any
-    # branch, and the job would then lint, build and record the version from
-    # THAT branch before "Return to main" switched the checkout for the
-    # publish: main's manifests published under another branch's recorded
-    # version, with the CDN job handed the other branch's bundles. A skipped
+    # branch, and the job would then version, build and publish THAT branch's
+    # tree and push its release commit to main. A skipped
     # release job also skips the cdn job (needs.release.result is not
     # 'success'), so nothing downstream runs on a stray dispatch either.
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
-      pull-requests: write
       # Required for npm trusted publishing (OIDC). Without it no OIDC token is
       # minted, npm falls back to token auth, and an unauthorised PUT comes back
       # as a 404 that reads like the package does not exist.
@@ -57,59 +54,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # The same gates the PR pipeline runs, in the same order, so a release
-      # cannot ship code that would fail CI.
-      #
-      # The build has to come before typecheck and tests, and this is not a
-      # preference. Every package except core resolves `@scarlett-player/core`
-      # through a tsconfig `paths` entry pointing at ../../core/dist/index.d.ts,
-      # and core's package.json exports resolve to dist as well. On a fresh
-      # checkout dist does not exist, so typecheck fails in 16 packages with
-      # TS2307 plus a cascade of TS2339s where a plugin interface extends a
-      # `Plugin` type that did not resolve. That is exactly how the v1.9.0
-      # release died on 2026-09-06. ci.yml has always built first, which is why
-      # the same commit passed CI and failed here.
-      - name: Run linter
-        run: pnpm run lint
-
-      - name: Check package scripts
-        run: node scripts/check-package-scripts.mjs
-
-      - name: Build packages
-        run: pnpm run build
-
-      - name: Run typecheck
-        run: pnpm run typecheck
-
-      - name: Run test suite
-        run: pnpm run test
-
-      # Gate the publish on the tarballs actually containing what their
-      # manifests promise. v1.7.0 went out with @scarlett-player/embed and
-      # @scarlett-player/vue both declaring `types: ./dist/index.d.ts` and
-      # neither tarball containing a single .d.ts (checked with npm pack
-      # --dry-run on 2026-09-02): a Vite emptyOutDir deleted the declarations
-      # tsc had just emitted and the build stayed green. What that costs the
-      # consumer depends on its own settings, measured on TypeScript 5.9.3:
-      # with noImplicitAny on, which is what strict gives you, the import does
-      # not compile at all (TS7016); with it off the module is typed any and
-      # nothing is reported. Deliberately before "Publish to npm" and not
-      # continue-on-error: a package whose advertised files are missing must
-      # not reach the registry, because a published version cannot be
-      # replaced.
-      - name: Check package artifacts
-        run: node scripts/check-package-artifacts.mjs
-
-      - name: Check embed chunks
-        run: node scripts/check-embed-chunks.mjs
-
-      # A declaration file can exist and still be unusable: @scarlett-player/vue
-      # shipped a dist/index.d.ts importing './ScarlettPlayer.vue', a path the
-      # package does not publish, so every consumer TypeScript build broke on a
-      # file the artifact check above declared present. Same placement rule as
-      # the two checks above: before the publish, never continue-on-error.
-      - name: Check package types
-        run: node scripts/check-package-types.mjs
+      # Version straight on main: a merge with pending changesets is the
+      # release. There is no release PR to approve any more; `changeset
+      # version` bumps every package, writes the changelogs and deletes the
+      # changeset files, and the result is committed here and pushed by "Push
+      # release commit" below, after the gates pass and before npm sees
+      # anything. A merge without changesets versions nothing, the tag for the
+      # current version already exists, and only the demo is rebuilt.
+      - name: Version packages
+        id: bump
+        # @changesets/changelog-github looks up each changeset's PR and author.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$(find .changeset -maxdepth 1 -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+            echo "No pending changesets"
+            echo "bumped=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          pnpm run version
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: release packages [skip ci]"
+          echo "bumped=true" >> $GITHUB_OUTPUT
 
       # Get version from embed package (main distributable)
       - name: Get version
@@ -131,45 +99,89 @@ jobs:
             echo "Tag v${{ steps.version.outputs.version }} does not exist, will create release"
           fi
 
-      # Create Release Pull Request or publish packages
-      - name: Create Release Pull Request
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: pnpm run version
-          title: 'chore: release packages'
-          commit: 'chore: release packages'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The same gates the PR pipeline runs, in the same order, so a release
+      # cannot ship code that would fail CI.
+      #
+      # Gated on this push actually publishing (no tag for the embed version
+      # yet). Every other push to main is a merged pull request that already
+      # passed these gates in ci.yml; on those this job only rebuilds the
+      # demo, so re-running lint, typecheck, tests and the
+      # artifact checks proved nothing new. The build stays unconditional:
+      # "Update demo site" needs it on every push.
+      #
+      # The build has to come before typecheck and tests, and this is not a
+      # preference. Every package except core resolves `@scarlett-player/core`
+      # through a tsconfig `paths` entry pointing at ../../core/dist/index.d.ts,
+      # and core's package.json exports resolve to dist as well. On a fresh
+      # checkout dist does not exist, so typecheck fails in 16 packages with
+      # TS2307 plus a cascade of TS2339s where a plugin interface extends a
+      # `Plugin` type that did not resolve. That is exactly how the v1.9.0
+      # release died on 2026-09-06. ci.yml has always built first, which is why
+      # the same commit passed CI and failed here.
+      - name: Run linter
+        if: steps.check_release.outputs.exists == 'false'
+        run: pnpm run lint
 
-      # Put the checkout back on main before anything else builds or commits.
-      #
-      # With a pending changeset, changesets/action runs `git checkout -b
-      # changeset-release/main` (or checks out the existing branch), versions,
-      # commits, force-pushes, and LEAVES THE CHECKOUT ON THAT BRANCH. Every
-      # step after it then worked on the release branch. On the PR #112 merge
-      # (run 35783689203) "Update demo site" committed "chore: rebuild demo
-      # bundle for v1.16.0 [skip ci]" there and `git push` failed with "The
-      # current branch changeset-release/main has no upstream branch"; on the
-      # PR #108 merge an earlier variant pushed the demo commit INTO release
-      # PR #109. Only the release-PR merge itself, where there is no changeset
-      # and the action never leaves main, rebuilt the site, which is the
-      # opposite of what the demo step is for.
-      #
-      # Before "Publish to npm" as well as the demo step: the publish reads
-      # each package's version from the working tree, and on the release
-      # branch that is the next, unmerged version. --force is safe because
-      # the action commits everything it changed, so anything left over is
-      # not wanted on main. actions/checkout with fetch-depth: 0 on a push
-      # creates the local main branch, so the target exists.
-      - name: Return to main
+      - name: Check package scripts
+        if: steps.check_release.outputs.exists == 'false'
+        run: node scripts/check-package-scripts.mjs
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Run typecheck
+        if: steps.check_release.outputs.exists == 'false'
+        run: pnpm run typecheck
+
+      - name: Run test suite
+        if: steps.check_release.outputs.exists == 'false'
+        run: pnpm run test
+
+      # Gate the publish on the tarballs actually containing what their
+      # manifests promise. v1.7.0 went out with @scarlett-player/embed and
+      # @scarlett-player/vue both declaring `types: ./dist/index.d.ts` and
+      # neither tarball containing a single .d.ts (checked with npm pack
+      # --dry-run on 2026-09-02): a Vite emptyOutDir deleted the declarations
+      # tsc had just emitted and the build stayed green. What that costs the
+      # consumer depends on its own settings, measured on TypeScript 5.9.3:
+      # with noImplicitAny on, which is what strict gives you, the import does
+      # not compile at all (TS7016); with it off the module is typed any and
+      # nothing is reported. Deliberately before "Publish to npm" and not
+      # continue-on-error: a package whose advertised files are missing must
+      # not reach the registry, because a published version cannot be
+      # replaced.
+      - name: Check package artifacts
+        if: steps.check_release.outputs.exists == 'false'
+        run: node scripts/check-package-artifacts.mjs
+
+      - name: Check embed chunks
+        if: steps.check_release.outputs.exists == 'false'
+        run: node scripts/check-embed-chunks.mjs
+
+      # A declaration file can exist and still be unusable: @scarlett-player/vue
+      # shipped a dist/index.d.ts importing './ScarlettPlayer.vue', a path the
+      # package does not publish, so every consumer TypeScript build broke on a
+      # file the artifact check above declared present. Same placement rule as
+      # the two checks above: before the publish, never continue-on-error.
+      - name: Check package types
+        if: steps.check_release.outputs.exists == 'false'
+        run: node scripts/check-package-types.mjs
+
+      # Land the version commit on main before anything is published, so npm
+      # never carries a version main does not have. A plain fast-forward push:
+      # if main moved during this run (another merge), the push is rejected
+      # and the job stops here with nothing published; that merge's own run
+      # versions every pending changeset, these included. A branch name, not
+      # HEAD, is pushed so the demo commit below lands on top of this one.
+      - name: Push release commit
+        if: steps.bump.outputs.bumped == 'true'
         run: |
-          git checkout --quiet --force main
           branch=$(git rev-parse --abbrev-ref HEAD)
           if [ "$branch" != "main" ]; then
-            echo "::error::expected to be on main after changesets/action, found $branch"
+            echo "::error::expected to be on main, found $branch"
             exit 1
           fi
+          git push origin main
 
       # Publish to npm.
       #
@@ -200,7 +212,7 @@ jobs:
       # never `npm publish`, for the same reason the step itself uses pnpm (see
       # below): npm ships `workspace:*` ranges verbatim and every install of the
       # result fails to resolve. Run it from the release commit this job is
-      # failing on - check out the release branch or that commit by sha, NOT
+      # failing on - check out main's "chore: release packages" commit by sha, NOT
       # `v<version>`: that tag is created by the "Create GitHub Release" step at
       # the end of this job, so it does not exist while the publish is still
       # failing. Confirm the version you are about to put on the registry first,
@@ -277,7 +289,9 @@ jobs:
             echo ""
             echo "Failed to publish: ${failed[*]}"
             echo "Add a trusted publisher entry (this repo + release.yml) for each on npmjs.com,"
-            echo "then re-run this job. Packages that already succeeded are skipped on the retry."
+            echo "then retry with Actions > Release > Run workflow on main (not Re-run jobs: that"
+            echo "re-versions the merge commit and stops at the push, because main already has the"
+            echo "release commit). Packages that already succeeded are skipped on the retry."
             echo "A package that is not on the registry at all cannot have that entry created."
             echo "Publish its first version by hand from this release commit (the v<version> tag"
             echo "does not exist yet - this job creates it only after npm succeeds), after"
@@ -433,7 +447,7 @@ jobs:
             git commit -m "chore: rebuild demo bundle for v${{ steps.version.outputs.version }} [skip ci]"
             # Checked again right before the push, so a future reordering
             # of the steps above fails here instead of pushing the demo
-            # commit to a release branch (see "Return to main").
+            # commit from a branch other than main.
             branch=$(git rev-parse --abbrev-ref HEAD)
             if [ "$branch" != "main" ]; then
               echo "::error::refusing to push the demo commit from $branch; it belongs on main"
@@ -519,8 +533,10 @@ jobs:
 
           if [ "$NPM" = "failure" ] || [ "$DEMO" = "failure" ]; then
             echo ""
-            echo "One or more targets failed. No tag was created, so a re-run of"
-            echo "this workflow will retry every target once the cause is fixed."
+            echo "One or more targets failed. No tag was created, so running this workflow"
+            echo "again on main (Actions > Release > Run workflow) retries every target once the"
+            echo "cause is fixed. Use Run workflow, not Re-run jobs: main already has the release"
+            echo "commit, and a re-run of this run would version the old merge commit again."
             exit 1
           fi
 
