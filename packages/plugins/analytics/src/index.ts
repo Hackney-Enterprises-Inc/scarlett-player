@@ -72,6 +72,20 @@ const KNOWN_ERROR_CATEGORIES: ReadonlySet<string> = new Set<ErrorCategory>([
   'unknown',
 ]);
 
+/**
+ * Whether a value is a plain object usable as the providers map: not null,
+ * an array, a promise/thenable, or a class instance.
+ *
+ * @param value - Value returned by the API's getProviderDiagnostics
+ * @returns True for a plain object (Object.prototype or null prototype)
+ */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (typeof (value as { then?: unknown }).then === 'function') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 // Re-export types
 export type {
   AnalyticsConfig,
@@ -2286,7 +2300,8 @@ export function createAnalyticsPlugin(
       let providers: Record<string, unknown> = {};
       if (typeof (api as any)?.getProviderDiagnostics === 'function') {
         try {
-          providers = (api as any).getProviderDiagnostics();
+          const raw: unknown = (api as any).getProviderDiagnostics();
+          if (isPlainRecord(raw)) providers = raw;
         } catch {
           providers = {};
         }

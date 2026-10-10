@@ -224,6 +224,30 @@ describe('KeyboardHelpDialog', () => {
     expect(document.activeElement).toBe(child);
   });
 
+  it('opens inside a host modal that contains the player', () => {
+    const h = createHarness();
+    const dialog = new KeyboardHelpDialog(h.api);
+    cleanups.push(() => dialog.destroy());
+
+    const host = document.createElement('div');
+    host.setAttribute('role', 'dialog');
+    host.setAttribute('aria-modal', 'true');
+    document.body.insertBefore(host, h.container);
+    host.appendChild(h.container);
+
+    const btn = document.createElement('button');
+    h.container.appendChild(btn);
+    btn.focus();
+
+    expect(dialog.open()).toBe(true);
+    expect(dialogEl(h)).not.toBeNull();
+
+    cleanups.push(() => {
+      h.container.parentNode!.insertBefore(h.container, host.nextSibling);
+      host.remove();
+    });
+  });
+
   it('closes on its close button and returns focus to the invoker', () => {
     const h = createHarness();
     const dialog = new KeyboardHelpDialog(h.api);

@@ -204,4 +204,26 @@ describe('Analytics Plugin Diagnostics', () => {
     expect(diagnostics.providers).toEqual({});
     expect(diagnostics.errors).toEqual([]);
   });
+
+  it.each([
+    [undefined],
+    [null],
+    [[1, 2] as unknown],
+    [Promise.resolve({ a: 1 })],
+    ['text' as unknown],
+    [new (class X { a = 1 })() as unknown],
+  ])(
+    'rejects %p from getProviderDiagnostics, providers stays {}',
+    async (badValue) => {
+      const plugin = createAnalyticsPlugin({
+        beaconUrl: 'https://beacon.example.com',
+        videoId: 'vid-bad-provider',
+      });
+      (mockApi.getProviderDiagnostics as any).mockReturnValue(badValue);
+      await plugin.init(mockApi);
+
+      const diagnostics = plugin.getDiagnostics();
+      expect(diagnostics.providers).toEqual({});
+    }
+  );
 });

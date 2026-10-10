@@ -148,7 +148,8 @@ export class KeyboardHelpDialog {
    *
    * A no-op while already open: a held or repeated `?` must not toggle the
    * dialog closed again, and opening never moves focus out of another modal
-   * (a clip title editor, a host dialog) that currently owns it.
+   * (a clip title editor, a host dialog) that currently owns it. A modal that
+   * contains the player itself does not count as foreign.
    *
    * @param invoker - Element to hand focus back to on close; defaults to
    *   whatever holds focus now. Falls back to the player container.
@@ -160,8 +161,9 @@ export class KeyboardHelpDialog {
     const active = document.activeElement;
     if (active instanceof HTMLElement) {
       const foreignModal = active.closest('[role="dialog"], [aria-modal="true"]');
-      if (foreignModal && !this.el.contains(foreignModal)) {
+      if (foreignModal && !this.el.contains(foreignModal) && !foreignModal.contains(this.api.container)) {
         // Focus belongs to another modal; opening here would steal it.
+        // A host modal that wraps the entire player is not foreign.
         return false;
       }
     }
