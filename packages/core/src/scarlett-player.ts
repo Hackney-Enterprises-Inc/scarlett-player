@@ -14,6 +14,9 @@ import { ErrorHandler, ErrorCode } from './error-handler';
 import { PluginManager } from './plugin-manager';
 import { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 import { sanitizeUrl } from './utils/url';
+import { generateDiagnosticsSnapshot } from './diagnostics';
+import { PKG_VERSION } from './version';
+import type { PlayerDiagnosticsSnapshot } from './types/diagnostics';
 import type { Plugin } from './types/plugin';
 import type { EventName, EventHandler as EventHandlerFn } from './types/events';
 import type { StateChangeEvent, StateStore } from './types/state';
@@ -1390,6 +1393,26 @@ export class ScarlettPlayer {
     })();
 
     return this.destroyPromise;
+  }
+
+  /**
+   * Get a synchronous, side-effect free troubleshooting snapshot of player state,
+   * recent errors, and provider contributions.
+   *
+   * Adheres to schemaVersion: 1 and safe whitelisted data bounds. Safe to call
+   * before playback, during outages, or after player destroy.
+   *
+   * @returns PlayerDiagnosticsSnapshot
+   */
+  getDiagnostics(): PlayerDiagnosticsSnapshot {
+    return generateDiagnosticsSnapshot({
+      stateManager: this.stateManager,
+      errorHandler: this.errorHandler,
+      pluginManager: this.pluginManager,
+      container: this.container,
+      isDestroyed: this.destroyed,
+      playerVersion: PKG_VERSION,
+    });
   }
 
   // ===== State Getters =====

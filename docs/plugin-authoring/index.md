@@ -329,6 +329,24 @@ The built-in controls meet WCAG 2.5.5 - 44x44px minimum touch targets, real ARIA
 
 A control that offers fullscreen goes through core's `enterFullscreen(api.container)`, `exitFullscreen(api.container)` and `isFullscreen(api.container)` (runtime exports of `@scarlett-player/core` since 1.8.0), the way `FullscreenButton` and the `f` shortcut do. Do not call `requestFullscreen()` on the DOM yourself: the helpers carry the iPhone fallback, and the player's `fullscreen` state key and `fullscreen:change` event are driven by the browser's own events, so they stay correct whichever path was taken. `enterFullscreen()` rejects where no fullscreen API exists; catch and ignore it as the built-ins do.
 
+## Diagnostics from a provider
+
+A provider can add a synchronous `getDiagnostics()` method to its plugin object.
+`player.getDiagnostics()` calls it on ready providers only and files the result
+under the plugin's `id` in the snapshot's `providers` map. Return finite
+numbers, booleans and `null` in small plain objects and arrays, describing the
+provider's current state: retry counters, the active level, buffered ranges.
+Strings are dropped unless they are one of the categorical values core
+allowlists (`SAFE_DIAGNOSTIC_STRINGS`: the HLS engine names and the WebRTC
+connection, ICE and signaling states), so report states as numbers or booleans,
+or as one of those values. Do not return a promise; a promise or a thrown error
+is recorded as `{ unavailable: true }` and never breaks the snapshot.
+
+Core also caps nesting depth, key counts and array lengths, drops keys that look
+like tokens, secrets or credentials, and lists your plugin id in the snapshot's
+`truncatedProviders` when anything was dropped. Still leave source URLs, headers,
+tokens and viewer identifiers out of the contribution in the first place.
+
 ## Testing
 
 Plugins are tested against a mock `IPluginAPI` - see `packages/plugins/captions/tests/captions.test.ts` for the pattern. Two things to know:

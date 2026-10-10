@@ -301,6 +301,41 @@ describe('createEmbedPlayer', () => {
     expect(uiConfig).not.toHaveProperty('bigPlayButton');
   });
 
+  it('should forward keyboard false to the video UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8', keyboard: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(fullPluginCreators.videoUI).toHaveBeenCalledWith(
+      expect.objectContaining({ keyboard: false })
+    );
+  });
+
+  it('should omit keyboard from the video UI config when it is unset', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'video.m3u8' },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(uiConfigOf(fullPluginCreators.videoUI)).not.toHaveProperty('keyboard');
+  });
+
+  it('should not pass keyboard to the audio UI', async () => {
+    await createEmbedPlayer(
+      container,
+      { src: 'audio.m3u8', type: 'audio', keyboard: false },
+      fullPluginCreators,
+      fullAvailableTypes
+    );
+
+    expect(uiConfigOf(fullPluginCreators.audioUI)).not.toHaveProperty('keyboard');
+  });
+
   it('derives a readable accent text colour from the brand colour', async () => {
     await createEmbedPlayer(
       container,

@@ -25,23 +25,28 @@
  *
  * Scenarios, each in a fresh browser context (fresh viewId, viewerId and
  * session): full session, unload, destroy, fatal error, clip create + retry,
- * and a live stream abandoned by navigation (the latency summary keys).
- * The assertions below run before anything is written; a failure exits
- * non-zero and writes nothing, because a fixture set that contradicts the
- * contract is worse than none.
+ * a live stream abandoned by navigation (the latency summary keys), a live
+ * HLS playlist-refresh outage that recovers over HTTP, a live playlist that
+ * finishes with ENDLIST, plus optional batch. `--extended` adds a real-time
+ * ten-minute long-outage capture. The assertions below run before anything
+ * is written; a failure exits non-zero and writes nothing, because a fixture
+ * set that contradicts the contract is worse than none.
  *
  * Usage:
- *   node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch]
+ *   node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch] [--extended]
  *
- *   --out    Output directory. Default:
- *            ../packages/laravel-scarlett-player/tests/Fixtures/wire/<version>/
- *            resolved from the repo root, <version> being the analytics
- *            package's own. Refuses an existing directory: captures are
- *            versioned evidence, never replaced in place.
- *   --smoke  Write to a temp directory instead, print the manifest, exit.
- *            What CI runs on a push to main.
- *   --batch  Also capture the opt-in batch envelope against the local recorder.
- *            Laravel v0.3.0 rejects batches; this is NOT an ingest test.
+ *   --out       Output directory. Default:
+ *               ../packages/laravel-scarlett-player/tests/Fixtures/wire/<version>/
+ *               resolved from the repo root, <version> being the analytics
+ *               package's own. Refuses an existing directory: captures are
+ *               versioned evidence, never replaced in place.
+ *   --smoke     Write to a temp directory instead, print the manifest, exit.
+ *               What CI runs on a push to main. Does not run --extended.
+ *   --batch     Also capture the opt-in batch envelope against the local recorder.
+ *               Laravel v0.3.0 rejects batches; this is NOT an ingest test.
+ *   --extended  Also run the real-time long-outage scenario (ten-minute HLS
+ *               threshold plus a retry tick). Listed in the manifest only when
+ *               selected; a normal capture does not imply it was verified.
  *
  *   WIRE_DEBUG=1 in the environment also lists every request received.
  *
@@ -63,6 +68,8 @@ import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ensureHlsFixture } from './hls-fixture.mjs';
+import { createLiveOrigin } from './wire-capture/live-origin.mjs';
+import { assertViewEndContract, LATENCY_KEYS } from './wire-capture/view-end-contract.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromRoot = createRequire(join(REPO_ROOT, 'package.json'));
@@ -77,12 +84,13 @@ const WIRE_TOKEN = 'per-beacon';
 const CSRF_TOKEN = 'wire-csrf-token';
 const CUSTOM_DIMENSIONS = { tenant: 'wire', planTier: 'free', experiment: 42, beta: true };
 
-/** Present on the ended viewEnd; absent from the unload viewEnd (the plan's two-variant table). */
-const VIEW_END_SHARED = ['watchTime', 'playTime', 'startupTime', 'rebufferCount', 'rebufferDuration', 'avgBitrate', 'maxBitrate', 'exitType'];
-const VIEW_END_FETCH_ONLY = ['qoeScore', 'rebufferRatio', 'qualityChanges', 'pauseCount', 'pauseDuration', 'seekCount', 'errorCount', 'completionRate'];
+/** Live scenarios whose beacons may carry the latency summary. */
+const LIVE_SCENARIOS = new Set(['live', 'live-recovery', 'live-ended', 'live-long-outage']);
 
-/** Every live heartbeat and live viewEnd carries these; no VOD beacon carries any. */
-const LATENCY_KEYS = ['liveLatencySamples', 'liveLatencyMean', 'liveLatencyP95', 'liveLatencyMax', 'lowLatency'];
+/** Hard-coded HLS live long-outage threshold; comparison is strictly greater. */
+const LONG_OUTAGE_MS = 600000;
+const EXTENDED_DEADLINE_MS = 12 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Headers that describe the connection, not the request; dropped from fixtures. */
 const HOP_BY_HOP = new Set(['host', 'connection', 'content-length']);
@@ -103,7 +111,7 @@ const MIME = {
  * Parse the command line.
  *
  * @param {string[]} argv - Arguments after the script path
- * @returns {{ out: string, smoke: boolean, batch: boolean }}
+ * @returns {{ out: string, smoke: boolean, batch: boolean, extended: boolean }}
  * @throws {Error} On an unknown flag
  */
 function parseArgs(argv) {
@@ -111,12 +119,14 @@ function parseArgs(argv) {
     out: resolve(REPO_ROOT, '..', 'packages/laravel-scarlett-player/tests/Fixtures/wire', PLAYER_VERSION),
     smoke: false,
     batch: false,
+    extended: false,
   };
   for (const arg of argv) {
     if (arg === '--smoke') opts.smoke = true;
     else if (arg === '--batch') opts.batch = true;
+    else if (arg === '--extended') opts.extended = true;
     else if (arg.startsWith('--out=')) opts.out = resolve(process.cwd(), arg.slice('--out='.length));
-    else throw new Error(`Unknown argument ${arg}. Usage: node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch]`);
+    else throw new Error(`Unknown argument ${arg}. Usage: node scripts/capture-wire-fixtures.mjs [--out=<dir>] [--smoke] [--batch] [--extended]`);
   }
   return opts;
 }
@@ -233,43 +243,12 @@ const MASTER_PLAYLIST = [
   '',
 ].join('\n');
 
-/** Segments in the fixture's vod.m3u8, 2 s each. */
-const LIVE_SEGMENTS = 30;
-const LIVE_SEGMENT_SECONDS = 2;
-/** Segments in the sliding window, and how far into the stream a viewer joins. */
-const LIVE_WINDOW = 6;
-const LIVE_PRIME_SECONDS = 12;
-
-/** The live origin's clock: set by the first playlist request of each run of scenarioLive. */
-const liveClock = { startedAt: null };
-
 /**
- * A rolling live media playlist over the fixture's 2 s segments.
- *
- * No ENDLIST, a sliding window and a media sequence that advances with the
- * clock, so hls.js classifies it live and the HLS plugin emits `live:latency`.
- * Standard latency, not LL: the wire question is which keys a live beacon
- * carries, and `lowLatency: false` is as much a fixture as `true` would be.
- * Served by the page server rather than a Playwright route (see segmentHold).
- *
- * @returns {string} The playlist as of now
+ * Rolling live origin: clock, playlist-refresh outage and ENDLIST reset per
+ * scenario. Reuses the 30 fixture segments with discontinuity so publication
+ * keeps advancing through a ten-minute outage.
  */
-function livePlaylist() {
-  liveClock.startedAt ??= Date.now();
-  const elapsed = LIVE_PRIME_SECONDS + (Date.now() - liveClock.startedAt) / 1000;
-  const published = Math.min(LIVE_SEGMENTS, Math.floor(elapsed / LIVE_SEGMENT_SECONDS));
-  const first = Math.max(0, published - LIVE_WINDOW);
-  const lines = [
-    '#EXTM3U',
-    '#EXT-X-VERSION:3',
-    `#EXT-X-TARGETDURATION:${LIVE_SEGMENT_SECONDS}`,
-    `#EXT-X-MEDIA-SEQUENCE:${first}`,
-  ];
-  for (let i = first; i < published; i++) {
-    lines.push(`#EXTINF:${LIVE_SEGMENT_SECONDS.toFixed(6)},`, `/scripts/fixtures/hls/seg${i}.ts`);
-  }
-  return `${lines.join('\n')}\n`;
-}
+const liveOrigin = createLiveOrigin();
 
 /**
  * Segment responses parked while the runner starves the buffer.
@@ -421,8 +400,13 @@ async function startPageServer(bundlePath, nativePath) {
     }
 
     if (url.pathname === '/__wire/live.m3u8') {
+      if (liveOrigin.isOutage()) {
+        res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end('outage');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': MIME['.m3u8'], 'Cache-Control': 'no-store' });
-      res.end(livePlaylist());
+      res.end(liveOrigin.playlist());
       return;
     }
 
@@ -507,7 +491,7 @@ const transportOf = (r) => (!r.headers['x-api-key'] && r.query.api_key !== undef
  * @param {string} beaconOrigin
  * @param {string} [src] - Playlist path; the page defaults to the fixture
  * @param {'vod'|'live'} [video] - Which videoId/videoTitle the beacons carry
- * @param {string} [mode] - Additional capture mode (privacy, native or batch)
+ * @param {string} [mode] - Additional capture mode (privacy, native, batch, reconnect or extended)
  * @returns {Promise<{ context: import('playwright').BrowserContext, page: import('playwright').Page, pageErrors: string[] }>}
  */
 async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod', mode) {
@@ -758,7 +742,7 @@ async function scenarioClip(browser, pageOrigin, beaconOrigin) {
  * carry the latency summary. Navigates to about:blank like scenario 2.
  */
 async function scenarioLive(browser, pageOrigin, beaconOrigin) {
-  liveClock.startedAt = null;
+  liveOrigin.reset();
   const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live');
   const notes = { pageErrors };
   try {
@@ -777,6 +761,183 @@ async function scenarioLive(browser, pageOrigin, beaconOrigin) {
     await page.goto('about:blank');
     await sleep(2000);
   } finally {
+    liveOrigin.reset();
+    await context.close();
+  }
+  return { notes };
+}
+
+/** Wait until analytics has classified the source live. */
+const waitLive = (page, timeoutMs = 15000) =>
+  waitFor(
+    () => page.evaluate(() => window.wire.player.getState().live === true),
+    timeoutMs,
+    'live classification'
+  );
+
+/**
+ * Playlist-refresh outage on a joined live stream: first reconnecting, the
+ * marked fatal, recovered, then an ending of the same view. No synthetic emit.
+ */
+async function scenarioLiveRecovery(browser, pageOrigin, beaconOrigin) {
+  liveOrigin.reset();
+  const { context, page, pageErrors } = await openPlayer(
+    browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live', 'reconnect'
+  );
+  const notes = { pageErrors };
+  try {
+    await play(page);
+    await waitPlaying(page);
+    await waitLive(page);
+    await waitFor(
+      () => beaconsOf('live-recovery').some((r) => eventOf(r) === 'heartbeat' && r.body.liveLatencySamples > 0),
+      15000,
+      'live-recovery heartbeat with latency'
+    );
+    liveOrigin.startOutage();
+    await waitFor(
+      () => beaconsOf('live-recovery').some((r) => eventOf(r) === 'reconnecting' && r.body.longOutage !== true),
+      20000,
+      'reconnecting beacon'
+    );
+    await waitFor(
+      () => beaconsOf('live-recovery').some((r) => eventOf(r) === 'error' && r.body.reconnecting === true && r.body.errorSeverity === 'warning'),
+      5000,
+      'error beacon marked reconnecting'
+    );
+    if (beaconsOf('live-recovery').some((r) => eventOf(r) === 'viewEnd')) {
+      throw new Error('premature viewEnd during recoverable outage');
+    }
+    liveOrigin.endOutage();
+    await waitFor(
+      () => beaconsOf('live-recovery').some((r) => eventOf(r) === 'recovered'),
+      20000,
+      'recovered beacon'
+    );
+    const timeAfter = await page.evaluate(() => window.wire.player.getState().currentTime);
+    await waitFor(
+      () =>
+        page.evaluate((t) => {
+          const s = window.wire.player.getState();
+          return s.playing && s.currentTime > t + 0.3;
+        }, timeAfter),
+      20000,
+      'currentTime progressing after recovery'
+    );
+    notes.currentTimeAfterRecovery = await page.evaluate(() => window.wire.player.getState().currentTime);
+    await page.evaluate(() => window.wire.player.destroy());
+    await waitFor(
+      () => beaconsOf('live-recovery').some((r) => eventOf(r) === 'viewEnd'),
+      8000,
+      'viewEnd after recovery'
+    );
+  } finally {
+    liveOrigin.reset();
+    await context.close();
+  }
+  return { notes };
+}
+
+/**
+ * A genuine live playlist that then finishes with ENDLIST after classification.
+ */
+async function scenarioLiveEnded(browser, pageOrigin, beaconOrigin) {
+  liveOrigin.reset();
+  const { context, page, pageErrors } = await openPlayer(browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live');
+  const notes = { pageErrors };
+  try {
+    await play(page);
+    await waitPlaying(page);
+    await waitLive(page);
+    await waitFor(
+      () => beaconsOf('live-ended').some((r) => eventOf(r) === 'heartbeat' && r.body.liveLatencySamples > 0),
+      15000,
+      'live-ended heartbeat with latency'
+    );
+    liveOrigin.finishWithEndlist();
+    await waitFor(
+      () => beaconsOf('live-ended').some((r) => eventOf(r) === 'viewEnd'),
+      30000,
+      'viewEnd liveEnded'
+    );
+    notes.state = await page.evaluate(() => {
+      const s = window.wire.player.getState();
+      return { live: s.live, ended: s.ended, currentTime: s.currentTime };
+    }).catch(() => ({}));
+  } finally {
+    liveOrigin.reset();
+    await context.close();
+  }
+  return { notes };
+}
+
+/**
+ * Real-time long outage: wait past the hard-coded ten-minute threshold and a
+ * retry tick. Production reconnect delays; idleTimeout stays at thirty minutes.
+ */
+async function scenarioLiveLongOutage(browser, pageOrigin, beaconOrigin) {
+  liveOrigin.reset();
+  const { context, page, pageErrors } = await openPlayer(
+    browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live', 'extended'
+  );
+  const notes = {
+    pageErrors,
+    assumptions: {
+      runnerAssumedIdleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
+      longOutageMs: LONG_OUTAGE_MS,
+      liveClassifiedBeforeOutage: false,
+    },
+  };
+  const beforePlay = Date.now();
+  try {
+    await play(page);
+    await waitPlaying(page);
+    await waitLive(page);
+    notes.assumptions.liveClassifiedBeforeOutage = true;
+    await waitFor(
+      () => beaconsOf('live-long-outage').some((r) => eventOf(r) === 'heartbeat' && r.body.liveLatencySamples > 0),
+      15000,
+      'live-long-outage heartbeat with latency'
+    );
+    liveOrigin.startOutage();
+    await waitFor(
+      () => beaconsOf('live-long-outage').some((r) => eventOf(r) === 'reconnecting' && r.body.longOutage !== true),
+      20000,
+      'first reconnecting beacon'
+    );
+    await waitFor(
+      () =>
+        beaconsOf('live-long-outage').some(
+          (r) => eventOf(r) === 'reconnecting' && r.body.longOutage === true
+        ),
+      EXTENDED_DEADLINE_MS,
+      'longOutage reconnecting beacon'
+    );
+    liveOrigin.endOutage();
+    await waitFor(
+      () => beaconsOf('live-long-outage').some((r) => eventOf(r) === 'recovered'),
+      30000,
+      'recovered after long outage'
+    );
+    const timeAfter = await page.evaluate(() => window.wire.player.getState().currentTime);
+    await waitFor(
+      () =>
+        page.evaluate((t) => {
+          const s = window.wire.player.getState();
+          return s.playing && s.currentTime > t + 0.3;
+        }, timeAfter),
+      20000,
+      'currentTime progressing after long-outage recovery'
+    );
+    await page.evaluate(() => window.wire.player.destroy());
+    await waitFor(
+      () => beaconsOf('live-long-outage').some((r) => eventOf(r) === 'viewEnd'),
+      8000,
+      'viewEnd after long outage'
+    );
+  } finally {
+    notes.elapsedSincePlayMs = Date.now() - beforePlay;
+    liveOrigin.reset();
     await context.close();
   }
   return { notes };
@@ -837,6 +998,8 @@ const SCENARIOS = [
   ['error', scenarioError],
   ['clip', scenarioClip],
   ['live', scenarioLive],
+  ['live-recovery', scenarioLiveRecovery],
+  ['live-ended', scenarioLiveEnded],
   ['privacy', scenarioPrivacy],
   ['native', scenarioNative],
 ];
@@ -918,6 +1081,19 @@ function selectFixtures(scenarioNotes, includeBatch) {
   beaconFixture('live', 'viewStart', { variant: 'live' });
   beaconFixture('live', 'heartbeat', { pick: 'last', variant: 'live' });
   beaconFixture('live', 'viewEnd', { variant: 'live-unload' });
+
+  beaconFixture('live-recovery', 'reconnecting');
+  const recoveryError = beaconsOf('live-recovery').find((r) => eventOf(r) === 'error' && r.body.reconnecting === true);
+  if (recoveryError) put('error.fetch.reconnecting.json', recoveryError, { event: 'error', transport: transportOf(recoveryError), variant: 'reconnecting', scenario: 'live-recovery' });
+  else absent.push({ file: 'error.fetch.reconnecting.json', required: true, reason: 'no error beacon marked reconnecting arrived in live-recovery' });
+  beaconFixture('live-recovery', 'recovered');
+  beaconFixture('live-recovery', 'viewEnd', { variant: 'recovered' });
+  beaconFixture('live-ended', 'viewEnd', { variant: 'live-ended' });
+  if (scenarioNotes['live-long-outage']) {
+    const long = beaconsOf('live-long-outage').find((r) => eventOf(r) === 'reconnecting' && r.body.longOutage === true);
+    if (long) put('reconnecting.fetch.long-outage.json', long, { event: 'reconnecting', transport: transportOf(long), variant: 'long-outage', scenario: 'live-long-outage' });
+    else absent.push({ file: 'reconnecting.fetch.long-outage.json', required: true, reason: 'no longOutage reconnecting beacon arrived' });
+  }
 
   beaconFixture('privacy', 'viewStart', { variant: 'anonymous' });
   beaconFixture('privacy', 'custom:wirePrivacy', { variant: 'anonymous' });
@@ -1048,19 +1224,18 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (!named.includes('x-api-key')) fail(`access-control-request-headers: ${pre.headers['access-control-request-headers']}`);
   });
 
-  check('viewEnd unload is the field subset; viewEnd ended has every field', () => {
+  check('viewEnd fetch and unload share the 1.22 required-field contract', () => {
     const unload = body('viewEnd.sendBeacon.unload.json');
     const ended = body('viewEnd.fetch.ended.json');
     if (!unload || !ended) fail('a viewEnd variant is missing');
-    for (const key of VIEW_END_SHARED) {
-      if (!(key in unload)) fail(`unload lacks ${key}`);
-      if (!(key in ended)) fail(`ended lacks ${key}`);
-    }
-    for (const key of VIEW_END_FETCH_ONLY) {
-      if (key in unload) fail(`unload has ${key}, which the unload path does not send`);
-      if (!(key in ended)) fail(`ended lacks ${key}`);
-    }
+    assertViewEndContract(ended, { live: false });
+    assertViewEndContract(unload, { live: false });
     if (ended.exitType !== 'completed') fail(`ended exitType ${ended.exitType}`);
+    if (unload.exitType !== 'abandoned') fail(`unload exitType ${unload.exitType}`);
+    const destroyed = body('viewEnd.fetch.destroy.json');
+    if (destroyed) assertViewEndContract(destroyed, { live: false });
+    const errored = body('viewEnd.fetch.error.json');
+    if (errored) assertViewEndContract(errored, { live: false });
   });
 
   check('videoStart.startupTime is above zero on VOD (play request to first frame, SCAR-ANALYTICS-4)', () => {
@@ -1092,12 +1267,13 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (viewEnd.fatalErrorCategory !== error.errorCategory || !Number.isInteger(viewEnd.warningCount)) fail('fatal category/warning count mismatch');
   });
 
-  check('QoE v2 on scored heartbeat and fetch viewEnd, absent from unload subset', () => {
-    for (const r of beacons.filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)) && transportOf(r) === 'fetch')) {
-      if (r.body.qoeVersion !== 2 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) fail(`${eventOf(r)} (${r.scenario}): invalid QoE v2`);
-    }
-    for (const r of beacons.filter((r) => eventOf(r) === 'viewEnd' && transportOf(r) === 'sendBeacon')) {
-      if ('qoeVersion' in r.body || 'qoeScore' in r.body) fail('unload carries QoE fetch-only fields');
+  check('QoE v2 on heartbeat and both viewEnd transports', () => {
+    for (const r of beacons.filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)))) {
+      if (eventOf(r) === 'heartbeat' && 'gaugeScale' in r.body) fail(`heartbeat (${r.scenario}) carries gaugeScale`);
+      if (eventOf(r) === 'viewEnd' && r.body.gaugeScale !== 'percent') fail(`viewEnd (${r.scenario}) gaugeScale ${JSON.stringify(r.body.gaugeScale)}`);
+      if (r.body.qoeVersion !== 2 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) {
+        fail(`${eventOf(r)} (${r.scenario}): invalid QoE v2`);
+      }
     }
   });
 
@@ -1204,15 +1380,14 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
       for (const key of LATENCY_KEYS.slice(0, 4)) {
         if (typeof b[key] !== 'number' || !Number.isFinite(b[key])) fail(`live ${name} ${key} = ${JSON.stringify(b[key])}`);
       }
-      // The live playlist is standard latency (see livePlaylist), so true
+      // The live playlist is standard latency (see live-origin), so true
       // would mean the stream was misclassified, not a valid alternative.
       if (b.lowLatency !== false) fail(`live ${name} lowLatency = ${JSON.stringify(b.lowLatency)}, expected false`);
       if (!(b.liveLatencySamples > 0)) fail(`live ${name} liveLatencySamples ${b.liveLatencySamples}`);
     }
-    for (const key of VIEW_END_SHARED) if (!(key in unload.body)) fail(`live unload lacks ${key}`);
-    for (const key of VIEW_END_FETCH_ONLY) if (key in unload.body) fail(`live unload has ${key}`);
+    assertViewEndContract(unload.body, { live: true });
     if (unload.body.exitType !== 'abandoned') fail(`live unload exitType ${unload.body.exitType}`);
-    for (const r of beacons.filter((b) => b.scenario !== 'live')) {
+    for (const r of beacons.filter((b) => !LIVE_SCENARIOS.has(b.scenario))) {
       const leaked = LATENCY_KEYS.filter((key) => key in r.body);
       if (leaked.length) fail(`${eventOf(r)} (${r.scenario}) carries ${leaked.join(', ')} on VOD`);
     }
@@ -1230,6 +1405,8 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (firstFrame('full-session')?.isLive !== false) fail(`VOD videoStart isLive ${JSON.stringify(firstFrame('full-session')?.isLive)}`);
     if (body('viewEnd.fetch.ended.json')?.isLive !== false) fail(`VOD ended viewEnd isLive ${JSON.stringify(body('viewEnd.fetch.ended.json')?.isLive)}`);
     if (firstFrame('live')?.isLive !== true) fail(`live videoStart isLive ${JSON.stringify(firstFrame('live')?.isLive)}`);
+    if (firstFrame('live-recovery')?.isLive !== true) fail(`live-recovery videoStart isLive ${JSON.stringify(firstFrame('live-recovery')?.isLive)}`);
+    if (firstFrame('live-ended')?.isLive !== true) fail(`live-ended videoStart isLive ${JSON.stringify(firstFrame('live-ended')?.isLive)}`);
     return `${ran.length} viewStart null`;
   });
 
@@ -1259,6 +1436,72 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     return `${sent.length} of ${notes.qualityChangeCount}`;
   });
 
+  check('live recovery captures reconnecting, marked warning, recovered, one outage, same view', () => {
+    const reconnecting = body('reconnecting.fetch.json');
+    const error = body('error.fetch.reconnecting.json');
+    const recovered = body('recovered.fetch.json');
+    const viewEnd = body('viewEnd.fetch.recovered.json');
+    if (!reconnecting || !error || !recovered || !viewEnd) fail('recovery fixture missing');
+    if (reconnecting.longOutage === true) fail('first reconnecting is a long-outage beacon');
+    if (error.errorSeverity !== 'warning' || error.reconnecting !== true || error.fatal !== true) {
+      fail(`reconnecting error severity/fatal ${error.errorSeverity}/${error.fatal} reconnecting=${error.reconnecting}`);
+    }
+    const viewIds = [reconnecting, error, recovered, viewEnd].map((b) => b.viewId);
+    if (new Set(viewIds).size !== 1) fail(`recovery viewIds drifted: ${viewIds.join(', ')}`);
+    if (viewEnd.reconnectCount !== 1) fail(`viewEnd reconnectCount ${viewEnd.reconnectCount}`);
+    if (recovered.reconnectCount !== 1) fail(`recovered reconnectCount ${recovered.reconnectCount}`);
+    if (!Number.isFinite(recovered.duration) || recovered.duration < 0) fail(`recovered duration ${recovered.duration}`);
+    if (!Number.isFinite(viewEnd.reconnectDuration) || viewEnd.reconnectDuration < 0) {
+      fail(`reconnectDuration ${viewEnd.reconnectDuration}`);
+    }
+    assertViewEndContract(viewEnd, { live: true });
+    if (viewEnd.exitType !== 'abandoned') fail(`recovery viewEnd exitType ${viewEnd.exitType}, expected abandoned after destroy()`);
+    const ordered = beaconsOf('live-recovery')
+      .filter((r) => ['reconnecting', 'error', 'recovered', 'viewEnd'].includes(eventOf(r)))
+      .sort((a, b) => a.body.timestamp - b.body.timestamp || a.body.beaconSeq - b.body.beaconSeq);
+    const names = ordered.map((r) => eventOf(r));
+    if (names.indexOf('viewEnd') !== -1 && names.indexOf('viewEnd') < names.indexOf('recovered')) {
+      fail('viewEnd arrived before recovered');
+    }
+    if (beaconsOf('live-recovery').filter((r) => eventOf(r) === 'viewEnd').length !== 1) {
+      fail('live-recovery did not send exactly one viewEnd');
+    }
+    return `outage ${recovered.duration} ms, view ${viewIds[0]}`;
+  });
+
+  check('live-ended sends one viewEnd with liveEnded and null completionRate', () => {
+    const ends = beaconsOf('live-ended').filter((r) => eventOf(r) === 'viewEnd');
+    if (ends.length !== 1) fail(`${ends.length} live-ended viewEnd beacons`);
+    const viewEnd = body('viewEnd.fetch.live-ended.json');
+    if (!viewEnd) fail('live-ended viewEnd missing');
+    if (viewEnd.isLive !== true) fail(`live-ended isLive ${viewEnd.isLive}`);
+    if (viewEnd.exitType !== 'liveEnded') fail(`live-ended exitType ${viewEnd.exitType}`);
+    if (viewEnd.completionRate !== null) fail(`live-ended completionRate ${viewEnd.completionRate}`);
+    if (transportOf(ends[0]) !== 'fetch') fail(`live-ended arrived by ${transportOf(ends[0])}`);
+    assertViewEndContract(viewEnd, { live: true });
+  });
+
+  if (scenarioNotes['live-long-outage']) {
+    check('extended long-outage sends one extra reconnecting with longOutage and does not increment outage count', () => {
+      const long = fixtures.get('reconnecting.fetch.long-outage.json')?.record?.body;
+      if (!long) fail('long-outage reconnecting missing');
+      if (long.longOutage !== true) fail('long-outage fixture lacks longOutage true');
+      const reconnecting = beaconsOf('live-long-outage').filter((r) => eventOf(r) === 'reconnecting');
+      const longs = reconnecting.filter((r) => r.body.longOutage === true);
+      if (longs.length !== 1) fail(`${longs.length} longOutage reconnecting beacons`);
+      const recovered = beaconsOf('live-long-outage').find((r) => eventOf(r) === 'recovered')?.body;
+      const viewEnd = beaconsOf('live-long-outage').find((r) => eventOf(r) === 'viewEnd')?.body;
+      if (!recovered || !viewEnd) fail('long-outage recovered or viewEnd missing');
+      if (recovered.reconnectCount !== 1 || viewEnd.reconnectCount !== 1) {
+        fail(`long-outage reconnectCount recovered=${recovered.reconnectCount} viewEnd=${viewEnd.reconnectCount}`);
+      }
+      if (long.viewId !== recovered.viewId || long.viewId !== viewEnd.viewId) fail('long-outage viewId drifted');
+      assertViewEndContract(viewEnd, { live: true });
+      const elapsed = scenarioNotes['live-long-outage']?.elapsedSincePlayMs;
+      return `${elapsed} ms since play(), runner-assumed idleTimeout ${scenarioNotes['live-long-outage']?.assumptions?.runnerAssumedIdleTimeoutMs}`;
+    });
+  }
+
   return results;
 }
 
@@ -1273,7 +1516,7 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
  * @param {object} context - Versions and results for the manifest
  * @returns {object} The manifest
  */
-function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes }) {
+function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes, selectedScenarios, extendedSelected }) {
   mkdirSync(dirname(outDir), { recursive: true });
   // Exclusive creation, even if another run created this version after the
   // early CLI check. Never mutate captured evidence or PROVENANCE.md.
@@ -1319,6 +1562,9 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
 
   const manifest = {
     ...provenance,
+    producerVersion: PLAYER_VERSION,
+    selectedScenarios,
+    extendedSelected: extendedSelected === true,
     files: [...written, 'manifest.json'],
     absent: absent.map(({ file, required, reason }) => ({ file, required, reason })),
     assertions,
@@ -1335,6 +1581,9 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
           isLiveByEvent: Object.fromEntries(beaconsOf(name).reverse().map((r) => [eventOf(r), r.body.isLive])),
           ...(name === 'full-session' ? { segments: notes.segments ?? [] } : {}),
           ...(name === 'native' ? { segments: notes.segments ?? [] } : {}),
+          ...(notes.elapsedSincePlayMs !== undefined ? { elapsedSincePlayMs: notes.elapsedSincePlayMs } : {}),
+          ...(notes.assumptions ? { assumptions: notes.assumptions } : {}),
+          ...(notes.currentTimeAfterRecovery !== undefined ? { currentTimeAfterRecovery: notes.currentTimeAfterRecovery } : {}),
         },
       ])
     ),
@@ -1397,7 +1646,13 @@ try {
 
   const scenarioNotes = {};
   const failures = [];
-  for (const [name, run] of [...SCENARIOS, ...(opts.batch ? [['batch', scenarioBatch]] : [])]) {
+  const selected = [
+    ...SCENARIOS,
+    ...(opts.batch ? [['batch', scenarioBatch]] : []),
+    ...(opts.extended ? [['live-long-outage', scenarioLiveLongOutage]] : []),
+  ];
+  const selectedScenarios = selected.map(([name]) => name);
+  for (const [name, run] of selected) {
     currentScenario = name;
     const started = Date.now();
     try {
@@ -1431,7 +1686,7 @@ try {
     console.error('\nAssertions failed; nothing written.');
   } else {
     const outDir = opts.smoke ? join(mkdtempSync(join(tmpdir(), 'scarlett-wire-smoke-')), PLAYER_VERSION) : opts.out;
-    const manifest = writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes });
+    const manifest = writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, capturedAt, scenarioNotes, selectedScenarios, extendedSelected: opts.extended });
     if (opts.smoke) {
       console.log(`\nSmoke run passed. Manifest (${join(outDir, 'manifest.json')}):\n`);
       console.log(JSON.stringify(manifest, null, 2));
@@ -1443,6 +1698,8 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
 } finally {
+  segmentHold.release();
+  liveOrigin.reset();
   await browser?.close();
   beaconServer?.close();
   pageServer?.close();

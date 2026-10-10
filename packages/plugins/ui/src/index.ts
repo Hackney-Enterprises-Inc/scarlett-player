@@ -43,6 +43,9 @@ import {
   BandwidthIndicator,
   BigPlayButton,
   OverflowTray,
+  KeyboardHelpButton,
+  KeyboardHelpDialog,
+  toggleCaptions,
 } from './controls';
 import { getControlFactory, onControlRegistered } from './control-registry';
 import { PKG_VERSION } from './version';
@@ -277,6 +280,8 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   let tray: OverflowTray | null = null;
   let entries: ControlEntry[] = [];
   let timeEntry: ControlEntry | null = null;
+  /** The keyboard help dialog this player owns; created in init(). */
+  let helpDialog: KeyboardHelpDialog | null = null;
   let resizeObserver: ResizeObserver | null = null;
   /** Debounce handle for the window-resize fallback, where ResizeObserver is absent. */
   let windowResizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -313,6 +318,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   const layout = config.controls || DEFAULT_LAYOUT;
   const hideDelay = config.hideDelay ?? DEFAULT_HIDE_DELAY;
   const showBigPlayButton = config.bigPlayButton !== false;
+  const enableKeyboard = config.keyboard !== false;
   const responsive = config.responsive !== false;
 
   // Before anything is built. With the fit off nothing ever hides, so the
@@ -320,6 +326,28 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   if (responsive) {
     assertFitLayout(layout, config.priority);
   }
+
+  /**
+   * Open the keyboard help dialog for this player.
+   *
+   * Closes whatever UI-owned popover is open first (the settings menu, the
+   * overflow tray) through their own close methods, so the dialog never
+   * stacks on top of a menu the viewer can no longer see. The dialog decides
+   * itself whether focus can be taken (see KeyboardHelpDialog.open).
+   */
+  const openHelpDialog = (): boolean => {
+    for (const control of controls) {
+      const popover = control as Control & { close?: (restoreFocus?: boolean) => void };
+      if (typeof popover.close === 'function') {
+        popover.close(false);
+      }
+    }
+
+    const invoker =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    return helpDialog?.open(invoker) ?? false;
+  };
 
   /**
    * Create a control instance for a given slot.
@@ -359,6 +387,9 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         return new FullscreenButton(api);
       case 'spacer':
         return new Spacer();
+      case 'keyboard-help':
+        // The dialog lists shortcuts that only work with the document listener.
+        return enableKeyboard ? new KeyboardHelpButton(openHelpDialog) : null;
       default: {
         // Not a built-in - fall through to whatever a plugin registered.
         // Scoped by container so a factory another player owns is never used.
@@ -1044,6 +1075,68 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
   };
 
   /**
+   * Whether a keydown is a bare digit the player may map to a seek.
+   *
+   * Shift and AltGraph are excluded on purpose: on several layouts they turn
+   * the numeric row into other characters, and where they do not, the chord
+   * belongs to the viewer's layout, not to the player.
+   *
+   * @param e - The document keydown
+   */
+  const isBareDigit = (e: KeyboardEvent): boolean =>
+    e.key.length === 1 &&
+    e.key >= '0' &&
+    e.key <= '9' &&
+    !e.shiftKey &&
+    !(typeof e.getModifierState === 'function' && e.getModifierState('AltGraph'));
+
+  /**
+   * Target a digit seek maps to, or null when the media cannot be seeked.
+   *
+   * VOD seeks to `digit / 10` of the duration, preferring the latest player
+   * duration (state) and falling back to what the element itself reports;
+   * neither may be stale, non-finite or non-positive - Infinity is never
+   * turned into a seek. Live with a DVR window maps the same share across
+   * `seekableRange`, clamped inside it; live without a window does nothing.
+   *
+   * @param digit - 0 to 9
+   * @param video - The player's media element
+   * @returns Seconds to seek to, or null when there is no valid target
+   */
+  const digitSeekTarget = (digit: number, video: HTMLVideoElement): number | null => {
+    const live = api.getState('live');
+    const seekableRange = api.getState('seekableRange');
+
+    if (live) {
+      if (!seekableRange) {
+        return null;
+      }
+
+      const { start, end } = seekableRange;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        return null;
+      }
+
+      return Math.min(end, Math.max(start, start + (digit / 10) * (end - start)));
+    }
+
+    const stateDuration = Number(api.getState('duration'));
+    const elementDuration = video.duration;
+    const duration =
+      Number.isFinite(stateDuration) && stateDuration > 0
+        ? stateDuration
+        : Number.isFinite(elementDuration) && elementDuration > 0
+          ? elementDuration
+          : null;
+
+    if (duration === null) {
+      return null;
+    }
+
+    return Math.min(duration, Math.max(0, (digit / 10) * duration));
+  };
+
+  /**
    * Handle keyboard shortcuts.
    */
   const handleKeyDown = (e: KeyboardEvent): void => {
@@ -1081,8 +1174,49 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
     if (isActivatable && ACTIVATION_KEYS.has(e.key)) return;
     if (role === 'slider' && SLIDER_KEYS.has(e.key)) return;
 
+    // While the keyboard help dialog is open it owns the keys that act on the
+    // player: Escape and Tab through its own listener, and nothing else may
+    // fire from its controls. The widget guard above only covers activation
+    // and slider keys, so without this a 'm' typed at the dialog's focused
+    // close button would mute the video behind it.
+    if (helpDialog?.isOpen()) return;
+
+    // '?' is the produced key (Shift+/ on many layouts), never a hard-coded
+    // physical key. Works before a media element exists, and only takes the
+    // key when the dialog actually opened.
+    if (e.key === '?') {
+      if (openHelpDialog()) {
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // C/c toggles captions exactly the way the bar button does. Only takes
+    // the key when there was something to toggle.
+    if (e.key === 'c' || e.key === 'C') {
+      if (toggleCaptions(api)) {
+        e.preventDefault();
+      }
+      return;
+    }
+
     const video = api.container.querySelector('video');
     if (!video) return;
+
+    // Digits seek to a share of the media, one clamped write and one bus
+    // event per key. Only takes the key when a target exists.
+    if (isBareDigit(e)) {
+      const target = digitSeekTarget(Number(e.key), video);
+      if (target === null) {
+        return;
+      }
+
+      e.preventDefault();
+      video.currentTime = target;
+      api.emit('playback:seeking', { time: video.currentTime });
+      showControls();
+      return;
+    }
 
     const live = api.getState('live');
     const seekableRange = api.getState('seekableRange');
@@ -1261,6 +1395,12 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         container.appendChild(bigPlayButton.render());
       }
 
+      // The keyboard help dialog this player owns. One per player, rendered
+      // into this container only, so two players never share dialog state.
+      // Created before any keydown can arrive: `?` must open it before a
+      // video element exists.
+      helpDialog = new KeyboardHelpDialog(api);
+
       // Create progress bar (positioned above controls)
       progressBar = new ProgressBar(api, {
         // A timeline editor is on screen for as long as the viewer needs it,
@@ -1359,7 +1499,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       container.addEventListener('mouseleave', handleMouseLeave);
       container.addEventListener('touchstart', handleInteraction, { passive: true });
       container.addEventListener('click', handleInteraction);
-      document.addEventListener('keydown', handleKeyDown);
+      if (enableKeyboard) document.addEventListener('keydown', handleKeyDown);
 
       // Subscribe to state changes (coalesced to one render per frame). This
       // is also how a fullscreen transition reaches the bar, and the plugin
@@ -1428,6 +1568,11 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
       stateUnsubscribe?.();
       stateUnsubscribe = null;
 
+      // Close the keyboard help dialog and drop its document listener before
+      // the container goes away. destroy() skips the focus hand-back on purpose.
+      helpDialog?.destroy();
+      helpDialog = null;
+
       // Remove error listeners
       errorUnsubscribe?.();
       errorUnsubscribe = null;
@@ -1448,7 +1593,7 @@ export function uiPlugin(config: UIPluginConfig = {}): IUIPlugin {
         api.container.removeEventListener('touchstart', handleInteraction);
         api.container.removeEventListener('click', handleInteraction);
       }
-      document.removeEventListener('keydown', handleKeyDown);
+      if (enableKeyboard) document.removeEventListener('keydown', handleKeyDown);
 
       controlRegistryUnsubscribe?.();
       controlRegistryUnsubscribe = null;

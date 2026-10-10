@@ -295,6 +295,28 @@ player.setQuality(-1); // Auto/ABR
 const current = player.getCurrentQuality();
 ```
 
+## Diagnostics
+
+The plugin implements the optional `getDiagnostics()` hook for troubleshooting snapshots:
+
+```typescript
+const hls = player.getPlugin<IHLSPlugin>('hls-provider');
+const diag = hls.getDiagnostics();
+
+console.log(diag.engine);            // 'hls.js' | 'native' | null
+console.log(diag.selectedLevel);     // Current level index
+console.log(diag.quality);           // { bitrate, width, height }
+console.log(diag.bandwidthEstimate); // bits per second
+console.log(diag.live);              // boolean
+console.log(diag.lowLatency);        // boolean
+console.log(diag.retryCount);        // Network + media retries
+console.log(diag.reconnectAttempts); // Auto-reconnect attempts
+console.log(diag.buffered);          // Bounded buffered time ranges (max 32)
+console.log(diag.seekable);          // Bounded seekable time ranges (max 32)
+```
+
+Works in both hls.js and native Safari playback modes, and in the light build.
+
 ## License
 
 MIT

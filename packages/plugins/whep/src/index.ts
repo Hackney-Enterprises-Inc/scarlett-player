@@ -30,9 +30,9 @@ import { PKG_VERSION } from './version';
 import { WHEPError, classifyTransport, type WHEPFailure } from './errors';
 import { deleteSession, postOffer } from './session';
 import { estimateLatency, type LatencySample } from './latency';
-import type { IWHEPPlugin, WHEPPluginConfig } from './types';
+import type { IWHEPPlugin, WHEPDiagnostics, WHEPPluginConfig } from './types';
 
-export type { IWHEPPlugin, WHEPPluginConfig, WHEPTokenProvider } from './types';
+export type { IWHEPPlugin, WHEPDiagnostics, WHEPPluginConfig, WHEPTokenProvider } from './types';
 export {
   WHEPError,
   classifyResponse,
@@ -155,6 +155,10 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
   let sessionUrl: string | null = null;
   /** The endpoint of the current source. */
   let currentSrc = '';
+  /** Latest known receiver latency estimate in seconds. */
+  let latestLatencyEstimate: number | null = null;
+  /** Cached numeric aggregate counters from latest stats report. */
+  let latestStatsSummary: WHEPDiagnostics['stats'] = null;
   /**
    * Whether the current source has connected at least once. A `404` before
    * that is a wrong URL and terminal; after it, the endpoint is known to
@@ -391,6 +395,8 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
    */
   const startLatencyPoll = (pc: RTCPeerConnection): void => {
     stopLatencyPoll();
+    latestLatencyEstimate = null;
+    latestStatsSummary = null;
     const session = loadSession;
     // The counters the previous tick saw, so each estimate covers the frames
     // emitted since then rather than the mean since the join.
@@ -403,10 +409,46 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
       void pc
         .getStats()
         .then((report) => {
-          if (session !== loadSession || !api) return;
+          if (session !== loadSession || peer !== pc || !api) return;
           const estimate = estimateLatency(report as unknown as Iterable<unknown>, lastSample);
           if (!estimate) return;
           lastSample = estimate.sample;
+          latestLatencyEstimate = estimate.latency;
+
+          const statsObj: NonNullable<WHEPDiagnostics['stats']> = {};
+          let hasStats = false;
+          for (const raw of report as unknown as Iterable<unknown>) {
+            const entry = (Array.isArray(raw) ? raw[1] : raw) as Record<string, unknown> | undefined;
+            if (!entry || typeof entry !== 'object') continue;
+            if (entry.type === 'inbound-rtp' && (entry.kind === 'video' || entry.mediaType === 'video')) {
+              if (typeof entry.jitter === 'number' && Number.isFinite(entry.jitter)) {
+                statsObj.jitter = entry.jitter;
+                hasStats = true;
+              }
+              if (typeof entry.framesReceived === 'number' && Number.isFinite(entry.framesReceived)) {
+                statsObj.framesReceived = entry.framesReceived;
+                hasStats = true;
+              }
+              if (typeof entry.framesDecoded === 'number' && Number.isFinite(entry.framesDecoded)) {
+                statsObj.framesDecoded = entry.framesDecoded;
+                hasStats = true;
+              }
+              if (typeof entry.framesDropped === 'number' && Number.isFinite(entry.framesDropped)) {
+                statsObj.framesDropped = entry.framesDropped;
+                hasStats = true;
+              }
+            }
+          }
+          if (estimate.rttKnown && Number.isFinite(estimate.rttSeconds)) {
+            statsObj.roundTripTime = estimate.rttSeconds;
+            hasStats = true;
+          } else {
+            statsObj.roundTripTime = null;
+          }
+          if (hasStats) {
+            latestStatsSummary = statsObj;
+          }
+
           const previous = api.getState('liveLatency');
           if (Math.abs(previous - estimate.latency) > LATENCY_EPSILON) {
             api.setState('liveLatency', estimate.latency);
@@ -434,6 +476,8 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
    */
   const closeConnection = (keepalive: boolean): void => {
     stopLatencyPoll();
+    latestLatencyEstimate = null;
+    latestStatsSummary = null;
     clearDisconnectTimer();
 
     const pc = peer;
@@ -1037,6 +1081,8 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
       cleanup(new Error('Player destroyed during load'), true);
       currentSrc = '';
       hasJoined = false;
+      latestLatencyEstimate = null;
+      latestStatsSummary = null;
 
       if (video?.parentNode) {
         video.parentNode.removeChild(video);
@@ -1081,6 +1127,27 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
 
     getSessionUrl(): string | null {
       return sessionUrl;
+    },
+
+    getDiagnostics(): WHEPDiagnostics {
+      // The liveLatency state outlives a dropped connection; once a source has
+      // joined, only a fresh estimate counts.
+      const currentLatency = latestLatencyEstimate ?? (api && !hasJoined ? (api.getState('liveLatency') || null) : null);
+      const receiverLatency =
+        typeof currentLatency === 'number' && Number.isFinite(currentLatency) && currentLatency > 0
+          ? currentLatency
+          : null;
+
+      return {
+        connectionState: peer ? peer.connectionState : null,
+        iceConnectionState: peer ? peer.iceConnectionState : null,
+        signalingState: peer ? peer.signalingState : null,
+        receiverLatency,
+        stats: latestStatsSummary,
+        autoReconnect,
+        reconnectAttempts,
+        isReconnecting,
+      };
     },
   };
 

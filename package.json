@@ -21,7 +21,8 @@
   "scripts": {
     "build": "pnpm --filter '@scarlett-player/core' run build && pnpm --filter './packages/**' --filter '!@scarlett-player/core' run build",
     "dev": "pnpm --filter '@scarlett-player/core' run dev",
-    "test": "pnpm --filter './packages/**' run test",
+    "test": "pnpm --filter './packages/**' run test && pnpm run test:scripts",
+    "test:scripts": "node --test scripts/wire-capture/view-end-contract.test.mjs scripts/wire-capture/live-origin.test.mjs",
     "test:watch": "pnpm --filter './packages/**' run test:watch",
     "typecheck": "pnpm --filter './packages/**' run typecheck",
     "lint": "eslint packages --ext .ts,.tsx",

@@ -27,6 +27,7 @@ describe('estimateLatency', () => {
       { id: 'p2', type: 'candidate-pair', state: 'succeeded', nominated: true, currentRoundTripTime: 0.1 },
     ];
     expect(estimateLatency(nominated)?.rttSeconds).toBe(0.1);
+    expect(estimateLatency(nominated)?.rttKnown).toBe(true);
 
     const any = [inbound, { id: 'p1', type: 'candidate-pair', state: 'failed', currentRoundTripTime: 9 }, { id: 'p2', type: 'candidate-pair', state: 'succeeded', currentRoundTripTime: 0.3 }];
     expect(estimateLatency(any)?.rttSeconds).toBe(0.3);
@@ -38,6 +39,7 @@ describe('estimateLatency', () => {
       latency: 0.1,
       jitterBufferSeconds: 0.1,
       rttSeconds: 0,
+      rttKnown: false,
       sample: { jitterBufferDelay: 1, jitterBufferEmittedCount: 10 },
     });
   });

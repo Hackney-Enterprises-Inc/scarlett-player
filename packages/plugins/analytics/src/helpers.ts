@@ -519,6 +519,27 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * The percentage gauge helper behind viewEnd's completionRate and
+ * rebufferRatio.
+ *
+ * Returns numerator/denominator as a percentage bounded to the wire
+ * contract's 0..100. Unusable inputs are rejected deliberately: either input
+ * not a finite number, or a denominator that is not positive, makes the gauge
+ * unavailable (null) instead of a number. NaN and Infinity must never reach
+ * the beacon JSON, and never be disguised as an accidental value.
+ *
+ * @param numerator - The measured share (a position, a rebuffer time)
+ * @param denominator - The whole it is a share of (a duration, a watch time)
+ * @returns The percentage clamped to 0..100, or null when either input is not
+ * a finite number or the denominator is not positive
+ */
+export function finitePercent(numerator: unknown, denominator: unknown): number | null {
+  if (typeof numerator !== 'number' || typeof denominator !== 'number') return null;
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+  return clamp((numerator / denominator) * 100, 0, 100);
+}
+
+/**
  * Format bytes to human-readable string.
  *
  * @param bytes - Bytes value

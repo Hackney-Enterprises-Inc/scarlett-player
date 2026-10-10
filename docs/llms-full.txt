@@ -343,6 +343,7 @@ interface Plugin<TConfig extends PluginConfig = PluginConfig> {
 
   onStateChange?(event: StateChangeEvent): void;
   onError?(error: Error): void;
+  getDiagnostics?(): unknown;
 }
 
 type PluginType = 'provider' | 'ui' | 'feature' | 'analytics' | 'utility';
@@ -364,6 +365,30 @@ Plugins expose an imperative API by hanging methods off the same object
 `PluginFactory` is the exported type for the `createXPlugin(config?)` factory
 functions every package ships.
 
+### Diagnostics snapshots
+
+`player.getDiagnostics()` returns a synchronous, side-effect free
+`PlayerDiagnosticsSnapshot` with `schemaVersion: 1`: a whitelisted projection of
+playback state, the recent structured errors from the error handler's history,
+and a `providers` map keyed by plugin id. It works before playback, during an
+outage and after `destroy()` (which returns a `destroyed` snapshot with no
+errors or providers), and it never mutates player or analytics state.
+
+Only ready plugins of type `provider` are asked for a contribution, through the
+optional `getDiagnostics()` hook. Core treats every contribution as untrusted:
+a provider without the hook maps to `null`; one that throws or returns a promise
+maps to `{ unavailable: true }`. Anything else is reduced to finite numbers,
+booleans, `null` and a short allowlist of categorical strings (the HLS engine and
+the WebRTC connection, ICE and signaling states), inside plain objects and arrays
+capped in depth, key count and length. Every other string is dropped, because a
+secret or an identifier can sit anywhere in free text and no redaction pattern
+makes it safe; sensitive-looking keys, cycles and prototype keys are dropped too.
+The snapshot's `truncatedProviders` lists the providers whose contribution lost
+anything that way. A hook that calls back into collection gets an empty map. The
+HLS, native and WHEP providers contribute their own fields; the analytics plugin
+exposes a separate `getDiagnostics()` with its current, non-mutating metric
+totals and only known error codes and categories.
+
 ## IPluginAPI
 
 The whole surface a plugin is handed. `PluginAPI` in
@@ -384,6 +409,7 @@ The whole surface a plugin is handed. `PluginAPI` in
 | `getPlugin(id)` | Another plugin, only if it is `ready` |
 | `onDestroy(cleanup)` | Register a cleanup function |
 | `subscribeToState(callback)` | Every state change, as a `StateChangeEvent` |
+| `getProviderDiagnostics()` | Sanitized diagnostics from the ready providers, keyed by plugin id (what `player.getDiagnostics()` puts under `providers`) |
 
 There is no `play()`, `pause()` or `seek()` on the API: a plugin drives playback
 by emitting `playback:play`, `playback:pause` or `playback:seeking`, which the
@@ -1137,6 +1163,24 @@ The built-in controls meet WCAG 2.5.5 - 44x44px minimum touch targets, real ARIA
 ### Fullscreen
 
 A control that offers fullscreen goes through core's `enterFullscreen(api.container)`, `exitFullscreen(api.container)` and `isFullscreen(api.container)` (runtime exports of `@scarlett-player/core` since 1.8.0), the way `FullscreenButton` and the `f` shortcut do. Do not call `requestFullscreen()` on the DOM yourself: the helpers carry the iPhone fallback, and the player's `fullscreen` state key and `fullscreen:change` event are driven by the browser's own events, so they stay correct whichever path was taken. `enterFullscreen()` rejects where no fullscreen API exists; catch and ignore it as the built-ins do.
+
+## Diagnostics from a provider
+
+A provider can add a synchronous `getDiagnostics()` method to its plugin object.
+`player.getDiagnostics()` calls it on ready providers only and files the result
+under the plugin's `id` in the snapshot's `providers` map. Return finite
+numbers, booleans and `null` in small plain objects and arrays, describing the
+provider's current state: retry counters, the active level, buffered ranges.
+Strings are dropped unless they are one of the categorical values core
+allowlists (`SAFE_DIAGNOSTIC_STRINGS`: the HLS engine names and the WebRTC
+connection, ICE and signaling states), so report states as numbers or booleans,
+or as one of those values. Do not return a promise; a promise or a thrown error
+is recorded as `{ unavailable: true }` and never breaks the snapshot.
+
+Core also caps nesting depth, key counts and array lengths, drops keys that look
+like tokens, secrets or credentials, and lists your plugin id in the snapshot's
+`truncatedProviders` when anything was dropped. Still leave source URLs, headers,
+tokens and viewer identifiers out of the contribution in the first place.
 
 ## Testing
 

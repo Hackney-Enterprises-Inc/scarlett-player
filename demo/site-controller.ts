@@ -909,6 +909,11 @@ export function createSiteController(deps: ControllerDeps): SiteController {
     diagWhep.hidden = !(s.group === 'live' || (role === 'video' && isWhep));
     diagAnalytics.hidden = role !== 'video';
     diagClips.hidden = !(role === 'video' && s.capabilities.clips);
+
+    const copyStatus = document.getElementById('copy-diagnostics-status');
+    if (copyStatus) copyStatus.textContent = '';
+    const copyFallback = document.getElementById('copy-diagnostics-fallback');
+    if (copyFallback) copyFallback.hidden = true;
   };
 
   // ----- Feature panels -------------------------------------------------------
@@ -1945,6 +1950,60 @@ export function createSiteController(deps: ControllerDeps): SiteController {
       if (role) logs[role].length = 0;
       consoleLog.replaceChildren();
       renderSummary();
+    });
+
+    const copyBtn = req<HTMLButtonElement>('copy-diagnostics');
+    const copyStatus = req<HTMLElement>('copy-diagnostics-status');
+    const copyFallback = req<HTMLElement>('copy-diagnostics-fallback');
+    const copyTextarea = req<HTMLTextAreaElement>('copy-diagnostics-text');
+
+    copyBtn.addEventListener('click', async () => {
+      const role = activeRole();
+      const player = role ? deps.players[role] : null;
+
+      if (!player) {
+        copyStatus.textContent = 'No active player to snapshot';
+        return;
+      }
+
+      let snapshotStr = '';
+      try {
+        const snapshot = typeof player.getDiagnostics === 'function' ? player.getDiagnostics() : null;
+        if (!snapshot) {
+          copyStatus.textContent = 'Diagnostics unavailable';
+          return;
+        }
+        snapshotStr = JSON.stringify(snapshot, null, 2);
+      } catch {
+        copyStatus.textContent = 'Failed to generate diagnostics';
+        return;
+      }
+
+      let copied = false;
+      if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(snapshotStr);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+
+      if (copied) {
+        copyStatus.textContent = 'Copied to clipboard';
+        copyFallback.hidden = true;
+        window.setTimeout(() => {
+          if (copyStatus.textContent === 'Copied to clipboard') {
+            copyStatus.textContent = '';
+          }
+        }, 3000);
+      } else {
+        copyFallback.hidden = false;
+        copyTextarea.value = snapshotStr;
+        copyTextarea.focus();
+        copyTextarea.select();
+        copyStatus.textContent = 'Clipboard unavailable; copy JSON below';
+      }
     });
   };
 

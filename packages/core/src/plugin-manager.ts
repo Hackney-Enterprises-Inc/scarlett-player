@@ -8,6 +8,7 @@ import type { StateManager } from './state/state-manager';
 import type { Logger } from './logger';
 import type { Plugin, PluginState, PluginConfig, PluginDescriptor } from './types/plugin';
 import { PluginAPI } from './plugin-api';
+import { collectProviderDiagnostics } from './diagnostics';
 
 export interface PluginManagerOptions {
   container: HTMLElement;
@@ -55,6 +56,7 @@ export class PluginManager {
       logger: this.logger,
       container: this.container,
       getPlugin: <T = unknown>(id: string): T | null => this.getReadyPlugin(id) as T | null,
+      getProviderDiagnostics: () => this.getProviderDiagnostics(),
     });
 
     this.plugins.set(plugin.id, {
@@ -312,6 +314,16 @@ export class PluginManager {
     return Array.from(this.plugins.values())
       .filter((r) => r.plugin.type === type)
       .map((r) => r.plugin);
+  }
+
+  /**
+   * Collect sanitized diagnostics from ready provider plugins.
+   *
+   * @returns Safe map of provider plugin IDs to diagnostic objects
+   */
+  getProviderDiagnostics(): Record<string, unknown> {
+    const readyProviders = this.getReadyPlugins().filter((p) => p.type === 'provider');
+    return collectProviderDiagnostics(readyProviders);
   }
 
   /** Select a provider plugin that can play a source. */

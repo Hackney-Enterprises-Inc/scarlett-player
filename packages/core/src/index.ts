@@ -67,6 +67,20 @@ export { enterFullscreen, exitFullscreen, isFullscreen } from './fullscreen';
 // Re-export URL sanitizer for telemetry-safe logging across packages
 export { sanitizeUrl } from './utils/url';
 
+// Re-export diagnostics helpers and schemas
+export {
+  generateDiagnosticsSnapshot,
+  collectProviderDiagnostics,
+  projectDiagnosticErrors,
+  projectPlaybackState,
+  extractHostname,
+  sanitizeUntrustedContribution,
+  classifyDiagnosticErrorCategory,
+  DIAGNOSTIC_LIMITS,
+  SAFE_DIAGNOSTIC_STRINGS,
+} from './diagnostics';
+export type { SanitizeReport } from './diagnostics';
+
 // Re-export the shared clock so ui and audio-ui render identical times
 export { formatTime, formatLiveTime } from './utils/format';
 
@@ -119,4 +133,11 @@ export type {
   PlaylistTrack,
   // Load Types
   LoadOptions,
+  // Diagnostics Types
+  DiagnosticPrimitive,
+  DiagnosticValue,
+  DiagnosticTimeRange,
+  DiagnosticsPlaybackState,
+  DiagnosticError,
+  PlayerDiagnosticsSnapshot,
 } from './types/index';

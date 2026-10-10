@@ -4,6 +4,82 @@
  * Type-safe analytics events, metrics, and configuration for Scarlett Player.
  */
 
+import type { Plugin } from '@scarlett-player/core';
+
+/**
+ * Mirrors `@scarlett-player/core`'s `DiagnosticTimeRange` structurally.
+ * Declared locally so analytics' own declarations do not require a core
+ * version newer than its peer range (`^1.8.0`).
+ */
+export interface AnalyticsDiagnosticTimeRange {
+  /** Start time in seconds */
+  start: number;
+  /** End time in seconds */
+  end: number;
+}
+
+/**
+ * Mirrors `@scarlett-player/core`'s `DiagnosticsPlaybackState` structurally.
+ * Declared locally so analytics' own declarations do not require a core
+ * version newer than its peer range (`^1.8.0`).
+ */
+export interface AnalyticsDiagnosticsPlaybackState {
+  /** Current playback state ('idle', 'loading', 'playing', 'paused', 'ended', 'error', 'destroyed') */
+  playbackState: string;
+  /** Whether media is currently playing */
+  playing: boolean;
+  /** Whether media is currently paused */
+  paused: boolean;
+  /** Whether playback has ended */
+  ended: boolean;
+  /** Whether media is buffering */
+  buffering: boolean;
+  /** Whether media is seeking */
+  seeking: boolean;
+  /** Current playback time in seconds, or null if unavailable */
+  currentTime: number | null;
+  /** Total duration in seconds, or null if unknown or non-finite */
+  duration: number | null;
+  /** Volume level (0.0 to 1.0), or null if unavailable */
+  volume: number | null;
+  /** Whether audio is muted, or null if unavailable */
+  muted: boolean | null;
+  /** Playback rate, or null if unavailable */
+  playbackRate: number | null;
+  /** Media type ('video' | 'audio'), or null if unknown / not set */
+  mediaType: string | null;
+  /** Whether stream is live, or null if unavailable */
+  live: boolean | null;
+  /** Safe seekable range for live/DVR, or null */
+  seekableRange: AnalyticsDiagnosticTimeRange | null;
+  /** Whether playback is at live edge (or live edge position), or null */
+  liveEdge: boolean | number | null;
+  /** Latency from live edge in seconds, or null */
+  liveLatency: number | null;
+  /** Intrinsic media dimensions in pixels, or null if unavailable */
+  dimensions: { width: number; height: number } | null;
+  /** Media source hostname and optional type (never contains query, fragments or tokens) */
+  source: { hostname: string | null; type?: string | null } | null;
+}
+
+/**
+ * Mirrors `@scarlett-player/core`'s `DiagnosticError` structurally.
+ * Declared locally so analytics' own declarations do not require a core
+ * version newer than its peer range (`^1.8.0`).
+ */
+export interface AnalyticsDiagnosticError {
+  /** Error code enum string */
+  code: string;
+  /** Error category enum string */
+  category: string;
+  /** Whether the error was fatal */
+  fatal: boolean;
+  /** Timestamp in epoch milliseconds */
+  timestamp: number;
+  /** Allowlisted numeric and boolean error details */
+  detail?: Record<string, number | boolean>;
+}
+
 /**
  * Analytics event types.
  */
@@ -355,6 +431,16 @@ export interface BeaconPayload {
   /** Null for an access-denied fatal view. */
   qoeScore?: number | null;
 
+  /**
+   * The units of the viewEnd gauges `completionRate` and `rebufferRatio`.
+   * This plugin always sends `percent`: both gauges are 0..100, or null when
+   * the measurement is unavailable (live or unknown completion, unusable
+   * inputs). `ratio` (0..1) belongs to explicitly compatible external
+   * producers; ingests normalize either declared scale into canonical 0..1
+   * columns and never infer units from a value's magnitude.
+   */
+  gaugeScale?: 'percent' | 'ratio';
+
   /** Structured error category on error events. */
   errorCategory?: ErrorCategory;
   /** Fatal error or non-fatal warning. */
@@ -562,4 +648,89 @@ export interface IAnalyticsPlugin {
    * @param data - Event data
    */
   trackEvent(name: string, data?: Record<string, unknown>): void;
+
+  /**
+   * Get synchronous troubleshooting snapshot of player state, provider contributions,
+   * whitelisted session metrics and QoE v2.
+   *
+   * Side-effect free; does not alter heartbeats, timers, sequence numbers or session metrics.
+   *
+   * @returns AnalyticsDiagnosticsSnapshot adhering to schemaVersion: 1
+   */
+  getDiagnostics(): AnalyticsDiagnosticsSnapshot;
+}
+
+/**
+ * Concrete plugin instance returned by createAnalyticsPlugin.
+ */
+export type AnalyticsPluginInstance = Omit<Plugin, 'init' | 'getDiagnostics'> &
+  IAnalyticsPlugin & {
+    getDiagnostics(): AnalyticsDiagnosticsSnapshot;
+  };
+
+/**
+ * Whitelisted session metrics for diagnostics snapshot.
+ */
+export interface AnalyticsMetricsSnapshot {
+  /** Time since the view started, in milliseconds, including the open interval since the last heartbeat. */
+  watchTime: number;
+  /** Time spent actually playing, in milliseconds, including the open interval. */
+  playTime: number;
+  /** `playTime` as of the last heartbeat, in milliseconds, without the open interval. */
+  settledPlayTime: number;
+  /** Rebuffer events so far. */
+  rebufferCount: number;
+  /** Total time spent rebuffering, in milliseconds. */
+  rebufferDuration: number;
+  /** Reconnect episodes so far. */
+  reconnectCount: number;
+  /** Total time spent reconnecting, in milliseconds, including an open episode. */
+  reconnectDuration: number;
+  /** `reconnectDuration` without an open episode, in milliseconds. */
+  settledReconnectDuration: number;
+  /** Times the viewer paused. */
+  pauseCount: number;
+  /** Total time spent paused, in milliseconds, including an open pause. */
+  pauseDuration: number;
+  /** `pauseDuration` without an open pause, in milliseconds. */
+  settledPauseDuration: number;
+  /** Seeks so far (player seeks plus coalesced element seek bursts). */
+  seekCount: number;
+  /** Errors recorded so far. */
+  errorCount: number;
+  /** Warnings recorded so far. */
+  warningCount: number;
+  /** Quality level changes so far. */
+  qualityChanges: number;
+  /** Time-weighted average bitrate in bits per second; `null` until a quality is known. */
+  avgBitrate: number | null;
+  /** Highest bitrate seen in bits per second; `null` until a quality is known. */
+  maxBitrate: number | null;
+  /** Time from play request to first frame, in milliseconds; `null` until the first frame. */
+  startupTime: number | null;
+  /** Playback time spent behind the live edge, in milliseconds; present only on live views. */
+  dvrTime?: number | null;
+}
+
+/**
+ * QoE score and schema version for diagnostics snapshot.
+ */
+export interface AnalyticsQoESnapshot {
+  score: number | null;
+  version: 2;
+}
+
+/**
+ * Full analytics troubleshooting diagnostics snapshot.
+ */
+export interface AnalyticsDiagnosticsSnapshot {
+  schemaVersion: 1;
+  timestamp: number;
+  playerVersion: string;
+  viewId: string | null;
+  playbackState: AnalyticsDiagnosticsPlaybackState;
+  errors: AnalyticsDiagnosticError[];
+  providers: Record<string, unknown>;
+  metrics: AnalyticsMetricsSnapshot;
+  qoe: AnalyticsQoESnapshot;
 }

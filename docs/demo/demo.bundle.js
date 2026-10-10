@@ -11,9 +11,11 @@
   };
 
   // packages/core/src/version.ts
+  var PKG_VERSION;
   var init_version = __esm({
     "packages/core/src/version.ts"() {
       "use strict";
+      PKG_VERSION = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
     }
   });
 
@@ -1102,10 +1104,26 @@
   });
 
   // packages/core/src/error-handler.ts
-  var ErrorHandler;
+  var ErrorCode, ErrorHandler;
   var init_error_handler = __esm({
     "packages/core/src/error-handler.ts"() {
       "use strict";
+      ErrorCode = /* @__PURE__ */ ((ErrorCode2) => {
+        ErrorCode2["SOURCE_NOT_SUPPORTED"] = "SOURCE_NOT_SUPPORTED";
+        ErrorCode2["SOURCE_LOAD_FAILED"] = "SOURCE_LOAD_FAILED";
+        ErrorCode2["PROVIDER_NOT_FOUND"] = "PROVIDER_NOT_FOUND";
+        ErrorCode2["PROVIDER_SETUP_FAILED"] = "PROVIDER_SETUP_FAILED";
+        ErrorCode2["PLUGIN_SETUP_FAILED"] = "PLUGIN_SETUP_FAILED";
+        ErrorCode2["PLUGIN_NOT_FOUND"] = "PLUGIN_NOT_FOUND";
+        ErrorCode2["PLAYBACK_FAILED"] = "PLAYBACK_FAILED";
+        ErrorCode2["MEDIA_DECODE_ERROR"] = "MEDIA_DECODE_ERROR";
+        ErrorCode2["MEDIA_NETWORK_ERROR"] = "MEDIA_NETWORK_ERROR";
+        ErrorCode2["MEDIA_APPEND_ERROR"] = "MEDIA_APPEND_ERROR";
+        ErrorCode2["MEDIA_BUFFER_FULL"] = "MEDIA_BUFFER_FULL";
+        ErrorCode2["PLAYLIST_INVALID"] = "PLAYLIST_INVALID";
+        ErrorCode2["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
+        return ErrorCode2;
+      })(ErrorCode || {});
       ErrorHandler = class {
         /**
          * Create a new ErrorHandler.
@@ -1365,7 +1383,7 @@
          * Create a new PluginAPI.
          *
          * @param pluginId - ID of the plugin this API belongs to
-         * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin)
+         * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin, getProviderDiagnostics)
          */
         constructor(pluginId, deps) {
           /** Cleanup functions registered by this plugin */
@@ -1375,6 +1393,7 @@
           this.eventBus = deps.eventBus;
           this.container = deps.container;
           this.getPluginFn = deps.getPlugin;
+          this.getProviderDiagnosticsFn = deps.getProviderDiagnostics;
           this.logger = {
             debug: (msg, metadata) => deps.logger.debug(`[${pluginId}] ${msg}`, metadata),
             info: (msg, metadata) => deps.logger.info(`[${pluginId}] ${msg}`, metadata),
@@ -1467,6 +1486,17 @@
           return this.stateManager.subscribe(callback);
         }
         /**
+         * Collect sanitized diagnostic contributions from ready provider plugins.
+         *
+         * @returns Map of provider plugin ID to sanitized diagnostic values
+         */
+        getProviderDiagnostics() {
+          if (this.getProviderDiagnosticsFn) {
+            return this.getProviderDiagnosticsFn();
+          }
+          return {};
+        }
+        /**
          * Run all registered cleanup functions.
          * Called by PluginManager when destroying the plugin.
          *
@@ -1495,12 +1525,363 @@
     }
   });
 
+  // packages/core/src/diagnostics.ts
+  function extractHostname(src) {
+    if (typeof src !== "string" || src.trim() === "") return null;
+    try {
+      const base = typeof document !== "undefined" ? document.baseURI : void 0;
+      const url = new URL(src, base);
+      if (url.protocol === "blob:" || url.protocol === "data:") return null;
+      return url.hostname || null;
+    } catch {
+      return null;
+    }
+  }
+  function sanitizeUntrustedContribution(value, depth = 1, seen = /* @__PURE__ */ new WeakSet(), report = { omitted: 0 }) {
+    if (value === null) return null;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === "string") {
+      if (SAFE_DIAGNOSTIC_STRINGS.has(value)) return value;
+      report.omitted++;
+      return void 0;
+    }
+    if (typeof value !== "object" || typeof value.then === "function" || value instanceof Promise) {
+      if (value !== void 0) report.omitted++;
+      return void 0;
+    }
+    if (depth > DIAGNOSTIC_LIMITS.MAX_NESTING_DEPTH) {
+      report.omitted++;
+      return void 0;
+    }
+    if (seen.has(value)) {
+      report.omitted++;
+      return void 0;
+    }
+    seen.add(value);
+    if (Array.isArray(value)) {
+      const result2 = [];
+      const limit = Math.min(value.length, DIAGNOSTIC_LIMITS.MAX_ARRAY_ITEMS);
+      report.omitted += value.length - limit;
+      for (let i = 0; i < limit; i++) {
+        const sanitized = sanitizeUntrustedContribution(value[i], depth + 1, seen, report);
+        if (sanitized !== void 0) {
+          result2.push(sanitized);
+        }
+      }
+      return result2;
+    }
+    if (typeof HTMLElement !== "undefined" && value instanceof HTMLElement || value instanceof Error) {
+      report.omitted++;
+      return void 0;
+    }
+    const result = /* @__PURE__ */ Object.create(null);
+    const keys = Object.keys(value);
+    let keyCount = 0;
+    for (const key of keys) {
+      if (keyCount >= DIAGNOSTIC_LIMITS.MAX_OBJECT_KEYS) {
+        report.omitted++;
+        continue;
+      }
+      if (FORBIDDEN_KEYS.has(key) || SENSITIVE_KEY_RE.test(key)) {
+        report.omitted++;
+        continue;
+      }
+      try {
+        const val = value[key];
+        const sanitized = sanitizeUntrustedContribution(val, depth + 1, seen, report);
+        if (sanitized !== void 0) {
+          result[key] = sanitized;
+          keyCount++;
+        }
+      } catch {
+        report.omitted++;
+      }
+    }
+    return result;
+  }
+  function collectProviderDiagnostics(providers, truncated) {
+    const contributions = /* @__PURE__ */ Object.create(null);
+    if (collecting) return contributions;
+    collecting = true;
+    try {
+      collectInto(contributions, providers, truncated);
+    } finally {
+      collecting = false;
+    }
+    return contributions;
+  }
+  function collectInto(contributions, providers, truncated) {
+    for (const provider of providers) {
+      if (!provider || typeof provider.id !== "string") continue;
+      if (FORBIDDEN_KEYS.has(provider.id)) continue;
+      if (typeof provider.getDiagnostics !== "function") {
+        contributions[provider.id] = null;
+        continue;
+      }
+      try {
+        const raw = provider.getDiagnostics();
+        if (raw === null || raw === void 0) {
+          contributions[provider.id] = null;
+        } else if (typeof raw.then === "function" || raw instanceof Promise) {
+          contributions[provider.id] = { unavailable: true };
+        } else {
+          const report = { omitted: 0 };
+          const sanitized = sanitizeUntrustedContribution(raw, 1, /* @__PURE__ */ new WeakSet(), report);
+          contributions[provider.id] = sanitized !== void 0 ? sanitized : { unavailable: true };
+          if (report.omitted > 0) truncated?.push(provider.id);
+        }
+      } catch {
+        contributions[provider.id] = { unavailable: true };
+      }
+    }
+    truncated?.sort();
+  }
+  function classifyDiagnosticErrorCategory(error) {
+    if (error.context?.category && KNOWN_ERROR_CATEGORIES.has(error.context.category)) {
+      return error.context.category;
+    }
+    const detail = error.detail || {};
+    if ([401, 403, 451].includes(detail.httpStatus)) return "access";
+    if (error.code === "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */ || error.code === "SOURCE_LOAD_FAILED" /* SOURCE_LOAD_FAILED */ || detail.type === "network") {
+      return "network";
+    }
+    if (error.code === "MEDIA_DECODE_ERROR" /* MEDIA_DECODE_ERROR */ || error.code === "MEDIA_APPEND_ERROR" /* MEDIA_APPEND_ERROR */ || error.code === "MEDIA_BUFFER_FULL" /* MEDIA_BUFFER_FULL */ || detail.type === "media") {
+      return "media";
+    }
+    if (error.code === "SOURCE_NOT_SUPPORTED" /* SOURCE_NOT_SUPPORTED */ || error.code === "PLAYLIST_INVALID" /* PLAYLIST_INVALID */ || error.code === "PROVIDER_NOT_FOUND" /* PROVIDER_NOT_FOUND */) {
+      return "source";
+    }
+    if (error.code === "PLAYBACK_FAILED" /* PLAYBACK_FAILED */) {
+      return "playback";
+    }
+    if (error.code === "PROVIDER_SETUP_FAILED" /* PROVIDER_SETUP_FAILED */ || error.code === "PLUGIN_SETUP_FAILED" /* PLUGIN_SETUP_FAILED */ || error.code === "PLUGIN_NOT_FOUND" /* PLUGIN_NOT_FOUND */) {
+      return "player";
+    }
+    if (detail.mediaErrorCode === 2) return "network";
+    if (detail.mediaErrorCode === 3) return "media";
+    if (detail.mediaErrorCode === 4) return "source";
+    return "unknown";
+  }
+  function projectDiagnosticErrors(errors, limit = DIAGNOSTIC_LIMITS.MAX_ERRORS) {
+    const result = [];
+    const knownCodes = new Set(Object.values(ErrorCode));
+    const slice = errors.slice(0, limit);
+    for (const err of slice) {
+      const code = knownCodes.has(err.code) ? err.code : "UNKNOWN_ERROR";
+      const category = classifyDiagnosticErrorCategory(err);
+      const fatal = Boolean(err.fatal);
+      const timestamp = Number.isFinite(err.timestamp) ? err.timestamp : Date.now();
+      const entry = {
+        code,
+        category,
+        fatal,
+        timestamp
+      };
+      if (err.detail && typeof err.detail === "object") {
+        const detailObj = {};
+        let hasDetail = false;
+        for (const numKey of WHITELISTED_DETAIL_NUMERICS) {
+          const val = err.detail[numKey];
+          if (typeof val === "number" && Number.isFinite(val)) {
+            detailObj[numKey] = val;
+            hasDetail = true;
+          }
+        }
+        for (const boolKey of WHITELISTED_DETAIL_BOOLEANS) {
+          const val = err.detail[boolKey];
+          if (typeof val === "boolean") {
+            detailObj[boolKey] = val;
+            hasDetail = true;
+          }
+        }
+        if (hasDetail) {
+          entry.detail = detailObj;
+        }
+      }
+      result.push(entry);
+    }
+    return result;
+  }
+  function projectPlaybackState(stateManager, container, isDestroyed) {
+    if (isDestroyed || !stateManager) {
+      return {
+        playbackState: "destroyed",
+        playing: false,
+        paused: false,
+        ended: false,
+        buffering: false,
+        seeking: false,
+        currentTime: null,
+        duration: null,
+        volume: null,
+        muted: null,
+        playbackRate: null,
+        mediaType: null,
+        live: null,
+        seekableRange: null,
+        liveEdge: null,
+        liveLatency: null,
+        dimensions: null,
+        source: null
+      };
+    }
+    const rawState = stateManager.snapshot();
+    const currentTime = Number.isFinite(rawState.currentTime) ? rawState.currentTime : null;
+    const duration = Number.isFinite(rawState.duration) ? rawState.duration : null;
+    const volume = Number.isFinite(rawState.volume) ? rawState.volume : null;
+    const playbackRate = Number.isFinite(rawState.playbackRate) ? rawState.playbackRate : null;
+    let mediaType = null;
+    if (rawState.mediaType === "video" || rawState.mediaType === "audio") {
+      mediaType = rawState.mediaType;
+    }
+    let seekableRange = null;
+    if (rawState.seekableRange && typeof rawState.seekableRange.start === "number" && typeof rawState.seekableRange.end === "number" && Number.isFinite(rawState.seekableRange.start) && Number.isFinite(rawState.seekableRange.end)) {
+      seekableRange = {
+        start: rawState.seekableRange.start,
+        end: rawState.seekableRange.end
+      };
+    }
+    let liveEdge = null;
+    let liveLatency = null;
+    if (rawState.live) {
+      liveEdge = typeof rawState.liveEdge === "boolean" ? rawState.liveEdge : null;
+      liveLatency = Number.isFinite(rawState.liveLatency) ? rawState.liveLatency : null;
+    }
+    let dimensions = null;
+    if (container) {
+      const video = container.querySelector("video");
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+        dimensions = { width: video.videoWidth, height: video.videoHeight };
+      }
+    }
+    let source = null;
+    if (rawState.source && rawState.source.src) {
+      source = {
+        hostname: extractHostname(rawState.source.src),
+        ...rawState.source.type ? { type: rawState.source.type } : {}
+      };
+    }
+    return {
+      playbackState: rawState.playbackState || "idle",
+      playing: Boolean(rawState.playing),
+      paused: Boolean(rawState.paused),
+      ended: Boolean(rawState.ended),
+      buffering: Boolean(rawState.buffering),
+      seeking: Boolean(rawState.seeking),
+      currentTime,
+      duration,
+      volume,
+      muted: typeof rawState.muted === "boolean" ? rawState.muted : false,
+      playbackRate,
+      mediaType,
+      live: Boolean(rawState.live),
+      seekableRange,
+      liveEdge,
+      liveLatency,
+      dimensions,
+      source
+    };
+  }
+  function generateDiagnosticsSnapshot(options) {
+    const timestamp = Date.now();
+    const playerVersion = options.playerVersion;
+    if (options.isDestroyed || !options.stateManager) {
+      return {
+        schemaVersion: 1,
+        timestamp,
+        playerVersion,
+        playbackState: projectPlaybackState(null, null, true),
+        errors: [],
+        providers: /* @__PURE__ */ Object.create(null),
+        truncatedProviders: []
+      };
+    }
+    const playbackState = projectPlaybackState(
+      options.stateManager,
+      options.container,
+      false
+    );
+    const errors = options.errorHandler ? projectDiagnosticErrors(options.errorHandler.getHistory()) : [];
+    const readyProviders = options.pluginManager ? options.pluginManager.getReadyPlugins().filter((p) => p.type === "provider") : [];
+    const truncatedProviders = [];
+    const providers = collectProviderDiagnostics(readyProviders, truncatedProviders);
+    return {
+      schemaVersion: 1,
+      timestamp,
+      playerVersion,
+      playbackState,
+      errors,
+      providers,
+      truncatedProviders
+    };
+  }
+  var DIAGNOSTIC_LIMITS, FORBIDDEN_KEYS, SENSITIVE_KEY_RE, SAFE_DIAGNOSTIC_STRINGS, collecting, KNOWN_ERROR_CATEGORIES, WHITELISTED_DETAIL_NUMERICS, WHITELISTED_DETAIL_BOOLEANS;
+  var init_diagnostics = __esm({
+    "packages/core/src/diagnostics.ts"() {
+      "use strict";
+      init_error_handler();
+      DIAGNOSTIC_LIMITS = {
+        MAX_ERRORS: 20,
+        MAX_TIME_RANGES: 32,
+        MAX_OBJECT_KEYS: 64,
+        MAX_ARRAY_ITEMS: 50,
+        MAX_NESTING_DEPTH: 4
+      };
+      FORBIDDEN_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
+      SENSITIVE_KEY_RE = /(token|secret|password|credential|auth|authorization|cookie|session|signature)/i;
+      SAFE_DIAGNOSTIC_STRINGS = /* @__PURE__ */ new Set([
+        "hls.js",
+        "native",
+        "new",
+        "connecting",
+        "connected",
+        "disconnected",
+        "failed",
+        "closed",
+        "checking",
+        "completed",
+        "stable",
+        "have-local-offer",
+        "have-remote-offer",
+        "have-local-pranswer",
+        "have-remote-pranswer"
+      ]);
+      collecting = false;
+      KNOWN_ERROR_CATEGORIES = /* @__PURE__ */ new Set([
+        "playback",
+        "network",
+        "media",
+        "source",
+        "player",
+        "access",
+        "unknown"
+      ]);
+      WHITELISTED_DETAIL_NUMERICS = [
+        "httpStatus",
+        "mediaErrorCode",
+        "networkState",
+        "readyState",
+        "attempts"
+      ];
+      WHITELISTED_DETAIL_BOOLEANS = [
+        "retriesExhausted",
+        "reconnectExhausted",
+        "reconnecting",
+        "timedOut"
+      ];
+    }
+  });
+
   // packages/core/src/plugin-manager.ts
   var PluginManager;
   var init_plugin_manager = __esm({
     "packages/core/src/plugin-manager.ts"() {
       "use strict";
       init_plugin_api();
+      init_diagnostics();
       PluginManager = class {
         constructor(eventBus, stateManager, logger2, options) {
           this.plugins = /* @__PURE__ */ new Map();
@@ -1524,7 +1905,8 @@
             eventBus: this.eventBus,
             logger: this.logger,
             container: this.container,
-            getPlugin: (id) => this.getReadyPlugin(id)
+            getPlugin: (id) => this.getReadyPlugin(id),
+            getProviderDiagnostics: () => this.getProviderDiagnostics()
           });
           this.plugins.set(plugin.id, {
             plugin,
@@ -1737,6 +2119,15 @@
         getPluginsByType(type) {
           return Array.from(this.plugins.values()).filter((r) => r.plugin.type === type).map((r) => r.plugin);
         }
+        /**
+         * Collect sanitized diagnostics from ready provider plugins.
+         *
+         * @returns Safe map of provider plugin IDs to diagnostic objects
+         */
+        getProviderDiagnostics() {
+          const readyProviders = this.getReadyPlugins().filter((p) => p.type === "provider");
+          return collectProviderDiagnostics(readyProviders);
+        }
         /** Select a provider plugin that can play a source. */
         selectProvider(source) {
           const providers = this.getPluginsByType("provider");
@@ -1882,6 +2273,8 @@
       init_plugin_manager();
       init_fullscreen();
       init_url();
+      init_diagnostics();
+      init_version();
       ScarlettPlayer = class {
         /**
          * Create a new ScarlettPlayer.
@@ -2882,6 +3275,25 @@
           })();
           return this.destroyPromise;
         }
+        /**
+         * Get a synchronous, side-effect free troubleshooting snapshot of player state,
+         * recent errors, and provider contributions.
+         *
+         * Adheres to schemaVersion: 1 and safe whitelisted data bounds. Safe to call
+         * before playback, during outages, or after player destroy.
+         *
+         * @returns PlayerDiagnosticsSnapshot
+         */
+        getDiagnostics() {
+          return generateDiagnosticsSnapshot({
+            stateManager: this.stateManager,
+            errorHandler: this.errorHandler,
+            pluginManager: this.pluginManager,
+            container: this.container,
+            isDestroyed: this.destroyed,
+            playerVersion: PKG_VERSION
+          });
+        }
         // ===== State Getters =====
         /**
          * Get playing state.
@@ -3127,6 +3539,7 @@
       init_scarlett_player();
       init_fullscreen();
       init_url();
+      init_diagnostics();
       init_format();
       init_icon_paths();
       init_shared_styles();
@@ -36204,6 +36617,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         "skip-backward": { rank: 1, exit: "overflow" },
         "skip-forward": { rank: 1, exit: "overflow" },
         pip: { rank: 2, exit: "overflow" },
+        "keyboard-help": { rank: 3, exit: "overflow" },
         chromecast: { rank: 4, exit: "overflow" },
         airplay: { rank: 4, exit: "overflow" },
         volume: { rank: 5, exit: "overflow" },
@@ -37318,6 +37732,133 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
 }
 
 /* ============================================
+   Keyboard Help Dialog
+   ============================================ */
+
+/* The dialog itself is a scrim over the whole player, rendered inside the
+   player's container (never portalled to document.body) so container-scoped
+   themes and the player's focus scoping keep applying to it. Above every
+   other layer: menus sit at 20 and the error overlay at 25, and help must
+   cover both. */
+.sp-kbd-help {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* Bounded to the player's box so a short or narrow player still shows a
+   usable dialog: the body below is the part that scrolls, and everything
+   else stays pinned. */
+.sp-kbd-help__panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  background: rgba(20, 20, 20, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.sp-kbd-help__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sp-kbd-help__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sp-kbd-help__close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.sp-kbd-help__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.sp-kbd-help__close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.sp-kbd-help__close svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* The bounded scrollable body: the list scrolls inside the panel while the
+   header and its close button stay reachable. */
+.sp-kbd-help__body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 16px 12px;
+}
+
+.sp-kbd-help__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sp-kbd-help__keys {
+  white-space: nowrap;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sp-kbd-help__action {
+  text-align: right;
+}
+
+.sp-kbd-help__notes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sp-kbd-help__note {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sp-kbd-help__note:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================
    Buffering Indicator
    ============================================ */
 .sp-buffering {
@@ -37441,6 +37982,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         /** Vertical ellipsis for the overflow tray button. */
         more: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>`,
         chevronDown: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>`,
+        /** X glyph for the keyboard help dialog's close button. */
+        close: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`,
+        /** Question-mark circle for the keyboard help bar control. */
+        keyboardHelp: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>`,
         spinner: `<svg viewBox="0 0 24 24" fill="currentColor" class="sp-spin"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>`,
         skipForward: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>`,
         skipBack: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>`,
@@ -39824,6 +40369,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   });
 
   // packages/plugins/ui/src/controls/CaptionsButton.ts
+  function toggleCaptions(api) {
+    const textTracks = api.getState("textTracks") || [];
+    const currentTrack = api.getState("currentTextTrack");
+    if (textTracks.length === 0) return false;
+    if (currentTrack) {
+      api.emit("track:text", { trackId: null });
+    } else {
+      api.emit("track:text", { trackId: textTracks[0].id });
+    }
+    return true;
+  }
   var CaptionsButton;
   var init_CaptionsButton = __esm({
     "packages/plugins/ui/src/controls/CaptionsButton.ts"() {
@@ -39861,18 +40417,242 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         toggle() {
-          const textTracks = this.api.getState("textTracks") || [];
-          const currentTrack = this.api.getState("currentTextTrack");
-          if (textTracks.length === 0) return;
-          if (currentTrack) {
-            this.api.emit("track:text", { trackId: null });
-          } else {
-            this.api.emit("track:text", { trackId: textTracks[0].id });
-          }
+          toggleCaptions(this.api);
         }
         destroy() {
           this.el.removeEventListener("click", this.clickHandler);
           this.el.remove();
+        }
+      };
+    }
+  });
+
+  // packages/plugins/ui/src/controls/KeyboardHelpButton.ts
+  var KeyboardHelpButton;
+  var init_KeyboardHelpButton = __esm({
+    "packages/plugins/ui/src/controls/KeyboardHelpButton.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      KeyboardHelpButton = class {
+        /**
+         * @param onOpen - Opens the keyboard help dialog; the button does not own it
+         */
+        constructor(onOpen) {
+          this.el = createButton("sp-kbd-help-btn", "Keyboard shortcuts", icons.keyboardHelp);
+          this.el.addEventListener("click", () => onOpen());
+        }
+        /** @returns The bar button element. */
+        render() {
+          return this.el;
+        }
+        /**
+         * No state to read: the dialog is opened on demand and answers for itself
+         * what is currently implemented.
+         */
+        update() {
+        }
+        /** Remove the button; the dialog is destroyed by the plugin itself. */
+        destroy() {
+          this.el.remove();
+        }
+      };
+    }
+  });
+
+  // packages/plugins/ui/src/shortcuts.ts
+  var SHORTCUTS;
+  var init_shortcuts = __esm({
+    "packages/plugins/ui/src/shortcuts.ts"() {
+      "use strict";
+      SHORTCUTS = [
+        { keys: "Space / K", action: "Play / pause" },
+        { keys: "Left / Right arrow", action: "Seek 5 seconds back / forward" },
+        { keys: "Up / Down arrow", action: "Volume up / down" },
+        { keys: "M", action: "Toggle mute" },
+        { keys: "F", action: "Toggle fullscreen" },
+        {
+          keys: "C",
+          action: "Toggle captions",
+          note: "Needs caption tracks. Turns the current track off, or enables the first available one."
+        },
+        {
+          keys: "0-9",
+          action: "Seek to 0-90% of the video",
+          note: "On a live stream with DVR, seeks to the same share of the seekable window; on live without DVR, digits do nothing."
+        },
+        { keys: "?", action: "Show this help" },
+        {
+          keys: "Home / End",
+          action: "Jump to the start / end",
+          note: "Only while the progress bar is focused - they are progress-slider shortcuts, not player-wide ones."
+        }
+      ];
+    }
+  });
+
+  // packages/plugins/ui/src/controls/KeyboardHelpDialog.ts
+  var KeyboardHelpDialog;
+  var init_KeyboardHelpDialog = __esm({
+    "packages/plugins/ui/src/controls/KeyboardHelpDialog.ts"() {
+      "use strict";
+      init_icons();
+      init_utils();
+      init_shortcuts();
+      KeyboardHelpDialog = class {
+        /**
+         * @param api - Per-player plugin API; the dialog renders into `api.container`
+         */
+        constructor(api) {
+          /** True while the dialog is in the container and owns its keys. */
+          this.opened = false;
+          /** Element focused when the dialog opened, handed focus back on close. */
+          this.invoker = null;
+          this.api = api;
+          this.el = createElement("div", {
+            className: "sp-kbd-help",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Keyboard shortcuts"
+          });
+          this.panel = createElement("div", { className: "sp-kbd-help__panel" });
+          const header = createElement("div", { className: "sp-kbd-help__header" });
+          const title = createElement("span", { className: "sp-kbd-help__title" });
+          title.textContent = "Keyboard shortcuts";
+          this.closeBtn = createElement("button", {
+            className: "sp-kbd-help__close",
+            type: "button",
+            "aria-label": "Close keyboard shortcuts"
+          });
+          this.closeBtn.innerHTML = icons.close;
+          this.closeHandler = () => this.close();
+          this.closeBtn.addEventListener("click", this.closeHandler);
+          header.appendChild(title);
+          header.appendChild(this.closeBtn);
+          this.body = createElement("div", { className: "sp-kbd-help__body" });
+          this.renderEntries();
+          this.panel.appendChild(header);
+          this.panel.appendChild(this.body);
+          this.el.appendChild(this.panel);
+          this.keyHandler = (e) => {
+            if (!this.opened) return;
+            if (!this.api.container.contains(document.activeElement)) return;
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              this.close();
+              return;
+            }
+            if (e.key === "Tab" && this.el.contains(document.activeElement)) {
+              e.preventDefault();
+              e.stopPropagation();
+              this.trapTab(e.shiftKey);
+            }
+          };
+        }
+        /**
+         * Build the shortcut rows and their footnotes from the shared list.
+         *
+         * Called once, in the constructor: the list is a build-time constant, and
+         * rebuilding it per open would only churn the DOM.
+         */
+        renderEntries() {
+          const list = createElement("div", { className: "sp-kbd-help__list" });
+          for (const entry of SHORTCUTS) {
+            const row = createElement("div", { className: "sp-kbd-help__row" });
+            const keys = createElement("span", { className: "sp-kbd-help__keys" });
+            keys.textContent = entry.keys;
+            const action = createElement("span", { className: "sp-kbd-help__action" });
+            action.textContent = entry.action;
+            row.appendChild(keys);
+            row.appendChild(action);
+            list.appendChild(row);
+          }
+          this.body.appendChild(list);
+          const notes = SHORTCUTS.filter((entry) => entry.note);
+          if (notes.length === 0) return;
+          const noteList = createElement("div", { className: "sp-kbd-help__notes" });
+          for (const entry of notes) {
+            const note = createElement("p", { className: "sp-kbd-help__note" });
+            note.textContent = `${entry.keys}: ${entry.note}`;
+            noteList.appendChild(note);
+          }
+          this.body.appendChild(noteList);
+        }
+        /**
+         * Open the dialog.
+         *
+         * A no-op while already open: a held or repeated `?` must not toggle the
+         * dialog closed again, and opening never moves focus out of another modal
+         * (a clip title editor, a host dialog) that currently owns it.
+         *
+         * @param invoker - Element to hand focus back to on close; defaults to
+         *   whatever holds focus now. Falls back to the player container.
+         * @returns True when the dialog is open after the call
+         */
+        open(invoker) {
+          if (this.opened) return true;
+          const active = document.activeElement;
+          if (active instanceof HTMLElement) {
+            const foreignModal = active.closest('[role="dialog"], [aria-modal="true"]');
+            if (foreignModal && !this.el.contains(foreignModal)) {
+              return false;
+            }
+          }
+          this.opened = true;
+          this.invoker = invoker instanceof HTMLElement && invoker.isConnected ? invoker : this.api.container;
+          this.api.container.appendChild(this.el);
+          document.addEventListener("keydown", this.keyHandler);
+          this.closeBtn.focus();
+          return true;
+        }
+        /**
+         * Close the dialog and hand focus back.
+         *
+         * The invoking element gets focus again when it is still in the document;
+         * when it is gone (a rebuild took the control, the source changed) focus
+         * lands on the player container, which is the player's own tab stop.
+         */
+        close() {
+          if (!this.opened) return;
+          this.opened = false;
+          document.removeEventListener("keydown", this.keyHandler);
+          this.el.remove();
+          const target = this.invoker?.isConnected ? this.invoker : this.api.container;
+          if (target.isConnected) {
+            target.focus();
+          }
+          this.invoker = null;
+        }
+        /**
+         * @returns True while the dialog is open and owns its keys
+         */
+        isOpen() {
+          return this.opened;
+        }
+        /**
+         * Keep Tab inside the dialog, wrapping from either end.
+         *
+         * @param shiftKey - True for Shift+Tab, which wraps to the last focusable
+         */
+        trapTab(shiftKey) {
+          const focusables = Array.from(
+            this.el.querySelectorAll("button, [href], [tabindex]")
+          ).filter((el) => !(el instanceof HTMLButtonElement && el.disabled));
+          if (focusables.length === 0) return;
+          const current = focusables.indexOf(document.activeElement);
+          const next = shiftKey ? focusables[(current <= 0 ? focusables.length : current) - 1] : focusables[(current + 1) % focusables.length];
+          next.focus();
+        }
+        /**
+         * Remove the dialog and its listeners.
+         *
+         * Closes first when open, so focus is released to the invoker (or the
+         * container) rather than dropped on `<body>` with the removed element.
+         */
+        destroy() {
+          this.close();
+          this.closeBtn.removeEventListener("click", this.closeHandler);
         }
       };
     }
@@ -40105,6 +40885,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       init_SettingsMenu();
       init_SkipButton();
       init_CaptionsButton();
+      init_CaptionsButton();
+      init_KeyboardHelpButton();
+      init_KeyboardHelpDialog();
       init_ThumbnailPreview();
       init_BandwidthIndicator();
       init_OverflowTray();
@@ -40365,6 +41148,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let tray = null;
     let entries = [];
     let timeEntry = null;
+    let helpDialog = null;
     let resizeObserver = null;
     let windowResizeTimer = null;
     let onWindowResize = null;
@@ -40384,6 +41168,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     if (responsive) {
       assertFitLayout(layout, config.priority);
     }
+    const openHelpDialog = () => {
+      for (const control of controls) {
+        const popover = control;
+        if (typeof popover.close === "function") {
+          popover.close(false);
+        }
+      }
+      const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      return helpDialog?.open(invoker) ?? false;
+    };
     const createControl = (slot) => {
       switch (slot) {
         case "play":
@@ -40418,6 +41212,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           return new FullscreenButton(api);
         case "spacer":
           return new Spacer();
+        case "keyboard-help":
+          return new KeyboardHelpButton(openHelpDialog);
         default: {
           const factory = getControlFactory(slot, api.container);
           if (factory) {
@@ -40730,6 +41526,28 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const handleMouseLeave = () => {
       hideControls();
     };
+    const isBareDigit = (e) => e.key.length === 1 && e.key >= "0" && e.key <= "9" && !e.shiftKey && !(typeof e.getModifierState === "function" && e.getModifierState("AltGraph"));
+    const digitSeekTarget = (digit, video) => {
+      const live = api.getState("live");
+      const seekableRange = api.getState("seekableRange");
+      if (live) {
+        if (!seekableRange) {
+          return null;
+        }
+        const { start, end } = seekableRange;
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          return null;
+        }
+        return Math.min(end, Math.max(start, start + digit / 10 * (end - start)));
+      }
+      const stateDuration = Number(api.getState("duration"));
+      const elementDuration = video.duration;
+      const duration = Number.isFinite(stateDuration) && stateDuration > 0 ? stateDuration : Number.isFinite(elementDuration) && elementDuration > 0 ? elementDuration : null;
+      if (duration === null) {
+        return null;
+      }
+      return Math.min(duration, Math.max(0, digit / 10 * duration));
+    };
     const handleKeyDown = (e) => {
       if (!api.container.contains(document.activeElement)) return;
       if (e.defaultPrevented) return;
@@ -40742,8 +41560,32 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const isActivatable = activeEl instanceof HTMLButtonElement || role === "button" || role === "menuitem";
       if (isActivatable && ACTIVATION_KEYS.has(e.key)) return;
       if (role === "slider" && SLIDER_KEYS.has(e.key)) return;
+      if (helpDialog?.isOpen()) return;
+      if (e.key === "?") {
+        if (openHelpDialog()) {
+          e.preventDefault();
+        }
+        return;
+      }
+      if (e.key === "c" || e.key === "C") {
+        if (toggleCaptions(api)) {
+          e.preventDefault();
+        }
+        return;
+      }
       const video = api.container.querySelector("video");
       if (!video) return;
+      if (isBareDigit(e)) {
+        const target = digitSeekTarget(Number(e.key), video);
+        if (target === null) {
+          return;
+        }
+        e.preventDefault();
+        video.currentTime = target;
+        api.emit("playback:seeking", { time: video.currentTime });
+        showControls();
+        return;
+      }
       const live = api.getState("live");
       const seekableRange = api.getState("seekableRange");
       switch (e.key) {
@@ -40861,6 +41703,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           bigPlayButton = new BigPlayButton(api, () => errorOverlay?.isVisible() ?? false);
           container.appendChild(bigPlayButton.render());
         }
+        helpDialog = new KeyboardHelpDialog(api);
         progressBar = new ProgressBar(api, {
           // A timeline editor is on screen for as long as the viewer needs it,
           // which is longer than any hide delay. Holding visibility here rather
@@ -40956,6 +41799,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.container?.style.removeProperty("--sp-menu-max-height");
         stateUnsubscribe?.();
         stateUnsubscribe = null;
+        helpDialog?.destroy();
+        helpDialog = null;
         errorUnsubscribe?.();
         errorUnsubscribe = null;
         reconnectingUnsubscribe?.();
@@ -43218,6 +44063,66 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         api?.logger.info("Switched to hls.js");
+      },
+      getDiagnostics() {
+        const engine = isNative ? "native" : hls ? "hls.js" : null;
+        let selectedLevel = null;
+        let levelDetails = null;
+        if (hls && typeof hls.currentLevel === "number") {
+          selectedLevel = hls.currentLevel;
+          if (hls.levels && selectedLevel >= 0 && hls.levels[selectedLevel]) {
+            const lvl = hls.levels[selectedLevel];
+            levelDetails = {};
+            if (typeof lvl.bitrate === "number" && Number.isFinite(lvl.bitrate)) levelDetails.bitrate = lvl.bitrate;
+            if (typeof lvl.width === "number" && Number.isFinite(lvl.width)) levelDetails.width = lvl.width;
+            if (typeof lvl.height === "number" && Number.isFinite(lvl.height)) levelDetails.height = lvl.height;
+          }
+        }
+        let bandwidthEstimate = null;
+        if (hls && typeof hls.bandwidthEstimate === "number" && Number.isFinite(hls.bandwidthEstimate)) {
+          bandwidthEstimate = Math.round(hls.bandwidthEstimate);
+        } else if (api) {
+          const bw = api.getState("bandwidth");
+          if (typeof bw === "number" && Number.isFinite(bw) && bw > 0) {
+            bandwidthEstimate = Math.round(bw);
+          }
+        }
+        const live = api ? Boolean(api.getState("live")) : false;
+        const lowLatency = api ? Boolean(api.getState("lowLatencyMode")) : false;
+        const extractRanges = (timeRanges) => {
+          if (!timeRanges) return [];
+          const ranges = [];
+          const count = Math.min(timeRanges.length, 32);
+          for (let i = 0; i < count; i++) {
+            try {
+              const start = timeRanges.start(i);
+              const end = timeRanges.end(i);
+              if (Number.isFinite(start) && Number.isFinite(end)) {
+                ranges.push({ start, end });
+              }
+            } catch {
+            }
+          }
+          return ranges;
+        };
+        const currentVideo = video ?? api?.container?.querySelector("video");
+        return {
+          engine,
+          selectedLevel,
+          quality: levelDetails,
+          bandwidthEstimate,
+          live,
+          lowLatency,
+          retryCount: (networkRetryCount || 0) + (mediaRetryCount || 0),
+          networkRetryCount: networkRetryCount || 0,
+          mediaRetryCount: mediaRetryCount || 0,
+          reconnectAttempts: reconnectAttempts || 0,
+          isReconnecting: Boolean(isReconnecting),
+          readyState: currentVideo ? currentVideo.readyState : null,
+          networkState: currentVideo ? currentVideo.networkState : null,
+          buffered: extractRanges(currentVideo ? currentVideo.buffered : null),
+          seekable: extractRanges(currentVideo ? currentVideo.seekable : null)
+        };
       }
     };
     return plugin;
@@ -43697,6 +44602,36 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           videoEl.src = src;
           videoEl.load();
         });
+      },
+      getDiagnostics() {
+        const currentVideo = video ?? api?.container?.querySelector("video");
+        const extractRanges = (timeRanges) => {
+          if (!timeRanges) return [];
+          const ranges = [];
+          const count = Math.min(timeRanges.length, 32);
+          for (let i = 0; i < count; i++) {
+            try {
+              const start = timeRanges.start(i);
+              const end = timeRanges.end(i);
+              if (Number.isFinite(start) && Number.isFinite(end)) {
+                ranges.push({ start, end });
+              }
+            } catch {
+            }
+          }
+          return ranges;
+        };
+        let dimensions = null;
+        if (currentVideo && currentVideo.videoWidth > 0 && currentVideo.videoHeight > 0) {
+          dimensions = { width: currentVideo.videoWidth, height: currentVideo.videoHeight };
+        }
+        return {
+          readyState: currentVideo ? currentVideo.readyState : null,
+          networkState: currentVideo ? currentVideo.networkState : null,
+          dimensions,
+          buffered: extractRanges(currentVideo ? currentVideo.buffered : null),
+          seekable: extractRanges(currentVideo ? currentVideo.seekable : null)
+        };
       }
     };
     return plugin;
@@ -44004,6 +44939,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let peer = null;
     let sessionUrl = null;
     let currentSrc = "";
+    let latestLatencyEstimate = null;
+    let latestStatsSummary = null;
     let hasJoined = false;
     let loadSession = 0;
     let pendingLoad = null;
@@ -44145,6 +45082,38 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           const estimate = estimateLatency(report, lastSample);
           if (!estimate) return;
           lastSample = estimate.sample;
+          latestLatencyEstimate = estimate.latency;
+          const statsObj = {};
+          let hasStats = false;
+          for (const raw of report) {
+            const entry = Array.isArray(raw) ? raw[1] : raw;
+            if (!entry || typeof entry !== "object") continue;
+            if (entry.type === "inbound-rtp" && (entry.kind === "video" || entry.mediaType === "video")) {
+              if (typeof entry.jitter === "number" && Number.isFinite(entry.jitter)) {
+                statsObj.jitter = entry.jitter;
+                hasStats = true;
+              }
+              if (typeof entry.framesReceived === "number" && Number.isFinite(entry.framesReceived)) {
+                statsObj.framesReceived = entry.framesReceived;
+                hasStats = true;
+              }
+              if (typeof entry.framesDecoded === "number" && Number.isFinite(entry.framesDecoded)) {
+                statsObj.framesDecoded = entry.framesDecoded;
+                hasStats = true;
+              }
+              if (typeof entry.framesDropped === "number" && Number.isFinite(entry.framesDropped)) {
+                statsObj.framesDropped = entry.framesDropped;
+                hasStats = true;
+              }
+            }
+          }
+          if (estimate.rttSeconds !== void 0 && Number.isFinite(estimate.rttSeconds)) {
+            statsObj.roundTripTime = estimate.rttSeconds;
+            hasStats = true;
+          }
+          if (hasStats) {
+            latestStatsSummary = statsObj;
+          }
           const previous = api.getState("liveLatency");
           if (Math.abs(previous - estimate.latency) > LATENCY_EPSILON) {
             api.setState("liveLatency", estimate.latency);
@@ -44590,6 +45559,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         cleanup(new Error("Player destroyed during load"), true);
         currentSrc = "";
         hasJoined = false;
+        latestLatencyEstimate = null;
+        latestStatsSummary = null;
         if (video?.parentNode) {
           video.parentNode.removeChild(video);
         }
@@ -44624,6 +45595,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       getSessionUrl() {
         return sessionUrl;
+      },
+      getDiagnostics() {
+        const currentLatency = latestLatencyEstimate ?? (api ? api.getState("liveLatency") || null : null);
+        const receiverLatency = typeof currentLatency === "number" && Number.isFinite(currentLatency) && currentLatency > 0 ? currentLatency : null;
+        return {
+          connectionState: peer ? peer.connectionState : null,
+          iceConnectionState: peer ? peer.iceConnectionState : null,
+          signalingState: peer ? peer.signalingState : null,
+          receiverLatency,
+          stats: latestStatsSummary,
+          autoReconnect,
+          reconnectAttempts,
+          isReconnecting: reconnectTimer !== null
+        };
       }
     };
     return plugin;
@@ -52849,6 +53834,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/analytics/src/index.ts
+  init_src();
+
   // packages/plugins/analytics/src/helpers.ts
   function generateId2() {
     const timestamp = Date.now();
@@ -53118,6 +54106,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   function clamp2(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
+  function finitePercent(numerator, denominator) {
+    if (typeof numerator !== "number" || typeof denominator !== "number") return null;
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+    return clamp2(numerator / denominator * 100, 0, 100);
+  }
   function isHttpsUrl(url) {
     if (!url || typeof url !== "string" || !url.trim()) {
       return false;
@@ -53272,6 +54265,101 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return { send, sendUnload, flush: () => flushWith(post), flushUnload: () => flushWith(unload) };
   }
 
+  // packages/plugins/analytics/src/seek-window.ts
+  function createSeekEmissionWindow(options) {
+    const { intervalMs } = options;
+    const now2 = options.now ?? Date.now;
+    let windowStart = null;
+    let pending = null;
+    let timer = null;
+    let generation = 0;
+    function clearTimer() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    }
+    function closeWindow() {
+      clearTimer();
+      windowStart = null;
+      generation++;
+    }
+    function deliverPending(unload) {
+      if (pending === null) return;
+      const seekTo = pending;
+      pending = null;
+      if (unload) options.emitUnload(seekTo);
+      else options.emit(seekTo);
+    }
+    function armTimer() {
+      clearTimer();
+      if (windowStart === null) return;
+      const captured = generation;
+      const delay = Math.max(0, windowStart + intervalMs - now2());
+      timer = setTimeout(() => {
+        if (captured === generation) onDeadline();
+      }, delay);
+    }
+    function onDeadline() {
+      timer = null;
+      if (windowStart === null) return;
+      const at = now2();
+      if (at < windowStart) {
+        deliverPending(false);
+        closeWindow();
+        return;
+      }
+      if (at - windowStart < intervalMs) {
+        armTimer();
+        return;
+      }
+      if (pending === null) {
+        closeWindow();
+        return;
+      }
+      deliverPending(false);
+      windowStart += intervalMs;
+      if (at - windowStart >= intervalMs) {
+        closeWindow();
+      }
+    }
+    return {
+      request(seekTo) {
+        const at = now2();
+        if (windowStart !== null) {
+          if (at < windowStart) {
+            deliverPending(false);
+            closeWindow();
+          } else if (at - windowStart >= intervalMs) {
+            if (pending !== null) {
+              deliverPending(false);
+              windowStart += intervalMs;
+              if (at - windowStart >= intervalMs) closeWindow();
+            } else {
+              closeWindow();
+            }
+          }
+        }
+        if (windowStart === null) {
+          options.emit(seekTo);
+          windowStart = at;
+        } else {
+          pending = seekTo;
+          armTimer();
+        }
+      },
+      flushPending(unload) {
+        deliverPending(unload);
+      },
+      end(unload) {
+        deliverPending(unload);
+        closeWindow();
+      },
+      reset() {
+        pending = null;
+        closeWindow();
+      }
+    };
+  }
+
   // packages/plugins/analytics/src/privacy.ts
   function privacyOptOut(enabled) {
     if (!enabled || typeof navigator === "undefined") return false;
@@ -53349,9 +54437,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var PKG_VERSION17 = typeof __PKG_VERSION__ !== "undefined" ? __PKG_VERSION__ : "0.0.0-dev";
 
   // packages/plugins/analytics/src/index.ts
+  var KNOWN_ERROR_CODES = new Set(Object.values(ErrorCode));
+  var KNOWN_ERROR_CATEGORIES2 = /* @__PURE__ */ new Set([
+    "access",
+    "network",
+    "media",
+    "source",
+    "playback",
+    "player",
+    "unknown"
+  ]);
   var PLUGIN_VERSION = PKG_VERSION17;
   var PLUGIN_NAME = "scarlett-player";
   var DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1e3;
+  var SEEK_EMISSION_INTERVAL_MS = 1e3;
   var DEFAULT_CONFIG5 = {
     heartbeatInterval: 1e4,
     rebufferGraceMs: 250,
@@ -53393,6 +54492,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let outageLongSent = false;
     let pendingEchoes = 0;
     let lastBusSeekAt = 0;
+    const seekWindow = createSeekEmissionWindow({
+      intervalMs: SEEK_EMISSION_INTERVAL_MS,
+      emit: (seekTo) => {
+        if (!api || session.viewEnd !== null) return;
+        sendBeacon("seeking", { seekCount: session.seekCount, seekSource: "player", seekTo });
+      },
+      emitUnload: (seekTo) => {
+        if (!api || session.viewEnd !== null) return;
+        sendUnloadBeacon("seeking", { seekCount: session.seekCount, seekSource: "player", seekTo });
+      }
+    });
     let lastElementSeekAt = null;
     let elementSeekBeacons = 0;
     let pauseStartTime = null;
@@ -53575,20 +54685,27 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       lastHeartbeatTime = now2;
       const duration = api?.getState("duration");
-      if (typeof duration === "number" && duration > 0) {
+      const position = api?.getState("currentTime");
+      if (typeof duration === "number" && Number.isFinite(duration) && duration > 0 && typeof position === "number" && Number.isFinite(position)) {
         lastKnownDuration = duration;
-        lastKnownCurrentTime = api?.getState("currentTime") ?? 0;
+        lastKnownCurrentTime = position;
       }
     }
-    function updateAvgBitrate(now2) {
+    function computeAvgBitrate(now2) {
       const history2 = session.bitrateHistory;
-      if (history2.length === 0) return;
+      if (!history2 || history2.length === 0) return session.avgBitrate;
       const totalBitrateTime = history2.reduce((sum, b, i, arr) => {
         const nextTime = i < arr.length - 1 ? arr[i + 1].time : now2;
         return sum + b.bitrate * (nextTime - b.time);
       }, 0);
       const timeSpan = now2 - history2[0].time;
-      session.avgBitrate = timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : history2[history2.length - 1].bitrate;
+      return timeSpan > 0 ? Math.round(totalBitrateTime / timeSpan) : history2[history2.length - 1].bitrate;
+    }
+    function updateAvgBitrate(now2) {
+      const avg = computeAvgBitrate(now2);
+      if (avg !== null) {
+        session.avgBitrate = avg;
+      }
     }
     function pauseDurationAt(now2) {
       return session.pauseDuration + (pauseStartTime !== null ? Math.max(0, now2 - pauseStartTime) : 0);
@@ -53634,25 +54751,35 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       };
     }
     function viewEndMetrics(now2) {
-      const currentTime = api?.getState("currentTime") ?? 0;
-      const duration = api?.getState("duration") ?? 0;
-      let completionRate = 0;
+      const currentTime = api?.getState("currentTime");
+      const duration = api?.getState("duration");
+      let completionRate;
       if (resolveIsLive() === true) {
         completionRate = null;
       } else if (session.exitType === "completed") {
         completionRate = 100;
-      } else if (duration > 0) {
-        completionRate = currentTime / duration * 100;
-      } else if (lastKnownDuration > 0) {
-        completionRate = lastKnownCurrentTime / lastKnownDuration * 100;
+      } else {
+        completionRate = finitePercent(currentTime, duration) ?? finitePercent(lastKnownCurrentTime, lastKnownDuration);
+      }
+      const watchTime = session.watchTime;
+      const rebufferDuration = session.rebufferDuration;
+      let rebufferRatio;
+      if (!Number.isFinite(rebufferDuration) || rebufferDuration < 0 || !Number.isFinite(watchTime) || watchTime < 0) {
+        rebufferRatio = null;
+      } else {
+        rebufferRatio = watchTime === 0 ? 0 : finitePercent(rebufferDuration, watchTime);
       }
       return {
         ...cumulativeMetrics(now2),
         startupTime: session.startupTime,
-        rebufferRatio: session.watchTime > 0 ? session.rebufferDuration / session.watchTime * 100 : 0,
+        rebufferRatio,
         ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
         exitType: session.exitType,
-        completionRate
+        completionRate,
+        // Declares the units of both gauges. It rides the viewEnd data, which
+        // buildPayload spreads after customDimensions, so a host dimension of
+        // the same name cannot override it.
+        gaugeScale: "percent"
       };
     }
     function onHeartbeatTick() {
@@ -53691,6 +54818,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     }
     function finalizeView(sendRebufferEnd) {
+      seekWindow.end(!sendRebufferEnd);
       accrueTime();
       commitPendingPause();
       closeRebuffer(sendRebufferEnd);
@@ -53729,6 +54857,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       outageLongSent = false;
       pendingEchoes = 0;
       lastBusSeekAt = 0;
+      seekWindow.reset();
       lastElementSeekAt = null;
       elementSeekBeacons = 0;
       pauseStartTime = null;
@@ -54011,7 +55140,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!api) return;
       const currentTime = payload?.currentTime;
       const duration = api.getState("duration");
-      if (typeof currentTime === "number" && Number.isFinite(currentTime) && typeof duration === "number" && duration > 0) {
+      if (typeof currentTime === "number" && Number.isFinite(currentTime) && typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
         lastKnownCurrentTime = currentTime;
         lastKnownDuration = duration;
       }
@@ -54060,11 +55189,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastBusSeekAt = now2;
       session.seekCount++;
       const target = payload?.time;
-      sendBeacon("seeking", {
-        seekCount: session.seekCount,
-        seekSource: "player",
-        seekTo: typeof target === "number" && Number.isFinite(target) ? target : api.getState("currentTime")
-      });
+      seekWindow.request(
+        typeof target === "number" && Number.isFinite(target) ? target : api.getState("currentTime")
+      );
     }
     function onEnded() {
       discardPendingPause();
@@ -54095,7 +55222,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         time: Date.now(),
         type: error.name || "Error",
         message: error.message || "Unknown error",
-        fatal
+        fatal,
+        code: error.code,
+        category,
+        detail: error.detail
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -54144,7 +55274,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         time: Date.now(),
         type,
         message,
-        fatal
+        fatal,
+        code,
+        category,
+        detail: err.detail
       };
       session.errors.push(errorEvent);
       if (session.errors.length > 100) {
@@ -54243,6 +55376,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (session.viewEnd !== null) return;
       if (document.hidden) {
         session.exitType = "background";
+        seekWindow.flushPending(false);
         sendHeartbeat();
         transport.flush();
       } else {
@@ -54335,6 +55469,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         transport.flush();
         discardPendingPause();
         cancelPendingRebuffer();
+        seekWindow.reset();
         cleanupFns.forEach((fn) => fn());
         cleanupFns = [];
         api?.logger.info("Analytics plugin destroyed");
@@ -54375,6 +55510,199 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
       trackEvent(name, data = {}) {
         sendBeacon(`custom:${name}`, data);
+      },
+      /**
+       * Get synchronous troubleshooting snapshot of player state, provider contributions,
+       * whitelisted session metrics and QoE v2.
+       *
+       * Side-effect free; does not alter heartbeats, timers, sequence numbers or session metrics.
+       *
+       * @returns AnalyticsDiagnosticsSnapshot adhering to schemaVersion: 1
+       */
+      getDiagnostics() {
+        const now2 = Date.now();
+        const playerVersion = PKG_VERSION17;
+        if (!api) {
+          return {
+            schemaVersion: 1,
+            timestamp: now2,
+            playerVersion,
+            viewId: null,
+            playbackState: {
+              playbackState: "destroyed",
+              playing: false,
+              paused: false,
+              ended: false,
+              buffering: false,
+              seeking: false,
+              currentTime: null,
+              duration: null,
+              volume: null,
+              muted: null,
+              playbackRate: null,
+              mediaType: null,
+              live: null,
+              seekableRange: null,
+              liveEdge: null,
+              liveLatency: null,
+              dimensions: null,
+              source: null
+            },
+            errors: [],
+            providers: {},
+            metrics: {
+              watchTime: 0,
+              playTime: 0,
+              settledPlayTime: 0,
+              rebufferCount: 0,
+              rebufferDuration: 0,
+              reconnectCount: 0,
+              reconnectDuration: 0,
+              settledReconnectDuration: 0,
+              pauseCount: 0,
+              pauseDuration: 0,
+              settledPauseDuration: 0,
+              seekCount: 0,
+              errorCount: 0,
+              warningCount: 0,
+              qualityChanges: 0,
+              avgBitrate: null,
+              maxBitrate: null,
+              startupTime: null
+            },
+            qoe: {
+              score: null,
+              version: 2
+            }
+          };
+        }
+        const elapsed = Math.max(0, now2 - lastHeartbeatTime);
+        const isActivelyPlaying = session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null;
+        const openPlay = isActivelyPlaying ? elapsed : 0;
+        const currentWatchTime = session.watchTime + elapsed;
+        const currentPlayTime = session.playTime + openPlay;
+        const currentPauseDuration = pauseDurationAt(now2);
+        const currentReconnectDuration = reconnectDurationAt(now2);
+        const currentAvgBitrate = computeAvgBitrate(now2);
+        const metrics = {
+          watchTime: currentWatchTime,
+          playTime: currentPlayTime,
+          settledPlayTime: session.playTime,
+          rebufferCount: session.rebufferCount,
+          rebufferDuration: session.rebufferDuration,
+          reconnectCount: session.reconnectCount,
+          reconnectDuration: currentReconnectDuration,
+          settledReconnectDuration: session.reconnectDuration,
+          pauseCount: session.pauseCount,
+          pauseDuration: currentPauseDuration,
+          settledPauseDuration: session.pauseDuration,
+          seekCount: session.seekCount,
+          errorCount: session.errorCount,
+          warningCount: session.warningCount,
+          qualityChanges: session.qualityChanges,
+          avgBitrate: currentAvgBitrate,
+          maxBitrate: Number.isFinite(session.maxBitrate) ? session.maxBitrate : null,
+          startupTime: Number.isFinite(session.startupTime) ? session.startupTime : null,
+          ...resolveIsLive() === true ? { dvrTime: session.dvrTime + (liveMode === "dvr" ? openPlay : 0) } : {}
+        };
+        const qoe = {
+          score: getQoEScore(),
+          version: 2
+        };
+        const rawPlaybackState = api.getState("playbackState") || "idle";
+        const currentTime = Number.isFinite(api.getState("currentTime")) ? api.getState("currentTime") : null;
+        const duration = Number.isFinite(api.getState("duration")) ? api.getState("duration") : null;
+        const volume = Number.isFinite(api.getState("volume")) ? api.getState("volume") : null;
+        const playbackRate = Number.isFinite(api.getState("playbackRate")) ? api.getState("playbackRate") : null;
+        let mediaType = null;
+        const rawMediaType = api.getState("mediaType");
+        if (rawMediaType === "video" || rawMediaType === "audio") {
+          mediaType = rawMediaType;
+        }
+        let seekableRange = null;
+        const rawSr = api.getState("seekableRange");
+        if (rawSr && typeof rawSr.start === "number" && typeof rawSr.end === "number" && Number.isFinite(rawSr.start) && Number.isFinite(rawSr.end)) {
+          seekableRange = { start: rawSr.start, end: rawSr.end };
+        }
+        const isLive = Boolean(api.getState("live"));
+        const liveEdge = isLive ? typeof api.getState("liveEdge") === "boolean" ? api.getState("liveEdge") : null : null;
+        const liveLatency = isLive && Number.isFinite(api.getState("liveLatency")) ? api.getState("liveLatency") : null;
+        let dimensions = null;
+        if (api.container) {
+          const video2 = api.container.querySelector("video");
+          if (video2 && video2.videoWidth > 0 && video2.videoHeight > 0) {
+            dimensions = { width: video2.videoWidth, height: video2.videoHeight };
+          }
+        }
+        let source = null;
+        const rawSource = api.getState("source");
+        if (rawSource && rawSource.src) {
+          source = {
+            hostname: extractHostname(rawSource.src),
+            ...rawSource.type ? { type: rawSource.type } : {}
+          };
+        }
+        const playbackState = {
+          playbackState: rawPlaybackState,
+          playing: Boolean(api.getState("playing")),
+          paused: Boolean(api.getState("paused")),
+          ended: Boolean(api.getState("ended")),
+          buffering: Boolean(api.getState("buffering")),
+          seeking: Boolean(api.getState("seeking")),
+          currentTime,
+          duration,
+          volume,
+          muted: typeof api.getState("muted") === "boolean" ? api.getState("muted") : false,
+          playbackRate,
+          mediaType,
+          live: isLive,
+          seekableRange,
+          liveEdge,
+          liveLatency,
+          dimensions,
+          source
+        };
+        let providers = {};
+        if (typeof api?.getProviderDiagnostics === "function") {
+          try {
+            providers = api.getProviderDiagnostics();
+          } catch {
+            providers = {};
+          }
+        }
+        const errors = (session.errors || []).slice(-20).map((err) => {
+          const rawCode = err.code;
+          const code = typeof rawCode === "string" && KNOWN_ERROR_CODES.has(rawCode) ? rawCode : "UNKNOWN_ERROR";
+          const rawCategory = err.category;
+          const category = typeof rawCategory === "string" && KNOWN_ERROR_CATEGORIES2.has(rawCategory) ? rawCategory : "unknown";
+          const fatal = Boolean(err.fatal);
+          const timestamp = Number.isFinite(err.time) ? err.time : Date.now();
+          const entry = {
+            code,
+            category,
+            fatal,
+            timestamp
+          };
+          const detail = err.detail;
+          if (detail && typeof detail === "object") {
+            const d = errorDetail(detail);
+            if (Object.keys(d).length > 0) {
+              entry.detail = d;
+            }
+          }
+          return entry;
+        });
+        return {
+          schemaVersion: 1,
+          timestamp: now2,
+          playerVersion,
+          viewId: session.viewId,
+          playbackState,
+          errors,
+          providers,
+          metrics,
+          qoe
+        };
       }
     };
   }
@@ -55459,6 +56787,10 @@ ${indent}src: ${tsString(config.src)},`;
       diagWhep.hidden = !(s.group === "live" || role === "video" && isWhep);
       diagAnalytics.hidden = role !== "video";
       diagClips.hidden = !(role === "video" && s.capabilities.clips);
+      const copyStatus = document.getElementById("copy-diagnostics-status");
+      if (copyStatus) copyStatus.textContent = "";
+      const copyFallback = document.getElementById("copy-diagnostics-fallback");
+      if (copyFallback) copyFallback.hidden = true;
     };
     const featureButton = (feature) => featureButtons.find((b) => b.dataset.feature === feature);
     const closePanel = (panel, feature) => {
@@ -56333,6 +57665,54 @@ ${indent}src: ${tsString(config.src)},`;
         if (role) logs[role].length = 0;
         consoleLog.replaceChildren();
         renderSummary();
+      });
+      const copyBtn = req("copy-diagnostics");
+      const copyStatus = req("copy-diagnostics-status");
+      const copyFallback = req("copy-diagnostics-fallback");
+      const copyTextarea = req("copy-diagnostics-text");
+      copyBtn.addEventListener("click", async () => {
+        const role = activeRole();
+        const player = role ? deps.players[role] : null;
+        if (!player) {
+          copyStatus.textContent = "No active player to snapshot";
+          return;
+        }
+        let snapshotStr = "";
+        try {
+          const snapshot = typeof player.getDiagnostics === "function" ? player.getDiagnostics() : null;
+          if (!snapshot) {
+            copyStatus.textContent = "Diagnostics unavailable";
+            return;
+          }
+          snapshotStr = JSON.stringify(snapshot, null, 2);
+        } catch {
+          copyStatus.textContent = "Failed to generate diagnostics";
+          return;
+        }
+        let copied = false;
+        if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          try {
+            await navigator.clipboard.writeText(snapshotStr);
+            copied = true;
+          } catch {
+            copied = false;
+          }
+        }
+        if (copied) {
+          copyStatus.textContent = "Copied to clipboard";
+          copyFallback.hidden = true;
+          window.setTimeout(() => {
+            if (copyStatus.textContent === "Copied to clipboard") {
+              copyStatus.textContent = "";
+            }
+          }, 3e3);
+        } else {
+          copyFallback.hidden = false;
+          copyTextarea.value = snapshotStr;
+          copyTextarea.focus();
+          copyTextarea.select();
+          copyStatus.textContent = "Clipboard unavailable; copy JSON below";
+        }
       });
     };
     const start = () => {

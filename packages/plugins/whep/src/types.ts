@@ -121,4 +121,54 @@ export interface IWHEPPlugin {
    * an absolute URL, or `null` while not joined.
    */
   getSessionUrl(): string | null;
+
+  /**
+   * Get synchronous diagnostic troubleshooting contribution.
+   *
+   * @returns Bounded snapshot of WebRTC connection states and cached latency/stats
+   */
+  getDiagnostics(): WHEPDiagnostics;
+}
+
+/**
+ * Diagnostic contribution from WHEP provider.
+ *
+ * Read from cached values: building it never calls `getStats()`. Every
+ * connection field is `null` while there is no peer connection (before
+ * `loadSource`, after a drop or destroy).
+ */
+export interface WHEPDiagnostics {
+  /** The peer connection's `connectionState`, or `null` with no connection. */
+  connectionState: RTCPeerConnectionState | null;
+  /** The peer connection's `iceConnectionState`, or `null` with no connection. */
+  iceConnectionState: RTCIceConnectionState | null;
+  /** The peer connection's `signalingState`, or `null` with no connection. */
+  signalingState: RTCSignalingState | null;
+  /**
+   * The receiver's share of the live latency in seconds (jitter buffer plus
+   * half the round trip), an estimate; `null` when none has been measured.
+   */
+  receiverLatency: number | null;
+  /**
+   * The newest stats poll, or `null` when no poll has produced any. Fields
+   * are left out when the report did not carry them.
+   */
+  stats: {
+    /** Inbound video jitter, in seconds. */
+    jitter?: number;
+    /** Round trip on the selected candidate pair, in seconds; `null` when the pair reported none (distinct from a measured 0). */
+    roundTripTime?: number | null;
+    /** Inbound video frames received (cumulative count). */
+    framesReceived?: number;
+    /** Inbound video frames decoded (cumulative count). */
+    framesDecoded?: number;
+    /** Inbound video frames dropped (cumulative count). */
+    framesDropped?: number;
+  } | null;
+  /** Whether the provider rejoins on its own after a drop (the `autoReconnect` option). */
+  autoReconnect: boolean;
+  /** Rejoin attempts made since the last successful join. */
+  reconnectAttempts: number;
+  /** Whether a rejoin is in progress or scheduled. */
+  isReconnecting: boolean;
 }

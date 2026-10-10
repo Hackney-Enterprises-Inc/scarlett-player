@@ -47,7 +47,8 @@ const player = await createPlayer({
   (the LIVE indicator says it) and `-m:ss` behind live after a DVR scrub back
 - Error overlay with viewer-friendly copy per error code, a Try Again action,
   and a reconnecting state while the player self-heals
-- Keyboard shortcuts
+- Keyboard shortcuts, with a `?` help dialog that lists the ones the player
+  actually implements (`keyboard: false` turns the global shortcuts off)
 - Customizable theming
 - Auto-hide controls
 
@@ -81,7 +82,7 @@ Lower ranks leave first. Ties go to the control that is later in the layout.
 | `bandwidth-indicator` | 0 | hidden (a status glyph, not an action) |
 | `skip-backward`, `skip-forward` | 1 | tray (gestures cover the same seek on touch) |
 | `pip` | 2 | tray |
-| any registered control (`share`, `chapters`, the playlist buttons, ...) | 3 | tray |
+| any registered control (`share`, `chapters`, the playlist buttons, ...) and the optional `keyboard-help` button | 3 | tray |
 | `chromecast`, `airplay` | 4 | tray (AirPlay is how an iPhone reaches a television, so it is never hidden) |
 | `volume` | 5 | tray (iOS `video.volume` is read only) |
 | `captions` | 6 | tray (also lives inside the settings menu) |
@@ -146,6 +147,21 @@ Any id a plugin registers through the control registry (`share`, `chapters`,
 `playlist-previous`, `playlist-next`, ...) can be placed in the same list. A
 control whose plugin is not loaded is skipped.
 
+The optional `keyboard-help` slot is a visible entry point into the shortcut
+dialog for hosts that want one:
+
+```typescript
+uiPlugin({
+  controls: ['play', 'keyboard-help', 'spacer', 'fullscreen'],
+});
+```
+
+It is deliberately not in the default layout: `?` already opens the same
+dialog, and the default bar keeps its exact widths. With `keyboard: false` the
+slot renders nothing, because the dialog would list shortcuts that no longer
+work. It fits like a registered control (rank 3, into the tray when the bar
+runs short).
+
 ## Timeline extensions
 
 The control registry lets a plugin contribute a *button*. `registerTimelineExtension` lets one contribute an editing layer over the **playback timeline** - the clip plugin's in/out handles are the first, and the reason it exists: an editor with its own miniature track cannot express a 30-second selection on a two-hour source, and makes the viewer pick points on a rail that is not the one they were just scrubbing.
@@ -187,16 +203,52 @@ The UI package reads no plugin-specific state and gains no `IPluginAPI` surface 
 | Space / K | Play/Pause |
 | M | Toggle mute |
 | F | Toggle fullscreen |
+| ? | Open the keyboard shortcut dialog |
+| C | Toggle captions (off, or the first available track; needs caption tracks) |
+| 0-9 | Seek to 0-90% of the video |
 | Left Arrow | Seek -5s |
 | Right Arrow | Seek +5s |
 | Up Arrow | Volume +10% |
 | Down Arrow | Volume -10% |
 
+Pass `keyboard: false` to turn all of them off: no document keydown listener is
+attached, so none of the keys above does anything. The controls' own keyboard
+handling (Enter/Space on buttons, arrow keys in the settings menu, the help
+dialog's own keys) is unchanged and the player stays focusable. The
+`keyboard-help` control is omitted too (see above).
+
+```typescript
+uiPlugin({
+  keyboard: false,  // Default: true
+});
+```
+
+`?` opens a dialog inside the player that lists these shortcuts and notes the
+conditional ones, so a viewer can discover them without leaving the video.
+Escape (or the close button) dismisses it and returns focus to whatever opened
+it. In fullscreen the browser takes the first Escape to exit fullscreen, so
+the close button or a second Escape is needed to dismiss the dialog. While it is open, the dialog owns Tab and the media shortcuts above stand
+down. The list lives in one place in the package (`src/shortcuts.ts`), so the
+dialog cannot drift from the handler.
+
+Digits seek to a share of the media. On VOD that is a share of the duration.
+On a live stream with a DVR window it is the same share of the seekable
+window, clamped inside it; on live without DVR the digits do nothing at all.
+An infinite or missing duration never becomes a seek. Home/End are not
+player-wide shortcuts: they belong to the focused progress bar, and the
+dialog says so.
+
+Every shortcut only takes a key it actually acts on: modifier chords
+(Cmd/Ctrl/Alt, Shift or AltGraph with a digit), keys a focused widget handles
+itself (Space/Enter on buttons, the arrows and Home/End on the slider), keys
+already consumed by a nearer handler, and typing in an editable field are all
+left alone.
+
 ### Seek events
 
 Progress-bar mouse/touch presses and releases, its focused Arrow/Home/End
-keys, the player-wide arrow shortcuts, the skip-backward/forward buttons and
-the control-bar Replay button emit
+keys, the player-wide arrow shortcuts, the digit percentage seeks, the
+skip-backward/forward buttons and the control-bar Replay button emit
 `playback:seeking { time }` immediately after writing the media element's
 `currentTime`. The payload carries the clamped target (zero for replay).
 Home/End on the focused bar seek to the VOD endpoints or live DVR boundaries.

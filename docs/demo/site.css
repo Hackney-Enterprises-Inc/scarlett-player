@@ -305,6 +305,10 @@ pre{font:13px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;color:#bdc5d7;w
    actions. Everything in here is below the fold and only rendered while
    the disclosure is open. */
 .diagnostics summary .diag-count{float:none;margin-left:8px;color:#ff8d93}
+.copy-diagnostics-status{font-size:12px;margin-left:8px;color:#8b92a0}
+.copy-diagnostics-fallback{margin:8px 0 16px}
+.copy-diagnostics-fallback label{display:block;font-size:12px;margin-bottom:4px;color:#8b92a0}
+.copy-diagnostics-fallback textarea{width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;background:#1a1d24;color:#e1e4ea;border:1px solid var(--border);border-radius:4px;padding:8px}
 .diag-section{margin:6px 0 18px}
 .diag-section h3{font:11px ui-monospace,monospace;letter-spacing:1.5px;text-transform:uppercase;color:#7e8797;margin:0 0 10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .diag-section h3 button{background:#171921;border:1px solid #292e3b;padding:5px 12px;border-radius:5px;font:12px var(--font-body);color:#bdc3ce;letter-spacing:0;text-transform:none}
