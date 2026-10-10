@@ -1,5 +1,11 @@
 # @scarlett-player/hls
 
+## 1.23.0
+
+### Minor Changes
+
+- [#137](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/137) [`74e81b9`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/74e81b9ec3f79164313e649dad902d4cd9dfd269) Thanks [@alexhackney](https://github.com/alexhackney)! - Add synchronous, typed, and bounded diagnostics troubleshooting snapshots and provider contributions
+
 ## 1.22.0
 
 ### Patch Changes
