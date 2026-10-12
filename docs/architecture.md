@@ -196,7 +196,10 @@ not need the event at all.
 2. Resets the playback state keys through `StateManager.update()` and clears
    `error`.
 3. Destroys the previous provider through `PluginManager.destroyPlugin()`, which
-   returns it to the `registered` state so it can be initialised again later.
+   returns it to the `registered` state so it can be initialised again later,
+   then waits for any teardown an `unload()` still has in flight. Each wait is
+   bounded at 10 seconds: past that the player logs a warning and goes ahead,
+   and the old provider's teardown finishes whenever it settles.
 4. `ensureInitialized()`.
 5. `PluginManager.selectProvider(source)`. No provider means
    `ErrorHandler.throw(ErrorCode.PROVIDER_NOT_FOUND, ...)` and a return, not an
@@ -214,17 +217,26 @@ error of its own) the catch only logs, so a specific code is not overwritten by
 a generic one.
 
 **When the returned promise settles.** `load()` awaits the provider's
-`loadSource()`, so on the two providers that reconnect - HLS and WHEP - it
-stays pending for as long as their scheduler keeps trying, up to
-`reconnectWindowMs` (five minutes by default). That is deliberate: a live
-stream that has not started yet, or is at its monitor cap, is a wait rather
-than a failure, and settling early would report an error while a reconnect is
-still running behind it. Hosts that need progress listen to
-`error:reconnecting`, `error:recovered` and fatal `error` rather than awaiting
-the promise; hosts that need a hard bound set a shorter `reconnectWindowMs` or
-race the promise themselves. Terminal failures - a refused token, a missing
-stream, an endpoint that does not speak the protocol - are not scheduled for
-reconnect and settle in seconds.
+`loadSource()`. A source failure does not reject it: core reports the failure
+through the error state and the `error` event, then resolves. `load()` rejects
+only when the player has been destroyed. The two providers that reconnect
+differ in how long they hold it:
+
+- **HLS** (hls.js and native) keeps `load()` pending through its in-place
+  retries (`maxNetworkRetries`, `maxMediaRetries`), then settles as soon as it
+  reports the fatal `error`. On a live source that error carries
+  `detail.reconnecting: true` and auto-reconnect carries on behind the settled
+  promise.
+- **WHEP** keeps `load()` pending while its reconnect scheduler is trying, up
+  to `reconnectWindowMs` (five minutes by default). A stream that has not
+  started yet, or is at its monitor cap, is a wait rather than a failure.
+  Terminal failures - a refused token, a missing stream, an endpoint that does
+  not speak the protocol - are not scheduled for reconnect and settle in
+  seconds.
+
+Either way, the promise is not the progress channel. Hosts follow
+`error:reconnecting`, `error:recovered` and fatal `error`; a host that needs a
+hard bound on WHEP sets a shorter `reconnectWindowMs` or races the promise.
 
 ### Unloading a source
 
@@ -236,7 +248,13 @@ or loading it returns without doing anything. Otherwise it:
    before the first finishes, with no `load()` between, shares its promise.
 2. Destroys the active provider through `PluginManager.destroyPlugin()`, which
    closes its connection or pipeline and removes its media element; a provider
-   still inside its `init()` is destroyed once that settles.
+   still inside its `init()` is destroyed once that settles. The wait is
+   bounded at 10 seconds (`PROVIDER_TEARDOWN_TIMEOUT_MS`, internal, not an
+   option): when the provider's `init()` or `destroy()` has not settled by then,
+   the player logs a warning and goes on to the next steps, and the teardown
+   finishes whenever it settles. A later `load()` that selects the same
+   provider still waits for that teardown in `initPlugin()`; `destroy()`
+   releases a bounded wait at once.
 3. Applies the unloaded state: `source` null, `playbackState` `idle`, the
    `playing` false, `paused` true, `ended`, `buffering`, `waiting` and
    `seeking` false, `currentTime`, `duration` and `bufferedAmount` 0,
@@ -252,7 +270,8 @@ or loading it returns without doing anything. Otherwise it:
 
 When a newer `load()` starts while the provider is going down, that load owns
 the state: the unload applies nothing and emits nothing, and the load waits
-for that teardown before it selects a provider, the same one or another. `unload()` rejects
+for that teardown (up to the same 10-second bound) before it selects a
+provider, the same one or another. `unload()` rejects
 after `destroy()`, and the next `load()` works as on a fresh instance. The
 analytics plugin ends its open view as `abandoned` on `source:unloaded`, and
 the Chromecast plugin stops the media on the receiver while keeping the
@@ -427,8 +446,9 @@ command and create a feedback loop. Analytics observes both paths, consuming
 recent bus echoes to avoid double-counting, and labels its `seeking` beacons
 with `seekSource: 'player'` or `'element'`. The echo window includes 1000 ms;
 expired pending echoes are discarded before recording a new bus request.
-Both seek paths are ignored for analytics after `viewEnd` until a play request
-opens the next view, so replay preparation cannot alter a finalized view.
+Both seek paths are ignored for analytics after `viewEnd` until the next view
+opens (a play request, or a load of another source), so replay preparation
+cannot alter a finalized view.
 
 `runCleanups()` and `getCleanupFns()` exist on the concrete `PluginAPI` for
 `PluginManager` to call; they are marked `@internal` and are not part of

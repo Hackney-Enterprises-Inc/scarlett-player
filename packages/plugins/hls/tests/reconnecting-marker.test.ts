@@ -120,11 +120,15 @@ describe('reconnecting marker on fatal errors', () => {
     await plugin.destroy();
   });
 
-  it('does not mark mux errors or schedule a reconnect for them', async () => {
-    const plugin = await loadAndPlay({});
-    fireError(created[0], { type: 'muxError', details: 'fragParsingError', fatal: true });
-    expect(fatals()[0].detail).not.toHaveProperty('reconnecting');
-    expect(emits().some(([event]) => event === 'error:reconnecting')).toBe(false);
+  // HEI-SCARLETT-54: mux used to be excluded from auto-reconnect outright.
+  // It now shares the media path, so a played source marks and schedules it
+  // exactly like a media failure (the never-played case stays in mux-retry).
+  it('marks mux errors and schedules a reconnect for them, like media errors', async () => {
+    vi.useFakeTimers();
+    const plugin = await loadAndPlay({ maxMediaRetries: 0 });
+    fireError(created[0], { type: 'muxError', details: 'remuxAllocError', fatal: true });
+    expect(fatals()[0].detail?.reconnecting).toBe(true);
+    expect(emits().some(([event]) => event === 'error:reconnecting')).toBe(true);
     await plugin.destroy();
   });
 

@@ -210,7 +210,8 @@ export function createAnalyticsPlugin(
   // alone says playing from a core play request that has not reached a frame,
   // and after a load() that stopped playback with no pause event.
   let statePlaying = false;
-  // Only idle ends may reopen without a new play request.
+  // Only idle ends may reopen on a passive signal, without a new play request
+  // (a new source's load reopens any closed view, see onStateChange).
   let idleEnded = false;
   // The last position and duration seen with a duration, so a view whose
   // state was already reset by a load() still reports how far it got (see
@@ -266,6 +267,10 @@ export function createAnalyticsPlugin(
   let pendingTrack: { trackId: string; src: string | null; video: AnalyticsVideo } | null = null;
   // The playlist track the current view is about, null outside a playlist
   let currentTrackId: string | null = null;
+  // The last source written, by `sourceKey`. A load of another source on a
+  // closed view opens the next view (HEI-52); a provider re-writing the same
+  // src (hls.js manifest parsed, WHEP recovery) never does. Cleared on unload.
+  let lastSourceKey: string | null = null;
   let cleanupFns: Array<() => void> = [];
   // Live latency, accumulated at constant memory across the whole session.
   // Reset alongside the session so a second view does not inherit the first
@@ -1169,7 +1174,8 @@ export function createAnalyticsPlugin(
   /**
    * Handle `source:unloaded` (`player.unload()`): the host stopped playback,
    * so the open view ends as `abandoned` with the full viewEnd. A no-op on a
-   * closed view. The next source's play request starts a new view.
+   * closed view. The next source's load starts a new view (HEI-52), as does a
+   * play request with no load between.
    */
   function onSourceUnloaded(): void {
     if (!api || session.viewEnd !== null) return;
@@ -1274,9 +1280,25 @@ export function createAnalyticsPlugin(
       return;
     }
 
-    if (event.key === 'source' && event.value) {
+    if (event.key === 'source') {
+      if (!event.value) {
+        // unload() writes source null, so even the same URL loading again is
+        // a new source afterwards
+        lastSourceKey = null;
+        return;
+      }
       const src = (event.value as { src?: unknown }).src;
+      // A pending playlist track wins the load and starts its own view
       onSourceChange(typeof src === 'string' ? src : '');
+      if (typeof src === 'string' && src !== '') {
+        // A load on a closed view opens the next one now, so a source that
+        // fails before it plays still sends its error. Same-src re-writes
+        // (manifest parsed, WHEP recovery) never open a view.
+        if (session.viewEnd !== null && sourceKey(src) !== lastSourceKey) {
+          startView(null);
+        }
+        lastSourceKey = sourceKey(src);
+      }
       resetFrames();
       return;
     }
@@ -1558,7 +1580,8 @@ export function createAnalyticsPlugin(
   /**
    * Handle seeking in an open view: count the seek and route its beacon
    * through the per-view emission window (HEI-SCARLETT-42). Ignore seeks
-   * after viewEnd; only a play request starts the replay view.
+   * after viewEnd, while no view is open; a play request or a new source's
+   * load starts the next one.
    *
    * The raw accounting is unbounded by design: every request increments
    * `seekCount`, reserves one element echo (expiring unused ones), marks a
@@ -1968,6 +1991,10 @@ export function createAnalyticsPlugin(
     async init(pluginApi: IPluginAPI): Promise<void> {
       api = pluginApi;
       statePlaying = api.getState('playing') === true;
+      // A source already loaded when the plugin starts (an init after load())
+      // is the one whose provider re-writes must not reopen a closed view
+      const initialSrc = api.getState('source')?.src;
+      lastSourceKey = typeof initialSrc === 'string' && initialSrc !== '' ? sourceKey(initialSrc) : null;
       viewContext = pageContext(mergedConfig.playerInitTime);
 
       // First view: viewStart and the heartbeat

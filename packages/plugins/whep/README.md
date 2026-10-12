@@ -161,7 +161,9 @@ while the reconnect scheduler is working** - up to `reconnectWindowMs`, five
 minutes by default. A stream that is not live yet (`409`) or at its monitor cap
 (`503`) is a wait, not a failure, and an `await load()` that rejected on the
 first one would turn every such wait into a host-visible error with a reconnect
-still running behind it.
+still running behind it. The HLS provider differs here: it settles `load()` as
+soon as it reports its first fatal error, and its reconnect runs on behind the
+settled promise.
 
 So do not use the promise as the progress channel. Listen instead:
 

@@ -267,7 +267,7 @@ on page unload through the synchronous unload transport, ahead of the unload
 window's timer never crosses into the next view.
 
 After `viewEnd`, both bus requests and element transitions are ignored for
-seek accounting until playback starts a new view. In particular, a replay's
+seek accounting until the next view starts. In particular, a replay's
 pre-play seek does not change the finalized view's `seekCount` or send a
 post-end `seeking` beacon. Seeking alone does not create a view; the replay's
 play request still starts exactly one new view with fresh counts and sequence.
@@ -296,8 +296,10 @@ check runs on the heartbeat tick, so the end can come up to one
 the default. Before this, a tab left paused kept its view open and its
 heartbeat running for as long as the page stayed open.
 
-What reopens a view afterwards: a play request reopens any ended view (as a
-replay does), including after `pagehide` or `beforeunload`. A passive resume, meaning `playing` turning true, a stall
+What reopens a view afterwards: loading another source opens the next view at
+the load (see [Views and track changes](#views-and-track-changes)), and a play
+request reopens any ended view (as a replay does), including after `pagehide`
+or `beforeunload`. A passive resume, meaning `playing` turning true, a stall
 recovering, or `error:recovered` while the player is not paused, reopens only
 a view that the idle timeout ended. Either way it is a new view of the same
 video, with its own `viewStart`.
@@ -478,9 +480,21 @@ its own `viewStart`.
   [idle timeout](#idle-views)) starts a new view of the same video. A replay
   keeps the ended view's `isLive`, since nothing reloads the source to
   classify it again.
+- **Loading a source after the view ended** (a `player.load()` after `ended`,
+  a fatal error, the idle timeout or `player.unload()`) starts the new view at
+  the load, before any play request, so a source that fails before it plays
+  still sends its `error` beacon and `viewEnd`. The view starts unclassified
+  (`isLive: null`) until the new source's metadata lands, and it counts as a
+  view even if it is never played. Source URLs are compared without their
+  query strings, so a provider re-writing the same source (hls.js on manifest
+  parsed, WHEP on join and on recovery) never opens one; for the same reason a
+  `load()` of the SAME URL after a fatal or idle end, with no
+  `player.unload()` between, opens none either; its play request still does.
+  A missing provider or a failed provider init never writes the source state,
+  so such a load is never reported.
 - **`player.unload()`** ends the open view as `abandoned` with the full
-  `viewEnd` (the `source:unloaded` event). The next play request starts a new
-  view.
+  `viewEnd` (the `source:unloaded` event). The next source load starts a new
+  view, even of the same URL, as does a play request with no load between.
 
 A playlist tells the plugin by itself. After `playlist:change`, the next
 source load starts a view for that track. The view reports the track's
