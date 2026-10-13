@@ -10,7 +10,11 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     name: Release
-    runs-on: namespace-profile-hackney
+    # GitHub-hosted on purpose, unlike CI and the cdn job: npm trusted
+    # publishing attaches provenance, and npm rejects provenance from any
+    # self-hosted runner (Namespace included) with a 422, failing every
+    # package. 1.25.0's first release run failed this way.
+    runs-on: ubuntu-26.04
     # main only, on both triggers. workflow_dispatch lets a person pick any
     # branch, and the job would then version, build and publish THAT branch's
     # tree and push its release commit to main. A skipped
