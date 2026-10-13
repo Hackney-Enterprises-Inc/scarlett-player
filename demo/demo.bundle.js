@@ -1386,12 +1386,16 @@
          * @param deps - Dependencies (stateManager, eventBus, logger, container, getPlugin, getProviderDiagnostics)
          */
         constructor(pluginId, deps) {
+          /** Stand-in container handed out once the API is revoked */
+          this.detachedContainer = null;
+          /** Set by `revoke()`, cleared by `restore()` */
+          this.revoked = false;
           /** Cleanup functions registered by this plugin */
           this.cleanupFns = [];
           this.pluginId = pluginId;
           this.stateManager = deps.stateManager;
           this.eventBus = deps.eventBus;
-          this.container = deps.container;
+          this.playerContainer = deps.container;
           this.getPluginFn = deps.getPlugin;
           this.getProviderDiagnosticsFn = deps.getProviderDiagnostics;
           this.logger = {
@@ -1400,6 +1404,15 @@
             warn: (msg, metadata) => deps.logger.warn(`[${pluginId}] ${msg}`, metadata),
             error: (msg, metadata) => deps.logger.error(`[${pluginId}] ${msg}`, metadata)
           };
+        }
+        /**
+         * Player container element. Once the API is revoked this is a detached
+         * stand-in, so a late teardown neither finds nor changes the player's DOM.
+         */
+        get container() {
+          if (!this.revoked) return this.playerContainer;
+          this.detachedContainer ?? (this.detachedContainer = document.createElement("div"));
+          return this.detachedContainer;
         }
         /**
          * Get a state value.
@@ -1417,6 +1430,7 @@
          * @param value - New state value
          */
         setState(key, value) {
+          if (this.revoked) return;
           this.stateManager.set(key, value);
         }
         /**
@@ -1429,6 +1443,7 @@
          * @param initialValue - Value used only when the key is new
          */
         defineState(key, initialValue) {
+          if (this.revoked) return;
           this.stateManager.define(key, initialValue);
         }
         /**
@@ -1439,6 +1454,8 @@
          * @returns Unsubscribe function
          */
         on(event, handler) {
+          if (this.revoked) return () => {
+          };
           return this.eventBus.on(event, handler);
         }
         /**
@@ -1457,6 +1474,7 @@
          * @param payload - Event payload
          */
         emit(event, payload) {
+          if (this.revoked) return;
           this.eventBus.emit(event, payload);
         }
         /**
@@ -1483,6 +1501,8 @@
          * @returns Unsubscribe function
          */
         subscribeToState(callback) {
+          if (this.revoked) return () => {
+          };
           return this.stateManager.subscribe(callback);
         }
         /**
@@ -1511,6 +1531,29 @@
             }
           }
           this.cleanupFns = [];
+        }
+        /**
+         * Cut the plugin off from the player while its teardown is still pending:
+         * run its cleanups now, make `setState`, `defineState`, `emit`, `on` and
+         * `subscribeToState` no-ops, and hand out a detached `container`. Used when
+         * the player stops waiting for a provider's teardown. Idempotent.
+         *
+         * @returns `true` when this call revoked it, `false` when it already was
+         * @internal
+         */
+        revoke() {
+          if (this.revoked) return false;
+          this.revoked = true;
+          this.runCleanups();
+          return true;
+        }
+        /**
+         * Undo `revoke()` before a fresh `init()`.
+         *
+         * @internal
+         */
+        restore() {
+          this.revoked = false;
         }
         /**
          * Get all registered cleanup functions.
@@ -2027,6 +2070,7 @@
             }
             try {
               record.state = "initializing";
+              record.api.restore();
               if (record.plugin.onStateChange) {
                 const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
                 record.api.onDestroy(unsub);
@@ -2127,6 +2171,22 @@
               this.destroyPromises.delete(id);
             }
           }
+        }
+        /**
+         * Cut off a plugin whose teardown is still pending, so it cannot act on
+         * the player while it finishes: its cleanups run now and its API stops
+         * reaching state, events and the container (see `PluginAPI.revoke()`). The
+         * teardown itself carries on; `destroy()` still runs when it settles. Does
+         * nothing when no teardown of the plugin is in flight.
+         *
+         * @param id - Plugin ID
+         * @returns `true` when this call cut the plugin off, `false` when there was
+         *   no teardown in flight or it was already cut off
+         */
+        abandonPlugin(id) {
+          const record = this.plugins.get(id);
+          if (!record || !this.destroyPromises.has(id)) return false;
+          return record.api.revoke();
         }
         /** Get a plugin by ID (returns any registered plugin). */
         getPlugin(id) {
@@ -2301,7 +2361,7 @@
   });
 
   // packages/core/src/scarlett-player.ts
-  var ScarlettPlayer;
+  var PROVIDER_TEARDOWN_TIMEOUT_MS, ScarlettPlayer;
   var init_scarlett_player = __esm({
     "packages/core/src/scarlett-player.ts"() {
       "use strict";
@@ -2314,6 +2374,7 @@
       init_url();
       init_diagnostics();
       init_version();
+      PROVIDER_TEARDOWN_TIMEOUT_MS = 1e4;
       ScarlettPlayer = class {
         /**
          * Create a new ScarlettPlayer.
@@ -2346,9 +2407,15 @@
           /**
            * An `unload()`'s provider destroy while it is in flight, so an `unload()`
            * that follows a newer `load()` in that window waits for the same teardown
-           * instead of resolving before the provider is gone.
+           * instead of resolving before the provider is gone. Cleared once the
+           * unload stops waiting for it, on settling or on the teardown bound.
            */
           this.providerTeardown = null;
+          /**
+           * Release functions of the bounded teardown waits in progress. `destroy()`
+           * calls them so no wait keeps its timer, or warns, after the player is gone.
+           */
+          this.teardownWaits = /* @__PURE__ */ new Set();
           /** The in-flight `unload()`, shared by a repeat call made before it ends. */
           this.pendingUnload = null;
           /** True once the lifecycle listeners have been wired (they are wired once) */
@@ -2554,6 +2621,17 @@
          * with it: clearing it here would blank the image over exactly the gap it
          * exists to cover, while the next source loads.
          *
+         * Before selecting a provider it waits for the previous provider's teardown
+         * (its pending `init()`, then its `destroy()`), and for one an `unload()`
+         * still has in flight. Each wait is bounded at 10 seconds: past that it logs
+         * a warning, cuts the old provider off (its cleanups run, its API stops
+         * reaching state, events and the container, and the media elements in the
+         * container are paused and removed) and goes ahead; the old provider's
+         * teardown finishes whenever it settles. A switch to a different provider
+         * never waits on an `init()` or `destroy()` that hangs for good. A load
+         * that selects the same provider again still waits for its teardown, since
+         * one plugin cannot start a fresh `init()` while the old one is pending.
+         *
          * Plays once the provider has loaded when the `autoplay` state key is set,
          * unless `options.autoplay` is given: then that value decides for this load
          * only and the state key is left as it is. The `media:load-request` handler
@@ -2592,11 +2670,14 @@
             if (this._currentProvider) {
               const previousProviderId = this._currentProvider.id;
               this.logger.info("Destroying previous provider", { provider: previousProviderId });
-              await this.pluginManager.destroyPlugin(previousProviderId);
+              await this.waitForTeardown(
+                this.pluginManager.destroyPlugin(previousProviderId),
+                previousProviderId
+              );
               this._currentProvider = null;
             }
             if (this.providerTeardown) {
-              await this.providerTeardown;
+              await this.waitForTeardown(this.providerTeardown.promise, this.providerTeardown.providerId);
             }
             await this.ensureInitialized();
             if (generation !== this.loadGeneration) {
@@ -2657,8 +2738,11 @@
          * cancels a pending post-seek resume, and destroys the active provider,
          * which closes its connection or pipeline and removes its media element. A
          * provider still inside its `init()` is destroyed as soon as that settles.
-         * Then applies the unloaded state: `source` null, `playbackState` idle,
-         * not playing, paused, not ended, not buffering, waiting or seeking,
+         * The wait for that teardown is bounded at 10 seconds: when the provider's
+         * `init()` or `destroy()` has not settled by then, it logs a warning and
+         * goes ahead, and the teardown finishes whenever it settles. Then applies
+         * the unloaded state: `source` null, `playbackState` idle, not playing,
+         * paused, not ended, not buffering, waiting or seeking,
          * `currentTime`, `duration` and `bufferedAmount` 0, no error, not live, and
          * the provider-owned track, quality and live keys cleared. `poster`,
          * `title`, `chapters` and the user's settings (volume, rate, autoplay) are
@@ -2669,12 +2753,13 @@
          * `load()` is called before the unload finishes, that load owns the state:
          * the unload still destroys the old provider but applies no state and emits
          * nothing, and the load selects its provider only once that teardown is
-         * done, whichever provider it is.
+         * done (or the 10-second bound has passed), whichever provider it is.
          *
          * The player stays usable: the next `load()` works as on a fresh instance.
          * Use `destroy()` instead to discard the player for good.
          *
-         * @returns Resolves once the provider is destroyed and the state applied
+         * @returns Resolves once the provider is destroyed (or the teardown bound
+         *   has passed) and the state applied
          * @throws When the player has been destroyed
          *
          * @example
@@ -2728,16 +2813,17 @@
                 error: error.message
               });
             });
-            this.providerTeardown = teardown;
+            const pending = { promise: teardown, providerId: provider.id };
+            this.providerTeardown = pending;
             try {
-              await teardown;
+              await this.waitForTeardown(teardown, provider.id);
             } finally {
-              if (this.providerTeardown === teardown) {
+              if (this.providerTeardown === pending) {
                 this.providerTeardown = null;
               }
             }
           } else if (this.providerTeardown) {
-            await this.providerTeardown;
+            await this.waitForTeardown(this.providerTeardown.promise, this.providerTeardown.providerId);
           }
           if (generation !== this.loadGeneration) {
             return;
@@ -2775,6 +2861,62 @@
           }
           this.logger.info("Source unloaded");
           this.eventBus.emit("source:unloaded", { src });
+        }
+        /**
+         * Wait for a provider teardown, but no longer than
+         * `PROVIDER_TEARDOWN_TIMEOUT_MS`. On the bound it warns, isolates the
+         * provider (`isolateProvider()`) and resolves; the teardown keeps running
+         * and its late `destroy()` still happens. A rejected
+         * teardown rejects as before. The timer is always cleared, and `destroy()`
+         * releases the wait at once, without the warning.
+         *
+         * @param teardown - The provider's teardown (`PluginManager.destroyPlugin()`)
+         * @param providerId - The provider being torn down, for the warning
+         * @returns Resolves when the teardown settles or the bound is reached
+         */
+        async waitForTeardown(teardown, providerId) {
+          let timer;
+          let release;
+          const bound = new Promise((resolve2) => {
+            release = resolve2;
+            timer = setTimeout(() => {
+              this.logger.warn(
+                `Provider teardown did not settle within ${PROVIDER_TEARDOWN_TIMEOUT_MS} ms: its init() or destroy() is still pending; cutting it off and going ahead. A load() that needs this provider again still waits for it`,
+                { provider: providerId }
+              );
+              this.isolateProvider(providerId);
+              resolve2();
+            }, PROVIDER_TEARDOWN_TIMEOUT_MS);
+          });
+          this.teardownWaits.add(release);
+          try {
+            await Promise.race([teardown, bound]);
+          } finally {
+            clearTimeout(timer);
+            this.teardownWaits.delete(release);
+          }
+        }
+        /**
+         * Cut off a provider the player has stopped waiting for, so its late
+         * teardown cannot touch whatever loads next: revoke its plugin API and
+         * pause and remove the media elements in the container. Only the first
+         * bound to fire for a teardown does this: no other provider is active then,
+         * so those elements are the old provider's (or markup it adopted), and its
+         * normal `destroy()` would remove them too. A later bound on the same
+         * teardown (a superseded `load()`) may find a newer provider in place and
+         * leaves the container alone.
+         *
+         * @param providerId - The provider whose teardown timed out
+         */
+        isolateProvider(providerId) {
+          if (!this.pluginManager.abandonPlugin(providerId)) return;
+          for (const media of Array.from(this.container.querySelectorAll("video, audio"))) {
+            try {
+              media.pause();
+            } catch {
+            }
+            media.remove();
+          }
         }
         /**
          * Start playback.
@@ -3296,6 +3438,8 @@
             this.logger.info("Destroying player");
             this.destroyed = true;
             this.loadGeneration++;
+            for (const release of this.teardownWaits) release();
+            this.teardownWaits.clear();
             if (this.seekResumeTimeout !== null) {
               clearTimeout(this.seekResumeTimeout);
               this.seekResumeTimeout = null;
@@ -42399,6 +42543,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("hlsFragBuffered", () => {
       api.setState("buffering", false);
       callbacks.onBufferUpdate?.();
+      callbacks.onFragBuffered?.();
     });
     addHandler("hlsFragLoading", () => {
       api.setState("buffering", true);
@@ -43110,7 +43255,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     };
     const buildErrorDetail = (error, retriesExhausted) => {
-      const attempts = error.attempts ?? (error.type === "network" ? networkRetryCount : error.type === "media" ? mediaRetryCount : 0);
+      const attempts = error.attempts ?? (error.type === "network" ? networkRetryCount : error.type === "media" || error.type === "mux" ? mediaRetryCount : 0);
       const detail = {
         type: error.type,
         retriesExhausted,
@@ -43152,6 +43297,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       maybeScheduleReconnect(error);
     };
+    const cancelPendingRetry = () => {
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
+    };
     const handleHlsError = (error) => {
       const Hls2 = loader.getHlsConstructor();
       if (!Hls2 || !hls) return false;
@@ -43165,6 +43316,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         if (errorCount >= MAX_ERRORS_IN_WINDOW) {
           api?.logger.error(`Too many fatal errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
+          cancelPendingRetry();
           emitFatalError(error, true);
           teardownPipeline(new Error(error.details));
           return true;
@@ -43175,6 +43327,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             const maxRetries = mergedConfig.maxNetworkRetries ?? 3;
             if (networkRetryCount >= maxRetries) {
               api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
+              cancelPendingRetry();
               emitFatalError(error, true);
               return true;
             }
@@ -43197,10 +43350,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             }, delay);
             break;
           }
-          case "media": {
+          // hls.js mux errors (fatal remux failures such as remuxAllocError)
+          // share the media budget and recovery: recoverMediaError() tears down
+          // and re-attaches the buffer pipeline the remuxer died in, which is
+          // the media-stage recovery hls.js documents for the host.
+          // `detail.type` stays 'mux' (from error.type) so analytics and the
+          // error table can still tell the classes apart.
+          case "media":
+          case "mux": {
             const maxRetries = mergedConfig.maxMediaRetries ?? 2;
             if (mediaRetryCount >= maxRetries) {
               api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
+              cancelPendingRetry();
               emitFatalError(error, true);
               return true;
             }
@@ -43219,6 +43380,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             break;
           }
           default:
+            cancelPendingRetry();
             emitFatalError(error, false);
             return true;
         }
@@ -43507,9 +43669,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           },
           onFragLoaded: () => {
             if (session !== loadSession) return;
-            if (networkRetryCount > 0 || mediaRetryCount > 0) {
-              api?.logger.debug("Playback recovered, resetting retry budgets");
+            if (networkRetryCount > 0) {
+              api?.logger.debug("Fragment loaded, resetting network retry budget");
               networkRetryCount = 0;
+            }
+          },
+          onFragBuffered: () => {
+            if (session !== loadSession) return;
+            if (mediaRetryCount > 0) {
+              api?.logger.debug("Fragment buffered, resetting media retry budget");
               mediaRetryCount = 0;
             }
           },
@@ -43675,7 +43843,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!currentSrc) return false;
       const isLive = (api?.getState("live") ?? false) && isLiveClassified;
       if (!isLive && !hasPlayedContent) return false;
-      return error.type === "network" || error.type === "media";
+      return error.type === "network" || error.type === "media" || error.type === "mux";
     };
     const maybeScheduleReconnect = (error) => {
       if (!canAutoReconnect(error)) return;
@@ -54576,6 +54744,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let playRequestPending = false;
     let pendingTrack = null;
     let currentTrackId = null;
+    let lastSourceKey = null;
     let cleanupFns = [];
     let latencySampler = createLatencySampler();
     let liveMode = "edge";
@@ -55116,9 +55285,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         onFirstFrame();
         return;
       }
-      if (event.key === "source" && event.value) {
+      if (event.key === "source") {
+        if (!event.value) {
+          lastSourceKey = null;
+          return;
+        }
         const src = event.value.src;
         onSourceChange(typeof src === "string" ? src : "");
+        if (typeof src === "string" && src !== "") {
+          if (session.viewEnd !== null && sourceKey(src) !== lastSourceKey) {
+            startView(null);
+          }
+          lastSourceKey = sourceKey(src);
+        }
         resetFrames();
         return;
       }
@@ -55472,6 +55651,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       async init(pluginApi) {
         api = pluginApi;
         statePlaying = api.getState("playing") === true;
+        const initialSrc = api.getState("source")?.src;
+        lastSourceKey = typeof initialSrc === "string" && initialSrc !== "" ? sourceKey(initialSrc) : null;
         viewContext = pageContext(mergedConfig.playerInitTime);
         startView();
         const unsubPlay = api.on("playback:play", onPlayEvent);
@@ -57806,7 +57987,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.23.0" : "dev";
+  var VERSION = true ? "1.24.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT

@@ -46,7 +46,7 @@
       <a href="../#start">Get started</a>
       <a class="github" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
-    <span class="version-badge" id="version">v1.23.0</span>
+    <span class="version-badge" id="version">v1.24.0</span>
   </header>
 
   <main id="main" class="docs wrap">
@@ -92,7 +92,7 @@ export function createExamplePlugin(config: ExampleConfig = {}): Plugin {
 }</code></pre>
 <p>Anything you attach in <code>init()</code> must come off again - via <code>api.onDestroy(fn)</code> or in <code>destroy()</code>. <code>api.on(...)</code> returns its own unsubscribe function, so <code>api.onDestroy(api.on(...))</code> at the point of subscription is the pattern that cannot be forgotten later.</p>
 <p>Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every <code>load()</code>, and destroyed by <code>player.unload()</code>.</p>
-<p>A destroy can arrive while your <code>init()</code> is still running (a provider switch, or <code>unload()</code>, during a slow init). The player does not skip it: it waits for <code>init()</code> to settle and then calls <code>destroy()</code> once, so write <code>destroy()</code> to undo whatever <code>init()</code> finished. <code>player.destroy()</code> is the one case that does not wait: it returns without your <code>init()</code> having settled, and your <code>destroy()</code> is called afterwards if the init ever finishes, so an <code>init()</code> that resumes after a long wait should check that the player is still alive before installing anything. If <code>init()</code> throws, the cleanups it registered with <code>api.onDestroy()</code> still run.</p>
+<p>A destroy can arrive while your <code>init()</code> is still running (a provider switch, or <code>unload()</code>, during a slow init). The player does not skip it: it waits for <code>init()</code> to settle and then calls <code>destroy()</code> once, so write <code>destroy()</code> to undo whatever <code>init()</code> finished. For a provider, <code>load()</code> and <code>unload()</code> wait at most 10 seconds for that teardown: past that they log a warning and cut your provider off before going ahead: your <code>api.onDestroy()</code> cleanups run, <code>api.setState</code>, <code>defineState</code>, <code>emit</code>, <code>on</code> and <code>subscribeToState</code> become no-ops, <code>api.container</code> becomes a detached element, and the media elements in the player&#39;s container are paused and removed. Your <code>destroy()</code> still runs when the <code>init()</code> settles, possibly after another provider has loaded, and anything it does through <code>api</code> no longer reaches the player. Keep DOM work in <code>destroy()</code> to the elements you hold, not fresh <code>api.container</code> lookups. The next <code>init()</code> gets a working API again. <code>player.destroy()</code> is the one case that does not wait: it returns without your <code>init()</code> having settled, and your <code>destroy()</code> is called afterwards if the init ever finishes, so an <code>init()</code> that resumes after a long wait should check that the player is still alive before installing anything. If <code>init()</code> throws, the cleanups it registered with <code>api.onDestroy()</code> still run.</p>
 <h3 id="when-init-runs"><a class="anchor" href="#when-init-runs">When <code>init()</code> runs</a></h3>
 <p>Non-provider plugins are initialised by the player&#39;s first <code>init()</code> or first <code>load()</code>, whichever happens first, in registration order. A plugin registered later with <code>player.registerPlugin()</code> is initialised by the next of those calls. Provider plugins are initialised lazily, per source, once <code>selectProvider()</code> has picked one.</p>
 <p><code>player:ready</code> is emitted at the END of that first pass, after every non-provider plugin&#39;s <code>init()</code> has resolved. A plugin that subscribes to it inside its own <code>init()</code> therefore does receive it, and it fires exactly once for the life of the player.</p>
@@ -125,7 +125,7 @@ produce <code>seekSource: &#39;player&#39;</code>, while native controls or dire
 produce <code>&#39;element&#39;</code> when not consumed as a recent bus echo (inclusive 1000 ms
 window). A new request discards expired pending echoes before adding its own.
 Both paths cancel pending rebuffer grace in an open view. After <code>viewEnd</code>,
-analytics ignores both seek paths until a play request starts the next view;
+analytics ignores both seek paths until the next view starts (a play request, or a load of another source);
 a replay&#39;s pre-play seek does not mutate or beacon the finalized view. See the
 <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md#seek-tracking">analytics seek contract</a>
 for counting and drag semantics; do not assume bus events cover native controls.
@@ -373,7 +373,7 @@ tokens and viewer identifiers out of the contribution in the first place.</p>
       <a href="https://www.npmjs.com/package/@scarlett-player/core">npm ↗</a>
       <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE">MIT license</a>
       <a href="../llms.txt" title="The documentation as Markdown, for AI coding agents">llms.txt</a>
-      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.23.0">v1.23.0</a>
+      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.24.0">v1.24.0</a>
     </div>
   </footer>
 </body>

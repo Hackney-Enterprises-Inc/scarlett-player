@@ -36,7 +36,7 @@ Anything you attach in `init()` must come off again - via `api.onDestroy(fn)` or
 
 Feature, UI, analytics and utility plugins outlive individual media items: a source change does not re-create them. Provider plugins are the exception, and are destroyed and initialised again on every `load()`, and destroyed by `player.unload()`.
 
-A destroy can arrive while your `init()` is still running (a provider switch, or `unload()`, during a slow init). The player does not skip it: it waits for `init()` to settle and then calls `destroy()` once, so write `destroy()` to undo whatever `init()` finished. `player.destroy()` is the one case that does not wait: it returns without your `init()` having settled, and your `destroy()` is called afterwards if the init ever finishes, so an `init()` that resumes after a long wait should check that the player is still alive before installing anything. If `init()` throws, the cleanups it registered with `api.onDestroy()` still run.
+A destroy can arrive while your `init()` is still running (a provider switch, or `unload()`, during a slow init). The player does not skip it: it waits for `init()` to settle and then calls `destroy()` once, so write `destroy()` to undo whatever `init()` finished. For a provider, `load()` and `unload()` wait at most 10 seconds for that teardown: past that they log a warning and cut your provider off before going ahead: your `api.onDestroy()` cleanups run, `api.setState`, `defineState`, `emit`, `on` and `subscribeToState` become no-ops, `api.container` becomes a detached element, and the media elements in the player's container are paused and removed. Your `destroy()` still runs when the `init()` settles, possibly after another provider has loaded, and anything it does through `api` no longer reaches the player. Keep DOM work in `destroy()` to the elements you hold, not fresh `api.container` lookups. The next `init()` gets a working API again. `player.destroy()` is the one case that does not wait: it returns without your `init()` having settled, and your `destroy()` is called afterwards if the init ever finishes, so an `init()` that resumes after a long wait should check that the player is still alive before installing anything. If `init()` throws, the cleanups it registered with `api.onDestroy()` still run.
 
 ### When `init()` runs
 
@@ -83,7 +83,7 @@ produce `seekSource: 'player'`, while native controls or direct element seeks
 produce `'element'` when not consumed as a recent bus echo (inclusive 1000 ms
 window). A new request discards expired pending echoes before adding its own.
 Both paths cancel pending rebuffer grace in an open view. After `viewEnd`,
-analytics ignores both seek paths until a play request starts the next view;
+analytics ignores both seek paths until the next view starts (a play request, or a load of another source);
 a replay's pre-play seek does not mutate or beacon the finalized view. See the
 [analytics seek contract](https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/plugins/analytics/README.md#seek-tracking)
 for counting and drag semantics; do not assume bus events cover native controls.
