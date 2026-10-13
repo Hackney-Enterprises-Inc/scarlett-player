@@ -2416,6 +2416,31 @@
            * calls them so no wait keeps its timer, or warns, after the player is gone.
            */
           this.teardownWaits = /* @__PURE__ */ new Set();
+          /**
+           * Autoplay intent of a `load()` that failed while still the active load,
+           * kept for the provider's auto-reconnect.
+           *
+           * A provider that hands a failed load to auto-reconnect (an HLS load
+           * timeout, HEI-SCARLETT-57) has already settled the load when it recovers,
+           * and it never sees the per-load `autoplay` override. So core records the
+           * effective autoplay here and plays on `error:recovered` when it was on.
+           * A new `load()`, `unload()` or `destroy()` clears it: each supersedes the
+           * load. The viewer's own `play()` and `pause()` decide instead of the
+           * load's autoplay, the latest one winning (play `shouldPlay: true`, pause
+           * `false`), whether made while the load was still pending (or from the
+           * provider's fatal `error` listener; see `playbackCommands`) or during the
+           * outage after it failed.
+           */
+          this.pendingRecoveryAutoplay = null;
+          /**
+           * Count of `play()` and `pause()` calls. `load()` captures it when it
+           * starts: when it has changed by the failure, the viewer's latest command
+           * (`lastPlaybackCommand`) decides recovery autoplay, not the load's own
+           * autoplay.
+           */
+          this.playbackCommands = 0;
+          /** The latest of `play()` / `pause()`, null before either was called. */
+          this.lastPlaybackCommand = null;
           /** The in-flight `unload()`, shared by a repeat call made before it ends. */
           this.pendingUnload = null;
           /** True once the lifecycle listeners have been wired (they are wired once) */
@@ -2570,6 +2595,18 @@
             if (this.stateManager.getValue("chromecastActive")) return;
             await this.load(src, { autoplay: autoplay !== false });
           });
+          this.eventBus.on("error:recovered", () => {
+            const pending = this.pendingRecoveryAutoplay;
+            if (!pending || this.destroyed) return;
+            this.pendingRecoveryAutoplay = null;
+            if (pending.generation !== this.loadGeneration) return;
+            if (!pending.shouldPlay || !this.stateManager.getValue("paused")) return;
+            this.play().catch((error) => {
+              this.logger.warn("Autoplay after recovery failed", {
+                error: error?.message
+              });
+            });
+          });
           this.eventBus.on("error:retry", async ({ src }) => {
             const was_live = this.stateManager.getValue("live");
             const resume_at = this.stateManager.getValue("currentTime");
@@ -2637,6 +2674,16 @@
          * only and the state key is left as it is. The `media:load-request` handler
          * passes the request's `autoplay` through here.
          *
+         * A load that fails can still recover: a provider may hand the failure to
+         * its auto-reconnect (the HLS provider does on a load timeout) and emit
+         * `error:recovered` later. When that load's effective autoplay was on and
+         * the player is still paused, the player plays then. A `play()` or
+         * `pause()` made while the load was pending (or from a fatal `error`
+         * listener), or during the outage after it failed, decides instead, the
+         * latest one winning: play plays on recovery, pause stays paused. A newer
+         * `load()`, `unload()` or `destroy()` cancels it, and a play the autoplay
+         * policy refuses is logged, not thrown.
+         *
          * @param source - Media source URL
          * @param options - Per-load options
          * @param options.autoplay - Overrides the `autoplay` option for this load
@@ -2653,6 +2700,8 @@
           this.initialSrcLoaded = true;
           const generation = ++this.loadGeneration;
           this.requestedSource = source;
+          this.pendingRecoveryAutoplay = null;
+          const commandsAtStart = this.playbackCommands;
           try {
             this.logger.info("Loading source", { source });
             this.stateManager.update({
@@ -2717,6 +2766,11 @@
             }
           } catch (error) {
             if (generation === this.loadGeneration) {
+              const commanded = this.playbackCommands !== commandsAtStart;
+              this.pendingRecoveryAutoplay = {
+                generation,
+                shouldPlay: commanded ? this.lastPlaybackCommand === "play" : Boolean(options?.autoplay ?? this.stateManager.getValue("autoplay"))
+              };
               if (this.stateManager.getValue("error")) {
                 this.logger.error("Load failed", {
                   source: sanitizeUrl(source),
@@ -2779,6 +2833,7 @@
             return;
           }
           const generation = ++this.loadGeneration;
+          this.pendingRecoveryAutoplay = null;
           const promise = this.runUnload(generation, provider, src);
           const pending = { generation, promise };
           this.pendingUnload = pending;
@@ -2930,6 +2985,9 @@
          */
         async play() {
           this.checkDestroyed();
+          this.playbackCommands++;
+          this.lastPlaybackCommand = "play";
+          if (this.pendingRecoveryAutoplay) this.pendingRecoveryAutoplay.shouldPlay = true;
           try {
             this.logger.debug("Play requested");
             this.eventBus.emit("playback:play", void 0);
@@ -2947,6 +3005,9 @@
          */
         pause() {
           this.checkDestroyed();
+          this.playbackCommands++;
+          this.lastPlaybackCommand = "pause";
+          if (this.pendingRecoveryAutoplay) this.pendingRecoveryAutoplay.shouldPlay = false;
           try {
             this.logger.debug("Pause requested");
             this.seekingWhilePlaying = false;
@@ -3438,6 +3499,7 @@
             this.logger.info("Destroying player");
             this.destroyed = true;
             this.loadGeneration++;
+            this.pendingRecoveryAutoplay = null;
             for (const release of this.teardownWaits) release();
             this.teardownWaits.clear();
             if (this.seekResumeTimeout !== null) {
@@ -38255,6 +38317,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   });
 
+  // packages/plugins/ui/src/controls/replay.ts
+  function replayFromEnd(api, video) {
+    if (video.duration === Infinity) {
+      const source = api.getState("source");
+      if (!source) return null;
+      api.emit("media:load-request", { src: source.src, autoplay: true });
+      return null;
+    }
+    const playlistStart = api.getPlugin("hls-provider")?.getPlaylistStart?.();
+    const seekable = video.seekable;
+    const target = typeof playlistStart === "number" && Number.isFinite(playlistStart) && playlistStart >= 0 && playlistStart < video.duration ? playlistStart : seekable && seekable.length > 0 ? seekable.start(0) : 0;
+    video.currentTime = target;
+    return target;
+  }
+  var init_replay = __esm({
+    "packages/plugins/ui/src/controls/replay.ts"() {
+      "use strict";
+    }
+  });
+
   // packages/plugins/ui/src/controls/PlayButton.ts
   var PlayButton;
   var init_PlayButton = __esm({
@@ -38262,6 +38344,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       "use strict";
       init_icons();
       init_utils();
+      init_replay();
       PlayButton = class {
         constructor(api) {
           this.clickHandler = () => {
@@ -38297,8 +38380,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           if (!video) return;
           const ended = this.api.getState("ended");
           if (ended) {
-            video.currentTime = 0;
-            this.api.emit("playback:seeking", { time: 0 });
+            const target = replayFromEnd(this.api, video);
+            if (target === null) return;
+            this.api.emit("playback:seeking", { time: target });
             video.play().catch(() => {
             });
           } else if (!video.paused) {
@@ -38323,6 +38407,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       "use strict";
       init_icons();
       init_utils();
+      init_replay();
       BigPlayButton = class {
         /**
          * @param api - Plugin API for state and container access
@@ -38425,16 +38510,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         /**
          * Start (or restart) playback.
          *
-         * The same two branches as the control bar's play button: restart from zero
-         * after the video ended, otherwise just play. There is no pause branch,
+         * The same two branches as the control bar's play button: restart after the
+         * video ended, otherwise just play. A replay goes through
+         * {@link replayFromEnd}, which picks the target from the element's duration.
+         * When that reloads the source instead of seeking, the element is left alone:
+         * the load request already carries `autoplay`. There is no pause branch,
          * because this button is never on screen while playback is running. It reads
          * `video.ended` for the same reason `hasEnded()` does.
          */
         start() {
           const video = getVideo(this.api.container);
           if (!video) return;
-          if (video.ended) {
-            video.currentTime = 0;
+          if (video.ended && replayFromEnd(this.api, video) === null) {
+            return;
           }
           video.play().catch(() => {
           });
@@ -42549,6 +42637,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("buffering", true);
     });
     addHandler("hlsLevelLoaded", (_event, data) => {
+      if (data.details) callbacks.onPlaylistDetails?.(data.details);
       if (data.details?.live !== void 0) {
         api.setState("live", data.details.live);
         if (data.details.live) {
@@ -42751,12 +42840,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     });
     const webkitVideo = video;
     if ("webkitPresentationMode" in video) {
+      let previousMode = webkitVideo.webkitPresentationMode;
       addHandler("webkitpresentationmodechanged", () => {
         const mode = webkitVideo.webkitPresentationMode;
+        const leftPip = previousMode === "picture-in-picture" && mode === "inline";
+        previousMode = mode;
         const isInPip = mode === "picture-in-picture";
         api.setState("pip", isInPip);
         api.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
-        if (mode === "inline" && video.paused) {
+        if (leftPip && video.paused) {
           video.play().catch(() => {
           });
         }
@@ -42957,7 +43049,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     maxMediaRetries: 2,
     retryDelayMs: 1e3,
     retryBackoffFactor: 2,
-    // Load watchdog: never leave the viewer on an endless spinner
+    // Load watchdog: never leave the viewer on an endless spinner. One 30 s
+    // ceiling over the whole load (retries included), well past a healthy
+    // cold start; a load that hits it hands off to auto-reconnect rather than
+    // ending in a dead-end error (HEI-SCARLETT-57, Sentry TSP-WEB-2G9)
     loadTimeoutMs: 3e4,
     // Self-healing: reconnect automatically after fatal errors mid-playback
     autoReconnect: true,
@@ -42974,6 +43069,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     "manifestParsingError"
   ];
   var LOAD_TIMEOUT_MESSAGE = "Video took too long to load (network timeout)";
+  function buildLoadTimeoutError(attempts) {
+    return {
+      type: "network",
+      details: LOAD_TIMEOUT_MESSAGE,
+      fatal: true,
+      timedOut: true,
+      attempts
+    };
+  }
   function nativeMediaError(mediaError, phase) {
     const code = mediaError?.code;
     const is_network = phase === "initial" ? code !== MediaError.MEDIA_ERR_DECODE : code === MediaError.MEDIA_ERR_NETWORK;
@@ -43008,7 +43112,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let lastLevelDetails = null;
     let lastLiveMetrics = null;
     let lastKnownTargetLatency = null;
+    let lastPlaylistStart = null;
     let loadSession = 0;
+    let pendingUserLoad = null;
     let abortPendingLoad2 = null;
     let networkRetryCount = 0;
     let mediaRetryCount = 0;
@@ -43158,7 +43264,68 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       lastLevelDetails = null;
       lastLiveMetrics = null;
       lastKnownTargetLatency = null;
+      lastPlaylistStart = null;
       if (api) resetLiveMetrics(api);
+    };
+    const applyAudioState = () => {
+      if (!video || !api) return;
+      const muted = api.getState("muted");
+      const volume = api.getState("volume");
+      if (muted !== void 0) video.muted = muted;
+      if (volume !== void 0) video.volume = volume;
+    };
+    const reportUserLoad = (ticket, session, failed, error) => {
+      if (ticket.done || ticket.session !== session) return;
+      if (session === loadSession) {
+        if (failed) ticket.reject(error);
+        else ticket.resolve(session);
+      } else if (failed && !ticket.takenOver) {
+        ticket.reject(error);
+      } else {
+        ticket.resolve(null);
+      }
+    };
+    const trackUserLoad = (ticket, session, load) => {
+      load.then(
+        () => reportUserLoad(ticket, session, false, void 0),
+        (error) => reportUserLoad(ticket, session, true, error)
+      );
+    };
+    const awaitUserLoad = (session, load) => {
+      const promise = new Promise((resolve2, reject) => {
+        const ticket = {
+          session,
+          takenOver: false,
+          done: false,
+          resolve: (owner) => {
+            ticket.done = true;
+            if (pendingUserLoad === ticket) pendingUserLoad = null;
+            resolve2(owner);
+          },
+          reject: (error) => {
+            ticket.done = true;
+            if (pendingUserLoad === ticket) pendingUserLoad = null;
+            reject(error);
+          }
+        };
+        pendingUserLoad = ticket;
+        trackUserLoad(ticket, session, load);
+      });
+      return promise;
+    };
+    const releaseUserLoad = (reason) => {
+      const ticket = pendingUserLoad;
+      pendingUserLoad = null;
+      if (!ticket || ticket.done) return;
+      if (ticket.takenOver) ticket.resolve(null);
+      else ticket.reject(reason);
+    };
+    const takeOverUserLoad = (session, load) => {
+      const ticket = pendingUserLoad;
+      if (!ticket || ticket.done) return;
+      ticket.session = session;
+      ticket.takenOver = true;
+      trackUserLoad(ticket, session, load);
     };
     const buildHlsConfig = () => {
       const config2 = buildBaseHlsConfig();
@@ -43280,6 +43447,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return detail;
     };
     const emitFatalError = (error, retriesExhausted, messageOverride) => {
+      const session = loadSession;
       const message = messageOverride ?? (retriesExhausted ? `HLS error: ${error.details} (max retries exceeded)` : `HLS error: ${error.details}`);
       api?.logger.error(message, { type: error.type, details: error.details });
       api?.setState("playbackState", "error");
@@ -43295,6 +43463,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         timestamp: Date.now(),
         detail
       });
+      if (session !== loadSession) return;
       maybeScheduleReconnect(error);
     };
     const cancelPendingRetry = () => {
@@ -43566,20 +43735,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
               reject(new Error(LOAD_TIMEOUT_MESSAGE));
               return;
             }
-            if (retryTimeout) {
-              clearTimeout(retryTimeout);
-              retryTimeout = null;
-            }
             api?.logger.error(`Native HLS load timed out after ${timeout_ms}ms`, {
               src: sanitizeUrl(src)
             });
-            const timeout_error = {
-              type: "network",
-              details: LOAD_TIMEOUT_MESSAGE,
-              fatal: true,
-              timedOut: true,
-              attempts: networkRetryCount + mediaRetryCount
-            };
+            const timeout_error = buildLoadTimeoutError(networkRetryCount + mediaRetryCount);
+            teardownPipeline();
+            videoEl.removeAttribute("src");
+            videoEl.load();
             if (last_error?.mediaErrorCode !== void 0) {
               timeout_error.mediaErrorCode = last_error.mediaErrorCode;
             }
@@ -43656,6 +43818,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             lastLevelDetails = details;
             readLiveMetrics();
           },
+          onPlaylistDetails: (details) => {
+            if (session !== loadSession) return;
+            const start = details.fragmentStart ?? details.fragments?.[0]?.start ?? 0;
+            lastPlaylistStart = Number.isFinite(start) ? start : null;
+          },
           isLowLatencyRequested: () => mergedConfig.lowLatencyMode === true,
           onError: (error) => {
             if (session !== loadSession) return;
@@ -43708,14 +43875,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             resolved = true;
             releaseAbort();
             api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src: sanitizeUrl(src) });
-            const timeoutError = {
-              type: "network",
-              details: "Video took too long to load (network timeout)",
-              fatal: true
-            };
-            emitFatalError(timeoutError, true);
-            teardownPipeline();
-            reject(new Error(timeoutError.details));
+            emitFatalError(buildLoadTimeoutError(networkRetryCount), false, LOAD_TIMEOUT_MESSAGE);
+            if (session === loadSession) teardownPipeline();
+            reject(new Error(LOAD_TIMEOUT_MESSAGE));
           }, timeout_ms);
         }
         hls.attachMedia(videoEl);
@@ -43802,6 +43964,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const scheduleReconnectAttempt = () => {
       if (reconnectExhausted) return;
       if (reconnectTimer) return;
+      const session = loadSession;
       const isLive = (api?.getState("live") ?? false) && isLiveClassified;
       const configWindowMs = mergedConfig.reconnectWindowMs ?? 3e5;
       const window_ms = isLive ? Infinity : configWindowMs;
@@ -43820,6 +43983,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           windowMs: window_ms,
           longOutage: true
         });
+        if (session !== loadSession) return;
       }
       const base_delay = mergedConfig.reconnectBaseDelayMs ?? 2e3;
       const max_delay = mergedConfig.reconnectMaxDelayMs ?? 3e4;
@@ -43833,6 +43997,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         elapsedMs: elapsed_ms,
         windowMs: window_ms
       });
+      if (session !== loadSession) return;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         void attemptReconnect();
@@ -43842,7 +44007,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (mergedConfig.autoReconnect === false) return false;
       if (!currentSrc) return false;
       const isLive = (api?.getState("live") ?? false) && isLiveClassified;
-      if (!isLive && !hasPlayedContent) return false;
+      const timeoutWindowOpen = reconnectTriggerError?.timedOut === true;
+      if (!isLive && !hasPlayedContent && !error.timedOut && !timeoutWindowOpen) return false;
       return error.type === "network" || error.type === "media" || error.type === "mux";
     };
     const maybeScheduleReconnect = (error) => {
@@ -43883,6 +44049,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         } else if (video && resume_position > 0) {
           video.currentTime = resume_position;
         }
+        applyAudioState();
         api.setState("playbackState", "ready");
         api.setState("buffering", false);
         api.emit("error:recovered", {
@@ -44083,7 +44250,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           window.removeEventListener("online", onlineListener);
           onlineListener = null;
         }
-        cleanup(new Error("HLS load cancelled: player destroyed"));
+        const reason = new Error("HLS load cancelled: player destroyed");
+        releaseUserLoad(reason);
+        cleanup(reason);
         mediaTypeClassifier?.destroy();
         mediaTypeClassifier = null;
         if (video?.parentNode) {
@@ -44100,22 +44269,25 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         hasPlayedContent = false;
         isLiveClassified = false;
         api.setState("live", false);
-        cleanup(new Error("HLS load cancelled: superseded by a new load"));
+        const superseded = new Error("HLS load cancelled: superseded by a new load");
+        releaseUserLoad(superseded);
+        cleanup(superseded);
         currentSrc = src;
         playbackGate.corePlayRequested = false;
         playbackGate.corePauseRequested = false;
         applyPoster();
         api.setState("playbackState", "loading");
         api.setState("buffering", true);
+        let load;
         if (api.getState("airplayActive") && loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS (AirPlay active)");
-          await loadNative(src, true);
+          load = loadNative(src, true);
         } else if (loader.isHlsJsSupported()) {
           api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
-          await loadWithHlsJs(src);
+          load = loadWithHlsJs(src);
         } else if (loader.supportsNativeHLS()) {
           api.logger.info("Using native HLS playback (hls.js not supported)");
-          await loadNative(src, true);
+          load = loadNative(src, true);
         } else {
           const probes = loader.describeSupport();
           const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
@@ -44130,13 +44302,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
           throw new Error(message);
         }
-        if (session !== loadSession) return;
-        if (video) {
-          const muted = api.getState("muted");
-          const volume = api.getState("volume");
-          if (muted !== void 0) video.muted = muted;
-          if (volume !== void 0) video.volume = volume;
-        }
+        const owner = await awaitUserLoad(session, load);
+        if (owner === null || owner !== loadSession || !api) return;
+        applyAudioState();
         api.setState("playbackState", "ready");
         api.setState("buffering", false);
       },
@@ -44205,6 +44373,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
        * Switch from hls.js to native HLS playback.
        * Used for AirPlay compatibility in Safari.
        * Preserves current playback position.
+       *
+       * A user `loadSource()` still pending when the switch starts is taken
+       * over, not failed: it resolves once this switch's native load does.
+       *
+       * @returns Resolves once the native pipeline has loaded the source
+       * @throws Error when the native load fails or is superseded
        */
       async switchToNative() {
         if (isNative) {
@@ -44224,12 +44398,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const currentTime = video?.currentTime || 0;
         const savedSrc = currentSrc;
         const savedTargetLatency = lastKnownTargetLatency;
+        const takes_over = pendingUserLoad !== null;
         const session = ++loadSession;
         cancelReconnect();
         cleanup(new Error("HLS load cancelled: switching to native HLS"));
         currentSrc = savedSrc;
         lastKnownTargetLatency = savedTargetLatency;
-        await loadNative(savedSrc);
+        const load = loadNative(savedSrc, takes_over);
+        takeOverUserLoad(session, load);
+        await load;
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
           video.currentTime = currentTime;
@@ -44246,6 +44423,12 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       /**
        * Switch from native HLS back to hls.js.
        * Restores quality control after AirPlay session ends.
+       *
+       * A user `loadSource()` still pending when the switch starts is taken
+       * over, not failed: it resolves once this switch's hls.js load does.
+       *
+       * @returns Resolves once hls.js has parsed the manifest
+       * @throws Error when the hls.js load fails or is superseded
        */
       async switchToHlsJs() {
         if (!isNative) {
@@ -44270,7 +44453,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         cleanup(new Error("HLS load cancelled: switching to hls.js"));
         currentSrc = savedSrc;
         lastKnownTargetLatency = savedTargetLatency;
-        await loadWithHlsJs(savedSrc);
+        const load = loadWithHlsJs(savedSrc);
+        takeOverUserLoad(session, load);
+        await load;
         if (session !== loadSession) return;
         if (video && currentTime > 0) {
           video.currentTime = currentTime;
@@ -44283,6 +44468,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         api?.logger.info("Switched to hls.js");
+      },
+      /**
+       * Start of the last playlist hls.js loaded, live or ended.
+       *
+       * Kept after EXT-X-ENDLIST, when `live` and `seekableRange` are cleared,
+       * so Replay can restart a finished sliding window at its first segment
+       * rather than at the MSE range start (0). Forgotten with the source.
+       *
+       * @returns The window start in seconds, or null on native HLS and before
+       *          any playlist loaded
+       */
+      getPlaylistStart() {
+        if (isNative) return null;
+        return lastPlaylistStart;
       },
       getDiagnostics() {
         const engine = isNative ? "native" : hls ? "hls.js" : null;
@@ -44615,11 +44814,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
       const webkitVideo = videoEl;
       if ("webkitPresentationMode" in videoEl) {
+        let previousMode = webkitVideo.webkitPresentationMode;
         on("webkitpresentationmodechanged", () => {
           const mode = webkitVideo.webkitPresentationMode;
+          const leftPip = previousMode === "picture-in-picture" && mode === "inline";
+          previousMode = mode;
           api?.setState("pip", mode === "picture-in-picture");
           api?.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
-          if (mode === "inline" && videoEl.paused) {
+          if (leftPip && videoEl.paused) {
             videoEl.play().catch(() => {
             });
           }
@@ -54362,8 +54564,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     const queue = [];
     let timer = null;
     const bytes = (body) => new TextEncoder().encode(body).length;
-    const envelope = (events) => ({ batch: 1, sentAt: Date.now(), events });
-    const bodyFor = (events) => safeStringify(envelope(events));
+    const bodyFor = (events, sentAt = 1e12) => `{"batch":1,"sentAt":${sentAt},"events":[${events.join(",")}]}`;
+    const singleBody = (json) => (sentAt) => json.length > 2 && json.endsWith("}") ? `${json.slice(0, -1)},"sentAt":${sentAt}}` : `{"sentAt":${sentAt}}`;
     function blocked() {
       if (!isOptedOut()) return false;
       clearTimer();
@@ -54379,7 +54581,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const dispatch = (extra) => {
         if (blocked()) return;
         try {
-          fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {
+          fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body: body(Date.now()), keepalive: true }).catch(() => {
           });
         } catch {
         }
@@ -54430,14 +54632,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
         }
         try {
-          if (!blocked() && navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) return;
+          if (!blocked() && navigator.sendBeacon(url, new Blob([body(Date.now())], { type: "application/json" }))) return;
         } catch {
         }
       }
       if (blocked()) return;
       const extra = unloadHeaders();
       try {
-        fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {
+        fetch(config.beaconUrl, { method: "POST", headers: beaconHeaders(extra), body: body(Date.now()), keepalive: true }).catch(() => {
         });
       } catch {
       }
@@ -54449,7 +54651,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function flushWith(dispatch) {
       if (blocked()) return;
       clearTimer();
-      if (queue.length) dispatch(bodyFor(queue.splice(0)));
+      if (queue.length) {
+        const events = queue.splice(0);
+        dispatch((sentAt) => bodyFor(events, sentAt));
+      }
     }
     function send(payload) {
       if (blocked()) return;
@@ -54457,17 +54662,18 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         config.customBeacon(config.beaconUrl, payload);
         return;
       }
+      const json = safeStringify(payload);
       if (!enabled) {
-        post(safeStringify(payload));
+        post(singleBody(json));
         return;
       }
-      if (bytes(bodyFor([payload])) > 6e4) {
+      if (bytes(bodyFor([json])) > 6e4) {
         flushWith(post);
-        post(safeStringify(payload));
+        post(singleBody(json));
         return;
       }
-      if (queue.length && bytes(bodyFor([...queue, payload])) > 6e4) flushWith(post);
-      queue.push(payload);
+      if (queue.length && bytes(bodyFor([...queue, json])) > 6e4) flushWith(post);
+      queue.push(json);
       if (queue.length >= maxEvents || payload.event === "viewEnd" || payload.event === "error" && payload.fatal === true) {
         flushWith(post);
       } else if (timer === null) timer = setTimeout(() => flushWith(post), intervalMs);
@@ -54478,19 +54684,61 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         config.customBeacon(config.beaconUrl, payload);
         return;
       }
+      const json = safeStringify(payload);
       if (!enabled) {
-        unload(safeStringify(payload));
+        unload(singleBody(json));
         return;
       }
-      if (queue.length && bytes(bodyFor([...queue, payload])) > 6e4) flushWith(unload);
-      if (bytes(bodyFor([payload])) > 6e4) {
-        unload(safeStringify(payload));
+      if (queue.length && bytes(bodyFor([...queue, json])) > 6e4) flushWith(unload);
+      if (bytes(bodyFor([json])) > 6e4) {
+        unload(singleBody(json));
         return;
       }
-      queue.push(payload);
+      queue.push(json);
       flushWith(unload);
     }
     return { send, sendUnload, flush: () => flushWith(post), flushUnload: () => flushWith(unload) };
+  }
+
+  // packages/plugins/analytics/src/stall-progress.ts
+  var PROGRESS_SAMPLE_MS = 500;
+  var PROGRESS_STALL_MS = 2e3;
+  function createStallProgress(options) {
+    let position = null;
+    let lastAdvanceAt = 0;
+    let stalled = false;
+    function reset(open = false) {
+      position = null;
+      lastAdvanceAt = 0;
+      stalled = open;
+    }
+    function sample() {
+      const current = options.position();
+      if (current === null || !Number.isFinite(current)) {
+        reset(stalled);
+        return;
+      }
+      const now2 = options.now();
+      if (position === null || current !== position) {
+        if (stalled && position !== null && current > position) {
+          options.onResume();
+          stalled = false;
+        }
+        position = current;
+        lastAdvanceAt = now2;
+        if (!stalled) options.onProgress?.();
+        return;
+      }
+      if (!stalled && now2 - lastAdvanceAt >= PROGRESS_STALL_MS) {
+        stalled = true;
+        options.onStall(lastAdvanceAt);
+      }
+    }
+    function holding() {
+      if (position === null || stalled) return false;
+      return options.position() === position;
+    }
+    return { sample, reset, holding };
   }
 
   // packages/plugins/analytics/src/seek-window.ts
@@ -54742,6 +54990,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let pauseStartTime = null;
     let pendingPause = null;
     let playRequestPending = false;
+    let playRequestPosition = 0;
+    let frameConfirmationArmed = false;
+    let frameConfirmationGeneration = 0;
+    let pendingFrame = null;
     let pendingTrack = null;
     let currentTrackId = null;
     let lastSourceKey = null;
@@ -54758,7 +55010,57 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let segmentErrors = 0;
     let mainBytes = 0;
     let mainDurationMs = 0;
+    let frameTotalsKnown = false;
+    let decodedFramesTotal = 0;
+    let droppedFramesTotal = 0;
+    let progressTimer = null;
+    let progressRebuffer = false;
+    let progressPlayCredit = 0;
+    let progressDvrCredit = 0;
+    const stallProgress = createStallProgress({
+      now: () => Date.now(),
+      position: () => api?.container.querySelector("video")?.currentTime ?? null,
+      onProgress: () => {
+        accrueTime();
+        progressPlayCredit = session.playTime;
+        progressDvrCredit = session.dvrTime;
+      },
+      onStall: (startedAt) => {
+        accrueTime();
+        session.playTime = progressPlayCredit;
+        session.dvrTime = progressDvrCredit;
+        lastPlayingAt = startedAt;
+        progressRebuffer = true;
+        openRebuffer(startedAt, "progress");
+      },
+      onResume: () => closeRebuffer(true)
+    });
     let frameBaseline = null;
+    function reportedCredit() {
+      if (progressTimer !== null && stallProgress.holding()) {
+        return { playTime: progressPlayCredit, dvrTime: progressDvrCredit };
+      }
+      return { playTime: session.playTime, dvrTime: session.dvrTime };
+    }
+    function stopStallProgress() {
+      if (progressTimer !== null) clearInterval(progressTimer);
+      progressTimer = null;
+      stallProgress.reset();
+    }
+    function syncStallProgress() {
+      const eligible = api && session.viewEnd === null && session.firstFrameTime !== null && statePlaying && session.playbackState === "playing" && !api.getState("paused") && !api.getState("seeking") && !api.getState("ended") && !document.hidden && api.getState("playbackRate") > 0 && waitingSince === null && api.getState("chromecastActive") !== true && (!isRebuffering || progressRebuffer) && api.container.querySelector("video");
+      if (!eligible) {
+        stopStallProgress();
+        return;
+      }
+      if (progressTimer !== null) return;
+      stallProgress.reset(progressRebuffer);
+      stallProgress.sample();
+      progressTimer = setInterval(() => {
+        syncStallProgress();
+        if (progressTimer !== null) stallProgress.sample();
+      }, PROGRESS_SAMPLE_MS);
+    }
     function onSegment(segment) {
       if (session.viewEnd !== null || !segment || !Number.isFinite(segment.bytes) || segment.bytes < 0 || !Number.isFinite(segment.durationMs) || segment.durationMs < 0 || segment.kind !== "main" && segment.kind !== "audio" && segment.kind !== "subtitle") return;
       segmentCount++;
@@ -54790,7 +55092,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function readFrames() {
       const video2 = api?.container.querySelector("video");
-      if (!video2 || typeof video2.getVideoPlaybackQuality !== "function") return null;
+      return video2 ? readFramesOf(video2) : null;
+    }
+    function readFramesOf(video2) {
+      if (typeof video2.getVideoPlaybackQuality !== "function") return null;
       try {
         const quality = video2.getVideoPlaybackQuality();
         const decoded = quality?.totalVideoFrames;
@@ -54801,18 +55106,43 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return null;
       }
     }
-    function resetFrames() {
-      frameBaseline = readFrames();
+    function resetFrames(settle = true) {
+      const current = readFrames();
+      if (settle) settleFrames(current);
+      frameBaseline = current;
+      if (current) frameTotalsKnown = true;
+    }
+    function settleFrames(current) {
+      const previous = frameBaseline;
+      if (!previous) return null;
+      const add = (decoded, dropped) => {
+        decodedFramesTotal += decoded;
+        droppedFramesTotal += dropped;
+      };
+      if (current && current.video === previous.video) {
+        if (current.decoded >= previous.decoded && current.dropped >= previous.dropped) {
+          const delta = { decoded: current.decoded - previous.decoded, dropped: current.dropped - previous.dropped };
+          add(delta.decoded, delta.dropped);
+          return delta;
+        }
+        add(current.decoded, current.dropped);
+        return null;
+      }
+      const old = readFramesOf(previous.video);
+      if (old && old.decoded >= previous.decoded && old.dropped >= previous.dropped) {
+        add(old.decoded - previous.decoded, old.dropped - previous.dropped);
+      }
+      if (current) add(current.decoded, current.dropped);
+      return null;
     }
     function frameSummary() {
       const current = readFrames();
-      const previous = frameBaseline;
+      const delta = settleFrames(current);
       frameBaseline = current;
-      if (!current || !previous || current.video !== previous.video || current.decoded < previous.decoded || current.dropped < previous.dropped) return {};
-      return {
-        decodedFrames: current.decoded - previous.decoded,
-        droppedFrames: current.dropped - previous.dropped
-      };
+      if (current) frameTotalsKnown = true;
+      if (!frameTotalsKnown) return {};
+      const totals = { decodedFramesTotal, droppedFramesTotal };
+      return delta ? { decodedFrames: delta.decoded, droppedFrames: delta.dropped, ...totals } : totals;
     }
     function initSession() {
       latencySampler = createLatencySampler();
@@ -54862,6 +55192,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return null;
       }
       if (eventType === "error" && Math.random() > (mergedConfig.errorSampleRate ?? 1)) return null;
+      const seekableWindow = eventType === "seeking" && resolveIsLive() === true ? api?.getState("seekableRange") : null;
       const payload = {
         event: eventType,
         timestamp: Date.now(),
@@ -54882,23 +55213,29 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         ...session.anonymous ? { anonymous: true } : {},
         ...mergedConfig.customDimensions,
         ...data,
+        ...seekableWindow && Number.isFinite(seekableWindow.start) && Number.isFinite(seekableWindow.end) ? { seekableStart: seekableWindow.start, seekableEnd: seekableWindow.end } : {},
         beaconSeq: session.beaconSeq + 1
       };
+      delete payload.sentAt;
       if (mergedConfig.beforeSend) {
         try {
           const result = mergedConfig.beforeSend(payload);
           if (result === null) return null;
           if (typeof result !== "object") {
             session.beaconSeq++;
-            return payload;
+            return withoutSentAt(payload);
           }
           session.beaconSeq++;
-          return { ...result, beaconSeq: session.beaconSeq };
+          return withoutSentAt({ ...result, beaconSeq: session.beaconSeq });
         } catch (error) {
           api?.logger.debug("Analytics beforeSend() failed; sending unmodified beacon", { error });
         }
       }
       session.beaconSeq++;
+      return withoutSentAt(payload);
+    }
+    function withoutSentAt(payload) {
+      delete payload.sentAt;
       return payload;
     }
     function sendBeacon(eventType, data = {}) {
@@ -54913,7 +55250,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function accrueTime(now2 = Date.now()) {
       const elapsed = now2 - lastHeartbeatTime;
       session.watchTime += elapsed;
-      if (session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null) {
+      if (session.firstFrameTime !== null && session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null) {
         session.playTime += elapsed;
         if (liveMode === "dvr") session.dvrTime += elapsed;
         lastPlayingAt = now2;
@@ -54962,7 +55299,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       updateAvgBitrate(now2);
       return {
         watchTime: session.watchTime,
-        playTime: session.playTime,
+        playTime: reportedCredit().playTime,
         rebufferCount: session.rebufferCount,
         rebufferDuration: session.rebufferDuration,
         reconnectCount: session.reconnectCount,
@@ -54980,7 +55317,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         qoeVersion: 2,
         // Absent entirely on VOD: nothing ever emitted a live:latency reading
         ...latencySampler.summary() ?? {},
-        ...resolveIsLive() === true ? { dvrTime: session.dvrTime } : {},
+        ...resolveIsLive() === true ? { dvrTime: reportedCredit().dvrTime } : {},
         ...segmentSummary(),
         ...frameSummary()
       };
@@ -55053,6 +55390,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       });
     }
     function finalizeView(sendRebufferEnd) {
+      stopStallProgress();
+      cancelFrameConfirmation();
       seekWindow.end(!sendRebufferEnd);
       accrueTime();
       commitPendingPause();
@@ -55077,10 +55416,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function startView(lastKnownIsLive = null) {
       commitPendingPause();
       cancelPendingRebuffer();
+      cancelFrameConfirmation();
+      stopStallProgress();
+      progressRebuffer = false;
       idleEnded = false;
       session = initSession();
       resetSegments();
-      resetFrames();
+      frameTotalsKnown = false;
+      decodedFramesTotal = droppedFramesTotal = 0;
+      resetFrames(false);
       session.lastKnownIsLive = lastKnownIsLive;
       lastHeartbeatTime = Date.now();
       lastPlayingAt = lastHeartbeatTime;
@@ -55164,13 +55508,20 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
       beginView(next);
     }
+    function currentPosition() {
+      if (!api) return 0;
+      if (api.getState("chromecastActive") === true) return api.getState("currentTime");
+      return api.container.querySelector("video")?.currentTime ?? api.getState("currentTime");
+    }
     function onPlayRequest() {
       if (!api) return;
       ensureOpenView(true);
       if (playRequestPending) return;
       playRequestPending = true;
       session.playRequestTime = Date.now();
-      sendBeacon("playRequest");
+      const element = api.container.querySelector("video");
+      playRequestPosition = currentPosition();
+      sendBeacon("playRequest", { readyState: element?.readyState ?? 0, resume: playRequestPosition > 0 });
     }
     function ensureOpenView(playRequest = false) {
       if (session.viewEnd === null || !api) return false;
@@ -55209,13 +55560,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const long = payload?.longOutage === true && !outageLongSent;
       if (!first && !long) return;
       if (first) {
+        stopStallProgress();
+        progressRebuffer = false;
         const now2 = Date.now();
         outageStartedAt = now2;
         session.reconnectCount++;
         if (!isRebuffering && session.firstFrameTime !== null && api.getState("paused") !== true) {
           const startedAt = waitingSince ?? now2;
           cancelPendingRebuffer();
-          openRebuffer(startedAt);
+          openRebuffer(startedAt, "reconnect");
         }
       }
       if (long) outageLongSent = true;
@@ -55244,8 +55597,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       return Object.keys(kept).length > 0 ? kept : void 0;
     }
     function onStateChange(event) {
+      handleStateChange(event);
+      syncStallProgress();
+    }
+    function handleStateChange(event) {
       if (event.key === "seeking" && event.previousValue === false && event.value === true) {
         if (session.viewEnd !== null) return;
+        cancelFrameConfirmation();
         markLiveSeek();
         if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1e3) {
           pendingEchoes--;
@@ -55269,9 +55627,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         });
         return;
       }
+      if (event.key === "seeking" && event.previousValue === true && event.value === false) {
+        onSeekEnded();
+        return;
+      }
       if (event.key === "paused") {
+        if (event.value === true) cancelFrameConfirmation();
         if (event.previousValue === true && event.value === false && !api?.getState("playing")) {
           onPlayRequest();
+        }
+        if (event.previousValue === true && event.value === false && statePlaying) onFirstFrame();
+        return;
+      }
+      if (event.key === "currentTime") {
+        if (frameConfirmationArmed && api?.getState("chromecastActive") === true && typeof event.value === "number" && Number.isFinite(event.value) && event.value > playRequestPosition) {
+          confirmFirstFrame("progress");
         }
         return;
       }
@@ -55309,14 +55679,63 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (!api) return;
       session.lastKnownIsLive = api.getState("live") === true;
     }
-    function onFirstFrame() {
-      if (session.viewEnd !== null || session.firstFrameTime !== null) return;
+    function onFirstFrame(rebase = false) {
+      if (!api || session.viewEnd !== null || session.firstFrameTime !== null || frameConfirmationArmed || !statePlaying || api.getState("paused") || api.getState("seeking")) return;
+      const element = api.container.querySelector("video");
+      if (rebase || session.playRequestTime === null) {
+        playRequestPosition = currentPosition();
+      }
+      frameConfirmationArmed = true;
+      if (api.getState("chromecastActive") === true && currentPosition() > playRequestPosition) {
+        confirmFirstFrame("progress");
+        return;
+      }
+      const generation = frameConfirmationGeneration;
+      if (!element) return;
+      const onTimeUpdate2 = () => {
+        if (generation === frameConfirmationGeneration && Number.isFinite(element.currentTime) && element.currentTime > playRequestPosition) confirmFirstFrame("progress");
+      };
+      element.addEventListener("timeupdate", onTimeUpdate2);
+      const pending = { video: element, handle: null, onTimeUpdate: onTimeUpdate2 };
+      pendingFrame = pending;
+      if (typeof element.requestVideoFrameCallback === "function") {
+        try {
+          pending.handle = element.requestVideoFrameCallback(() => {
+            if (generation !== frameConfirmationGeneration) return;
+            pending.handle = null;
+            confirmFirstFrame("rvfc");
+          });
+        } catch {
+        }
+      }
+    }
+    function onSeekEnded() {
+      if (!api || session.viewEnd !== null || session.firstFrameTime !== null || frameConfirmationArmed) return;
+      onFirstFrame(true);
+    }
+    function cancelFrameConfirmation() {
+      frameConfirmationArmed = false;
+      frameConfirmationGeneration++;
+      if (pendingFrame) {
+        pendingFrame.video.removeEventListener("timeupdate", pendingFrame.onTimeUpdate);
+        if (pendingFrame.handle !== null) {
+          try {
+            pendingFrame.video.cancelVideoFrameCallback?.(pendingFrame.handle);
+          } catch {
+          }
+        }
+        pendingFrame = null;
+      }
+    }
+    function confirmFirstFrame(source) {
+      if (!api || !frameConfirmationArmed || session.viewEnd !== null || session.firstFrameTime !== null || !statePlaying || api.getState("paused") || api.getState("seeking")) return;
       const now2 = Date.now();
+      accrueTime(now2);
+      cancelFrameConfirmation();
       session.firstFrameTime = now2;
       session.startupTime = session.playRequestTime !== null ? now2 - session.playRequestTime : null;
-      sendBeacon("videoStart", {
-        startupTime: session.startupTime
-      });
+      sendBeacon("videoStart", { startupTime: session.startupTime, firstFrameSource: source });
+      syncStallProgress();
     }
     function closeRebuffer(sendEndBeacon) {
       cancelPendingRebuffer();
@@ -55325,6 +55744,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const rebufferDuration = Date.now() - rebufferStartTime;
       session.rebufferDuration += rebufferDuration;
       isRebuffering = false;
+      progressRebuffer = false;
       rebufferStartTime = null;
       if (sendEndBeacon) {
         sendBeacon("rebufferEnd", {
@@ -55334,19 +55754,23 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       }
     }
     function onPlaying() {
-      if (ensureOpenView() && api?.getState("playing")) onFirstFrame();
+      ensureOpenView();
+      if (api?.getState("playing")) onFirstFrame();
       if (!api || session.viewEnd !== null) return;
       const now2 = Date.now();
       accrueTime(now2);
-      closeRebuffer(true);
+      if (!progressRebuffer) closeRebuffer(true);
       commitPendingPause();
       settlePause(now2);
       session.playbackState = "playing";
+      syncStallProgress();
     }
     function onPause() {
       if (!api || session.viewEnd !== null) return;
       accrueTime();
+      stopStallProgress();
       closeRebuffer(true);
+      cancelFrameConfirmation();
       playRequestPending = false;
       session.playbackState = "paused";
       if (api.getState("ended") === true || pendingPause) return;
@@ -55389,6 +55813,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     function onTimeUpdate(payload) {
       if (!api) return;
       const currentTime = payload?.currentTime;
+      if (typeof currentTime === "number" && Number.isFinite(currentTime) && currentTime > playRequestPosition) {
+        confirmFirstFrame("progress");
+      }
       const duration = api.getState("duration");
       if (typeof currentTime === "number" && Number.isFinite(currentTime) && typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
         lastKnownCurrentTime = currentTime;
@@ -55400,6 +55827,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (session.firstFrameTime !== null && !isRebuffering && waitingSince === null && !api.getState("seeking")) {
         accrueTime();
         waitingSince = Date.now();
+        stopStallProgress();
         if (rebufferGraceMs === 0) {
           openRebuffer(waitingSince);
           waitingSince = null;
@@ -55413,12 +55841,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
       }
     }
-    function openRebuffer(startedAt) {
+    function openRebuffer(startedAt, cause = "waiting") {
       accrueTime();
       isRebuffering = true;
       rebufferStartTime = startedAt;
       session.rebufferCount++;
       sendBeacon("rebufferStart", {
+        cause,
         rebufferCount: session.rebufferCount,
         currentTime: api?.getState("currentTime")
       });
@@ -55431,6 +55860,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onSeeking(payload) {
       if (!api || session.viewEnd !== null) return;
+      stopStallProgress();
+      cancelFrameConfirmation();
       markLiveSeek();
       cancelPendingRebuffer();
       const now2 = Date.now();
@@ -55624,6 +56055,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function onVisibilityChange() {
       if (session.viewEnd !== null) return;
+      syncStallProgress();
       if (document.hidden) {
         session.exitType = "background";
         seekWindow.flushPending(false);
@@ -55663,6 +56095,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubSeeking = api.on("playback:seeking", onSeeking);
         const unsubEnded = api.on("playback:ended", onEnded);
         const unsubTimeUpdate = api.on("playback:timeupdate", onTimeUpdate);
+        const unsubSeeked = api.on("playback:seeked", onSeekEnded);
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
         const unsubRecovered = api.on("error:recovered", onRecovered);
@@ -55693,7 +56126,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubEdgeChange,
           unsubLowLatency,
           unsubPlaylist,
-          unsubTimeUpdate
+          unsubTimeUpdate,
+          unsubSeeked
         );
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("beforeunload", onBeforeUnload);
@@ -55721,6 +56155,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         transport.flush();
         discardPendingPause();
         cancelPendingRebuffer();
+        cancelFrameConfirmation();
+        stopStallProgress();
         seekWindow.reset();
         cleanupFns.forEach((fn) => fn());
         cleanupFns = [];
@@ -55830,7 +56266,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         }
         const isViewEnded = !!session.viewEnd;
         const elapsed = isViewEnded ? 0 : Math.max(0, now2 - lastHeartbeatTime);
-        const isActivelyPlaying = session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null && !isViewEnded;
+        const isActivelyPlaying = session.firstFrameTime !== null && session.playbackState === "playing" && statePlaying && !isRebuffering && waitingSince === null && !isViewEnded;
         const openPlay = isActivelyPlaying ? elapsed : 0;
         const currentWatchTime = session.watchTime + elapsed;
         const currentPlayTime = session.playTime + openPlay;
@@ -57987,7 +58423,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.24.0" : "dev";
+  var VERSION = true ? "1.25.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT
