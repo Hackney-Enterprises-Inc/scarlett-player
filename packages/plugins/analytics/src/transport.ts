@@ -1,7 +1,7 @@
 import type { AnalyticsConfig, BeaconPayload } from './types';
 import { isHttpsUrl, safeStringify } from './helpers';
 
-/** Batch envelope understood by compatible custom ingests (not Laravel v0.3.0). */
+/** Opt-in batch: sentAt is wire dispatch time, stamped after asynchronous headers resolve. */
 export interface BatchEnvelope {
   batch: 1;
   sentAt: number;
@@ -25,11 +25,18 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
   const options = typeof batch === 'object' ? batch : {};
   const intervalMs = typeof options.intervalMs === 'number' && Number.isFinite(options.intervalMs) && options.intervalMs > 0 ? options.intervalMs : 10000;
   const maxEvents = typeof options.maxEvents === 'number' && Number.isFinite(options.maxEvents) && options.maxEvents > 0 ? Math.floor(options.maxEvents) : 20;
-  const queue: BeaconPayload[] = [];
+  /** Queued events, each serialized when the transport accepted it. */
+  const queue: string[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   const bytes = (body: string) => new TextEncoder().encode(body).length;
-  const envelope = (events: BeaconPayload[]): BatchEnvelope => ({ batch: 1, sentAt: Date.now(), events });
-  const bodyFor = (events: BeaconPayload[]) => safeStringify(envelope(events));
+  // Events are snapshotted as JSON when accepted, so a caller mutating a
+  // payload afterwards (during a headers() wait or a batch interval) cannot
+  // change what is sent; only the wire-only sentAt is added at dispatch.
+  // A same-width dispatch-time placeholder keeps the queue size check bounded.
+  const bodyFor = (events: string[], sentAt = 1000000000000) => `{"batch":1,"sentAt":${sentAt},"events":[${events.join(',')}]}`;
+  /** @param json - An event serialized at accept time. @returns A factory adding `sentAt` as its last key. */
+  const singleBody = (json: string) => (sentAt: number) =>
+    json.length > 2 && json.endsWith('}') ? `${json.slice(0, -1)},"sentAt":${sentAt}}` : `{"sentAt":${sentAt}}`;
 
   /** Drop pending work whenever an active privacy signal is observed. */
   function blocked(): boolean {
@@ -46,12 +53,12 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
     return headers;
   }
 
-  /** Post a fully serialized body without blocking playback. */
-  function post(body: string): void {
+  /** Dispatch after headers resolve, stamping wire time immediately before fetch. @param body - Factory serialized with the dispatch time. */
+  function post(body: (sentAt: number) => string): void {
     const dispatch = (extra: Record<string, string>) => {
       if (blocked()) return;
       try {
-        fetch(config.beaconUrl, { method: 'POST', headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {});
+        fetch(config.beaconUrl, { method: 'POST', headers: beaconHeaders(extra), body: body(Date.now()), keepalive: true }).catch(() => {});
       } catch { /* Transport must never interrupt playback. */ }
     };
     const configured = config.headers;
@@ -90,8 +97,8 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
     }
   }
 
-  /** Send one body on the unload transport, with the legacy fetch fallback. */
-  function unload(body: string): void {
+  /** Stamp each unload attempt independently, including the keepalive fallback. @param body - Factory serialized with the dispatch time. */
+  function unload(body: (sentAt: number) => string): void {
     if (blocked()) return;
     if (navigator.sendBeacon) {
       let url = config.beaconUrl;
@@ -105,12 +112,12 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
           url = `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(config.apiKey)}`;
         }
       }
-      try { if (!blocked() && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) return; } catch { /* Fetch fallback. */ }
+      try { if (!blocked() && navigator.sendBeacon(url, new Blob([body(Date.now())], { type: 'application/json' }))) return; } catch { /* Fetch fallback. */ }
     }
     if (blocked()) return;
     const extra = unloadHeaders();
     try {
-      fetch(config.beaconUrl, { method: 'POST', headers: beaconHeaders(extra), body, keepalive: true }).catch(() => {});
+      fetch(config.beaconUrl, { method: 'POST', headers: beaconHeaders(extra), body: body(Date.now()), keepalive: true }).catch(() => {});
     } catch { /* Transport must never interrupt playback. */ }
   }
 
@@ -121,37 +128,42 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
   }
 
   /** Drain the queue into one bounded envelope using the requested transport. */
-  function flushWith(dispatch: (body: string) => void): void {
+  function flushWith(dispatch: (body: (sentAt: number) => string) => void): void {
     if (blocked()) return;
     clearTimer();
-    if (queue.length) dispatch(bodyFor(queue.splice(0)));
+    if (queue.length) {
+      const events = queue.splice(0);
+      dispatch((sentAt) => bodyFor(events, sentAt));
+    }
   }
 
-  /** Enqueue one payload, splitting before 60,000 bytes or on the event limit. */
+  /** Enqueue one payload, splitting before 60,000 bytes or on the event limit. @param payload - Event payload before wire stamping. */
   function send(payload: BeaconPayload): void {
     if (blocked()) return;
     if (config.customBeacon) { config.customBeacon(config.beaconUrl, payload); return; }
-    if (!enabled) { post(safeStringify(payload)); return; }
-    if (bytes(bodyFor([payload])) > 60000) {
+    const json = safeStringify(payload);
+    if (!enabled) { post(singleBody(json)); return; }
+    if (bytes(bodyFor([json])) > 60000) {
       flushWith(post);
-      post(safeStringify(payload));
+      post(singleBody(json));
       return;
     }
-    if (queue.length && bytes(bodyFor([...queue, payload])) > 60000) flushWith(post);
-    queue.push(payload);
+    if (queue.length && bytes(bodyFor([...queue, json])) > 60000) flushWith(post);
+    queue.push(json);
     if (queue.length >= maxEvents || payload.event === 'viewEnd' || (payload.event === 'error' && payload.fatal === true)) {
       flushWith(post);
     } else if (timer === null) timer = setTimeout(() => flushWith(post), intervalMs);
   }
 
-  /** Unload the pending queue and final payload as one batch if it fits. */
+  /** Unload the pending queue and final payload as one batch if it fits. @param payload - Final event payload before wire stamping. */
   function sendUnload(payload: BeaconPayload): void {
     if (blocked()) return;
     if (config.customBeacon) { config.customBeacon(config.beaconUrl, payload); return; }
-    if (!enabled) { unload(safeStringify(payload)); return; }
-    if (queue.length && bytes(bodyFor([...queue, payload])) > 60000) flushWith(unload);
-    if (bytes(bodyFor([payload])) > 60000) { unload(safeStringify(payload)); return; }
-    queue.push(payload);
+    const json = safeStringify(payload);
+    if (!enabled) { unload(singleBody(json)); return; }
+    if (queue.length && bytes(bodyFor([...queue, json])) > 60000) flushWith(unload);
+    if (bytes(bodyFor([json])) > 60000) { unload(singleBody(json)); return; }
+    queue.push(json);
     flushWith(unload);
   }
 

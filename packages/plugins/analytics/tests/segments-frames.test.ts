@@ -95,3 +95,66 @@ describe('interval segment and frame signals', () => {
     expect(h.sent('viewEnd').at(-1)).toMatchObject({ decodedFrames: 3, droppedFrames: 1 });
   });
 });
+
+it('retains frame totals after a hidden heartbeat consumes the delta, and resets totals per view', async () => {
+  const h = await createHarness(); const video = document.createElement('video');
+  const quality = { totalVideoFrames: 50, droppedVideoFrames: 5 };
+  video.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality; h.api.container.append(video);
+  h.state.set('source', { src: 'first.mp4' }); quality.totalVideoFrames = 80; quality.droppedVideoFrames = 8;
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(true); document.dispatchEvent(new Event('visibilitychange'));
+  expect(h.sent('heartbeat')[0]).toMatchObject({ decodedFrames: 30, droppedFrames: 3, decodedFramesTotal: 30, droppedFramesTotal: 3 });
+  window.dispatchEvent(new Event('pagehide'));
+  expect(h.sent('viewEnd')[0]).toMatchObject({ decodedFrames: 0, droppedFrames: 0, decodedFramesTotal: 30, droppedFramesTotal: 3 });
+  h.plugin.setVideo({ videoId: 'next' }); quality.totalVideoFrames = 90; quality.droppedVideoFrames = 9; await h.plugin.destroy();
+  expect(h.sent('viewEnd')[1]).toMatchObject({ decodedFramesTotal: 10, droppedFramesTotal: 1 });
+});
+
+it('keeps view totals through counter resets and element replacement while preserving absent deltas', async () => {
+  const h = await createHarness({ heartbeatInterval: 1000 }); let quality = { totalVideoFrames: 0, droppedVideoFrames: 0 };
+  const video = document.createElement('video'); video.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality; h.api.container.append(video);
+  h.state.set('source', { src: 'one.mp4' }); quality = { totalVideoFrames: 20, droppedVideoFrames: 2 }; vi.advanceTimersByTime(1000);
+  quality = { totalVideoFrames: 0, droppedVideoFrames: 0 }; vi.advanceTimersByTime(1000);
+  expect(h.sent('heartbeat').at(-1)).not.toHaveProperty('decodedFrames'); expect(h.sent('heartbeat').at(-1)).toMatchObject({ decodedFramesTotal: 20, droppedFramesTotal: 2 });
+  const replacement = document.createElement('video'); replacement.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality; video.replaceWith(replacement); vi.advanceTimersByTime(1000);
+  expect(h.sent('heartbeat').at(-1)).not.toHaveProperty('decodedFrames'); expect(h.sent('heartbeat').at(-1)).toMatchObject({ decodedFramesTotal: 20, droppedFramesTotal: 2 });
+  quality = { totalVideoFrames: 5, droppedVideoFrames: 1 }; await h.plugin.destroy();
+  expect(h.sent('viewEnd')[0]).toMatchObject({ decodedFrames: 5, droppedFrames: 1, decodedFramesTotal: 25, droppedFramesTotal: 3 });
+});
+
+it('retains measured view totals if the provider removes the element before unload', async () => {
+  const h = await createHarness({ heartbeatInterval: 1000 }); const video = document.createElement('video');
+  const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 }; video.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality;
+  h.api.container.append(video); h.state.set('source', { src: 'one.mp4' }); quality.totalVideoFrames = 30; quality.droppedVideoFrames = 3;
+  vi.advanceTimersByTime(1000); video.remove(); h.bus.emit('source:unloaded', { src: 'one.mp4' });
+  expect(h.sent('viewEnd')[0]).not.toHaveProperty('decodedFrames'); expect(h.sent('viewEnd')[0]).toMatchObject({ decodedFramesTotal: 30, droppedFramesTotal: 3 });
+  h.plugin.setVideo({ videoId: 'next' }); await h.plugin.destroy(); expect(h.sent('viewEnd')[1]).not.toHaveProperty('decodedFramesTotal');
+});
+
+it('folds the pending delta into totals before a mid-view source re-write rebaselines', async () => {
+  const h = await createHarness({ heartbeatInterval: 1000 }); const video = document.createElement('video');
+  const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 }; video.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality;
+  h.api.container.append(video); h.state.set('source', { src: 'live.m3u8' });
+  quality.totalVideoFrames = 100; quality.droppedVideoFrames = 10; vi.advanceTimersByTime(1000);
+  // A reconnect reload re-writes the same source between heartbeats
+  quality.totalVideoFrames = 140; quality.droppedVideoFrames = 12; h.state.set('source', { src: 'live.m3u8' });
+  quality.totalVideoFrames = 150; quality.droppedVideoFrames = 13; await h.plugin.destroy();
+  expect(h.sent('viewEnd')[0]).toMatchObject({ decodedFrames: 10, droppedFrames: 1, decodedFramesTotal: 150, droppedFramesTotal: 13 });
+});
+
+it('counts frames since a counter reset and from a replacement element, plus the old element\'s pending delta', async () => {
+  const h = await createHarness({ heartbeatInterval: 1000 }); const video = document.createElement('video');
+  const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 }; video.getVideoPlaybackQuality = () => quality as VideoPlaybackQuality;
+  h.api.container.append(video); h.state.set('source', { src: 'one.mp4' });
+  quality.totalVideoFrames = 20; quality.droppedVideoFrames = 2; vi.advanceTimersByTime(1000);
+  // The element reloaded: its counters restarted and have counted 7 since
+  quality.totalVideoFrames = 7; quality.droppedVideoFrames = 1; vi.advanceTimersByTime(1000);
+  expect(h.sent('heartbeat').at(-1)).not.toHaveProperty('decodedFrames');
+  expect(h.sent('heartbeat').at(-1)).toMatchObject({ decodedFramesTotal: 27, droppedFramesTotal: 3 });
+  // The old element decodes 3 more before a new one replaces it, which has counted 4
+  quality.totalVideoFrames = 10; quality.droppedVideoFrames = 1;
+  const replacement = document.createElement('video'); const next = { totalVideoFrames: 4, droppedVideoFrames: 0 };
+  replacement.getVideoPlaybackQuality = () => next as VideoPlaybackQuality; video.replaceWith(replacement); vi.advanceTimersByTime(1000);
+  expect(h.sent('heartbeat').at(-1)).not.toHaveProperty('decodedFrames');
+  expect(h.sent('heartbeat').at(-1)).toMatchObject({ decodedFramesTotal: 34, droppedFramesTotal: 3 });
+  await h.plugin.destroy();
+});

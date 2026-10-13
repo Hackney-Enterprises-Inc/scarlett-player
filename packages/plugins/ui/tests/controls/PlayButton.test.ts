@@ -195,6 +195,76 @@ describe('PlayButton', () => {
     });
   });
 
+  describe('Replay on an ended stream', () => {
+    const timeRanges = (pairs: Array<[number, number]>): TimeRanges =>
+      ({
+        length: pairs.length,
+        start: (i: number) => (pairs[i] ?? [0, 0])[0],
+        end: (i: number) => (pairs[i] ?? [0, 0])[1],
+      }) as unknown as TimeRanges;
+
+    const setElementTimeline = (duration: number, seekable: Array<[number, number]>): HTMLVideoElement => {
+      const video = api.container.querySelector('video')!;
+      Object.defineProperty(video, 'duration', { value: duration, configurable: true });
+      Object.defineProperty(video, 'seekable', { value: timeRanges(seekable), configurable: true });
+      return video;
+    };
+
+    it('native: durationchange to Infinity, then finite, then ended restarts the recording at 0', () => {
+      api.setState('live', true);
+      setElementTimeline(Infinity, [[0, 90]]);
+      setElementTimeline(90, [[0, 90]]);
+      api.setState('ended', true);
+      button.update();
+
+      const video = api.container.querySelector('video')!;
+      button.render().click();
+
+      expect(video.currentTime).toBe(0);
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 0 });
+      expect(api.emit).not.toHaveBeenCalledWith('live:seektolive', undefined);
+    });
+
+    it('a sliding window that ended replays from the window start and announces it', () => {
+      setElementTimeline(600, [[120, 600]]);
+      api.setState('ended', true);
+
+      const video = api.container.querySelector('video')!;
+      button.render().click();
+
+      expect(video.currentTime).toBe(120);
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 120 });
+      expect(video.play).toHaveBeenCalled();
+    });
+
+    it('an element that ended with an infinite duration reloads the source with autoplay', () => {
+      const src = 'https://cdn.example.com/stalled/index.m3u8';
+      api.setState('source', { src, type: 'application/x-mpegURL' });
+      const video = setElementTimeline(Infinity, [[100, 400]]);
+      const setTime = vi.fn();
+      Object.defineProperty(video, 'currentTime', { get: () => 0, set: setTime, configurable: true });
+      api.setState('ended', true);
+
+      button.render().click();
+
+      expect(setTime).not.toHaveBeenCalled();
+      expect(api.emit).toHaveBeenCalledWith('media:load-request', { src, autoplay: true });
+      expect(api.emit).not.toHaveBeenCalledWith('playback:seeking', expect.anything());
+    });
+
+    it('a VOD that ended still restarts at 0 (regression guard)', () => {
+      setElementTimeline(600, [[0, 600]]);
+      api.setState('ended', true);
+
+      const video = api.container.querySelector('video')!;
+      button.render().click();
+
+      expect(video.currentTime).toBe(0);
+      expect(api.emit).toHaveBeenCalledWith('playback:seeking', { time: 0 });
+      expect(api.emit).not.toHaveBeenCalledWith('media:load-request', expect.anything());
+    });
+  });
+
   it('should remove element on destroy', () => {
     const el = button.render();
     document.body.appendChild(el);

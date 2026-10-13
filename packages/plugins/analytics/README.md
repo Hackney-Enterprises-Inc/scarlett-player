@@ -122,12 +122,12 @@ The plugin automatically tracks these events:
 | Event | Description | Data |
 |-------|-------------|------|
 | `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment, pageUrl (origin + pathname only), optional referrerOrigin, pageLoadToInitMs, optional playerInitMs |
-| `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp |
-| `videoStart` | First frame rendered, once per view | startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
-| `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 2, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional interval fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames (see below) |
+| `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp, readyState (element readiness), resume (`currentTime > 0` at the request) |
+| `videoStart` | First frame confirmed by rVFC or advancing timeupdate, once per view | firstFrameSource: `rvfc` or `progress`; startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
+| `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 2, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional measurement fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames, decodedFramesTotal, droppedFramesTotal (see below) |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
-| `seeking` | A player-requested seek started: the first request of a burst, then the burst's latest target once per second; or the first element-driven seek of a burst (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount at emission, seekSource: `'player'` or `'element'` |
-| `rebufferStart` | Buffering persisted through `rebufferGraceMs` (250 ms default); duration is measured from the first eligible `waiting`, not this beacon's timestamp | rebufferCount |
+| `seeking` | A player-requested seek started: the first request of a burst, then the burst's latest target once per second; or the first element-driven seek of a burst (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount at emission, seekSource: `'player'` or `'element'`; on live seeks with an available window, seekableStart and seekableEnd (seconds) |
+| `rebufferStart` | Waiting persisted through `rebufferGraceMs`, visible playback froze for 2 s, or a provider reconnect began; duration starts at waiting, the last sampled advance, or reconnect | rebufferCount, cause: `waiting`, `progress` or `reconnect` |
 | `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
 | `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), optional errorCode (string or number), fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, networkState, readyState, attempts, retriesExhausted, reconnectExhausted, reconnecting, timedOut when the provider supplies them; online (boolean, when `navigator.onLine` is available); sourceHost (the source's host name only: no scheme, port, path, query or fragment; absent for `blob:`/`data:` sources). Classification uses code/detail, not message text: an element error with no player code is classified by its MediaError code (2 `network`, 3 `media`, 4 `source`). No raw detail or signed URL is sent. A fatal error marked `reconnecting` is sent with errorSeverity `warning` (see [Reconnects](#reconnects)) |
@@ -135,14 +135,24 @@ The plugin automatically tracks these events:
 | `recovered` | A reconnect succeeded (see [Reconnects](#reconnects)) | duration (ms of the outage), reconnectCount; attempt and elapsedMs when supplied as finite numbers |
 | `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, optional fatalErrorCategory, completionRate and gaugeScale. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or null when no finite duration is known. startupTime is null until the first frame. Both gauges are declared by gaugeScale and bounded as described in [Gauge units](#gauge-units) |
 
-The segment and frame fields are interval measurements, not cumulative counters.
+Segment fields and the original frame fields are interval measurements.
 `segmentCount`, `segmentBytes`, `segmentLoadAvgMs`, `segmentLoadMaxMs` and
 `segmentErrors` are present only when measurable segment requests arrived since
 the previous metrics beacon; load times are in ms. `segmentThroughputBps` is
 present only with a positive main-segment load interval and measures bits per
 second. `decodedFrames` and `droppedFrames` are deltas between valid readings
 of the same media element's `getVideoPlaybackQuality()` counters; unavailable
-or reset counters omit them. Both `viewEnd` paths use these same rules.
+or reset counters omit them. `decodedFramesTotal` and `droppedFramesTotal`
+count every frame the view's elements reported and reset only on a new view.
+They also take in what the deltas cannot: the frames since the last reading
+when a source re-write (a reconnect reload) rebaselines mid-view, the frames
+counted since a counter reset, and, when the element is replaced or removed,
+what the old element decoded since the last reading plus the new element's
+own count. A visibility heartbeat can consume the last delta, so pagehide may
+send a zero delta while retaining the view's total. Both `viewEnd` paths use
+these same rules. Previously measured view totals survive an unavailable
+reading or element teardown. A view that never supplied valid counters omits
+frame totals as well.
 
 A closed view stays closed. Once its `viewEnd` has gone, no `error`, `pause`,
 `rebufferStart`, `qualityChange` or visibility heartbeat is sent for it and its
@@ -179,6 +189,28 @@ ingest that stores these gauges normalizes the declared scale into canonical
 `customDimensions` entry named `gaugeScale` cannot override the marker: the
 plugin's own value is applied after custom dimensions.
 
+### First-frame confirmation
+
+`playing` arms confirmation; it does not send `videoStart`. The first
+`requestVideoFrameCallback` (rVFC) or a `timeupdate` advancing past the position
+at the play request wins, and sends `firstFrameSource: 'rvfc'` or `'progress'`.
+The progress fallback also works when a supported rVFC never fires. While a
+Chromecast session is active (`chromecastActive`) the local element stays
+paused, so the receiver's position (the `currentTime` state key) advancing
+past its position at the play request confirms instead, with
+`firstFrameSource: 'progress'`.
+`startupTime` ends at that confirmation. No `playTime` accrues before it, so
+startup and play time do not overlap. A frozen start has no `videoStart` and
+its `startupTime` stays null. Pause, seek, viewEnd, a new view and destroy
+cancel pending confirmation and any rVFC handle. The next play re-arms it after
+a pause; a seek re-arms it when the seek ends while playback is still running
+(providers keep `playing` true across a seek), and progress is then measured
+from the post-seek position. Progress is read from the bus `timeupdate` and
+from the element's own `timeupdate`, so a provider that emits no bus
+`timeupdate` (WHEP) still confirms in a browser without rVFC.
+`playRequest.readyState` and `resume` describe readiness and a nonzero request
+position, so a warm resume can be distinguished from a cold start.
+
 ### Rebuffer grace and time accounting
 
 `rebufferGraceMs` defaults to **250 ms**. Waiting before the first frame or
@@ -200,7 +232,8 @@ rebuffer beacons or an increase in `rebufferCount`.
 - `watchTime` is the time the view was open: wall time from `viewStart` to the
   view's end, paused, stalled and pending waiting included. `playTime` is
   engaged time and accrues only while playing, with neither a pending nor a confirmed
-  stall. Playing means the player's `playing` state key is true: a play
+  stall, and only after a confirmed first frame. Playing also requires the
+  player's `playing` state key to be true: a play
   request still waiting for its first frame, and a view whose playback a
   `load()` stopped with no pause, accrue none. A custom provider must
   therefore keep the `playing` key current. Even an 11 ms blip that is dropped from rebuffer metrics counts as
@@ -211,6 +244,26 @@ rebuffer beacons or an increase in `rebufferCount`.
 This reduces short Safari post-seek rebuffer rows and counts without hiding
 the full duration of a real stall. This is a JavaScript analytics option;
 there is no embed data attribute for it.
+
+A progress detector samples the media element every **500 ms**, after first-frame
+confirmation, while playback is active, visible, unpaused, not seeking or
+ended, at a positive playback rate, and not cast to a Chromecast receiver (the
+local element stays paused while `chromecastActive` is true). Two seconds
+without an advance opens one `cause: 'progress'` rebuffer, with duration
+backdated to the last sampled advance. That frozen interval is removed from
+credited `playTime` and `dvrTime`. A beacon sent while the element has not
+moved since the last sample reports only the credit up to that sample, so the
+cumulative `playTime` and `dvrTime` never decrease from one beacon to the next,
+and play time never overlaps the backdated rebuffer. A freeze shorter than two
+seconds is play time and appears on the next beacon. The next sampled advance
+closes the rebuffer; another `playing` without progress does not.
+Sampling stops on pause, seek, hidden, viewEnd and destroy. An existing progress
+episode remains one episode across hidden/visible transitions. `waiting` and
+provider reconnect takeovers never open a duplicate rebuffer. Ordinary waiting
+and reconnect rebuffers carry `cause: 'waiting'` and `'reconnect'` respectively.
+
+Startup and rebuffer metrics change in player 1.25. Compare dashboards by
+`playerVersion`; `firstFrameSource` and `cause` identify the new measurements.
 
 ### Seek tracking
 
@@ -389,7 +442,8 @@ Every beacon sent includes:
 {
   // Event info
   event: string;              // Event type
-  timestamp: number;          // Unix timestamp in milliseconds at send time
+  timestamp: number;          // Event creation time in epoch milliseconds
+  sentAt: number;             // Default transport only: browser dispatch time, after headers resolve
 
   // View context
   viewId: string;             // Unique per playback attempt
@@ -440,8 +494,27 @@ raw event table **will see gaps**, which alone do not prove missing seeks.
 
 Within each `viewId`, sort by **`timestamp, beaconSeq`**, never by HTTP arrival
 order or database row ID. Requests can arrive out of order, and `beaconSeq`
-breaks ties when timestamps share a millisecond. `seekSource` is added by the
+breaks ties when timestamps share a millisecond. `sentAt` measures dispatch
+delay and is not the event ordering key. `seekSource` is added by the
 plugin only to `seeking` beacons, not to the common fields of other events.
+
+### Clock skew
+
+The default transport adds `sentAt` immediately before fetch or sendBeacon,
+after asynchronous `headers()` resolves. `timestamp` retains the event time,
+so queuing and header delays are measurable as `sentAt - timestamp`.
+`sentAt` is wire-only: `beforeSend` receives the event payload before it is
+added, and cannot remove or override the transport's dispatch value. A
+`sentAt` from a custom dimension, or one `beforeSend` returns or writes into
+the payload (even if it then throws), is dropped from the payload, so the events inside a batch never carry one that disagrees with
+the envelope's. `customBeacon` receives that same payload, without `sentAt`,
+and may add its own at dispatch.
+
+An ingest can capture HTTP receipt time and compute a per-view clock offset
+as `receiptTime - sentAt`, applying that offset to event timestamps. Capture
+receipt before queueing server work. With older players, fall back to
+`timestamp` (batch/header delays are then included in the inferred offset).
+The player supplies the timing measurement; the ingest corrects the clock.
 
 ### `isLive`
 
@@ -627,6 +700,13 @@ with HTTP 422. Leave `batch` off with that version. Only enable batching for a
 custom ingest that explicitly accepts both the single-event and batch shapes;
 do not infer compatibility from the client version.
 
+Player 1.25 also requires the Laravel ingest release that recognises `sentAt`,
+`decodedFramesTotal`, `droppedFramesTotal`, `seekableStart`, `seekableEnd`,
+`cause`, `firstFrameSource`, `readyState` and `resume`, and performs server-side
+clock correction. That release must ship first or on the same day; older
+ingests accept these additive fields but store them as custom dimensions.
+The release lead pins the minimum Laravel version once that package ships.
+
 ### Opt-in batching
 
 `batch` defaults to **off**. The off path keeps one POST per beacon, the same
@@ -634,13 +714,14 @@ do not infer compatibility from the client version.
 With `batch: true` (or `{ intervalMs: 10000, maxEvents: 20 }`), queued events
 flush on the timer, count limit, viewEnd, fatal error, hidden tab, pagehide or
 destroy. The JSON body is `{ "batch": 1, "sentAt": <epoch ms>, "events": [ ... ] }`;
-each envelope is at most **60,000 UTF-8 bytes**. An individual beacon too large
+the envelope's `sentAt` is stamped at dispatch after headers resolve, while its events
+retain their original timestamps; each envelope is at most **60,000 UTF-8 bytes**. An individual beacon too large
 for an envelope is sent alone without wrapping. Event timestamps and sequence
 numbers are assigned when events occur, not at flush time. Dynamic `headers()`
 is called once per batch. On pagehide the queued events and unload viewEnd use
 `navigator.sendBeacon()` (including the HTTPS-only `api_key` URL parameter),
 falling back to keepalive fetch. `customBeacon` always receives individual
-payloads, even when batching is enabled.
+payloads without transport-added `sentAt`, even when batching is enabled.
 
 ### Endpoint Requirements
 

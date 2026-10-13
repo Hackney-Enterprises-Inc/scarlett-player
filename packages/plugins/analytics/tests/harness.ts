@@ -34,13 +34,37 @@ export async function createHarness(config: Partial<AnalyticsConfig> = {}) {
     ...config,
   });
   await plugin.init(api);
+  /** Confirm an advancing frame without moving the scenario's state position. */
+  const confirmFrame = () => bus.emit('playback:timeupdate', { currentTime: state.getValue('currentTime') + 0.01 });
+  /** Attach a controllable video with manual frame callbacks. */
+  const attachVideo = (rvfc = true) => {
+    const video = document.createElement('video');
+    const callbacks = new Map<number, VideoFrameRequestCallback>();
+    let handle = 0;
+    if (rvfc) {
+      video.requestVideoFrameCallback = vi.fn(callback => { callbacks.set(++handle, callback); return handle; });
+      video.cancelVideoFrameCallback = vi.fn(id => { callbacks.delete(id); });
+    }
+    api.container.append(video);
+    return { video, callbacks, frame: () => {
+      const pending = [...callbacks.values()]; callbacks.clear();
+      for (const callback of pending) callback(performance.now(), {} as VideoFrameCallbackMetadata);
+    } };
+  };
   return {
-    plugin, api, state, bus, beacons,
+    plugin, api, state, bus, beacons, confirmFrame, attachVideo,
+    advancePosition: (time: number) => {
+      const video = api.container.querySelector('video');
+      if (video) video.currentTime = time;
+      state.set('currentTime', time);
+      bus.emit('playback:timeupdate', { currentTime: time });
+    },
     sent: (event: string) => beacons.filter((beacon) => beacon.event === event),
-    play: () => {
+    play: (confirm = true) => {
       state.set('paused', false);
       state.set('playing', true);
       bus.emit('playback:play', undefined);
+      if (confirm) confirmFrame();
     },
     elementSeek: (time: number) => {
       state.set('currentTime', time);

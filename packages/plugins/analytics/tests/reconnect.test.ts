@@ -310,6 +310,7 @@ describe('reconnect reporting', () => {
 
       vi.advanceTimersByTime(2000);
       h.bus.emit('error:recovered', { attempt: 3, elapsedMs: 7000 });
+      h.confirmFrame();
 
       expect(h.sent('viewStart')).toHaveLength(2);
       const opened = h.sent('viewStart')[1].viewId;
@@ -333,4 +334,14 @@ describe('reconnect reporting', () => {
       expect(h.plugin.getMetrics()).toMatchObject({ reconnectCount: 1, reconnectDuration: 1000, rebufferCount: 1 });
     });
   });
+});
+
+it('keeps a pre-frame load timeout marked reconnecting open without an error exit or rebuffer', async () => {
+  const h = await createHarness();
+  h.bus.emit('error', { code: ErrorCode.MEDIA_NETWORK_ERROR, timestamp: Date.now(), message: 'Video took too long to load (network timeout)', fatal: true, detail: { timedOut: true, attempts: 0, retriesExhausted: false, reconnecting: true } });
+  h.bus.emit('error:reconnecting', { attempt: 1, delayMs: 2000, elapsedMs: 0 });
+  expect(h.sent('error')[0]).toMatchObject({ errorSeverity: 'warning', reconnecting: true, timedOut: true });
+  expect(h.sent('viewEnd')).toHaveLength(0); expect(h.sent('rebufferStart')).toHaveLength(0);
+  expect(h.plugin.getMetrics()).toMatchObject({ exitType: null, reconnectCount: 1, rebufferCount: 0 });
+  await h.plugin.destroy(); expect(h.sent('viewEnd')[0]?.exitType).toBe('abandoned');
 });

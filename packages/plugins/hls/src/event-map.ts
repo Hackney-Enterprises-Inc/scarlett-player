@@ -180,6 +180,7 @@ export function setupHlsEventHandlers(
     onError?: (error: HLSError) => void;
     onLiveUpdate?: () => void;
     onLevelDetails?: (details: HlsLevelDetails) => void;
+    onPlaylistDetails?: (details: HlsLevelDetails) => void;
     isLowLatencyRequested?: () => boolean;
     onFragLoaded?: () => void;
     onFragBuffered?: () => void;
@@ -315,6 +316,10 @@ export function setupHlsEventHandlers(
   // by nothing else, so the `timeupdate` handler below can no longer clobber
   // the edge flag computed here.
   addHandler('hlsLevelLoaded', (_event: string, data: { details: HlsLevelDetails }) => {
+    // Every playlist, live or ended: the final ENDLIST playlist still knows
+    // where its window starts, which the cleared live keys no longer say
+    if (data.details) callbacks.onPlaylistDetails?.(data.details);
+
     if (data.details?.live !== undefined) {
       api.setState('live', data.details.live);
 
@@ -690,14 +695,20 @@ export function setupVideoEventHandlers(
     webkitPresentationMode?: string;
   };
   if ('webkitPresentationMode' in video) {
+    // The mode before each change: only a picture-in-picture -> inline exit
+    // resumes. AVKit fullscreen -> inline also lands on `inline`, and resuming
+    // there restarted a video the viewer had paused in fullscreen (HEI-25 D6).
+    let previousMode = webkitVideo.webkitPresentationMode;
     addHandler('webkitpresentationmodechanged', () => {
       const mode = webkitVideo.webkitPresentationMode;
+      const leftPip = previousMode === 'picture-in-picture' && mode === 'inline';
+      previousMode = mode;
       const isInPip = mode === 'picture-in-picture';
       api.setState('pip', isInPip);
       api.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
 
       // Resume playback when exiting PiP on Safari
-      if (mode === 'inline' && video.paused) {
+      if (leftPip && video.paused) {
         video.play().catch(() => {});
       }
     });

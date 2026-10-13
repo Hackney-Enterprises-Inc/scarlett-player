@@ -577,12 +577,44 @@ describe('native HLS retry budget', () => {
         })
       );
 
-      const src_after_timeout = video.src;
+      // The stalled fetch is aborted (src removed, element reloaded empty)
+      // and nothing re-requests the source afterwards
+      expect(video.hasAttribute('src')).toBe(false);
+      expect(loadCalls()).toBe(2);
       await vi.advanceTimersByTimeAsync(10000);
 
-      expect(loadCalls()).toBe(1);
-      expect(video.src).toBe(src_after_timeout);
+      expect(loadCalls()).toBe(2);
+      expect(video.hasAttribute('src')).toBe(false);
       expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).not.toHaveProperty('reconnecting');
+
+      await plugin.destroy();
+    });
+
+    it('lets the watchdog win during a backoff and hands the timeout to auto-reconnect', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        autoReconnect: true,
+        maxNetworkRetries: 3,
+        retryDelayMs: 4000,
+        loadTimeoutMs: 2000,
+      });
+      const video = getVideo();
+
+      fireVideoError(video, MEDIA_ERR_NETWORK, 'manifest 503');
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({ timedOut: true, attempts: 1, reconnecting: true })
+      );
+      expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+      // The in-load retry stays cancelled; only the reconnect re-requests
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(loadCalls()).toBe(3);
+      expect(video.getAttribute('src')).toBe(SRC);
 
       await plugin.destroy();
     });
@@ -596,7 +628,9 @@ describe('native HLS retry budget', () => {
       expect(outcome.status).toBe('rejected');
       expect(fatalErrors()).toHaveLength(1);
       const detail = fatalErrors()[0].detail;
-      expect(detail).toEqual(expect.objectContaining({ timedOut: true, attempts: 0 }));
+      expect(detail).toEqual(
+        expect.objectContaining({ timedOut: true, attempts: 0, retriesExhausted: false })
+      );
       expect(detail).not.toHaveProperty('mediaErrorCode');
       expect(detail).not.toHaveProperty('mediaErrorMessage');
 
@@ -646,6 +680,261 @@ describe('native HLS retry budget', () => {
       expect(fatalErrors()).toHaveLength(1);
       expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
       expect(outcome.status).toBe('rejected');
+
+      await plugin.destroy();
+    });
+  });
+
+  /**
+   * HEI-SCARLETT-57 (Sentry TSP-WEB-2G9): a stalled Safari load never fires
+   * `error`, so the 30 s watchdog is what ends it. Live is only classified
+   * after metadata, so the timeout used to be a dead-end fatal even on a live
+   * stream. A timeout now hands off to auto-reconnect: a stall is transient,
+   * and the unclassified window stays finite (`reconnectWindowMs`).
+   */
+  /**
+   * Review finding (Sol, P2): A's metadata settles A's load, and B starts in
+   * the microtasks before A's loadSource() continuation runs. A must not then
+   * write `ready` (or audio state) into B, which has no metadata yet. Tried at
+   * several microtask depths so it does not hinge on how many awaits the
+   * chain has.
+   */
+  it('never writes ready into a load that superseded it after its metadata', async () => {
+    for (let depth = 0; depth <= 8; depth++) {
+      (api.setState as ReturnType<typeof vi.fn>).mockClear();
+      const { plugin } = await startNativeLoad();
+
+      const startB = () => {
+        plugin.loadSource('http://example.com/other.m3u8').catch(() => {});
+      };
+      let schedule = startB;
+      for (let i = 0; i < depth; i++) {
+        const next = schedule;
+        schedule = () => queueMicrotask(next);
+      }
+
+      getVideo().dispatchEvent(new Event('loadedmetadata'));
+      queueMicrotask(schedule);
+      await flush();
+      await flush();
+
+      const writes = (api.setState as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([key]) => key === 'playbackState')
+        .map(([, value]) => value);
+      const last_loading = writes.lastIndexOf('loading');
+      expect({ depth, after: writes.slice(last_loading + 1) }).toEqual({ depth, after: [] });
+
+      await plugin.destroy();
+    }
+  });
+
+  describe('native load timeout', () => {
+    const TIMEOUT = 30000;
+
+    /** Payloads of every emit of one event, in order. */
+    const emitted = (event: string): unknown[] =>
+      (api.emit as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([name]) => name === event)
+        .map(([, payload]) => payload);
+
+    it('hands a stalled initial load to auto-reconnect', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ autoReconnect: true });
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+
+      expect(outcome.status).toBe('rejected');
+      expect(outcome.error?.message).toBe('Video took too long to load (network timeout)');
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].message).toBe('Video took too long to load (network timeout)');
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({
+          timedOut: true,
+          attempts: 0,
+          retriesExhausted: false,
+          reconnecting: true,
+        })
+      );
+      expect(emitted('error:reconnecting')).toHaveLength(1);
+
+      // Backoff for attempt 1 is at most 2 s (2000 ms x 0.7-1.0 jitter)
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(loadCalls()).toBe(3); // initial, abort, reconnect
+      expect(getVideo().getAttribute('src')).toBe(SRC);
+
+      await plugin.destroy();
+    });
+
+    it('recovers when a reconnect attempt reaches metadata', async () => {
+      vi.useFakeTimers();
+      const { plugin } = await startNativeLoad({ autoReconnect: true });
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+      await vi.advanceTimersByTimeAsync(2000);
+      (api.setState as ReturnType<typeof vi.fn>).mockClear();
+
+      getVideo().dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+
+      expect(emitted('error:recovered')).toHaveLength(1);
+      expect(emitted('media:loaded')).toHaveLength(1);
+      const playback_states = (api.setState as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([key]) => key === 'playbackState')
+        .map(([, value]) => value);
+      expect(playback_states.at(-1)).toBe('ready');
+      expect(fatalErrors()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it("applies the viewer's audio state before announcing the recovery", async () => {
+      vi.useFakeTimers();
+      (api.getState as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'live') return false;
+        if (key === 'muted') return true;
+        if (key === 'volume') return 0.25;
+        if (key === 'paused') return true;
+        return undefined;
+      });
+      const at_recovery: { muted?: boolean; volume?: number } = {};
+      (api.emit as ReturnType<typeof vi.fn>).mockImplementation((event: string) => {
+        if (event === 'error:recovered') {
+          at_recovery.muted = getVideo().muted;
+          at_recovery.volume = getVideo().volume;
+        }
+      });
+
+      const { plugin } = await startNativeLoad({ autoReconnect: true });
+      expect(getVideo().muted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+      await vi.advanceTimersByTimeAsync(2000);
+      getVideo().dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+
+      expect(at_recovery).toEqual({ muted: true, volume: 0.25 });
+
+      await plugin.destroy();
+    });
+
+    it('aborts the stalled element fetch, so a late loadedmetadata loads nothing', async () => {
+      vi.useFakeTimers();
+      const { plugin } = await startNativeLoad({ autoReconnect: true });
+      const video = getVideo();
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+
+      expect(video.hasAttribute('src')).toBe(false);
+      expect(loadCalls()).toBe(2);
+
+      // Before the reconnect fires
+      video.dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+      expect(emitted('media:loaded')).toHaveLength(0);
+
+      await plugin.destroy();
+    });
+
+    it('stays terminal with autoReconnect: false', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({ autoReconnect: false });
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).not.toHaveProperty('reconnecting');
+      expect(emitted('error:reconnecting')).toHaveLength(0);
+      // The initial load and the abort, nothing after
+      expect(loadCalls()).toBe(2);
+      expect(getVideo().hasAttribute('src')).toBe(false);
+
+      await plugin.destroy();
+    });
+
+    it('gives up once reconnectWindowMs has passed', async () => {
+      vi.useFakeTimers();
+      const { plugin } = await startNativeLoad({
+        autoReconnect: true,
+        loadTimeoutMs: 2000,
+        reconnectBaseDelayMs: 1000,
+        reconnectMaxDelayMs: 2000,
+        reconnectWindowMs: 10000,
+      });
+
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(emitted('error:reconnect-exhausted')).toHaveLength(1);
+      const finals = fatalErrors().filter((e) => e.detail?.reconnectExhausted === true);
+      expect(finals).toHaveLength(1);
+      // The timeout that opened the window, then the final one
+      expect(fatalErrors()).toHaveLength(2);
+
+      await plugin.destroy();
+    });
+
+    /**
+     * Review finding (Sol, P2): a host's synchronous listener loads a backup
+     * source B from inside A's timeout report. A's reconnect must not attach
+     * to B: B loads on its own and nothing tears it down afterwards.
+     */
+    it.each([
+      ['the fatal error', 'error'],
+      ['error:reconnecting', 'error:reconnecting'],
+    ])('does not reconnect into a source loaded from %s listener', async (_label, trigger) => {
+      vi.useFakeTimers();
+      const SRC_B = 'http://example.com/backup.m3u8';
+      let target: ReturnType<typeof createHLSPlugin> | null = null;
+      let swapped = false;
+      (api.emit as ReturnType<typeof vi.fn>).mockImplementation((event: string) => {
+        if (event === trigger && !swapped && target) {
+          swapped = true;
+          target.loadSource(SRC_B).catch(() => {});
+        }
+      });
+
+      const { plugin } = await startNativeLoad({ autoReconnect: true });
+      target = plugin;
+      await vi.advanceTimersByTimeAsync(TIMEOUT);
+      expect(swapped).toBe(true);
+
+      // B gets its metadata and is healthy
+      getVideo().dispatchEvent(new Event('loadedmetadata'));
+      await flush();
+      expect(getVideo().getAttribute('src')).toBe(SRC_B);
+      const loads_after_b = loadCalls();
+      const reconnecting_after_b = emitted('error:reconnecting').length;
+      (api.setState as ReturnType<typeof vi.fn>).mockClear();
+
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(loadCalls()).toBe(loads_after_b);
+      expect(emitted('error:reconnecting')).toHaveLength(reconnecting_after_b);
+      expect(emitted('error:recovered')).toHaveLength(0);
+      const playback_states = (api.setState as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([key]) => key === 'playbackState')
+        .map(([, value]) => value);
+      expect(playback_states).not.toContain('loading');
+
+      await plugin.destroy();
+    });
+
+    it('keeps an element error at the initial load manual while unclassified', async () => {
+      vi.useFakeTimers();
+      const { plugin, outcome } = await startNativeLoad({
+        autoReconnect: true,
+        maxNetworkRetries: 0,
+      });
+
+      fireVideoError(getVideo(), MEDIA_ERR_NETWORK, 'manifest 404');
+      await flush();
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(outcome.status).toBe('rejected');
+      expect(fatalErrors()).toHaveLength(1);
+      expect(fatalErrors()[0].detail).not.toHaveProperty('reconnecting');
+      expect(emitted('error:reconnecting')).toHaveLength(0);
 
       await plugin.destroy();
     });

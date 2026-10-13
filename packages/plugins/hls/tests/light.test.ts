@@ -116,6 +116,33 @@ describe('HLS light entry', () => {
     expect(String(rejection.mock.calls[0][0])).toMatch(/took too long/);
   });
 
+  it('hands a load timeout to auto-reconnect before anything has played', async () => {
+    vi.useFakeTimers();
+    const plugin = createLightPlugin();
+    await plugin.init(api);
+
+    plugin.loadSource(SRC).catch(() => {});
+    await flush();
+    await vi.advanceTimersByTimeAsync(30000);
+
+    expect(api.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({
+        message: 'Video took too long to load (network timeout)',
+        detail: expect.objectContaining({ timedOut: true, retriesExhausted: false, reconnecting: true }),
+      })
+    );
+    expect(api.emit).toHaveBeenCalledWith(
+      'error:reconnecting',
+      expect.objectContaining({ attempt: 1 })
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(created).toHaveLength(2);
+
+    await plugin.destroy();
+  });
+
   it('has auto-reconnect (schedules recovery after a mid-playback fatal error)', async () => {
     vi.useFakeTimers();
     const plugin = createLightPlugin({ maxNetworkRetries: 0 });

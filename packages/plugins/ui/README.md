@@ -250,7 +250,8 @@ Progress-bar mouse/touch presses and releases, its focused Arrow/Home/End
 keys, the player-wide arrow shortcuts, the digit percentage seeks, the
 skip-backward/forward buttons and the control-bar Replay button emit
 `playback:seeking { time }` immediately after writing the media element's
-`currentTime`. The payload carries the clamped target (zero for replay).
+`currentTime`. The payload carries the clamped target (zero for a VOD replay,
+the playlist window start for a replay of a finished live stream).
 Home/End on the focused bar seek to the VOD endpoints or live DVR boundaries.
 
 A drag emits on press and release, not on each throttled mid-drag write.
@@ -268,6 +269,18 @@ button does nothing at all, since there is nothing ahead to skip to.
 Big-overlay replay still seeks by writing `currentTime` without a bus request. Analytics observes these through the
 element path (`seekSource: 'element'` when not consumed as a recent bus echo),
 so the source field describes the path rather than proving native-control use.
+
+Replay (the big overlay and the control-bar button) picks its target from the
+media element's duration, not from `live`. On a finite duration (VOD, or a live
+stream that ended with a playlist end marker) it restarts at the start of the
+playlist window, so a sliding window replays from its first segment. On hls.js
+that start comes from the HLS provider's `getPlaylistStart()`, because the MSE
+element's finite seekable range always starts at zero; on native HLS and other
+providers it is the start of the element's seekable window, or zero when there
+is none. On an infinite duration (the element ended without an end
+marker, for example because the playlist stopped updating) it does not seek. It
+emits `media:load-request` for the current source with `autoplay: true`, so the
+fresh load rejoins the live edge.
 
 Analytics only counts seeks while a view is open: a replay's pre-play seek
 after `viewEnd` is ignored on both paths, without changing the finalized view

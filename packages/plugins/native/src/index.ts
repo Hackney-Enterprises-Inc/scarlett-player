@@ -550,13 +550,20 @@ export function createNativePlugin(config?: NativePluginConfig): INativePlugin {
       webkitPresentationMode?: string;
     };
     if ('webkitPresentationMode' in videoEl) {
+      // The mode before each change: only a picture-in-picture -> inline exit
+      // resumes. AVKit fullscreen -> inline also lands on `inline`, and
+      // resuming there restarted a video the viewer had paused in fullscreen
+      // (HEI-25 D6).
+      let previousMode = webkitVideo.webkitPresentationMode;
       on('webkitpresentationmodechanged', () => {
         const mode = webkitVideo.webkitPresentationMode;
+        const leftPip = previousMode === 'picture-in-picture' && mode === 'inline';
+        previousMode = mode;
         api?.setState('pip', mode === 'picture-in-picture');
         api?.logger.debug(`PiP: mode changed to ${mode} (webkit)`);
 
         // Resume playback when exiting PiP on Safari
-        if (mode === 'inline' && videoEl.paused) {
+        if (leftPip && videoEl.paused) {
           videoEl.play().catch(() => {});
         }
       });
