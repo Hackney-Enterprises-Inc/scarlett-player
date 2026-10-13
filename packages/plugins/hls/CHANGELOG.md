@@ -1,5 +1,19 @@
 # @scarlett-player/hls
 
+## 1.25.0
+
+### Minor Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - A load that times out (`loadTimeoutMs`) now hands off to auto-reconnect instead of ending in a dead-end error, even before the stream is known to be live, and both playback paths report it as `Video took too long to load (network timeout)` with `detail.timedOut`. The viewer's muted and volume settings are applied after every reconnect.
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Replay restarts a finished stream at the start of its window instead of position 0 (on hls.js, the playlist's real start, which the HLS provider now reports through `getPlaylistStart()`), and reloads a live stream that stopped without ending so it rejoins the live edge.
+
+### Patch Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - A load in progress is no longer reported as a fatal error when an AirPlay switch hands it between native HLS and hls.js; it now finishes on the new pipeline.
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Leaving fullscreen on iPhone no longer resumes a video the viewer paused; only leaving picture-in-picture does.
+
 ## 1.24.0
 
 ### Patch Changes

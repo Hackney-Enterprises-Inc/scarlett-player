@@ -1,5 +1,11 @@
 # @scarlett-player/ui
 
+## 1.25.0
+
+### Patch Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Replay restarts a finished stream at the start of its window instead of position 0 (on hls.js, the playlist's real start, which the HLS provider now reports through `getPlaylistStart()`), and reloads a live stream that stopped without ending so it rejoins the live edge.
+
 ## 1.24.0
 
 ## 1.23.0

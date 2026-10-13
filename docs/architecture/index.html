@@ -46,7 +46,7 @@
       <a href="../#start">Get started</a>
       <a class="github" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
-    <span class="version-badge" id="version">v1.24.0</span>
+    <span class="version-badge" id="version">v1.25.0</span>
   </header>
 
   <main id="main" class="docs wrap">
@@ -656,8 +656,26 @@ caught and logged, so one bad listener cannot stop the others. An
 cancel the event by returning <code>null</code>; interceptors are enabled by default and
 can be turned off through <code>EventEmitterOptions</code>.</p>
 <h2 id="analytics-timing-and-ordering"><a class="anchor" href="#analytics-timing-and-ordering">Analytics timing and ordering</a></h2>
+<p><code>videoStart</code> marks a confirmed first frame, not the first <code>playing</code> event:
+the first <code>requestVideoFrameCallback</code> on the element, or else the first
+<code>timeupdate</code> whose position has moved past the play request&#39;s
+(<code>firstFrameSource: &#39;rvfc&#39; | &#39;progress&#39;</code>). <code>startupTime</code> runs to that
+confirmation and no <code>playTime</code> accrues before it. A seek before the first
+frame re-arms confirmation when it ends, measured from the post-seek
+position, and progress is also read from the element&#39;s own <code>timeupdate</code>, so
+WHEP confirms without rVFC. While casting, the receiver&#39;s advancing position
+confirms instead, since the local element stays paused. Safari can fire <code>playing</code>
+right after <code>play</code> without showing a frame, which made iOS startup times read
+1-7 ms. A view that never confirms sends no <code>videoStart</code>.</p>
 <p>The analytics plugin waits <code>rebufferGraceMs</code> (250 ms by default) before counting
-an eligible post-first-frame stall. Zero counts synchronously; negative or
+an eligible post-first-frame stall. A stall that the browser never reports
+with <code>waiting</code> counts too: while the view is playing, visible and past its
+first frame, the position is sampled every 500 ms, and 2 s without progress
+opens a rebuffer backdated to the last advance (<code>rebufferStart.cause</code>:
+<code>&#39;waiting&#39;</code>, <code>&#39;progress&#39;</code> or <code>&#39;reconnect&#39;</code>). Sampling is off while a
+Chromecast session is active (<code>chromecastActive</code>). A beacon sent during a
+freeze not yet confirmed as a stall reports play and DVR credit only up to
+the last advance, so cumulative counters never decrease. Zero counts synchronously; negative or
 non-finite values fall back to 250 ms. Resuming, pausing, seeking or closing
 the view during the grace cancels the pending rebuffer. Confirmed duration
 includes the grace, but <code>rebufferStart.timestamp</code> remains its send time, not
@@ -666,7 +684,14 @@ play time, even when too short to count as a rebuffer.</p>
 <p>Every dispatched beacon has a per-view <code>beaconSeq</code>, starting at 1 on
 <code>viewStart</code>, assigned after development/error-sampling filters and protected
 from custom-data overrides. Custom events and unload beacons share the counter.
-Order each view by <code>timestamp, beaconSeq</code>, not arrival or row ID. An ingest
+Order each view by <code>timestamp, beaconSeq</code>, not arrival or row ID.
+<code>timestamp</code> is the client clock when the event happened. Every unbatched POST
+body, and each batch envelope (events inside a batch carry none), also
+carries <code>sentAt</code>, the client clock when it left the
+browser, stamped after <code>headers()</code> resolves and outside <code>beforeSend</code>; a <code>sentAt</code> from <code>customDimensions</code> or <code>beforeSend</code> is
+dropped. An
+ingest corrects client clock skew with <code>receipt - sentAt</code> and applies that
+offset to <code>timestamp</code>; <code>customBeacon</code> payloads carry no <code>sentAt</code>. An ingest
 that drops heartbeats sees sequence gaps. <code>seeking</code> carries <code>seekSource</code>
 (<code>player</code> or <code>element</code>); a view closes seek accounting at <code>viewEnd</code>. The
 <code>hei/laravel-scarlett-player</code> v0.3.0 migration recognises the 1.19.3
@@ -751,8 +776,15 @@ through <code>emitFatalError()</code> before the load rejects, with the element&
 in <code>detail</code>, so core&#39;s <code>load()</code> keeps the provider&#39;s code.</li>
 <li><code>emitFatalError()</code> emits the fatal <code>error</code> and then calls
 <code>maybeScheduleReconnect()</code>, which hands over to the auto-reconnect scheduler
-only when playback had already started (or the stream is live) and the failure
-was a network or media one. That gate, <code>canAutoReconnect()</code>, is checked before
+only when the failure was a network or media one and playback had already
+started, the stream is live, or the failure is a load timeout
+(<code>detail.timedOut</code>), as is any later failure inside the window a timeout
+opened. A stall at <code>loadTimeoutMs</code> is transient and comes before
+live is known, so both watchdogs hand it to reconnect (the native one first
+tears down and aborts the stalled element fetch); <code>load()</code> still rejects at
+the timeout, and a load that later recovers plays when its effective
+autoplay was on. A wrong URL errors rather than stalls, so it stays a
+manual fatal before playback. That gate, <code>canAutoReconnect()</code>, is checked before
 the emit as well, so the fatal <code>error</code> already carries <code>detail.reconnecting: true</code> when a reconnect will follow. <code>scheduleReconnectAttempt()</code> emits
 <code>error:reconnecting</code> (<code>{ attempt, delayMs, elapsedMs?, windowMs? }</code>) and
 <code>attemptReconnect()</code> rebuilds the pipeline, resuming VOD at the position
@@ -976,7 +1008,7 @@ with <code>PIPELINE_ERROR_DECODE</code> a few seconds into part-driven playback.
       <a href="https://www.npmjs.com/package/@scarlett-player/core">npm ↗</a>
       <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE">MIT license</a>
       <a href="../llms.txt" title="The documentation as Markdown, for AI coding agents">llms.txt</a>
-      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.24.0">v1.24.0</a>
+      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.25.0">v1.25.0</a>
     </div>
   </footer>
 </body>

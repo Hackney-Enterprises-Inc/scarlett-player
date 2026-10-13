@@ -1,5 +1,11 @@
 # @scarlett-player/core
 
+## 1.25.0
+
+### Patch Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - A load that failed and then recovered through auto-reconnect now starts playing when that load asked for autoplay, including a per-load `autoplay` override.
+
 ## 1.24.0
 
 ### Patch Changes
