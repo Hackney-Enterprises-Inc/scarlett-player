@@ -1,5 +1,11 @@
 # @scarlett-player/analytics
 
+## 1.24.0
+
+### Minor Changes
+
+- [#140](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/140) [`78343b4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/78343b49d9e6787c6d3795c1db40ab8ede8c8d6a) Thanks [@alexhackney](https://github.com/alexhackney)! - Loading a new source after a view has ended now starts a new view right away, so a source that fails before it plays is still reported.
+
 ## 1.23.0
 
 ### Minor Changes

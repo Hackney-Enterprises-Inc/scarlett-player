@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/core",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "description": "Core player with plugin system for Scarlett Player",
   "type": "module",
   "main": "./dist/index.cjs",

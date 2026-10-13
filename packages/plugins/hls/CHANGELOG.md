@@ -1,5 +1,11 @@
 # @scarlett-player/hls
 
+## 1.24.0
+
+### Patch Changes
+
+- [#140](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/140) [`78343b4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/78343b49d9e6787c6d3795c1db40ab8ede8c8d6a) Thanks [@alexhackney](https://github.com/alexhackney)! - hls.js mux errors now get the same retries and live auto-reconnect as media errors instead of failing at once. The media retry budget now refills only once a fragment is buffered, not merely downloaded, and a terminal error cancels any recovery still waiting to run.
+
 ## 1.23.0
 
 ### Minor Changes

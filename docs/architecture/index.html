@@ -46,7 +46,7 @@
       <a href="../#start">Get started</a>
       <a class="github" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
-    <span class="version-badge" id="version">v1.23.0</span>
+    <span class="version-badge" id="version">v1.24.0</span>
   </header>
 
   <main id="main" class="docs wrap">
@@ -312,7 +312,11 @@ also increments the counter) has started.</li>
 <li>Resets the playback state keys through <code>StateManager.update()</code> and clears
 <code>error</code>.</li>
 <li>Destroys the previous provider through <code>PluginManager.destroyPlugin()</code>, which
-returns it to the <code>registered</code> state so it can be initialised again later.</li>
+returns it to the <code>registered</code> state so it can be initialised again later,
+then waits for any teardown an <code>unload()</code> still has in flight. Each wait is
+bounded at 10 seconds: past that the player logs a warning, cuts the old
+provider off (see below) and goes ahead, and the old provider&#39;s teardown
+finishes whenever it settles.</li>
 <li><code>ensureInitialized()</code>.</li>
 <li><code>PluginManager.selectProvider(source)</code>. No provider means
 <code>ErrorHandler.throw(ErrorCode.PROVIDER_NOT_FOUND, ...)</code> and a return, not an
@@ -329,28 +333,53 @@ error state is already populated (a provider that emitted a structured fatal
 error of its own) the catch only logs, so a specific code is not overwritten by
 a generic one.</p>
 <p><strong>When the returned promise settles.</strong> <code>load()</code> awaits the provider&#39;s
-<code>loadSource()</code>, so on the two providers that reconnect - HLS and WHEP - it
-stays pending for as long as their scheduler keeps trying, up to
-<code>reconnectWindowMs</code> (five minutes by default). That is deliberate: a live
-stream that has not started yet, or is at its monitor cap, is a wait rather
-than a failure, and settling early would report an error while a reconnect is
-still running behind it. Hosts that need progress listen to
-<code>error:reconnecting</code>, <code>error:recovered</code> and fatal <code>error</code> rather than awaiting
-the promise; hosts that need a hard bound set a shorter <code>reconnectWindowMs</code> or
-race the promise themselves. Terminal failures - a refused token, a missing
-stream, an endpoint that does not speak the protocol - are not scheduled for
-reconnect and settle in seconds.</p>
+<code>loadSource()</code>. A source failure does not reject it: core reports the failure
+through the error state and the <code>error</code> event, then resolves. <code>load()</code> rejects
+only when the player has been destroyed. The two providers that reconnect
+differ in how long they hold it:</p>
+<ul>
+<li><strong>HLS</strong> (hls.js and native) keeps <code>load()</code> pending through its in-place
+retries (<code>maxNetworkRetries</code>, <code>maxMediaRetries</code>), then settles as soon as it
+reports the fatal <code>error</code>. On a live source that error carries
+<code>detail.reconnecting: true</code> and auto-reconnect carries on behind the settled
+promise.</li>
+<li><strong>WHEP</strong> keeps <code>load()</code> pending while its reconnect scheduler is trying, up
+to <code>reconnectWindowMs</code> (five minutes by default). A stream that has not
+started yet, or is at its monitor cap, is a wait rather than a failure.
+Terminal failures - a refused token, a missing stream, an endpoint that does
+not speak the protocol - are not scheduled for reconnect and settle in
+seconds.</li>
+</ul>
+<p>Either way, the promise is not the progress channel. Hosts follow
+<code>error:reconnecting</code>, <code>error:recovered</code> and fatal <code>error</code>; a host that needs a
+hard bound on WHEP sets a shorter <code>reconnectWindowMs</code> or races the promise.</p>
 <h3 id="unloading-a-source"><a class="anchor" href="#unloading-a-source">Unloading a source</a></h3>
 <p><code>unload()</code> leaves the current source and keeps the player. With nothing loaded
 or loading it returns without doing anything. Otherwise it:</p>
 <ol>
-<li>Increments <code>loadGeneration</code>, so an in-flight <code>load()</code> bails at its next
+<li><p>Increments <code>loadGeneration</code>, so an in-flight <code>load()</code> bails at its next
 checkpoint, and clears the pending seek-resume timeout. A second <code>unload()</code>
-before the first finishes, with no <code>load()</code> between, shares its promise.</li>
-<li>Destroys the active provider through <code>PluginManager.destroyPlugin()</code>, which
+before the first finishes, with no <code>load()</code> between, shares its promise.</p>
+</li>
+<li><p>Destroys the active provider through <code>PluginManager.destroyPlugin()</code>, which
 closes its connection or pipeline and removes its media element; a provider
-still inside its <code>init()</code> is destroyed once that settles.</li>
-<li>Applies the unloaded state: <code>source</code> null, <code>playbackState</code> <code>idle</code>, the
+still inside its <code>init()</code> is destroyed once that settles. The wait is
+bounded at 10 seconds (<code>PROVIDER_TEARDOWN_TIMEOUT_MS</code>, internal, not an
+option): when the provider&#39;s <code>init()</code> or <code>destroy()</code> has not settled by then,
+the player logs a warning and goes on to the next steps, and the teardown
+finishes whenever it settles. A later <code>load()</code> that selects the same
+provider still waits for that teardown in <code>initPlugin()</code>; <code>destroy()</code>
+releases a bounded wait at once.</p>
+<p>When the bound fires, the player first cuts the old provider off
+(<code>PluginManager.abandonPlugin()</code>): its <code>PluginAPI</code> runs its cleanups and is
+revoked, so <code>setState</code>, <code>defineState</code>, <code>emit</code>, <code>on</code> and <code>subscribeToState</code>
+do nothing and <code>api.container</code> is a detached stand-in, and the media
+elements in the player&#39;s container are paused and removed. Only the first
+bound to fire for a teardown does this, while no other provider is active,
+so the late <code>destroy()</code> cannot remove a replacement&#39;s reused element or
+write to its state. A fresh <code>initPlugin()</code> restores the API.</p>
+</li>
+<li><p>Applies the unloaded state: <code>source</code> null, <code>playbackState</code> <code>idle</code>, the
 <code>playing</code> false, <code>paused</code> true, <code>ended</code>, <code>buffering</code>, <code>waiting</code> and
 <code>seeking</code> false, <code>currentTime</code>, <code>duration</code> and <code>bufferedAmount</code> 0,
 <code>buffered</code> and <code>error</code> null, <code>mediaType</code> <code>unknown</code>, <code>qualities</code>,
@@ -359,13 +388,16 @@ and <code>currentTextTrack</code> null, <code>live</code> and <code>liveEdge</co
 null, <code>liveLatency</code> 0 and <code>lowLatencyMode</code> false. <code>poster</code>, <code>title</code>, <code>chapters</code>, <code>thumbnails</code> and the
 viewer&#39;s volume, mute, rate and autoplay settings are left alone by this
 core reset. The <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/packages/core/README.md#unload">core README</a> lists every
-key it resets and leaves alone; plugins can update state during teardown.</li>
-<li>Emits <code>source:unloaded</code> with <code>{ src }</code>, the source the last <code>load()</code> asked
-for.</li>
+key it resets and leaves alone; plugins can update state during teardown.</p>
+</li>
+<li><p>Emits <code>source:unloaded</code> with <code>{ src }</code>, the source the last <code>load()</code> asked
+for.</p>
+</li>
 </ol>
 <p>When a newer <code>load()</code> starts while the provider is going down, that load owns
 the state: the unload applies nothing and emits nothing, and the load waits
-for that teardown before it selects a provider, the same one or another. <code>unload()</code> rejects
+for that teardown (up to the same 10-second bound) before it selects a
+provider, the same one or another. <code>unload()</code> rejects
 after <code>destroy()</code>, and the next <code>load()</code> works as on a fresh instance. The
 analytics plugin ends its open view as <code>abandoned</code> on <code>source:unloaded</code>, and
 the Chromecast plugin stops the media on the receiver while keeping the
@@ -560,11 +592,12 @@ command and create a feedback loop. Analytics observes both paths, consuming
 recent bus echoes to avoid double-counting, and labels its <code>seeking</code> beacons
 with <code>seekSource: &#39;player&#39;</code> or <code>&#39;element&#39;</code>. The echo window includes 1000 ms;
 expired pending echoes are discarded before recording a new bus request.
-Both seek paths are ignored for analytics after <code>viewEnd</code> until a play request
-opens the next view, so replay preparation cannot alter a finalized view.</p>
-<p><code>runCleanups()</code> and <code>getCleanupFns()</code> exist on the concrete <code>PluginAPI</code> for
-<code>PluginManager</code> to call; they are marked <code>@internal</code> and are not part of
-<code>IPluginAPI</code>.</p>
+Both seek paths are ignored for analytics after <code>viewEnd</code> until the next view
+opens (a play request, or a load of another source), so replay preparation
+cannot alter a finalized view.</p>
+<p><code>runCleanups()</code>, <code>getCleanupFns()</code>, <code>revoke()</code> and <code>restore()</code> exist on the
+concrete <code>PluginAPI</code> for <code>PluginManager</code> to call; they are marked <code>@internal</code>
+and are not part of <code>IPluginAPI</code>.</p>
 <h2 id="state"><a class="anchor" href="#state">State</a></h2>
 <p><code>StateManager</code> holds one <code>Signal</code> per key. <code>DEFAULT_STATE</code> supplies the initial
 values and is typed against <code>CoreStateStore</code>, not <code>StateStore</code>:</p>
@@ -943,7 +976,7 @@ with <code>PIPELINE_ERROR_DECODE</code> a few seconds into part-driven playback.
       <a href="https://www.npmjs.com/package/@scarlett-player/core">npm ↗</a>
       <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE">MIT license</a>
       <a href="../llms.txt" title="The documentation as Markdown, for AI coding agents">llms.txt</a>
-      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.23.0">v1.23.0</a>
+      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.24.0">v1.24.0</a>
     </div>
   </footer>
 </body>
