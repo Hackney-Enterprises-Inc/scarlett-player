@@ -10,7 +10,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-hackney
     # main only, on both triggers. workflow_dispatch lets a person pick any
     # branch, and the job would then version, build and publish THAT branch's
     # tree and push its release commit to main. A skipped
@@ -567,7 +567,7 @@ jobs:
     # NOT deploy if npm publish failed, because consumers cannot install a
     # version that never reached the registry.
     if: always() && needs.release.outputs.published == 'true' && needs.release.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-hackney
 
     steps:
       - name: Checkout

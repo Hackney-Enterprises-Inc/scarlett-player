@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     name: Test & Build
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-hackney
 
     # This job only reads the repository - it lints, builds and tests. Stated
     # explicitly rather than inheriting the repository or organization default,
