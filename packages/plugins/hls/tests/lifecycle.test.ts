@@ -396,6 +396,48 @@ describe('HLS plugin lifecycle', () => {
     });
   });
 
+  describe('a reconnect window opened by a load timeout', () => {
+    /** Fatal `error` payloads emitted so far. */
+    const fatalErrors = () =>
+      (api.emit as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event, payload]) => event === 'error' && (payload as { fatal?: boolean })?.fatal)
+        .map(([, payload]) => payload as { message: string; detail: Record<string, unknown> });
+
+    // Tarnock review HEI-SCARLETT-64: a later ordinary fatal inside the window
+    // must still be marked reconnecting, since the provider keeps retrying.
+    it('marks a later attempt\'s ordinary fatal as reconnecting and keeps retrying', async () => {
+      vi.useFakeTimers();
+      const timeoutPlugin = createHLSPlugin({ maxNetworkRetries: 0 });
+      await timeoutPlugin.init(api);
+      timeoutPlugin.loadSource(SRC_A).catch(() => {});
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(fatalErrors()[0].detail).toEqual(expect.objectContaining({ timedOut: true, reconnecting: true }));
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(created).toHaveLength(2);
+      const reconnectingEvents = () =>
+        (api.emit as ReturnType<typeof vi.fn>).mock.calls.filter(([event]) => event === 'error:reconnecting').length;
+      const reconnectingBefore = reconnectingEvents();
+
+      // The reconnect attempt fails with an ordinary fatal: not a timeout,
+      // not live, nothing played
+      fireError(created[1], { type: 'networkError', details: 'manifestLoadError', fatal: true });
+      await flush();
+
+      expect(fatalErrors()).toHaveLength(2);
+      expect(fatalErrors()[1].detail).toEqual(expect.objectContaining({ reconnecting: true }));
+      // The UI's reconnecting overlay keys on this, not on playbackState
+      expect(reconnectingEvents()).toBe(reconnectingBefore + 1);
+
+      // And the provider does carry on: the next attempt builds a new pipeline
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(created).toHaveLength(3);
+      await timeoutPlugin.destroy();
+    });
+  });
+
   describe('auto-reconnect supersede', () => {
     it('a reconnect attempt superseded by a user load cannot revive itself or stomp the new session', async () => {
       vi.useFakeTimers();

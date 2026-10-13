@@ -360,7 +360,7 @@ export function createHLSPluginWith(
   let onlineListener: (() => void) | null = null;
   // Error that opened the current reconnect window, reused to classify the
   // terminal error emitted when the window closes
-  let reconnectTriggerError: HLSError | null = null;
+  let reconnectTriggerError: NativeHLSError | null = null;
   // Latched once the window closes so exhaustion is announced exactly once
   // and no further attempt can be scheduled against a closed window
   let reconnectExhausted = false;
@@ -1992,9 +1992,12 @@ export function createHLSPluginWith(
     if (!currentSrc) return false;
     // Live streams reconnect even before first playback (a viewer loading
     // during a pre-event intermission), but only once classified. VOD needs
-    // a manifest that loaded once. A load timeout qualifies regardless.
+    // a manifest that loaded once. A load timeout qualifies regardless, and
+    // so does any later failure inside the window that timeout opened: the
+    // loop keeps retrying, so its errors must keep saying so.
     const isLive = (api?.getState('live') ?? false) && isLiveClassified;
-    if (!isLive && !hasPlayedContent && !error.timedOut) return false;
+    const timeoutWindowOpen = reconnectTriggerError?.timedOut === true;
+    if (!isLive && !hasPlayedContent && !error.timedOut && !timeoutWindowOpen) return false;
     // mux joins media here as in handleHlsError(): a fatal remux failure on a
     // stream worth reconnecting is just as recoverable as a media one.
     return error.type === 'network' || error.type === 'media' || error.type === 'mux';

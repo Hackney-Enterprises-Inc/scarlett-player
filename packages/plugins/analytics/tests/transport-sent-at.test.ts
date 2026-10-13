@@ -73,3 +73,19 @@ it.each(['throws', 'returns nothing'] as const)('strips a sentAt the hook wrote 
   const c = await createHarness({ customBeacon, beforeSend }); await c.plugin.destroy();
   expect(customBeacon).toHaveBeenCalled(); for (const [, p] of customBeacon.mock.calls) expect(p).not.toHaveProperty('sentAt');
 });
+// PR #141 review (CodeRabbit): the event is snapshotted when the transport
+// accepts it, as before sentAt; only sentAt is added at dispatch.
+it('snapshots an unbatched event at send, not after a header delay', async () => {
+  const p = { ...payload(), currentTime: 1 } as BeaconPayload;
+  transport({ headers: () => new Promise(resolve => setTimeout(() => resolve({}), 2000)) }).send(p);
+  (p as Record<string, unknown>).currentTime = 99;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(bodies()[0]).toMatchObject({ currentTime: 1, sentAt: 12000 });
+});
+it('snapshots each batched event when it is queued', async () => {
+  const p = { ...payload(), currentTime: 1 } as BeaconPayload;
+  transport({ batch: { intervalMs: 1000 } }).send(p);
+  (p as Record<string, unknown>).currentTime = 99;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(bodies()[0]).toMatchObject({ sentAt: 11000, events: [{ currentTime: 1 }] });
+});

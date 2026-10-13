@@ -181,12 +181,12 @@ export class ScarlettPlayer {
    * timeout, HEI-SCARLETT-57) has already settled the load when it recovers,
    * and it never sees the per-load `autoplay` override. So core records the
    * effective autoplay here and plays on `error:recovered` when it was on.
-   * A new `load()`, `unload()`, `destroy()`, `play()` or `pause()` clears
-   * it: each either supersedes the load or states the viewer's own intent.
-   * A `play()` or `pause()` made while the load was still pending (or from
-   * the provider's fatal `error` listener, before the load's catch runs)
-   * decides instead of the load's autoplay: the latest one wins, play
-   * recording `shouldPlay: true` and pause `false` (see `playbackCommands`).
+   * A new `load()`, `unload()` or `destroy()` clears it: each supersedes the
+   * load. The viewer's own `play()` and `pause()` decide instead of the
+   * load's autoplay, the latest one winning (play `shouldPlay: true`, pause
+   * `false`), whether made while the load was still pending (or from the
+   * provider's fatal `error` listener; see `playbackCommands`) or during the
+   * outage after it failed.
    */
   private pendingRecoveryAutoplay: { generation: number; shouldPlay: boolean } | null = null;
 
@@ -424,9 +424,9 @@ export class ScarlettPlayer {
 
     // A provider recovered through auto-reconnect. A load that failed into
     // that reconnect has already settled without playing, so play it now if
-    // it asked for autoplay. Only while still paused: the provider resumes on
-    // its own when the viewer pressed play during the outage (play() would
-    // have cleared the intent anyway), and the two must never both play.
+    // its effective autoplay, or the latest play()/pause() since, asks for it.
+    // Only while still paused: the provider resumes on its own when its
+    // element took the viewer's play, and the two must never both play.
     this.eventBus.on('error:recovered', () => {
       const pending = this.pendingRecoveryAutoplay;
       if (!pending || this.destroyed) return;
@@ -544,10 +544,10 @@ export class ScarlettPlayer {
    * `error:recovered` later. When that load's effective autoplay was on and
    * the player is still paused, the player plays then. A `play()` or
    * `pause()` made while the load was pending (or from a fatal `error`
-   * listener) decides instead, the latest one winning: play plays on
-   * recovery, pause stays paused. A newer `load()`, `unload()`, `destroy()`,
-   * `play()` or `pause()` after the failure cancels it, and a play the
-   * autoplay policy refuses is logged, not thrown.
+   * listener), or during the outage after it failed, decides instead, the
+   * latest one winning: play plays on recovery, pause stays paused. A newer
+   * `load()`, `unload()` or `destroy()` cancels it, and a play the autoplay
+   * policy refuses is logged, not thrown.
    *
    * @param source - Media source URL
    * @param options - Per-load options
@@ -928,7 +928,10 @@ export class ScarlettPlayer {
     this.checkDestroyed();
     this.playbackCommands++;
     this.lastPlaybackCommand = 'play';
-    this.pendingRecoveryAutoplay = null;
+    // During an outage the latest command decides what recovery does: this
+    // play may reach an aborted element and be lost, so recovery replays it
+    // (only while still paused; see the error:recovered listener).
+    if (this.pendingRecoveryAutoplay) this.pendingRecoveryAutoplay.shouldPlay = true;
 
     try {
       this.logger.debug('Play requested');
@@ -953,7 +956,7 @@ export class ScarlettPlayer {
     this.checkDestroyed();
     this.playbackCommands++;
     this.lastPlaybackCommand = 'pause';
-    this.pendingRecoveryAutoplay = null;
+    if (this.pendingRecoveryAutoplay) this.pendingRecoveryAutoplay.shouldPlay = false;
 
     try {
       this.logger.debug('Pause requested');

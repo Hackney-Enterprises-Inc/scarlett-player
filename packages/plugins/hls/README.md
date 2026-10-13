@@ -239,7 +239,8 @@ VOD whose manifest never loaded stays manual. A load that hits `loadTimeoutMs`
 qualifies even before that, because a stalled load is usually transient (a
 wrong URL errors rather than stalls) and live is only known once the source
 has loaded; the source then gets the finite `reconnectWindowMs` window until
-it is classified live. `fatal` stays `true`. Normally `error:reconnecting` follows,
+it is classified live. A failure of a later attempt inside that window is
+marked `reconnecting` too, since the plugin keeps retrying. `fatal` stays `true`. Normally `error:reconnecting` follows,
 then either `error:recovered` or `error:reconnect-exhausted` and a final fatal
 `error` with `detail.reconnectExhausted: true`. If the reconnect window has
 already run out, a qualifying fatal error can still carry the marker, but

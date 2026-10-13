@@ -91,10 +91,11 @@ A load that failed and then recovered through the provider's auto-reconnect
 (`error:recovered`; the HLS provider does this after a load timeout) starts
 playing when that load's effective autoplay was on: the `autoplay` option, or
 the per-load override when one was given. A `play()` or `pause()` made while
-that load was still pending decides instead, the latest one winning: after a
-`play()` it plays on recovery, after a `pause()` it stays paused. It only plays
-while the player is still paused, and a newer `load()`, `unload()`, `play()` or
-`pause()` after the failure cancels it.
+that load was still pending, or during the outage after it failed, decides
+instead, the latest one winning: after a `play()` it plays on recovery, after a
+`pause()` it stays paused. It only plays while the player is still paused, so a
+play the provider already resumed never plays twice, and a newer `load()` or
+`unload()` cancels it.
 
 ### unload()
 

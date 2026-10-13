@@ -25,12 +25,18 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
   const options = typeof batch === 'object' ? batch : {};
   const intervalMs = typeof options.intervalMs === 'number' && Number.isFinite(options.intervalMs) && options.intervalMs > 0 ? options.intervalMs : 10000;
   const maxEvents = typeof options.maxEvents === 'number' && Number.isFinite(options.maxEvents) && options.maxEvents > 0 ? Math.floor(options.maxEvents) : 20;
-  const queue: BeaconPayload[] = [];
+  /** Queued events, each serialized when the transport accepted it. */
+  const queue: string[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   const bytes = (body: string) => new TextEncoder().encode(body).length;
+  // Events are snapshotted as JSON when accepted, so a caller mutating a
+  // payload afterwards (during a headers() wait or a batch interval) cannot
+  // change what is sent; only the wire-only sentAt is added at dispatch.
   // A same-width dispatch-time placeholder keeps the queue size check bounded.
-  const bodyFor = (events: BeaconPayload[], sentAt = 1000000000000) => safeStringify({ batch: 1, sentAt, events });
-  const singleBody = (payload: BeaconPayload) => (sentAt: number) => safeStringify({ ...payload, sentAt });
+  const bodyFor = (events: string[], sentAt = 1000000000000) => `{"batch":1,"sentAt":${sentAt},"events":[${events.join(',')}]}`;
+  /** @param json - An event serialized at accept time. @returns A factory adding `sentAt` as its last key. */
+  const singleBody = (json: string) => (sentAt: number) =>
+    json.length > 2 && json.endsWith('}') ? `${json.slice(0, -1)},"sentAt":${sentAt}}` : `{"sentAt":${sentAt}}`;
 
   /** Drop pending work whenever an active privacy signal is observed. */
   function blocked(): boolean {
@@ -135,14 +141,15 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
   function send(payload: BeaconPayload): void {
     if (blocked()) return;
     if (config.customBeacon) { config.customBeacon(config.beaconUrl, payload); return; }
-    if (!enabled) { post(singleBody(payload)); return; }
-    if (bytes(bodyFor([payload])) > 60000) {
+    const json = safeStringify(payload);
+    if (!enabled) { post(singleBody(json)); return; }
+    if (bytes(bodyFor([json])) > 60000) {
       flushWith(post);
-      post(singleBody(payload));
+      post(singleBody(json));
       return;
     }
-    if (queue.length && bytes(bodyFor([...queue, payload])) > 60000) flushWith(post);
-    queue.push(payload);
+    if (queue.length && bytes(bodyFor([...queue, json])) > 60000) flushWith(post);
+    queue.push(json);
     if (queue.length >= maxEvents || payload.event === 'viewEnd' || (payload.event === 'error' && payload.fatal === true)) {
       flushWith(post);
     } else if (timer === null) timer = setTimeout(() => flushWith(post), intervalMs);
@@ -152,10 +159,11 @@ export function createTransport(config: AnalyticsConfig, logger: { debug(message
   function sendUnload(payload: BeaconPayload): void {
     if (blocked()) return;
     if (config.customBeacon) { config.customBeacon(config.beaconUrl, payload); return; }
-    if (!enabled) { unload(singleBody(payload)); return; }
-    if (queue.length && bytes(bodyFor([...queue, payload])) > 60000) flushWith(unload);
-    if (bytes(bodyFor([payload])) > 60000) { unload(singleBody(payload)); return; }
-    queue.push(payload);
+    const json = safeStringify(payload);
+    if (!enabled) { unload(singleBody(json)); return; }
+    if (queue.length && bytes(bodyFor([...queue, json])) > 60000) flushWith(unload);
+    if (bytes(bodyFor([json])) > 60000) { unload(singleBody(json)); return; }
+    queue.push(json);
     flushWith(unload);
   }
 

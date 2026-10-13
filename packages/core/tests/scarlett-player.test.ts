@@ -316,12 +316,51 @@ describe('ScarlettPlayer', () => {
       expect(onPlay).not.toHaveBeenCalled();
     });
 
-    it('does not play a second time when the viewer pressed play during the outage', async () => {
-      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+    // PR #141 review (CodeRabbit): a play pressed during the outage reaches an
+    // aborted element, so it can be lost. Recovery honours the latest command
+    // and replays it, but only while the player is still paused; when the
+    // provider's own resume already unpaused it, nothing plays twice (the
+    // 'no longer paused' case below).
+    it('replays a play pressed during the outage when the player is still paused at recovery', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: false });
       await player.load('live.m3u8');
       const onPlay = watchPlay(player);
       await player.play();
       expect(onPlay).toHaveBeenCalledTimes(1);
+
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(2);
+    });
+
+    it('lets the latest command during the outage decide: play then pause stays paused', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      await player.play();
+      player.pause();
+
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets the latest command during the outage decide: pause then play plays', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      player.pause();
+      await player.play();
+
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not record intent from play() when no load failed into a recovery', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: false });
+      const onPlay = watchPlay(player);
+      await player.play();
 
       await recover(player);
 
@@ -340,7 +379,7 @@ describe('ScarlettPlayer', () => {
       expect(onPlay).not.toHaveBeenCalled();
     });
 
-    it('drops the intent when pause() is called during the outage', async () => {
+    it('stays paused when pause() is called during the outage', async () => {
       const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
       await player.load('live.m3u8');
       const onPlay = watchPlay(player);

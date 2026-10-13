@@ -663,7 +663,8 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   `maybeScheduleReconnect()`, which hands over to the auto-reconnect scheduler
   only when the failure was a network or media one and playback had already
   started, the stream is live, or the failure is a load timeout
-  (`detail.timedOut`). A stall at `loadTimeoutMs` is transient and comes before
+  (`detail.timedOut`), as is any later failure inside the window a timeout
+  opened. A stall at `loadTimeoutMs` is transient and comes before
   live is known, so both watchdogs hand it to reconnect (the native one first
   tears down and aborts the stalled element fetch); `load()` still rejects at
   the timeout, and a load that later recovers plays when its effective
