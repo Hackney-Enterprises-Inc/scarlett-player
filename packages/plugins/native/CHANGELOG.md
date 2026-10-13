@@ -1,5 +1,11 @@
 # @scarlett-player/native
 
+## 1.25.0
+
+### Patch Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Leaving fullscreen on iPhone no longer resumes a video the viewer paused; only leaving picture-in-picture does.
+
 ## 1.24.0
 
 ## 1.23.0

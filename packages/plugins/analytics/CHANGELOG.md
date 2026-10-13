@@ -1,5 +1,15 @@
 # @scarlett-player/analytics
 
+## 1.25.0
+
+### Minor Changes
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - `videoStart` now waits for a frame to actually be shown, and a stall where the picture freezes without the browser reporting buffering now counts as a rebuffer, so startup times and rebuffer counts (mostly on iOS Safari) will read higher than on 1.24.
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Heartbeats and viewEnd carry view totals for decoded and dropped frames, and live seeks carry the seekable window.
+
+- [#141](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/141) [`b1eaa79`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/b1eaa798118f9ea4164d99414f2cc569af998e8a) Thanks [@alexhackney](https://github.com/alexhackney)! - Every beacon the built-in transport sends now carries `sentAt`, the time it left the browser, so an ingest can correct for a viewer's clock being wrong. A batch carries it once on its envelope, and `customBeacon` payloads have none.
+
 ## 1.24.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@scarlett-player/embed",
-  "version": "1.24.0",
+  "version": "1.25.0",
   "description": "Standalone CDN-ready embed package for Scarlett Player",
   "type": "module",
   "main": "./dist/embed.umd.cjs",
