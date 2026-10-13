@@ -211,3 +211,61 @@ describe('native first-load failure through core load()', () => {
     await player.destroy();
   });
 });
+
+/**
+ * Tarnock review HEI-SCARLETT-65: after `error:recovered`, core's recovery
+ * autoplay and the provider's own resume in attemptReconnect are both
+ * candidates to call play(). Only one may: core plays while `paused` is still
+ * true, and the provider reads `paused` synchronously after the emit, before
+ * core's play() has changed it. Pinned through the real core and plugin.
+ */
+describe('play after recovering a timed-out load, through core', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hlsLoader.resetLoader();
+    installMediaStubs();
+    vi.spyOn(hlsLoader, 'supportsNativeHLS').mockReturnValue(true);
+    vi.spyOn(hlsLoader, 'isHlsJsSupported').mockReturnValue(false);
+    vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(true);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('calls video.play() exactly once when an autoplay load recovers', async () => {
+    vi.useFakeTimers();
+    const player = new ScarlettPlayer({ container, autoplay: true, plugins: [createHLSPlugin()] });
+
+    const loading = player.load('http://example.com/live/stream.m3u8');
+    await vi.advanceTimersByTimeAsync(30000);
+    await loading;
+
+    const recovered = vi.fn();
+    player.on('error:recovered', recovered);
+    const play = vi.spyOn(HTMLVideoElement.prototype, 'play');
+    play.mockClear();
+
+    // The reconnect attempt (2 s base backoff, jittered) reaches metadata
+    await vi.advanceTimersByTimeAsync(2500);
+    const video = container.querySelector('video') as HTMLVideoElement;
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await vi.advanceTimersByTimeAsync(0);
+    await flush();
+
+    expect(recovered).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    await player.destroy();
+  });
+});
