@@ -154,6 +154,8 @@ export class PluginManager {
 
       try {
         record.state = 'initializing';
+        // A previous run may have been abandoned mid-teardown; this one is fresh
+        record.api.restore();
 
         if (record.plugin.onStateChange) {
           const unsub = this.stateManager.subscribe(record.plugin.onStateChange.bind(record.plugin));
@@ -273,6 +275,23 @@ export class PluginManager {
         this.destroyPromises.delete(id);
       }
     }
+  }
+
+  /**
+   * Cut off a plugin whose teardown is still pending, so it cannot act on
+   * the player while it finishes: its cleanups run now and its API stops
+   * reaching state, events and the container (see `PluginAPI.revoke()`). The
+   * teardown itself carries on; `destroy()` still runs when it settles. Does
+   * nothing when no teardown of the plugin is in flight.
+   *
+   * @param id - Plugin ID
+   * @returns `true` when this call cut the plugin off, `false` when there was
+   *   no teardown in flight or it was already cut off
+   */
+  abandonPlugin(id: string): boolean {
+    const record = this.plugins.get(id);
+    if (!record || !this.destroyPromises.has(id)) return false;
+    return record.api.revoke();
   }
 
   /** Get a plugin by ID (returns any registered plugin). */

@@ -844,6 +844,116 @@ describe('ScarlettPlayer', () => {
         expectTeardownWarning('first');
       });
 
+      it('cuts a timed-out provider off from the player before the next one loads', async () => {
+        const { first, second, player } = createPair({ deferInit: true });
+
+        void player.load('first.m3u8'); // stays inside init() for good
+        await vi.advanceTimersByTimeAsync(0);
+        const oldApi = first.api;
+
+        const loadingSecond = player.load('second.mp4');
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS);
+        await loadingSecond;
+
+        // Its listeners are released and its late writes go nowhere
+        player.play();
+        expect(first.listener).not.toHaveBeenCalled();
+        oldApi.setState('title', 'stale');
+        expect(player.getState().title).not.toBe('stale');
+        const onLate = vi.fn();
+        oldApi.on('playback:play', onLate);
+        player.play();
+        expect(onLate).not.toHaveBeenCalled();
+
+        // Its container is no longer the player's: a late teardown cannot
+        // find, and remove, the replacement's media element
+        const replacement = document.createElement('video');
+        container.appendChild(replacement);
+        expect(oldApi.container).not.toBe(container);
+        expect(oldApi.container.querySelector('video')).toBeNull();
+
+        // The late teardown still runs and leaves the replacement alone
+        first.settle();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(first.provider.destroy).toHaveBeenCalledTimes(1);
+        expect(player.currentProvider).toBe(second.provider);
+        expect(replacement.isConnected).toBe(true);
+      });
+
+      it("takes the timed-out provider's media element out of the container", async () => {
+        const { player } = createPair({ deferInit: true });
+
+        void player.load('first.m3u8');
+        await vi.advanceTimersByTimeAsync(0);
+        const stale = document.createElement('video');
+        const pause = vi.spyOn(stale, 'pause').mockImplementation(() => {});
+        container.appendChild(stale);
+
+        const loadingSecond = player.load('second.mp4');
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS);
+        await loadingSecond;
+
+        expect(stale.isConnected).toBe(false);
+        expect(pause).toHaveBeenCalled();
+        expect(container.querySelector('video')).toBeNull();
+      });
+
+      it("does not strip a newer provider's element when a superseded load's bound fires later", async () => {
+        const { second, player } = createPair({ deferInit: true });
+
+        void player.load('first.m3u8'); // stays inside init() for good
+        await vi.advanceTimersByTimeAsync(0);
+        void player.load('b.mp4'); // bound fires at 10 s
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS / 2);
+        void player.load('c.mp4'); // its own bound fires at 15 s
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS / 2);
+
+        // The first bound cut the old provider off; a newer load goes straight in
+        const loadingD = player.load('d.mp4');
+        await vi.advanceTimersByTimeAsync(0);
+        await loadingD;
+        expect(player.currentProvider).toBe(second.provider);
+        const current = document.createElement('video');
+        container.appendChild(current);
+
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS / 2);
+        expect(current.isConnected).toBe(true);
+        expect(player.getState().source).toEqual({ src: 'd.mp4', type: 'video/mp4' });
+      });
+
+      it('makes a load() of the same provider wait for its teardown, then init it afresh', async () => {
+        const { first, player } = createPair({ deferInit: true });
+
+        void player.load('first.m3u8');
+        await vi.advanceTimersByTimeAsync(0);
+        const unloading = player.unload();
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS);
+        await unloading;
+
+        let loaded = false;
+        const reloading = player.load('first.m3u8').then(() => {
+          loaded = true;
+        });
+        await vi.advanceTimersByTimeAsync(TEARDOWN_TIMEOUT_MS);
+        expect(first.provider.init).toHaveBeenCalledTimes(1);
+        expect(loaded).toBe(false);
+
+        first.settle(); // the old init settles; its destroy runs, then a fresh init
+        await vi.advanceTimersByTimeAsync(0);
+        expect(first.provider.destroy).toHaveBeenCalledTimes(1);
+        expect(first.provider.init).toHaveBeenCalledTimes(2);
+        first.settle();
+        await vi.advanceTimersByTimeAsync(0);
+        await reloading;
+
+        // The fresh init has a working API again
+        expect(first.api.container).toBe(container);
+        first.api.setState('title', 'fresh');
+        expect(player.getState().title).toBe('fresh');
+        player.play();
+        expect(first.listener).toHaveBeenCalled();
+      });
+
       it('leaves no timer behind when the teardown settles first', async () => {
         const { second, player } = createPair();
 

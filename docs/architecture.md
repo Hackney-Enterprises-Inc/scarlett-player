@@ -198,8 +198,9 @@ not need the event at all.
 3. Destroys the previous provider through `PluginManager.destroyPlugin()`, which
    returns it to the `registered` state so it can be initialised again later,
    then waits for any teardown an `unload()` still has in flight. Each wait is
-   bounded at 10 seconds: past that the player logs a warning and goes ahead,
-   and the old provider's teardown finishes whenever it settles.
+   bounded at 10 seconds: past that the player logs a warning, cuts the old
+   provider off (see below) and goes ahead, and the old provider's teardown
+   finishes whenever it settles.
 4. `ensureInitialized()`.
 5. `PluginManager.selectProvider(source)`. No provider means
    `ErrorHandler.throw(ErrorCode.PROVIDER_NOT_FOUND, ...)` and a return, not an
@@ -255,6 +256,15 @@ or loading it returns without doing anything. Otherwise it:
    finishes whenever it settles. A later `load()` that selects the same
    provider still waits for that teardown in `initPlugin()`; `destroy()`
    releases a bounded wait at once.
+
+   When the bound fires, the player first cuts the old provider off
+   (`PluginManager.abandonPlugin()`): its `PluginAPI` runs its cleanups and is
+   revoked, so `setState`, `defineState`, `emit`, `on` and `subscribeToState`
+   do nothing and `api.container` is a detached stand-in, and the media
+   elements in the player's container are paused and removed. Only the first
+   bound to fire for a teardown does this, while no other provider is active,
+   so the late `destroy()` cannot remove a replacement's reused element or
+   write to its state. A fresh `initPlugin()` restores the API.
 3. Applies the unloaded state: `source` null, `playbackState` `idle`, the
    `playing` false, `paused` true, `ended`, `buffering`, `waiting` and
    `seeking` false, `currentTime`, `duration` and `bufferedAmount` 0,
@@ -450,9 +460,9 @@ Both seek paths are ignored for analytics after `viewEnd` until the next view
 opens (a play request, or a load of another source), so replay preparation
 cannot alter a finalized view.
 
-`runCleanups()` and `getCleanupFns()` exist on the concrete `PluginAPI` for
-`PluginManager` to call; they are marked `@internal` and are not part of
-`IPluginAPI`.
+`runCleanups()`, `getCleanupFns()`, `revoke()` and `restore()` exist on the
+concrete `PluginAPI` for `PluginManager` to call; they are marked `@internal`
+and are not part of `IPluginAPI`.
 
 ## State
 
