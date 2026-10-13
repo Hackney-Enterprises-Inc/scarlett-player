@@ -173,6 +173,34 @@ export class ScarlettPlayer {
    */
   private readonly teardownWaits = new Set<() => void>();
 
+  /**
+   * Autoplay intent of a `load()` that failed while still the active load,
+   * kept for the provider's auto-reconnect.
+   *
+   * A provider that hands a failed load to auto-reconnect (an HLS load
+   * timeout, HEI-SCARLETT-57) has already settled the load when it recovers,
+   * and it never sees the per-load `autoplay` override. So core records the
+   * effective autoplay here and plays on `error:recovered` when it was on.
+   * A new `load()`, `unload()`, `destroy()`, `play()` or `pause()` clears
+   * it: each either supersedes the load or states the viewer's own intent.
+   * A `play()` or `pause()` made while the load was still pending (or from
+   * the provider's fatal `error` listener, before the load's catch runs)
+   * decides instead of the load's autoplay: the latest one wins, play
+   * recording `shouldPlay: true` and pause `false` (see `playbackCommands`).
+   */
+  private pendingRecoveryAutoplay: { generation: number; shouldPlay: boolean } | null = null;
+
+  /**
+   * Count of `play()` and `pause()` calls. `load()` captures it when it
+   * starts: when it has changed by the failure, the viewer's latest command
+   * (`lastPlaybackCommand`) decides recovery autoplay, not the load's own
+   * autoplay.
+   */
+  private playbackCommands = 0;
+
+  /** The latest of `play()` / `pause()`, null before either was called. */
+  private lastPlaybackCommand: 'play' | 'pause' | null = null;
+
   /** The in-flight `unload()`, shared by a repeat call made before it ends. */
   private pendingUnload: { generation: number; promise: Promise<void> } | null = null;
 
@@ -394,6 +422,26 @@ export class ScarlettPlayer {
       await this.load(src, { autoplay: autoplay !== false });
     });
 
+    // A provider recovered through auto-reconnect. A load that failed into
+    // that reconnect has already settled without playing, so play it now if
+    // it asked for autoplay. Only while still paused: the provider resumes on
+    // its own when the viewer pressed play during the outage (play() would
+    // have cleared the intent anyway), and the two must never both play.
+    this.eventBus.on('error:recovered', () => {
+      const pending = this.pendingRecoveryAutoplay;
+      if (!pending || this.destroyed) return;
+      this.pendingRecoveryAutoplay = null;
+      if (pending.generation !== this.loadGeneration) return;
+      if (!pending.shouldPlay || !this.stateManager.getValue('paused')) return;
+
+      // The autoplay policy may refuse a play nobody clicked for
+      this.play().catch((error: unknown) => {
+        this.logger.warn('Autoplay after recovery failed', {
+          error: (error as Error)?.message,
+        });
+      });
+    });
+
     // Listen for retry requests (e.g., the UI error overlay's "Try Again").
     // Reload through the normal provider path rather than poking the video
     // element directly, then restore where the viewer was: live streams
@@ -491,6 +539,16 @@ export class ScarlettPlayer {
    * only and the state key is left as it is. The `media:load-request` handler
    * passes the request's `autoplay` through here.
    *
+   * A load that fails can still recover: a provider may hand the failure to
+   * its auto-reconnect (the HLS provider does on a load timeout) and emit
+   * `error:recovered` later. When that load's effective autoplay was on and
+   * the player is still paused, the player plays then. A `play()` or
+   * `pause()` made while the load was pending (or from a fatal `error`
+   * listener) decides instead, the latest one winning: play plays on
+   * recovery, pause stays paused. A newer `load()`, `unload()`, `destroy()`,
+   * `play()` or `pause()` after the failure cancels it, and a play the
+   * autoplay policy refuses is logged, not thrown.
+   *
    * @param source - Media source URL
    * @param options - Per-load options
    * @param options.autoplay - Overrides the `autoplay` option for this load
@@ -512,6 +570,8 @@ export class ScarlettPlayer {
     // Increment generation to invalidate any in-flight load
     const generation = ++this.loadGeneration;
     this.requestedSource = source;
+    this.pendingRecoveryAutoplay = null;
+    const commandsAtStart = this.playbackCommands;
 
     try {
       this.logger.info('Loading source', { source });
@@ -612,6 +672,18 @@ export class ScarlettPlayer {
     } catch (error) {
       // Only handle error if this is still the active load
       if (generation === this.loadGeneration) {
+        // The provider may still recover this load through auto-reconnect;
+        // keep what it wanted so error:recovered can honour it. A play() or
+        // pause() since the load started is the viewer's own say: the latest
+        // one wins over the load's autoplay.
+        const commanded = this.playbackCommands !== commandsAtStart;
+        this.pendingRecoveryAutoplay = {
+          generation,
+          shouldPlay: commanded
+            ? this.lastPlaybackCommand === 'play'
+            : Boolean(options?.autoplay ?? this.stateManager.getValue('autoplay')),
+        };
+
         // Providers that emit structured fatal errors (e.g. the HLS plugin
         // after exhausting recovery) have already reported this failure and
         // populated the error state. Re-classifying the thrown message here
@@ -684,6 +756,7 @@ export class ScarlettPlayer {
 
     // Invalidate any in-flight load through the same counter load() trusts
     const generation = ++this.loadGeneration;
+    this.pendingRecoveryAutoplay = null;
     const promise = this.runUnload(generation, provider, src);
     const pending = { generation, promise };
     this.pendingUnload = pending;
@@ -853,6 +926,9 @@ export class ScarlettPlayer {
    */
   async play(): Promise<void> {
     this.checkDestroyed();
+    this.playbackCommands++;
+    this.lastPlaybackCommand = 'play';
+    this.pendingRecoveryAutoplay = null;
 
     try {
       this.logger.debug('Play requested');
@@ -875,6 +951,9 @@ export class ScarlettPlayer {
    */
   pause(): void {
     this.checkDestroyed();
+    this.playbackCommands++;
+    this.lastPlaybackCommand = 'pause';
+    this.pendingRecoveryAutoplay = null;
 
     try {
       this.logger.debug('Pause requested');
@@ -1461,6 +1540,7 @@ export class ScarlettPlayer {
       // destroy() did not participate in the generation counter, so a destroy
       // mid-load left the generation matching and the continuation ran on.
       this.loadGeneration++;
+      this.pendingRecoveryAutoplay = null;
 
       // Release bounded provider-teardown waits: the superseded load or
       // unload behind each one bails on the generation check, and none of

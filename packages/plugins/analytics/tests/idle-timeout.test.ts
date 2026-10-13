@@ -131,6 +131,7 @@ describe('idle timeout', () => {
     vi.advanceTimersByTime(3000);
     h.state.set('paused', false);
     h.state.set('playing', true);
+    h.confirmFrame();
     vi.advanceTimersByTime(2000);
 
     expect(h.sent('heartbeat').at(-1)).toMatchObject({ watchTime: 5000, playTime: 2000 });
@@ -186,6 +187,7 @@ describe('idle timeout', () => {
       // The element's `playing` after a stall: `playing` never went false,
       // so only playback:play reaches the bus
       h.bus.emit('playback:play', undefined);
+      h.confirmFrame();
 
       const starts = h.sent('viewStart');
       expect(starts).toHaveLength(2);
@@ -211,6 +213,7 @@ describe('idle timeout', () => {
       h.bus.emit('error:recovered', { attempt: 2, elapsedMs: 8000 });
       // The provider's own resume follows
       h.bus.emit('playback:play', undefined);
+      h.confirmFrame();
 
       const starts = h.sent('viewStart');
       expect(starts).toHaveLength(2);

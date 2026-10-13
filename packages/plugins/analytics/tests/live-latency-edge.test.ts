@@ -317,6 +317,7 @@ describe('live latency at the edge', () => {
     vi.advanceTimersByTime(2500);
     expect(h.sent('viewEnd')[0]).toMatchObject({ dvrTime: 500 });
     h.bus.emit('playback:play', undefined);
+    h.confirmFrame();
     await reading(4, true);
     vi.advanceTimersByTime(1000);
     expect(lastHeartbeat()).toMatchObject({ liveLatencySamples: 1, liveLatencyMax: 4, dvrTime: 0 });

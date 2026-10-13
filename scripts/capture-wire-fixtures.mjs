@@ -1150,6 +1150,16 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     return `${beacons.length} beacons`;
   });
 
+  check('every unbatched beacon carries dispatch sentAt within 1s of its event timestamp', () => {
+    for (const r of beacons) {
+      const b = r.body;
+      if (!Number.isSafeInteger(b.sentAt) || b.sentAt < b.timestamp || b.sentAt - b.timestamp >= 1000) {
+        fail(`${eventOf(r)} (${r.scenario}): invalid dispatch sentAt ${b.sentAt} for timestamp ${b.timestamp}`);
+      }
+    }
+    return `${beacons.length} fetch/sendBeacon bodies`;
+  });
+
   check('every beacon has a positive integer beaconSeq, starting at 1 and increasing per view in timestamp/beaconSeq order', () => {
     const views = new Map();
     for (const r of beacons) {
@@ -1325,9 +1335,12 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
   if (includeBatch) check('opt-in batch envelope preserves event order and uses fetch auth', () => {
     const posts = beaconsOf('batch');
     const events = posts.flatMap((r) => r.body?.events ?? []);
-    if (!posts.length || posts.some((r) => r.body?.batch !== 1 || !Number.isFinite(r.body.sentAt) || !Array.isArray(r.body.events) || Buffer.byteLength(JSON.stringify(r.body)) > 60000)) fail('invalid batch envelope/size or a single-event POST');
+    if (!posts.length || posts.some((r) => r.body?.batch !== 1 || !Number.isSafeInteger(r.body.sentAt) || !Array.isArray(r.body.events) || Buffer.byteLength(JSON.stringify(r.body)) > 60000)) fail('invalid batch envelope/size or a single-event POST');
     if (!events.some((e) => e.event === 'custom:wireBatch') || !events.some((e) => e.event === 'viewEnd')) fail('batch missing custom event or final viewEnd');
     for (let i = 1; i < events.length; i++) if (events[i].beaconSeq <= events[i - 1].beaconSeq) fail('batch event sequence out of order');
+    for (const r of posts) {
+      if (r.body.events.some((event) => r.body.sentAt < event.timestamp)) fail('batch sentAt precedes an event timestamp');
+    }
     for (const r of posts) if (r.headers['x-api-key'] !== API_KEY || r.headers['x-wire-token'] !== WIRE_TOKEN) fail('batch fetch auth missing');
   });
 

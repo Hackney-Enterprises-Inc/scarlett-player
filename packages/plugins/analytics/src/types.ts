@@ -220,7 +220,7 @@ export interface AnalyticsConfig {
   /** Opt in to the batch envelope; requires a compatible custom ingest. Default false. */
   batch?: boolean | { intervalMs?: number; maxEvents?: number };
 
-  /** Custom beacon transport function (for testing) */
+  /** Custom transport: receives event payloads without wire-only sentAt; hosts may add their own dispatch time. */
   customBeacon?: BeaconFunction;
 }
 
@@ -298,7 +298,7 @@ export interface ViewSession {
   /** Total time from viewStart to viewEnd (ms) */
   watchTime: number;
 
-  /** Actual playback time (excludes waiting, including dropped grace, and pauses) (ms) */
+  /** Playback time after first-frame confirmation; excludes startup, waiting (including dropped grace), progress freezes and pauses (ms). */
   playTime: number;
 
   /**
@@ -394,14 +394,16 @@ export interface ViewSession {
 }
 
 /**
- * Beacon payload structure sent to analytics endpoint.
+ * Event payload supplied to beforeSend and customBeacon. The default transport
+ * adds wire-only sentAt (epoch ms at dispatch after headers resolve); it is
+ * deliberately absent here, and does not change the event timestamp.
  */
 export interface BeaconPayload {
   // === Event Info ===
   /** Event type */
   event: AnalyticsEventType | string;
 
-  /** Event timestamp */
+  /** Event creation time in epoch milliseconds; independent of wire dispatch time. */
   timestamp: number;
 
   /**
@@ -413,6 +415,23 @@ export interface BeaconPayload {
 
   /** On seeking beacons: a player bus request or an element/native-controls seek. */
   seekSource?: 'player' | 'element';
+
+  /** Frame-confirmation signal on videoStart; playing alone is not confirmation. */
+  firstFrameSource?: 'rvfc' | 'progress';
+  /** Element readyState at the play request (0 when no element is available). */
+  readyState?: number;
+  /** True on playRequest when the request position is greater than zero. */
+  resume?: boolean;
+  /** Signal opening a rebuffer; progress duration starts at the last sampled advance. */
+  cause?: 'waiting' | 'progress' | 'reconnect';
+  /** View-scoped decoded frame total on measured heartbeat/viewEnd payloads. */
+  decodedFramesTotal?: number;
+  /** View-scoped dropped frame total on measured heartbeat/viewEnd payloads. */
+  droppedFramesTotal?: number;
+  /** Live seekable window start in seconds, when available on seeking. */
+  seekableStart?: number;
+  /** Live seekable window end in seconds, when available on seeking. */
+  seekableEnd?: number;
 
   /** Present only when persistent IDs are disabled for this view. */
   anonymous?: true;

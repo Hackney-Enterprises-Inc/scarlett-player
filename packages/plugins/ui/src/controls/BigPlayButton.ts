@@ -21,6 +21,7 @@ import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
 import { getVideo, setHTML, setAttr } from '../utils';
+import { replayFromEnd } from './replay';
 
 export class BigPlayButton implements Control {
   private el: HTMLButtonElement;
@@ -162,8 +163,11 @@ export class BigPlayButton implements Control {
   /**
    * Start (or restart) playback.
    *
-   * The same two branches as the control bar's play button: restart from zero
-   * after the video ended, otherwise just play. There is no pause branch,
+   * The same two branches as the control bar's play button: restart after the
+   * video ended, otherwise just play. A replay goes through
+   * {@link replayFromEnd}, which picks the target from the element's duration.
+   * When that reloads the source instead of seeking, the element is left alone:
+   * the load request already carries `autoplay`. There is no pause branch,
    * because this button is never on screen while playback is running. It reads
    * `video.ended` for the same reason `hasEnded()` does.
    */
@@ -171,8 +175,8 @@ export class BigPlayButton implements Control {
     const video = getVideo(this.api.container);
     if (!video) return;
 
-    if (video.ended) {
-      video.currentTime = 0;
+    if (video.ended && replayFromEnd(this.api, video) === null) {
+      return;
     }
 
     // play() rejections (autoplay policy, AbortError) must never escape as

@@ -52,6 +52,7 @@ import {
   isDevelopment,
 } from './helpers';
 import { createTransport } from './transport';
+import { createStallProgress, PROGRESS_SAMPLE_MS } from './stall-progress';
 import { createSeekEmissionWindow } from './seek-window';
 import { privacyOptOut } from './privacy';
 import { pageContext } from './context';
@@ -263,6 +264,10 @@ export function createAnalyticsPlugin(
   } | null = null;
   // A play request is waiting for its first frame (see onPlayRequest)
   let playRequestPending = false;
+  let playRequestPosition = 0;
+  let frameConfirmationArmed = false;
+  let frameConfirmationGeneration = 0;
+  let pendingFrame: { video: HTMLVideoElement; handle: number | null; onTimeUpdate: () => void } | null = null;
   // A playlist track that has not been loaded yet (see onPlaylistChange)
   let pendingTrack: { trackId: string; src: string | null; video: AnalyticsVideo } | null = null;
   // The playlist track the current view is about, null outside a playlist
@@ -293,7 +298,79 @@ export function createAnalyticsPlugin(
   let segmentErrors = 0;
   let mainBytes = 0;
   let mainDurationMs = 0;
+  let frameTotalsKnown = false;
+  let decodedFramesTotal = 0;
+  let droppedFramesTotal = 0;
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  let progressRebuffer = false;
+  let progressPlayCredit = 0;
+  let progressDvrCredit = 0;
+  const stallProgress = createStallProgress({
+    now: () => Date.now(),
+    position: () => api?.container.querySelector('video')?.currentTime ?? null,
+    onProgress: () => {
+      accrueTime();
+      progressPlayCredit = session.playTime;
+      progressDvrCredit = session.dvrTime;
+    },
+    onStall: (startedAt) => {
+      accrueTime();
+      // Sampling confirms the preceding frozen interval retrospectively. Remove
+      // its credited play/DVR time, even if heartbeats accrued it meanwhile.
+      session.playTime = progressPlayCredit;
+      session.dvrTime = progressDvrCredit;
+      lastPlayingAt = startedAt;
+      progressRebuffer = true;
+      openRebuffer(startedAt, 'progress');
+    },
+    onResume: () => closeRebuffer(true),
+  });
   let frameBaseline: { video: HTMLVideoElement; decoded: number; dropped: number } | null = null;
+
+  /**
+   * Play and DVR credit safe to put on a beacon. While the element has not
+   * advanced since the last sample, the time since that advance may yet be
+   * confirmed as a progress stall and removed, so only the credit at the
+   * last advance is reported. Sent cumulative counters therefore never go
+   * down, and a later stall backdated to that advance never overlaps
+   * reported play time.
+   * @returns The play and DVR time to report
+   */
+  function reportedCredit(): { playTime: number; dvrTime: number } {
+    if (progressTimer !== null && stallProgress.holding()) {
+      return { playTime: progressPlayCredit, dvrTime: progressDvrCredit };
+    }
+    return { playTime: session.playTime, dvrTime: session.dvrTime };
+  }
+
+  /** Stop sampling and discard its baseline at a lifecycle boundary. */
+  function stopStallProgress(): void {
+    if (progressTimer !== null) clearInterval(progressTimer);
+    progressTimer = null;
+    stallProgress.reset();
+  }
+
+  /**
+   * Sample only confirmed, visible playback. Keep a progress episode sampled
+   * while open so its next actual advance can close it, even without playing.
+   */
+  function syncStallProgress(): void {
+    const eligible = api && session.viewEnd === null && session.firstFrameTime !== null
+      && statePlaying && session.playbackState === 'playing' && !api.getState('paused')
+      && !api.getState('seeking') && !api.getState('ended') && !document.hidden
+      && api.getState('playbackRate') > 0 && waitingSince === null
+      // A Chromecast receiver plays while the local element stays paused
+      && api.getState('chromecastActive') !== true
+      && (!isRebuffering || progressRebuffer) && api.container.querySelector('video');
+    if (!eligible) { stopStallProgress(); return; }
+    if (progressTimer !== null) return;
+    stallProgress.reset(progressRebuffer);
+    stallProgress.sample();
+    progressTimer = setInterval(() => {
+      syncStallProgress();
+      if (progressTimer !== null) stallProgress.sample();
+    }, PROGRESS_SAMPLE_MS);
+  }
 
   /** Record a measured fragment; failed requests and alternate renditions count too. */
   function onSegment(segment: PlayerEventMap['media:segment']): void {
@@ -332,10 +409,19 @@ export function createAnalyticsPlugin(
     mainBytes = mainDurationMs = 0;
   }
 
-  /** Read counters only from a video with the standard playback-quality API. */
+  /** Read the current video's counters, when it has the standard playback-quality API. */
   function readFrames(): { video: HTMLVideoElement; decoded: number; dropped: number } | null {
     const video = api?.container.querySelector('video');
-    if (!video || typeof video.getVideoPlaybackQuality !== 'function') return null;
+    return video ? readFramesOf(video) : null;
+  }
+
+  /**
+   * Read one element's playback-quality counters; a detached element still answers.
+   * @param video - The element to read
+   * @returns Valid counters, or null when unavailable
+   */
+  function readFramesOf(video: HTMLVideoElement): { video: HTMLVideoElement; decoded: number; dropped: number } | null {
+    if (typeof video.getVideoPlaybackQuality !== 'function') return null;
     try {
       const quality = video.getVideoPlaybackQuality();
       const decoded = quality?.totalVideoFrames;
@@ -347,22 +433,64 @@ export function createAnalyticsPlugin(
     }
   }
 
-  /** Baseline at source/view boundaries to avoid counting the previous video's frames. */
-  function resetFrames(): void {
-    frameBaseline = readFrames();
+  /**
+   * Rebaseline the frame counters. Mid-view (a source re-write) the frames
+   * since the previous baseline are folded into the view totals first.
+   * @param settle - False at a view boundary, whose pending frames belong to
+   *   the view that already ended
+   */
+  function resetFrames(settle = true): void {
+    const current = readFrames();
+    if (settle) settleFrames(current);
+    frameBaseline = current;
+    if (current) frameTotalsKnown = true;
   }
 
-  /** Frame increments since the previous heartbeat (or source/view boundary). */
+  /**
+   * Add the frames counted since the baseline to the view totals.
+   *
+   * The same element with counters at or above the baseline gives a delta.
+   * Counters that went down restarted (a reload), so everything they now
+   * hold is this view's. A replaced or removed element first settles what it
+   * decoded since the baseline, then the new element counts from zero. With
+   * no baseline the first reading is a baseline only.
+   *
+   * @param current - The current element's reading, or null
+   * @returns The same-element delta, or null when there is none to report
+   */
+  function settleFrames(current: { video: HTMLVideoElement; decoded: number; dropped: number } | null): { decoded: number; dropped: number } | null {
+    const previous = frameBaseline;
+    if (!previous) return null;
+    const add = (decoded: number, dropped: number) => {
+      decodedFramesTotal += decoded;
+      droppedFramesTotal += dropped;
+    };
+    if (current && current.video === previous.video) {
+      if (current.decoded >= previous.decoded && current.dropped >= previous.dropped) {
+        const delta = { decoded: current.decoded - previous.decoded, dropped: current.dropped - previous.dropped };
+        add(delta.decoded, delta.dropped);
+        return delta;
+      }
+      add(current.decoded, current.dropped);
+      return null;
+    }
+    const old = readFramesOf(previous.video);
+    if (old && old.decoded >= previous.decoded && old.dropped >= previous.dropped) {
+      add(old.decoded - previous.decoded, old.dropped - previous.dropped);
+    }
+    if (current) add(current.decoded, current.dropped);
+    return null;
+  }
+
+  /** Frame increments since the previous heartbeat (or source/view boundary), with the view totals. */
   function frameSummary(): Record<string, number> {
     const current = readFrames();
-    const previous = frameBaseline;
+    const delta = settleFrames(current);
     frameBaseline = current;
-    if (!current || !previous || current.video !== previous.video ||
-      current.decoded < previous.decoded || current.dropped < previous.dropped) return {};
-    return {
-      decodedFrames: current.decoded - previous.decoded,
-      droppedFrames: current.dropped - previous.dropped,
-    };
+    if (current) frameTotalsKnown = true;
+    if (!frameTotalsKnown) return {};
+    const totals = { decodedFramesTotal, droppedFramesTotal };
+    return delta ? { decodedFrames: delta.decoded, droppedFrames: delta.dropped, ...totals } : totals;
   }
 
   /**
@@ -431,6 +559,7 @@ export function createAnalyticsPlugin(
       return null;
     }
     if (eventType === 'error' && Math.random() > (mergedConfig.errorSampleRate ?? 1.0)) return null;
+    const seekableWindow = eventType === 'seeking' && resolveIsLive() === true ? api?.getState('seekableRange') : null;
     const payload: BeaconPayload = {
       event: eventType,
       timestamp: Date.now(),
@@ -451,23 +580,40 @@ export function createAnalyticsPlugin(
       ...(session.anonymous ? { anonymous: true as const } : {}),
       ...mergedConfig.customDimensions,
       ...data,
+      ...(seekableWindow && Number.isFinite(seekableWindow.start) && Number.isFinite(seekableWindow.end)
+        ? { seekableStart: seekableWindow.start, seekableEnd: seekableWindow.end } : {}),
       beaconSeq: session.beaconSeq + 1,
     };
+    // sentAt is the transport's wire-only dispatch time: a custom dimension
+    // or beforeSend can't supply one, so batched events never disagree with
+    // their envelope. Every path that sends strips it, including a hook that
+    // wrote it in place and then returned nothing or threw.
+    delete payload.sentAt;
     if (mergedConfig.beforeSend) {
       try {
         const result = mergedConfig.beforeSend(payload);
         if (result === null) return null;
         if (typeof result !== 'object') {
           session.beaconSeq++;
-          return payload;
+          return withoutSentAt(payload);
         }
         session.beaconSeq++;
-        return { ...result, beaconSeq: session.beaconSeq };
+        return withoutSentAt({ ...result, beaconSeq: session.beaconSeq });
       } catch (error) {
         api?.logger.debug('Analytics beforeSend() failed; sending unmodified beacon', { error });
       }
     }
     session.beaconSeq++;
+    return withoutSentAt(payload);
+  }
+
+  /**
+   * Drop any `sentAt` from an outgoing payload; only the transport stamps it.
+   * @param payload - The payload about to be sent
+   * @returns The same payload, without `sentAt`
+   */
+  function withoutSentAt(payload: BeaconPayload): BeaconPayload {
+    delete payload.sentAt;
     return payload;
   }
 
@@ -488,7 +634,7 @@ export function createAnalyticsPlugin(
    * Accrue watch and play time up to now.
    *
    * Adds the time since the last accrual to `watchTime`, and to `playTime`
-   * only while playback is running and not stalled: the view's
+   * only after first-frame confirmation while playback is running and not stalled: the view's
    * `playbackState` is playing and the player's `playing` state key is true.
    * Called by every heartbeat, before every change to `playbackState`,
    * `isRebuffering` or the `playing` key (so each stretch is credited under
@@ -503,7 +649,7 @@ export function createAnalyticsPlugin(
   function accrueTime(now: number = Date.now()): void {
     const elapsed = now - lastHeartbeatTime;
     session.watchTime += elapsed;
-    if (session.playbackState === 'playing' && statePlaying && !isRebuffering && waitingSince === null) {
+    if (session.firstFrameTime !== null && session.playbackState === 'playing' && statePlaying && !isRebuffering && waitingSince === null) {
       session.playTime += elapsed;
       if (liveMode === 'dvr') session.dvrTime += elapsed;
       lastPlayingAt = now;
@@ -618,7 +764,7 @@ export function createAnalyticsPlugin(
     updateAvgBitrate(now);
     return {
       watchTime: session.watchTime,
-      playTime: session.playTime,
+      playTime: reportedCredit().playTime,
       rebufferCount: session.rebufferCount,
       rebufferDuration: session.rebufferDuration,
       reconnectCount: session.reconnectCount,
@@ -636,7 +782,7 @@ export function createAnalyticsPlugin(
       qoeVersion: 2,
       // Absent entirely on VOD: nothing ever emitted a live:latency reading
       ...(latencySampler.summary() ?? {}),
-      ...(resolveIsLive() === true ? { dvrTime: session.dvrTime } : {}),
+      ...(resolveIsLive() === true ? { dvrTime: reportedCredit().dvrTime } : {}),
       ...segmentSummary(),
       ...frameSummary(),
     };
@@ -785,6 +931,8 @@ export function createAnalyticsPlugin(
     // The unload path (sendRebufferEnd false) uses the synchronous unload
     // transport, so the trailing seeking and the unload viewEnd go out as two
     // dispatches in creation order; no seeking beacon may follow a viewEnd.
+    stopStallProgress();
+    cancelFrameConfirmation();
     seekWindow.end(!sendRebufferEnd);
 
     // The time since the last heartbeat belongs to this view too
@@ -839,10 +987,15 @@ export function createAnalyticsPlugin(
     // A held pause belongs to the view it happened in, never the next one
     commitPendingPause();
     cancelPendingRebuffer();
+    cancelFrameConfirmation();
+    stopStallProgress();
+    progressRebuffer = false;
     idleEnded = false;
     session = initSession();
     resetSegments();
-    resetFrames();
+    frameTotalsKnown = false;
+    decodedFramesTotal = droppedFramesTotal = 0;
+    resetFrames(false);
     session.lastKnownIsLive = lastKnownIsLive;
     lastHeartbeatTime = Date.now();
     lastPlayingAt = lastHeartbeatTime;
@@ -1037,6 +1190,22 @@ export function createAnalyticsPlugin(
    * `paused` key going false. Whichever arrives first wins, and the other is
    * absorbed until the request settles at the next `playing: true` or pause.
    */
+  /**
+   * The playback position that first-frame confirmation measures from.
+   *
+   * While a Chromecast session owns playback, the local element stays paused
+   * and the receiver's position is mirrored into the `currentTime` state key,
+   * so that key is the position; otherwise the element's own, falling back to
+   * the state key when there is no element.
+   *
+   * @returns The current playback position in seconds
+   */
+  function currentPosition(): number {
+    if (!api) return 0;
+    if (api.getState('chromecastActive') === true) return api.getState('currentTime');
+    return api.container.querySelector('video')?.currentTime ?? api.getState('currentTime');
+  }
+
   function onPlayRequest(): void {
     // Before the dedup: a request the closed view left pending must not
     // swallow the one that reopens it
@@ -1046,7 +1215,9 @@ export function createAnalyticsPlugin(
 
     playRequestPending = true;
     session.playRequestTime = Date.now();
-    sendBeacon('playRequest');
+    const element = api.container.querySelector('video');
+    playRequestPosition = currentPosition();
+    sendBeacon('playRequest', { readyState: element?.readyState ?? 0, resume: playRequestPosition > 0 });
   }
 
   /**
@@ -1086,8 +1257,8 @@ export function createAnalyticsPlugin(
    * A reconnect that succeeds resumes playback, so it also reopens a view
    * the outage outlasted. Not while the viewer is paused: the provider keeps
    * a paused player paused, and nothing is being watched. Its `videoStart`
-   * comes now if `playing` is already true, otherwise from the `playing`
-   * change that follows.
+   * confirmation is armed now if `playing` is already true, otherwise from
+   * the `playing` change that follows; videoStart still waits for a frame.
    *
    * @param payload - `{ attempt, elapsedMs }`, or nothing from an older provider
    */
@@ -1150,6 +1321,8 @@ export function createAnalyticsPlugin(
     if (!first && !long) return;
 
     if (first) {
+      stopStallProgress();
+      progressRebuffer = false;
       const now = Date.now();
       outageStartedAt = now;
       session.reconnectCount++;
@@ -1159,7 +1332,7 @@ export function createAnalyticsPlugin(
       if (!isRebuffering && session.firstFrameTime !== null && api.getState('paused') !== true) {
         const startedAt = waitingSince ?? now;
         cancelPendingRebuffer();
-        openRebuffer(startedAt);
+        openRebuffer(startedAt, 'reconnect');
       }
     }
     if (long) outageLongSent = true;
@@ -1230,9 +1403,16 @@ export function createAnalyticsPlugin(
    * @param event - The change, dispatched only when the value actually changed
    */
   function onStateChange(event: StateChangeEvent): void {
+    handleStateChange(event);
+    syncStallProgress();
+  }
+
+  /** Apply one state transition before reconciling the progress sampler. @param event - Changed state key. */
+  function handleStateChange(event: StateChangeEvent): void {
     if (event.key === 'seeking' && event.previousValue === false && event.value === true) {
       // Replay preparation must not change an already-finalized view.
       if (session.viewEnd !== null) return;
+      cancelFrameConfirmation();
       markLiveSeek();
       if (pendingEchoes > 0 && Date.now() - lastBusSeekAt <= 1000) {
         pendingEchoes--;
@@ -1260,9 +1440,28 @@ export function createAnalyticsPlugin(
       return;
     }
 
+    if (event.key === 'seeking' && event.previousValue === true && event.value === false) {
+      onSeekEnded();
+      return;
+    }
+
     if (event.key === 'paused') {
+      if (event.value === true) cancelFrameConfirmation();
       if (event.previousValue === true && event.value === false && !api?.getState('playing')) {
         onPlayRequest();
+      }
+      // A provider that reports playing before paused (Chromecast's receiver
+      // sync) found the view still paused when playing armed confirmation.
+      if (event.previousValue === true && event.value === false && statePlaying) onFirstFrame();
+      return;
+    }
+
+    // While casting, the local element never advances: the receiver position
+    // mirrored into state is the progress that confirms the first frame.
+    if (event.key === 'currentTime') {
+      if (frameConfirmationArmed && api?.getState('chromecastActive') === true
+        && typeof event.value === 'number' && Number.isFinite(event.value) && event.value > playRequestPosition) {
+        confirmFirstFrame('progress');
       }
       return;
     }
@@ -1323,24 +1522,89 @@ export function createAnalyticsPlugin(
   }
 
   /**
-   * Send `videoStart` on the first frame of the view.
+   * Arm the first-frame race once playing is reported. Neither playing nor
+   * a play request proves a frame was shown: rVFC or advancing timeupdate
+   * confirms it. A resume after the view's first frame needs no new start.
    *
-   * The first `playing: true` the view sees, so a resume after pause is not a
-   * second start. Another video, or a replay after `ended`, is a new view
-   * with a start of its own.
+   * Progress is read from the bus `playback:timeupdate` and from the
+   * element's own `timeupdate`, so a provider that emits no bus timeupdate
+   * (WHEP) still confirms in a browser without rVFC.
+   *
+   * @param rebase - Measure progress from the element's current position
+   *   rather than the play request's (after a seek moved it)
    */
-  function onFirstFrame(): void {
-    if (session.viewEnd !== null || session.firstFrameTime !== null) return;
+  function onFirstFrame(rebase = false): void {
+    if (!api || session.viewEnd !== null || session.firstFrameTime !== null || frameConfirmationArmed
+      || !statePlaying || api.getState('paused') || api.getState('seeking')) return;
+    const element = api.container.querySelector('video');
+    if (rebase || session.playRequestTime === null) {
+      playRequestPosition = currentPosition();
+    }
+    frameConfirmationArmed = true;
+    // The Chromecast receiver sync writes the position before playing/paused,
+    // so the progress that confirms may already be in state when this arms.
+    if (api.getState('chromecastActive') === true && currentPosition() > playRequestPosition) {
+      confirmFirstFrame('progress');
+      return;
+    }
+    const generation = frameConfirmationGeneration;
+    if (!element) return;
+    const onTimeUpdate = (): void => {
+      if (generation === frameConfirmationGeneration && Number.isFinite(element.currentTime)
+        && element.currentTime > playRequestPosition) confirmFirstFrame('progress');
+    };
+    element.addEventListener('timeupdate', onTimeUpdate);
+    const pending: { video: HTMLVideoElement; handle: number | null; onTimeUpdate: () => void } = { video: element, handle: null, onTimeUpdate };
+    pendingFrame = pending;
+    if (typeof element.requestVideoFrameCallback === 'function') {
+      try {
+        pending.handle = element.requestVideoFrameCallback(() => {
+          if (generation !== frameConfirmationGeneration) return;
+          pending.handle = null;
+          confirmFirstFrame('rvfc');
+        });
+      } catch { /* Progress confirmation still works on an unsupported pipeline. */ }
+    }
+  }
 
+  /**
+   * Re-arm confirmation when a seek ends during playback that has not shown
+   * its first frame. A seek cancels pending confirmation, and providers keep
+   * the `playing` key true across it, so no `playing` change re-arms it.
+   * Progress is then measured from the post-seek position.
+   */
+  function onSeekEnded(): void {
+    if (!api || session.viewEnd !== null || session.firstFrameTime !== null || frameConfirmationArmed) return;
+    onFirstFrame(true);
+  }
+
+  /** Cancel a pending frame and invalidate callbacks across view/lifecycle boundaries. */
+  function cancelFrameConfirmation(): void {
+    frameConfirmationArmed = false;
+    frameConfirmationGeneration++;
+    if (pendingFrame) {
+      pendingFrame.video.removeEventListener('timeupdate', pendingFrame.onTimeUpdate);
+      if (pendingFrame.handle !== null) {
+        try { pendingFrame.video.cancelVideoFrameCallback?.(pendingFrame.handle); } catch { /* Already detached. */ }
+      }
+      pendingFrame = null;
+    }
+  }
+
+  /**
+   * Commit a confirmed first frame, accruing startup exclusively of play time.
+   * @param source - The signal that won the frame-confirmation race
+   */
+  function confirmFirstFrame(source: 'rvfc' | 'progress'): void {
+    if (!api || !frameConfirmationArmed || session.viewEnd !== null || session.firstFrameTime !== null
+      || !statePlaying || api.getState('paused') || api.getState('seeking')) return;
     const now = Date.now();
+    accrueTime(now);
+    cancelFrameConfirmation();
     session.firstFrameTime = now;
-    session.startupTime = session.playRequestTime !== null
-      ? now - session.playRequestTime
-      : null;
-
-    sendBeacon('videoStart', {
-      startupTime: session.startupTime,
-    });
+    session.startupTime = session.playRequestTime !== null ? now - session.playRequestTime : null;
+    sendBeacon('videoStart', { startupTime: session.startupTime, firstFrameSource: source });
+    syncStallProgress();
   }
 
   /**
@@ -1366,6 +1630,7 @@ export function createAnalyticsPlugin(
     const rebufferDuration = Date.now() - rebufferStartTime;
     session.rebufferDuration += rebufferDuration;
     isRebuffering = false;
+    progressRebuffer = false;
     rebufferStartTime = null;
 
     if (sendEndBeacon) {
@@ -1380,16 +1645,17 @@ export function createAnalyticsPlugin(
    * Handle playback started/resumed.
    *
    * A resume with no request (a stall recovering on its own after the view
-   * ended) opens a new view, whose first frame is this one.
+   * ended) opens a new view and arms its first-frame confirmation.
    */
   function onPlaying(): void {
-    if (ensureOpenView() && api?.getState('playing')) onFirstFrame();
+    ensureOpenView();
+    if (api?.getState('playing')) onFirstFrame();
     if (!api || session.viewEnd !== null) return;
 
     const now = Date.now();
     accrueTime(now);
 
-    closeRebuffer(true);
+    if (!progressRebuffer) closeRebuffer(true);
 
     // A held near-end pause that playback resumed from was the viewer's
     commitPendingPause();
@@ -1398,6 +1664,7 @@ export function createAnalyticsPlugin(
     settlePause(now);
 
     session.playbackState = 'playing';
+    syncStallProgress();
   }
 
   /**
@@ -1419,10 +1686,12 @@ export function createAnalyticsPlugin(
 
     accrueTime();
 
+    stopStallProgress();
     // A stall that ends in a pause rather than a resume still closes.
     closeRebuffer(true);
 
     // A pause settles any request still waiting for its first frame
+    cancelFrameConfirmation();
     playRequestPending = false;
     session.playbackState = 'paused';
 
@@ -1516,6 +1785,9 @@ export function createAnalyticsPlugin(
     if (!api) return;
 
     const currentTime = payload?.currentTime;
+    if (typeof currentTime === 'number' && Number.isFinite(currentTime) && currentTime > playRequestPosition) {
+      confirmFirstFrame('progress');
+    }
     const duration = api.getState('duration');
     if (
       typeof currentTime === 'number' && Number.isFinite(currentTime)
@@ -1538,6 +1810,7 @@ export function createAnalyticsPlugin(
       // Time up to the stall was spent playing
       accrueTime();
       waitingSince = Date.now();
+      stopStallProgress();
       if (rebufferGraceMs === 0) {
         openRebuffer(waitingSince);
         waitingSince = null;
@@ -1555,14 +1828,16 @@ export function createAnalyticsPlugin(
   /**
    * Count a confirmed stall, including its grace in the measured duration.
    * The beacon timestamp stays the send time, never backdated to waiting.
-   * @param startedAt - Time of the original waiting event
+   * @param startedAt - Time of the original waiting or last progress
+   * @param cause - Signal that confirmed the rebuffer
    */
-  function openRebuffer(startedAt: number): void {
+  function openRebuffer(startedAt: number, cause: 'waiting' | 'progress' | 'reconnect' = 'waiting'): void {
     accrueTime();
     isRebuffering = true;
     rebufferStartTime = startedAt;
     session.rebufferCount++;
     sendBeacon('rebufferStart', {
+      cause,
       rebufferCount: session.rebufferCount,
       currentTime: api?.getState('currentTime'),
     });
@@ -1602,6 +1877,8 @@ export function createAnalyticsPlugin(
   function onSeeking(payload?: { time?: number }): void {
     if (!api || session.viewEnd !== null) return;
 
+    stopStallProgress();
+    cancelFrameConfirmation();
     markLiveSeek();
     cancelPendingRebuffer();
     const now = Date.now();
@@ -1941,6 +2218,7 @@ export function createAnalyticsPlugin(
    */
   function onVisibilityChange(): void {
     if (session.viewEnd !== null) return;
+    syncStallProgress();
     if (document.hidden) {
       session.exitType = 'background';
       // A held player seek target goes out ahead of the heartbeat/flush.
@@ -2009,6 +2287,7 @@ export function createAnalyticsPlugin(
       const unsubSeeking = api.on('playback:seeking', onSeeking);
       const unsubEnded = api.on('playback:ended', onEnded);
       const unsubTimeUpdate = api.on('playback:timeupdate', onTimeUpdate);
+      const unsubSeeked = api.on('playback:seeked', onSeekEnded);
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
       const unsubRecovered = api.on('error:recovered', onRecovered);
@@ -2044,7 +2323,8 @@ export function createAnalyticsPlugin(
         unsubEdgeChange,
         unsubLowLatency,
         unsubPlaylist,
-        unsubTimeUpdate
+        unsubTimeUpdate,
+        unsubSeeked
       );
 
       // Page lifecycle events
@@ -2081,6 +2361,8 @@ export function createAnalyticsPlugin(
 
       discardPendingPause();
       cancelPendingRebuffer();
+      cancelFrameConfirmation();
+      stopStallProgress();
       // Defensive: a finalized view already closed its emission window.
       seekWindow.reset();
 
@@ -2210,6 +2492,7 @@ export function createAnalyticsPlugin(
       const isViewEnded = !!session.viewEnd;
       const elapsed = isViewEnded ? 0 : Math.max(0, now - lastHeartbeatTime);
       const isActivelyPlaying =
+        session.firstFrameTime !== null &&
         session.playbackState === 'playing' &&
         statePlaying &&
         !isRebuffering &&

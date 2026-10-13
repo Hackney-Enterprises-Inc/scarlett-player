@@ -414,3 +414,195 @@ describe.each([
     });
   });
 });
+
+/**
+ * HEI-SCARLETT-25 D3 contract, which the ui lane's Replay helper relies on:
+ * once an hls.js live stream ends with EXT-X-ENDLIST, `live` is false, the
+ * DVR window is cleared, and the duration is finite, so Replay must key on
+ * the duration (not on `live`, and not on `seekToLive()`). Driven through
+ * the real event map and a real state store, in the order a browser and
+ * hls.js produce: live playlist, Infinity duration, ENDLIST playlist,
+ * finite duration, `ended`.
+ */
+describe('hls.js live stream ending with ENDLIST', () => {
+  let plugin: ReturnType<typeof createHLSPlugin>;
+  let api: MockPluginAPI;
+  let state: StateManager;
+  let captured: ReturnType<typeof createCapturedHls>;
+  const mockCtor = createMockHlsConstructor();
+
+  const SRC = 'http://example.com/event.m3u8';
+
+  const getVideo = (): HTMLVideoElement =>
+    (api.container as HTMLElement).querySelector('video') as HTMLVideoElement;
+
+  /**
+   * Give the element a duration and fire `durationchange`.
+   *
+   * @param value - Duration the element reports
+   */
+  const setDuration = (value: number): void => {
+    Object.defineProperty(getVideo(), 'duration', { value, configurable: true });
+    getVideo().dispatchEvent(new Event('durationchange'));
+  };
+
+  /**
+   * Fire `hlsLevelLoaded` for a playlist window ending at 600 s.
+   *
+   * @param live - Whether the playlist is still live (no ENDLIST)
+   * @param fragmentStart - Window start: 0 for EVENT, later for a sliding window
+   */
+  const levelLoaded = (live: boolean, fragmentStart = 0): void => {
+    captured.handlers['hlsLevelLoaded']?.('hlsLevelLoaded', {
+      details: { live, fragmentStart, edge: 600, totalduration: 600 - fragmentStart, targetduration: 6 },
+    });
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    hlsLoader.resetLoader();
+    installMediaStubs();
+    vi.spyOn(hlsLoader, 'loadHlsJs').mockResolvedValue(mockCtor as never);
+    vi.spyOn(hlsLoader, 'getHlsConstructor').mockReturnValue(mockCtor as never);
+    vi.spyOn(hlsLoader, 'createHlsInstance').mockImplementation(() => {
+      captured = createCapturedHls();
+      return captured.instance as never;
+    });
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    state = new StateManager();
+    api = createMockAPI();
+    api.getState = vi.fn(state.getValue.bind(state));
+    api.setState = vi.fn(state.set.bind(state));
+
+    plugin = createHLSPlugin({ autoReconnect: false });
+    await plugin.init(api);
+    const load = plugin.loadSource(SRC);
+    await flush();
+    captured.handlers['hlsManifestParsed']?.('hlsManifestParsed', { levels: captured.instance.levels });
+    await load;
+  });
+
+  afterEach(async () => {
+    await plugin.destroy();
+    vi.restoreAllMocks();
+  });
+
+  it('reports live: false, no DVR window and a finite duration at ended', () => {
+    levelLoaded(true);
+    setDuration(Infinity);
+
+    expect(state.getValue('live')).toBe(true);
+    expect(state.getValue('seekableRange')).toEqual({ start: 0, end: 600 });
+
+    levelLoaded(false);
+    setDuration(600);
+    getVideo().dispatchEvent(new Event('ended'));
+
+    expect(state.getValue('live')).toBe(false);
+    expect(state.getValue('seekableRange')).toBeNull();
+    expect(state.getValue('duration')).toBe(600);
+    expect(Number.isFinite(state.getValue('duration'))).toBe(true);
+    expect(state.getValue('ended')).toBe(true);
+    expect(plugin.getPlaylistStart()).toBe(0);
+  });
+
+  /**
+   * Review finding (Sol, P2): a sliding window that ended at 120-600. Under
+   * MSE the element's finite `seekable` is 0-600, so Replay cannot take the
+   * start from the element; the provider keeps the final playlist's start
+   * for it, while `live` and `seekableRange` stay cleared (analytics D2).
+   */
+  it('keeps the ended sliding window start for Replay without restoring the live window', () => {
+    levelLoaded(true, 120);
+    setDuration(Infinity);
+    expect(plugin.getPlaylistStart()).toBe(120);
+
+    levelLoaded(false, 120);
+    setDuration(600);
+    Object.defineProperty(getVideo(), 'seekable', {
+      value: { length: 1, start: () => 0, end: () => 600 },
+      configurable: true,
+    });
+    getVideo().dispatchEvent(new Event('ended'));
+
+    expect(state.getValue('live')).toBe(false);
+    expect(state.getValue('seekableRange')).toBeNull();
+    expect(plugin.getPlaylistStart()).toBe(120);
+  });
+
+  it('forgets the playlist start with the source', async () => {
+    levelLoaded(false, 120);
+    expect(plugin.getPlaylistStart()).toBe(120);
+
+    plugin.loadSource('http://example.com/next.m3u8').catch(() => {});
+    await flush();
+
+    expect(plugin.getPlaylistStart()).toBeNull();
+  });
+});
+
+/**
+ * HEI-SCARLETT-25 D6: Safari's `webkitpresentationmodechanged` resumed
+ * playback on ANY change to `inline` while paused, so leaving AVKit
+ * fullscreen after pausing started the video again. Only leaving
+ * picture-in-picture resumes now.
+ */
+describe('webkit presentation mode resume', () => {
+  let video: HTMLVideoElement & { webkitPresentationMode?: string };
+  let api: MockPluginAPI;
+
+  /**
+   * Move the element to a presentation mode and fire the change event.
+   *
+   * @param mode - The new `webkitPresentationMode`
+   */
+  const changeMode = (mode: string): void => {
+    video.webkitPresentationMode = mode;
+    video.dispatchEvent(new Event('webkitpresentationmodechanged'));
+  };
+
+  beforeEach(() => {
+    installMediaStubs();
+    video = document.createElement('video');
+    Object.defineProperty(video, 'webkitPresentationMode', {
+      value: 'inline',
+      writable: true,
+      configurable: true,
+    });
+    setPaused(video, true);
+    api = createMockAPI();
+    setupVideoEventHandlers(video, api, undefined, { corePlayRequested: false, corePauseRequested: false });
+    (video.play as Mock).mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('resumes a paused element on picture-in-picture -> inline', () => {
+    changeMode('picture-in-picture');
+    expect(video.play).not.toHaveBeenCalled();
+
+    changeMode('inline');
+
+    expect(video.play).toHaveBeenCalledTimes(1);
+    expect(api.setState).toHaveBeenLastCalledWith('pip', false);
+  });
+
+  it('keeps a paused element paused on fullscreen -> inline', () => {
+    changeMode('fullscreen');
+    changeMode('inline');
+
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it('does nothing on inline -> inline', () => {
+    changeMode('inline');
+
+    expect(video.play).not.toHaveBeenCalled();
+  });
+});

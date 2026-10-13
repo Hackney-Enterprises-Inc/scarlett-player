@@ -221,6 +221,134 @@ describe('HLS plugin lifecycle', () => {
       await flush();
       await expect(promise2).resolves.toBeUndefined();
     });
+
+    /** Fatal `error` payloads emitted so far. */
+    const fatalErrors = () =>
+      (api.emit as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event, payload]) => event === 'error' && (payload as { fatal?: boolean })?.fatal)
+        .map(([, payload]) => payload as { message: string; detail: Record<string, unknown> });
+
+    it('reports a manifest timeout as timedOut and not exhausted', async () => {
+      vi.useFakeTimers();
+      await plugin.init(api);
+      plugin.loadSource(SRC_A).catch(() => {});
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(fatalErrors()).toHaveLength(1);
+      // Same message as the native watchdog: no "HLS error:" prefix and no
+      // "(max retries exceeded)" suffix, since no retry budget was spent
+      expect(fatalErrors()[0].message).toBe('Video took too long to load (network timeout)');
+      expect(fatalErrors()[0].detail).toEqual(
+        expect.objectContaining({ type: 'network', timedOut: true, retriesExhausted: false, attempts: 0 })
+      );
+    });
+
+    it('reconnects after a manifest timeout and recovers on the next manifest', async () => {
+      vi.useFakeTimers();
+      await plugin.init(api);
+      const rejection = vi.fn();
+      plugin.loadSource(SRC_A).catch(rejection);
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      // load() still settles at the timeout; reconnect carries on behind it
+      expect(rejection).toHaveBeenCalled();
+      expect(fatalErrors()[0].detail).toEqual(expect.objectContaining({ reconnecting: true }));
+      expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(created).toHaveLength(2);
+      expect(created[1].instance.loadSource).toHaveBeenCalledWith(SRC_A);
+
+      fireManifest(created[1]);
+      await flush();
+
+      expect(api.emit).toHaveBeenCalledWith('error:recovered', expect.anything());
+      expect(api.emit).toHaveBeenCalledWith('media:loaded', { src: SRC_A, type: 'application/x-mpegURL' });
+      expect(fatalErrors()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    /**
+     * Review finding (Sol, P2): a synchronous listener loads source B from
+     * inside A's timeout report. A's watchdog must neither tear B's pipeline
+     * down nor schedule a reconnect against it.
+     */
+    it.each([
+      ['the fatal error', 'error'],
+      ['error:reconnecting', 'error:reconnecting'],
+    ])('leaves a source loaded from %s listener alone', async (_label, trigger) => {
+      vi.useFakeTimers();
+      let swapped = false;
+      (api.emit as ReturnType<typeof vi.fn>).mockImplementation((event: string) => {
+        if (event === trigger && !swapped) {
+          swapped = true;
+          plugin.loadSource(SRC_B).catch(() => {});
+        }
+      });
+
+      await plugin.init(api);
+      plugin.loadSource(SRC_A).catch(() => {});
+      await flush();
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(swapped).toBe(true);
+      await flush();
+
+      expect(created).toHaveLength(2);
+      expect(created[1].instance.destroy).not.toHaveBeenCalled();
+      fireManifest(created[1]);
+      await flush();
+
+      const reconnects = (api.emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([event]) => event === 'error:reconnecting'
+      ).length;
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(created).toHaveLength(2);
+      expect(created[1].instance.destroy).not.toHaveBeenCalled();
+      expect(
+        (api.emit as ReturnType<typeof vi.fn>).mock.calls.filter(([event]) => event === 'error:reconnecting')
+      ).toHaveLength(reconnects);
+      expect(api.emit).not.toHaveBeenCalledWith('error:recovered', expect.anything());
+
+      await plugin.destroy();
+    });
+
+    it("applies the viewer's audio state before announcing a reconnect recovery", async () => {
+      vi.useFakeTimers();
+      (api.getState as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'live') return false;
+        if (key === 'muted') return true;
+        if (key === 'volume') return 0.25;
+        if (key === 'paused') return true;
+        return undefined;
+      });
+      const at_recovery: { muted?: boolean; volume?: number } = {};
+      (api.emit as ReturnType<typeof vi.fn>).mockImplementation((event: string) => {
+        if (event === 'error:recovered') {
+          const video = (api.container as HTMLElement).querySelector('video') as HTMLVideoElement;
+          at_recovery.muted = video.muted;
+          at_recovery.volume = video.volume;
+        }
+      });
+
+      await plugin.init(api);
+      plugin.loadSource(SRC_A).catch(() => {});
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(2000);
+      fireManifest(created[1]);
+      await flush();
+
+      expect(at_recovery).toEqual({ muted: true, volume: 0.25 });
+
+      await plugin.destroy();
+    });
   });
 
   describe('error-storm circuit breaker', () => {

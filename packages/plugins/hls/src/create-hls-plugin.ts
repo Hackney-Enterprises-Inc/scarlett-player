@@ -115,7 +115,10 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   maxMediaRetries: 2,
   retryDelayMs: 1000,
   retryBackoffFactor: 2,
-  // Load watchdog: never leave the viewer on an endless spinner
+  // Load watchdog: never leave the viewer on an endless spinner. One 30 s
+  // ceiling over the whole load (retries included), well past a healthy
+  // cold start; a load that hits it hands off to auto-reconnect rather than
+  // ending in a dead-end error (HEI-SCARLETT-57, Sentry TSP-WEB-2G9)
   loadTimeoutMs: 30000,
   // Self-healing: reconnect automatically after fatal errors mid-playback
   autoReconnect: true,
@@ -141,8 +144,35 @@ const MANIFEST_PHASE_ERRORS = [
   'manifestParsingError',
 ];
 
-/** Message of a load that hit `loadTimeoutMs`. Sentry groups on it (TSP-WEB-2FJ). */
+/**
+ * Message of a load that hit `loadTimeoutMs`, identical on the native and
+ * hls.js paths. Hosts' Sentry groups on it (TSP-WEB-2G9, TSP-WEB-2FJ). The
+ * fatal carrying it also carries `detail.timedOut` and, with auto-reconnect
+ * on, `detail.reconnecting`: a stalled load is retried, not abandoned.
+ */
 const LOAD_TIMEOUT_MESSAGE = 'Video took too long to load (network timeout)';
+
+/**
+ * Build the error a load watchdog reports when `loadTimeoutMs` runs out.
+ *
+ * Shared by the native and hls.js watchdogs, so both report the same
+ * message and shape. It is a network error flagged `timedOut`, which is
+ * what lets `canAutoReconnect()` hand it to auto-reconnect before the
+ * stream is known to be live, and it is reported with `retriesExhausted:
+ * false`: the watchdog ends the load whatever budget is left.
+ *
+ * @param attempts - Retries the load spent before the watchdog ended it
+ * @returns Fatal network error with `timedOut: true`
+ */
+function buildLoadTimeoutError(attempts: number): NativeHLSError {
+  return {
+    type: 'network',
+    details: LOAD_TIMEOUT_MESSAGE,
+    fatal: true,
+    timedOut: true,
+    attempts,
+  };
+}
 
 /**
  * When a native media element error arrived: before `loadedmetadata`
@@ -208,6 +238,28 @@ function nativeMediaError(mediaError: MediaError | null, phase: NativeErrorPhase
 }
 
 /**
+ * A user `loadSource()` waiting for whichever pipeline load carries it.
+ *
+ * The user's own pipeline load carries it first. A provider switch during
+ * that load takes it over (HEI-SCARLETT-56, Sentry TSP-WEB-2K5): `session`
+ * moves to the switch's session and only that load's outcome settles the
+ * ticket, so the abandoned pipeline (say an hls.js import still in flight)
+ * can neither hold the user load open nor fail it later.
+ */
+interface UserLoadTicket {
+  /** Session of the pipeline load that currently carries the user load */
+  session: number;
+  /** True once a provider switch has taken the load over */
+  takenOver: boolean;
+  /** True once settled; later outcomes are ignored */
+  done: boolean;
+  /** Settle with the owning session, or null when superseded quietly */
+  resolve: (owner: number | null) => void;
+  /** Settle with the carrying load's failure */
+  reject: (error: unknown) => void;
+}
+
+/**
  * Create an HLS Provider Plugin instance bound to a loader module and
  * build-variant labels. Not part of the public API: consumers use the
  * `createHLSPlugin` wrappers exported by `index.ts` and `light.ts`.
@@ -265,6 +317,8 @@ export function createHLSPluginWith(
   let lastLevelDetails: HlsLevelDetails | null = null;
   let lastLiveMetrics: LiveMetrics | null = null;
   let lastKnownTargetLatency: number | null = null;
+  // Start of the last playlist hls.js loaded, live or ended (getPlaylistStart())
+  let lastPlaylistStart: number | null = null;
 
   // Load-session guard. Bumped by every entry point that starts or stops a
   // pipeline (loadSource, destroy, provider switches, reconnect attempts).
@@ -272,6 +326,16 @@ export function createHLSPluginWith(
   // no longer matches, so a superseded session can never fire a timer,
   // settle a promise, or write state against the current one.
   let loadSession = 0;
+
+  /**
+   * The user `loadSource()` still waiting on a pipeline, or null.
+   *
+   * A provider switch that finds one takes the load over (see
+   * `takeOverUserLoad()`), so its native load is the user's initial load: it
+   * gets the initial retry budget and a watchdog that reports its own
+   * timeout, instead of a bare rejection.
+   */
+  let pendingUserLoad: UserLoadTicket | null = null;
 
   // Settles the pending load promise (if any) when the pipeline is torn down
   let abortPendingLoad: ((reason: Error) => void) | null = null;
@@ -573,7 +637,147 @@ export function createHLSPluginWith(
     lastLevelDetails = null;
     lastLiveMetrics = null;
     lastKnownTargetLatency = null;
+    lastPlaylistStart = null;
     if (api) resetLiveMetrics(api);
+  };
+
+  /**
+   * Put the viewer's muted and volume state onto the video element.
+   *
+   * Runs before every play this plugin's loads can lead to: the end of a
+   * user `loadSource()` (including one a provider switch took over) and a
+   * successful auto-reconnect. A new or reloaded element starts unmuted, and
+   * Safari refuses muted autoplay on an element that is not muted yet.
+   */
+  const applyAudioState = (): void => {
+    if (!video || !api) return;
+    const muted = api.getState('muted');
+    const volume = api.getState('volume');
+    if (muted !== undefined) video.muted = muted;
+    if (volume !== undefined) video.volume = volume;
+  };
+
+  /**
+   * Settle a user load with the outcome of the pipeline load carrying it.
+   *
+   * Only the carrying load counts (`ticket.session`): once a switch has taken
+   * the load over, the abandoned pipeline's outcome is ignored. A carrying
+   * load that settles on the current session decides it: resolved with that
+   * session, or rejected with the failure. One superseded by a new
+   * `loadSource()` or a destroy (a switch would have moved `ticket.session`)
+   * settles as user loads always have: rejected with its cancellation, or
+   * resolved quietly when it had loaded or a switch had taken it over.
+   *
+   * @param ticket - The user load
+   * @param session - Session of the pipeline load reporting
+   * @param failed - Whether that load rejected
+   * @param error - Its rejection, when it failed
+   */
+  const reportUserLoad = (
+    ticket: UserLoadTicket,
+    session: number,
+    failed: boolean,
+    error: unknown
+  ): void => {
+    if (ticket.done || ticket.session !== session) return;
+    if (session === loadSession) {
+      if (failed) ticket.reject(error);
+      else ticket.resolve(session);
+    } else if (failed && !ticket.takenOver) {
+      ticket.reject(error);
+    } else {
+      ticket.resolve(null);
+    }
+  };
+
+  /**
+   * Report a pipeline load's outcome to the user load it carries.
+   *
+   * @param ticket - The user load
+   * @param session - Session the pipeline load started
+   * @param load - The pipeline load
+   */
+  const trackUserLoad = (ticket: UserLoadTicket, session: number, load: Promise<void>): void => {
+    load.then(
+      () => reportUserLoad(ticket, session, false, undefined),
+      (error: unknown) => reportUserLoad(ticket, session, true, error)
+    );
+  };
+
+  /**
+   * Start waiting for a user load carried by its own pipeline load.
+   *
+   * @param session - The session the user load started
+   * @param load - The user load's own pipeline load
+   * @returns Resolves with the session that finished the load (the user's own,
+   *          or the switch that took it over), or null when it was superseded
+   *          quietly
+   * @throws Error from the carrying load when it failed on the current
+   *         session, or from the user's own load when a new load or a destroy
+   *         cancelled it before any switch took it over
+   */
+  const awaitUserLoad = (session: number, load: Promise<void>): Promise<number | null> => {
+    const promise = new Promise<number | null>((resolve, reject) => {
+      const ticket: UserLoadTicket = {
+        session,
+        takenOver: false,
+        done: false,
+        resolve: (owner) => {
+          ticket.done = true;
+          if (pendingUserLoad === ticket) pendingUserLoad = null;
+          resolve(owner);
+        },
+        reject: (error) => {
+          ticket.done = true;
+          if (pendingUserLoad === ticket) pendingUserLoad = null;
+          reject(error);
+        },
+      };
+      pendingUserLoad = ticket;
+      trackUserLoad(ticket, session, load);
+    });
+    return promise;
+  };
+
+  /**
+   * Settle and detach the pending user load because the user load itself is
+   * over: a new `loadSource()` or a destroy (which is also how core's
+   * `unload()` reaches this plugin).
+   *
+   * Settled here, not left to its carrying pipeline load: that load may be an
+   * hls.js import with no abort hook yet, which would hold the user load
+   * open until the import settled, or forever if it stalls. A load a switch
+   * took over resolves quietly, as it does when its carrying load is
+   * cancelled; one still on its own pipeline rejects with `reason`, as its
+   * own load's cancellation would. Never called from `cleanup()`: provider
+   * switches run that too, and they hand the user load over instead.
+   *
+   * @param reason - Cancellation for a user load no switch had taken over
+   */
+  const releaseUserLoad = (reason: Error): void => {
+    const ticket = pendingUserLoad;
+    pendingUserLoad = null;
+    if (!ticket || ticket.done) return;
+    if (ticket.takenOver) ticket.resolve(null);
+    else ticket.reject(reason);
+  };
+
+  /**
+   * Hand a pending user load to a provider switch's pipeline load.
+   *
+   * From here on only the switch's load settles the user load, and a newer
+   * switch takes it over again the same way. A no-op when no user load is
+   * pending.
+   *
+   * @param session - The session the switch started
+   * @param load - The switch's pipeline load
+   */
+  const takeOverUserLoad = (session: number, load: Promise<void>): void => {
+    const ticket = pendingUserLoad;
+    if (!ticket || ticket.done) return;
+    ticket.session = session;
+    ticket.takenOver = true;
+    trackUserLoad(ticket, session, load);
   };
 
   /** Build hls.js config */
@@ -760,7 +964,9 @@ export function createHLSPluginWith(
    * diagnosis meant correlating timestamps across viewers. The URL goes
    * through sanitizeUrl() because signed-URL tokens live in the query.
    * Native errors add the element's MediaError code and message, and a
-   * load watchdog adds `timedOut` with its own attempt count.
+   * load watchdog (either path) adds `timedOut` with its own attempt count:
+   * the 30 s `loadTimeoutMs` ceiling ran out, and the load was handed to
+   * auto-reconnect when that is on (TSP-WEB-2G9).
    *
    * @param error - Parsed HLS error, or a native one with its diagnostics
    * @param retriesExhausted - Whether the retry budget ran out
@@ -815,6 +1021,10 @@ export function createHLSPluginWith(
    * the consumer's telemetry, then hands off to the auto-reconnect scheduler
    * when the failure class is worth reconnecting for.
    *
+   * Bound to the session that raised it: when a synchronous state or `error`
+   * listener starts a new load, switches provider or destroys the plugin,
+   * no reconnect is scheduled, since it would attach to the replacement.
+   *
    * @param error - Parsed HLS error
    * @param retriesExhausted - Whether the retry budget ran out (adds the
    *        "(max retries exceeded)" message suffix)
@@ -825,6 +1035,7 @@ export function createHLSPluginWith(
     retriesExhausted: boolean,
     messageOverride?: string
   ) => {
+    const session = loadSession;
     const message =
       messageOverride ??
       (retriesExhausted
@@ -850,6 +1061,8 @@ export function createHLSPluginWith(
       detail,
     });
 
+    // A listener replaced or destroyed this session while it was reported
+    if (session !== loadSession) return;
     maybeScheduleReconnect(error);
   };
 
@@ -1121,16 +1334,25 @@ export function createHLSPluginWith(
    * budget is spent the failure is emitted as a structured fatal `error`
    * before the promise rejects, so core keeps its code. `loadTimeoutMs` stays
    * one ceiling over the whole load, retries included, and wins over any
-   * budget left.
+   * budget left. 30 s covers the manifest, the first segments and every
+   * retry; a stalled Safari load never fires `error`, so without it the
+   * viewer would spin forever (TSP-WEB-2G9). When it runs out the pipeline
+   * is torn down, the element's fetch aborted, and the timeout emitted as a
+   * fatal that hands off to auto-reconnect (when on) before the promise
+   * rejects.
    *
    * Recovery, reconnect and AirPlay-switch reloads are not initial: they
    * reject on the first error, as the caller runs its own budget, and a
-   * timeout rejects without emitting.
+   * timeout rejects without emitting. The exception is a switch that takes
+   * over a user load still pending: that reload is the user's initial load.
    *
    * @param src - Source URL
    * @param initial - Whether this is the first load of a user `loadSource()`
    * @returns Resolves on `loadedmetadata`
-   * @throws Error when the load fails, times out, or is superseded
+   * @throws Error when the load fails, times out, or is superseded. A
+   *         superseded load rejects with "HLS load cancelled..."; a user
+   *         `loadSource()` superseded by a provider switch does not surface
+   *         that, it waits for the switch's load instead (`awaitUserLoad()`)
    */
   const loadNative = async (src: string, initial = false): Promise<void> => {
     const session = loadSession;
@@ -1308,28 +1530,31 @@ export function createHLSPluginWith(
             return;
           }
 
-          if (retryTimeout) {
-            clearTimeout(retryTimeout);
-            retryTimeout = null;
-          }
-
           api?.logger.error(`Native HLS load timed out after ${timeout_ms}ms`, {
             src: sanitizeUrl(src),
           });
 
-          const timeout_error: NativeHLSError = {
-            type: 'network',
-            details: LOAD_TIMEOUT_MESSAGE,
-            fatal: true,
-            timedOut: true,
-            attempts: networkRetryCount + mediaRetryCount,
-          };
+          // The attempt count first: teardown leaves the budgets alone, but
+          // read them before anything else touches the pipeline
+          const timeout_error = buildLoadTimeoutError(networkRetryCount + mediaRetryCount);
+
+          // Stop the stalled load for real. Teardown detaches the handlers
+          // and clears the pending retry; only then is the element's fetch
+          // aborted, so the `emptied` it fires reaches no handler, and a late
+          // `loadedmetadata` from the abandoned fetch cannot load anything
+          // behind the reconnect that takes over below.
+          teardownPipeline();
+          videoEl.removeAttribute('src');
+          videoEl.load();
+
           if (last_error?.mediaErrorCode !== undefined) {
             timeout_error.mediaErrorCode = last_error.mediaErrorCode;
           }
           if (last_error?.mediaErrorMessage !== undefined) {
             timeout_error.mediaErrorMessage = last_error.mediaErrorMessage;
           }
+          // Emitted before the rejection, so the reconnect is scheduled (and
+          // the fatal marked `reconnecting`) before core's catch runs
           emitFatalError(timeout_error, false, LOAD_TIMEOUT_MESSAGE);
           reject(new Error(LOAD_TIMEOUT_MESSAGE));
         }, timeout_ms);
@@ -1436,6 +1661,11 @@ export function createHLSPluginWith(
           // switch can happen before any timeupdate fires.
           readLiveMetrics();
         },
+        onPlaylistDetails: (details) => {
+          if (session !== loadSession) return;
+          const start = details.fragmentStart ?? details.fragments?.[0]?.start ?? 0;
+          lastPlaylistStart = Number.isFinite(start) ? start : null;
+        },
         isLowLatencyRequested: () => mergedConfig.lowLatencyMode === true,
         onError: (error) => {
           if (session !== loadSession) return;
@@ -1514,7 +1744,8 @@ export function createHLSPluginWith(
 
       // Watchdog: no code path may leave this promise pending forever. If the
       // manifest has not parsed and recovery has not reported terminal within
-      // the window, tear down and fail with a real error the UI can show.
+      // the window, tear down and fail with a real error the UI can show,
+      // handing the source to auto-reconnect when that is on.
       const timeout_ms = mergedConfig.loadTimeoutMs ?? 30000;
       if (timeout_ms > 0) {
         watchdog = setTimeout(() => {
@@ -1523,15 +1754,15 @@ export function createHLSPluginWith(
           releaseAbort();
           api?.logger.error(`HLS load timed out after ${timeout_ms}ms`, { src: sanitizeUrl(src) });
 
-          const timeoutError: HLSError = {
-            type: 'network',
-            details: 'Video took too long to load (network timeout)',
-            fatal: true,
-          };
-          emitFatalError(timeoutError, true);
-          teardownPipeline();
+          // Same report as the native watchdog: a timeout, not an exhausted
+          // budget. The reconnect timer emitFatalError() may schedule
+          // survives the teardown below, which leaves it alone.
+          emitFatalError(buildLoadTimeoutError(networkRetryCount), false, LOAD_TIMEOUT_MESSAGE);
+          // Unless a listener already replaced this pipeline: the teardown
+          // would then destroy the replacement it started
+          if (session === loadSession) teardownPipeline();
 
-          reject(new Error(timeoutError.details));
+          reject(new Error(LOAD_TIMEOUT_MESSAGE));
         }, timeout_ms);
       }
 
@@ -1681,6 +1912,10 @@ export function createHLSPluginWith(
   const scheduleReconnectAttempt = () => {
     if (reconnectExhausted) return; // Window already closed and announced
     if (reconnectTimer) return; // Already scheduled
+    // Every emit below runs listeners synchronously; one that starts a new
+    // load or destroys the plugin must not be left with a timer armed
+    // against the source it replaced
+    const session = loadSession;
 
     // Live streams get an indefinite window: the event may resume after an
     // extended intermission. VOD keeps the finite window from config.
@@ -1705,6 +1940,7 @@ export function createHLSPluginWith(
         windowMs: window_ms,
         longOutage: true,
       });
+      if (session !== loadSession) return;
     }
 
     const base_delay = mergedConfig.reconnectBaseDelayMs ?? 2000;
@@ -1723,6 +1959,7 @@ export function createHLSPluginWith(
       elapsedMs: elapsed_ms,
       windowMs: window_ms,
     });
+    if (session !== loadSession) return;
 
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -1738,19 +1975,26 @@ export function createHLSPluginWith(
    * scheduled. A window that has already run out is still reported by the
    * scheduler, with its own terminal error.
    *
-   * @param error - Parsed HLS error
+   * A source that is neither classified live nor has loaded once is refused,
+   * so a wrong URL does not retry forever, unless the failure is a load
+   * timeout (`timedOut`). Live is only classified after metadata, so a
+   * stalled live load could never qualify otherwise (Sentry TSP-WEB-2G9).
+   * A stall is transient, a wrong URL errors rather than stalls, and an
+   * unclassified source keeps the finite `reconnectWindowMs` window.
+   *
+   * @param error - Parsed HLS error, or a native one with its diagnostics
    * @returns True when auto-reconnect is on, a source is loaded, the stream
-   *          is live or has played, and the failure is network, media, or
-   *          mux (which shares the media retry budget)
+   *          is live, has played, or timed out loading, and the failure is
+   *          network, media, or mux (which shares the media retry budget)
    */
-  const canAutoReconnect = (error: HLSError): boolean => {
+  const canAutoReconnect = (error: NativeHLSError): boolean => {
     if (mergedConfig.autoReconnect === false) return false;
     if (!currentSrc) return false;
-    // For live streams, allow reconnect even before first playback (e.g.
-    // viewer loading during pre-event intermission). VOD requires that
-    // content has played at least once so a wrong URL does not retry forever.
+    // Live streams reconnect even before first playback (a viewer loading
+    // during a pre-event intermission), but only once classified. VOD needs
+    // a manifest that loaded once. A load timeout qualifies regardless.
     const isLive = (api?.getState('live') ?? false) && isLiveClassified;
-    if (!isLive && !hasPlayedContent) return false;
+    if (!isLive && !hasPlayedContent && !error.timedOut) return false;
     // mux joins media here as in handleHlsError(): a fatal remux failure on a
     // stream worth reconnecting is just as recoverable as a media one.
     return error.type === 'network' || error.type === 'media' || error.type === 'mux';
@@ -1759,12 +2003,16 @@ export function createHLSPluginWith(
   /**
    * Start auto-reconnecting after a fatal error, when it makes sense.
    *
-   * Only kicks in when the stream had previously worked (manifest parsed) and
-   * the failure class is plausibly transient (network/media/mux). Initial-load
-   * failures stay manual: the viewer sees an error with a working Try Again,
-   * because auto-retrying a wrong URL forever would just mask the problem.
+   * Kicks in when the stream is classified live or had previously worked
+   * (manifest parsed), or the load timed out, and the failure class is
+   * plausibly transient (network/media/mux); see canAutoReconnect(). Other
+   * initial-load failures stay manual: the viewer sees an error with a
+   * working Try Again, because auto-retrying a wrong URL forever would just
+   * mask the problem.
+   *
+   * @param error - Parsed HLS error, or a native one with its diagnostics
    */
-  const maybeScheduleReconnect = (error: HLSError) => {
+  const maybeScheduleReconnect = (error: NativeHLSError) => {
     if (!canAutoReconnect(error)) return;
 
     if (reconnectWindowStart === 0) {
@@ -1784,8 +2032,11 @@ export function createHLSPluginWith(
    * Tear down the dead pipeline and reload the source in place.
    *
    * On success the viewer is put back where they were: live streams rejoin
-   * at the live edge, VOD resumes at the previous position, and playback
-   * restarts without any interaction.
+   * at the live edge, VOD resumes at the previous position, the viewer's
+   * muted/volume go back on the element, and playback restarts without any
+   * interaction unless the player is paused. A load that failed into this
+   * reconnect (a timeout) is still paused: core plays it on
+   * `error:recovered` when that load asked for autoplay.
    */
   const attemptReconnect = async (): Promise<void> => {
     if (!api || !currentSrc) return;
@@ -1835,6 +2086,12 @@ export function createHLSPluginWith(
       } else if (video && resume_position > 0) {
         video.currentTime = resume_position;
       }
+
+      // Before `ready` and `error:recovered`: whichever play follows (the
+      // resume below, or core's autoplay for a load that failed into this
+      // reconnect) must start with the viewer's muted/volume, or Safari
+      // refuses a muted autoplay on the fresh element
+      applyAudioState();
 
       api.setState('playbackState', 'ready');
       api.setState('buffering', false);
@@ -2116,7 +2373,9 @@ export function createHLSPluginWith(
         window.removeEventListener('online', onlineListener);
         onlineListener = null;
       }
-      cleanup(new Error('HLS load cancelled: player destroyed'));
+      const reason = new Error('HLS load cancelled: player destroyed');
+      releaseUserLoad(reason);
+      cleanup(reason);
 
       // After cleanup(), so a teardown-time event on the element cannot
       // classify anything on the way out.
@@ -2142,8 +2401,11 @@ export function createHLSPluginWith(
       isLiveClassified = false;
       api.setState('live', false);
 
-      // Cleanup previous source (also settles a pending load promise)
-      cleanup(new Error('HLS load cancelled: superseded by a new load'));
+      // Cleanup previous source (also settles a pending load promise). The
+      // previous user load is settled first, whatever its pipeline is doing.
+      const superseded = new Error('HLS load cancelled: superseded by a new load');
+      releaseUserLoad(superseded);
+      cleanup(superseded);
       currentSrc = src;
 
       // A new source is a new playback session: no command aimed at the old
@@ -2173,15 +2435,16 @@ export function createHLSPluginWith(
       api.setState('buffering', true);
 
       // Force native HLS when AirPlay is active (required for wireless playback)
+      let load: Promise<void>;
       if (api.getState('airplayActive') && loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS (AirPlay active)');
-        await loadNative(src, true);
+        load = loadNative(src, true);
       } else if (loader.isHlsJsSupported()) {
         api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
-        await loadWithHlsJs(src);
+        load = loadWithHlsJs(src);
       } else if (loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS playback (hls.js not supported)');
-        await loadNative(src, true);
+        load = loadNative(src, true);
       } else {
         const probes = loader.describeSupport();
         const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
@@ -2202,17 +2465,15 @@ export function createHLSPluginWith(
         throw new Error(message);
       }
 
-      // Superseded between the load settling and this continuation running
-      if (session !== loadSession) return;
+      // A provider switch during the load takes it over rather than failing
+      // it. Ownership is checked again right here, after the await: a new
+      // load or a destroy between the load settling and this continuation
+      // must not get this load's audio state and `ready`.
+      const owner = await awaitUserLoad(session, load);
+      if (owner === null || owner !== loadSession || !api) return;
 
-      // Apply initial volume/muted state to video element
-      // This must happen before autoplay for muted autoplay to work
-      if (video) {
-        const muted = api.getState('muted');
-        const volume = api.getState('volume');
-        if (muted !== undefined) video.muted = muted;
-        if (volume !== undefined) video.volume = volume;
-      }
+      // Before autoplay, for muted autoplay to work
+      applyAudioState();
 
       api.setState('playbackState', 'ready');
       api.setState('buffering', false);
@@ -2295,6 +2556,12 @@ export function createHLSPluginWith(
      * Switch from hls.js to native HLS playback.
      * Used for AirPlay compatibility in Safari.
      * Preserves current playback position.
+     *
+     * A user `loadSource()` still pending when the switch starts is taken
+     * over, not failed: it resolves once this switch's native load does.
+     *
+     * @returns Resolves once the native pipeline has loaded the source
+     * @throws Error when the native load fails or is superseded
      */
     async switchToNative(): Promise<void> {
       if (isNative) {
@@ -2327,6 +2594,9 @@ export function createHLSPluginWith(
       // cleanup() leaves the reconnect timer armed, and a reconnect scheduled
       // against the old pipeline would fire into the newly switched one,
       // tearing down a healthy player and seeking it to a stale position.
+      // A user load still waiting on its pipeline is taken over (see
+      // takeOverUserLoad()), so the native load below is its initial load
+      const takes_over = pendingUserLoad !== null;
       const session = ++loadSession;
       cancelReconnect();
       cleanup(new Error('HLS load cancelled: switching to native HLS'));
@@ -2340,7 +2610,9 @@ export function createHLSPluginWith(
       lastKnownTargetLatency = savedTargetLatency;
 
       // Load with native HLS
-      await loadNative(savedSrc);
+      const load = loadNative(savedSrc, takes_over);
+      takeOverUserLoad(session, load);
+      await load;
 
       // Superseded mid-switch by a newer load or destroy
       if (session !== loadSession) return;
@@ -2365,6 +2637,12 @@ export function createHLSPluginWith(
     /**
      * Switch from native HLS back to hls.js.
      * Restores quality control after AirPlay session ends.
+     *
+     * A user `loadSource()` still pending when the switch starts is taken
+     * over, not failed: it resolves once this switch's hls.js load does.
+     *
+     * @returns Resolves once hls.js has parsed the manifest
+     * @throws Error when the hls.js load fails or is superseded
      */
     async switchToHlsJs(): Promise<void> {
       if (!isNative) {
@@ -2401,7 +2679,9 @@ export function createHLSPluginWith(
       lastKnownTargetLatency = savedTargetLatency;
 
       // Load with hls.js
-      await loadWithHlsJs(savedSrc);
+      const load = loadWithHlsJs(savedSrc);
+      takeOverUserLoad(session, load);
+      await load;
 
       // Superseded mid-switch by a newer load or destroy
       if (session !== loadSession) return;
@@ -2421,6 +2701,21 @@ export function createHLSPluginWith(
       }
 
       api?.logger.info('Switched to hls.js');
+    },
+
+    /**
+     * Start of the last playlist hls.js loaded, live or ended.
+     *
+     * Kept after EXT-X-ENDLIST, when `live` and `seekableRange` are cleared,
+     * so Replay can restart a finished sliding window at its first segment
+     * rather than at the MSE range start (0). Forgotten with the source.
+     *
+     * @returns The window start in seconds, or null on native HLS and before
+     *          any playlist loaded
+     */
+    getPlaylistStart(): number | null {
+      if (isNative) return null;
+      return lastPlaylistStart;
     },
 
     getDiagnostics(): HLSDiagnostics {

@@ -227,6 +227,267 @@ describe('ScarlettPlayer', () => {
     });
   });
 
+  /**
+   * HEI-SCARLETT-57, decision #339: a load that failed into auto-reconnect
+   * (an HLS load timeout) has already settled when the provider recovers, so
+   * only core still knows whether that load wanted autoplay. Core plays it on
+   * `error:recovered`, honouring a per-load override in both directions.
+   */
+  describe('autoplay after recovery', () => {
+    /** A provider whose loadSource() rejects, as a timed-out HLS load does. */
+    const createFailingProvider = () =>
+      createMockPlugin({
+        id: 'provider',
+        type: 'provider',
+        canPlay: vi.fn(() => true),
+        loadSource: vi.fn().mockRejectedValue(new Error('Video took too long to load (network timeout)')),
+      });
+
+    /** Emit the provider's recovery and let any resulting play run. */
+    const recover = async (player: ScarlettPlayer) => {
+      (player as any).eventBus.emit('error:recovered', { attempt: 1, elapsedMs: 2000 });
+      await tick();
+    };
+
+    /** Count `playback:play` commands from here on. */
+    const watchPlay = (player: ScarlettPlayer) => {
+      const onPlay = vi.fn();
+      player.on('playback:play', onPlay);
+      return onPlay;
+    };
+
+    it('plays once after recovery for a plain load on an autoplay: true player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      const onPlay = watchPlay(player);
+      await player.load('live.m3u8');
+      expect(onPlay).not.toHaveBeenCalled();
+
+      await recover(player);
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays paused after recovery for load(src, { autoplay: false }) on an autoplay: true player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      const onPlay = watchPlay(player);
+      await player.load('live.m3u8', { autoplay: false });
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    it('plays once after recovery for load(src, { autoplay: true }) on an autoplay: false player', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: false });
+      const onPlay = watchPlay(player);
+      await player.load('live.m3u8', { autoplay: true });
+
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays paused after recovery for a media:load-request with autoplay: false', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.init();
+      const onPlay = watchPlay(player);
+      (player as any).eventBus.emit('media:load-request', { src: 'live.m3u8', autoplay: false });
+      for (let i = 0; i < 5; i++) await tick();
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    it('does not play for a load superseded before the recovery', async () => {
+      const provider = createFailingProvider();
+      const player = new ScarlettPlayer({ container, plugins: [provider], autoplay: true });
+      const onPlay = watchPlay(player);
+      await player.load('a.m3u8');
+
+      // b starts and stays pending; a's late recovery is not b's
+      (provider.loadSource as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
+      void player.load('b.m3u8', { autoplay: false });
+      for (let i = 0; i < 5; i++) await tick();
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    it('does not play a second time when the viewer pressed play during the outage', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      await player.play();
+      expect(onPlay).toHaveBeenCalledTimes(1);
+
+      await recover(player);
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not play when the player is no longer paused at recovery', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      // The provider's own resume already started playback
+      (player as any).stateManager.set('paused', false);
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    it('drops the intent when pause() is called during the outage', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      player.pause();
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    it('drops the intent on unload()', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const onPlay = watchPlay(player);
+      await player.unload();
+
+      await recover(player);
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Review finding (Sol, P2): a play/pause command issued while the load is
+     * still pending, or from the provider's fatal callback, states the
+     * viewer's own intent. The load's catch must not record autoplay over it.
+     */
+    describe('a playback command before the load fails', () => {
+      /** A provider whose load rejects only when the test says so. */
+      const createDeferredProvider = () => {
+        let fail: (error: Error) => void = () => {};
+        const provider = createMockPlugin({
+          id: 'provider',
+          type: 'provider',
+          canPlay: vi.fn(() => true),
+          loadSource: vi.fn(
+            () =>
+              new Promise<void>((_resolve, reject) => {
+                fail = reject;
+              })
+          ),
+        });
+        return { provider, fail: (error: Error) => fail(error) };
+      };
+
+      type Command = 'play' | 'pause';
+      /** Issue the viewer's commands in order. */
+      const issue = (player: ScarlettPlayer, commands: Command[]) => {
+        for (const command of commands) {
+          if (command === 'play') void player.play();
+          else player.pause();
+        }
+      };
+
+      // Latest command wins (lead decision on review finding 4): the load's
+      // autoplay is chosen so each case proves the command, not the load,
+      // decided the outcome
+      it.each([
+        { commands: ['pause'] as Command[], loadAutoplay: true, plays: 0 },
+        { commands: ['play'] as Command[], loadAutoplay: false, plays: 1 },
+        { commands: ['play', 'pause'] as Command[], loadAutoplay: true, plays: 0 },
+        { commands: ['pause', 'play'] as Command[], loadAutoplay: false, plays: 1 },
+      ])(
+        'plays $plays time(s) on recovery after $commands during a pending autoplay: $loadAutoplay load',
+        async ({ commands, loadAutoplay, plays }) => {
+          const { provider, fail } = createDeferredProvider();
+          const player = new ScarlettPlayer({ container, plugins: [provider], autoplay: !loadAutoplay });
+          const loading = player.load('live.m3u8', { autoplay: loadAutoplay });
+          for (let i = 0; i < 5; i++) await tick();
+
+          issue(player, commands);
+          const onPlay = watchPlay(player);
+          fail(new Error('Video took too long to load (network timeout)'));
+          await loading;
+
+          await recover(player);
+          await recover(player);
+
+          expect(onPlay).toHaveBeenCalledTimes(plays);
+        }
+      );
+
+      it.each([
+        { command: 'pause' as Command, loadAutoplay: true, plays: 0 },
+        { command: 'play' as Command, loadAutoplay: false, plays: 1 },
+      ])(
+        'plays $plays time(s) on recovery after $command from the fatal error callback',
+        async ({ command, loadAutoplay, plays }) => {
+          let pluginApi: IPluginAPI | null = null;
+          const provider = createMockPlugin({
+            id: 'provider',
+            type: 'provider',
+            canPlay: vi.fn(() => true),
+            init: vi.fn((api: IPluginAPI) => {
+              pluginApi = api;
+            }),
+            loadSource: vi.fn(async () => {
+              pluginApi?.emit('error', {
+                code: 'MEDIA_NETWORK_ERROR',
+                message: 'Video took too long to load (network timeout)',
+                fatal: true,
+                timestamp: Date.now(),
+                detail: { type: 'network', retriesExhausted: false, attempts: 0, reconnecting: true },
+              } as never);
+              throw new Error('Video took too long to load (network timeout)');
+            }),
+          });
+          const player = new ScarlettPlayer({ container, plugins: [provider], autoplay: !loadAutoplay });
+          let issued = false;
+          player.on('error', () => {
+            if (issued) return;
+            issued = true;
+            issue(player, [command]);
+          });
+
+          await player.load('live.m3u8', { autoplay: loadAutoplay });
+          const onPlay = watchPlay(player);
+          await recover(player);
+
+          expect(onPlay).toHaveBeenCalledTimes(plays);
+        }
+      );
+    });
+
+    it('logs a play() rejection on recovery instead of throwing', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      await player.load('live.m3u8');
+      const refusal = new Error('NotAllowedError');
+      vi.spyOn(player, 'play').mockRejectedValue(refusal);
+      const warn = vi.spyOn((player as any).logger, 'warn');
+
+      await recover(player);
+      await tick();
+
+      expect(player.play).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/recover/i), expect.anything());
+    });
+
+    it('holds the intent without playing while no recovery arrives', async () => {
+      const player = new ScarlettPlayer({ container, plugins: [createFailingProvider()], autoplay: true });
+      const onPlay = watchPlay(player);
+      await player.load('live.m3u8');
+      for (let i = 0; i < 5; i++) await tick();
+
+      expect(onPlay).not.toHaveBeenCalled();
+    });
+  });
+
   describe('load()', () => {
     it('should load a media source', async () => {
       const provider = createMockPlugin({

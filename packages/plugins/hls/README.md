@@ -102,7 +102,7 @@ createHLSPlugin({
   // Loading
   autoStartLoad: true,
   startPosition: -1,
-  loadTimeoutMs: 30000,         // Load watchdog; 0 disables
+  loadTimeoutMs: 30000,         // Load watchdog, then auto-reconnect; 0 disables
 
   // Live / low latency (see below). Every key here except lowLatencyMode is
   // left to hls.js unless you set it - none is ever passed as undefined.
@@ -185,6 +185,14 @@ On native Safari HLS there is no latency API, so `latency` is the distance to
 `video.seekable.end` - a buffer distance, not a measured latency - and the edge
 threshold stays deliberately loose. Treat those numbers as an approximation.
 
+When a live stream ends with `EXT-X-ENDLIST`, `live` turns false and
+`seekableRange` is cleared. `provider.getPlaylistStart()` still answers the
+start of the last playlist hls.js loaded, in seconds on the player timeline,
+which the UI's Replay uses to restart a finished sliding window at its first
+segment (under MSE the element's finite `seekable` range starts at 0). It
+returns `null` on native HLS, where the element's `seekable` is accurate, and
+before any playlist has loaded.
+
 ### Rejoining the live edge
 
 Call `player.seekToLive()`, or emit `live:seektolive` from a control. Both land
@@ -227,7 +235,11 @@ true`, decided before the event is emitted, so a listener (analytics, a host's
 telemetry) can tell a failure the plugin will try to recover from from a
 terminal one. Network, media and mux failures qualify on a live source, and on
 a VOD once its manifest has loaded (whether or not it has started playing); a
-VOD whose manifest never loaded stays manual. `fatal` stays `true`. Normally `error:reconnecting` follows,
+VOD whose manifest never loaded stays manual. A load that hits `loadTimeoutMs`
+qualifies even before that, because a stalled load is usually transient (a
+wrong URL errors rather than stalls) and live is only known once the source
+has loaded; the source then gets the finite `reconnectWindowMs` window until
+it is classified live. `fatal` stays `true`. Normally `error:reconnecting` follows,
 then either `error:recovered` or `error:reconnect-exhausted` and a final fatal
 `error` with `detail.reconnectExhausted: true`. If the reconnect window has
 already run out, a qualifying fatal error can still carry the marker, but
@@ -242,20 +254,26 @@ the source on the same backoff instead of failing at once. On that first load,
 network budget, including `MEDIA_ERR_SRC_NOT_SUPPORTED`, which is how Safari
 reports a manifest that answered 4xx or 5xx. Set `maxNetworkRetries: 0` to fail
 on the first error. `loadTimeoutMs` stays one ceiling over the whole load,
-retries included, and a timeout ends the load even with budget left.
+retries included, and a timeout ends the load even with budget left. A
+timeout stops the stalled fetch (the element's `src` is removed) and, with
+`autoReconnect` on, hands the source to auto-reconnect: the fatal `error` has
+`detail.reconnecting: true`, `error:reconnecting` follows, and a source that
+comes back recovers with `media:loaded` and `error:recovered`. The viewer's
+muted and volume settings are put back on the element after every reconnect,
+before `error:recovered`.
 
 A load that fails for good emits a fatal `error` with a structured code
 (`MEDIA_NETWORK_ERROR` or `MEDIA_DECODE_ERROR`; a mux failure is classified as
 a decode failure) before `load()` settles, so the host never sees a generic
 `SOURCE_LOAD_FAILED` for it. Its `detail` carries `type` (`'network'`,
-`'media'`, `'mux'` or `'other'`), `attempts` and `retriesExhausted`, and on the
-native path also:
+`'media'`, `'mux'` or `'other'`), `attempts` and `retriesExhausted`, and,
+where they apply, the fields below (the media error fields are native only):
 
 | Field | Meaning |
 |---|---|
 | `mediaErrorCode` | `MediaError.code` of the element error (1 aborted, 2 network, 3 decode, 4 source not supported) |
 | `mediaErrorMessage` | `MediaError.message`, when the browser gave one |
-| `timedOut` | `true` when `loadTimeoutMs` ended the load. The message stays `Video took too long to load (network timeout)`, and the media error fields describe the last error seen, if any |
+| `timedOut` | `true` when `loadTimeoutMs` ended the load, on either path (native or hls.js). The message is exactly `Video took too long to load (network timeout)`, `retriesExhausted` is `false`, and on native the media error fields describe the last error seen, if any |
 
 Every media element error is also reported on `media:error`, as an
 `Error` whose numeric `code` is the `MediaError.code` and whose `detail`
@@ -272,7 +290,14 @@ not reject on a source failure: core reports the failure through the `error`
 event and the error state. This differs from the WHEP provider, whose `load()`
 stays pending while its reconnect scheduler works. Hosts that need progress
 listen to `error:reconnecting`, `error:recovered` and fatal `error`, not to the
-promise.
+promise. When a load that settled this way later recovers, core starts
+playback on `error:recovered` if that load asked for autoplay (the `autoplay`
+option, or a per-load `autoplay` override).
+
+A load in progress carries over a provider switch: when AirPlay connects or
+disconnects before the source has loaded, and the plugin moves between native
+HLS and hls.js, `load()` stays pending and settles with the new pipeline's
+load instead of failing.
 
 ### Unsupported browsers
 

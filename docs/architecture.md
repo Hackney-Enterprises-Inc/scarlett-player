@@ -533,8 +533,27 @@ can be turned off through `EventEmitterOptions`.
 
 ## Analytics timing and ordering
 
+`videoStart` marks a confirmed first frame, not the first `playing` event:
+the first `requestVideoFrameCallback` on the element, or else the first
+`timeupdate` whose position has moved past the play request's
+(`firstFrameSource: 'rvfc' | 'progress'`). `startupTime` runs to that
+confirmation and no `playTime` accrues before it. A seek before the first
+frame re-arms confirmation when it ends, measured from the post-seek
+position, and progress is also read from the element's own `timeupdate`, so
+WHEP confirms without rVFC. While casting, the receiver's advancing position
+confirms instead, since the local element stays paused. Safari can fire `playing`
+right after `play` without showing a frame, which made iOS startup times read
+1-7 ms. A view that never confirms sends no `videoStart`.
+
 The analytics plugin waits `rebufferGraceMs` (250 ms by default) before counting
-an eligible post-first-frame stall. Zero counts synchronously; negative or
+an eligible post-first-frame stall. A stall that the browser never reports
+with `waiting` counts too: while the view is playing, visible and past its
+first frame, the position is sampled every 500 ms, and 2 s without progress
+opens a rebuffer backdated to the last advance (`rebufferStart.cause`:
+`'waiting'`, `'progress'` or `'reconnect'`). Sampling is off while a
+Chromecast session is active (`chromecastActive`). A beacon sent during a
+freeze not yet confirmed as a stall reports play and DVR credit only up to
+the last advance, so cumulative counters never decrease. Zero counts synchronously; negative or
 non-finite values fall back to 250 ms. Resuming, pausing, seeking or closing
 the view during the grace cancels the pending rebuffer. Confirmed duration
 includes the grace, but `rebufferStart.timestamp` remains its send time, not
@@ -544,7 +563,14 @@ play time, even when too short to count as a rebuffer.
 Every dispatched beacon has a per-view `beaconSeq`, starting at 1 on
 `viewStart`, assigned after development/error-sampling filters and protected
 from custom-data overrides. Custom events and unload beacons share the counter.
-Order each view by `timestamp, beaconSeq`, not arrival or row ID. An ingest
+Order each view by `timestamp, beaconSeq`, not arrival or row ID.
+`timestamp` is the client clock when the event happened. Every unbatched POST
+body, and each batch envelope (events inside a batch carry none), also
+carries `sentAt`, the client clock when it left the
+browser, stamped after `headers()` resolves and outside `beforeSend`; a `sentAt` from `customDimensions` or `beforeSend` is
+dropped. An
+ingest corrects client clock skew with `receipt - sentAt` and applies that
+offset to `timestamp`; `customBeacon` payloads carry no `sentAt`. An ingest
 that drops heartbeats sees sequence gaps. `seeking` carries `seekSource`
 (`player` or `element`); a view closes seek accounting at `viewEnd`. The
 `hei/laravel-scarlett-player` v0.3.0 migration recognises the 1.19.3
@@ -635,8 +661,14 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   in `detail`, so core's `load()` keeps the provider's code.
 - `emitFatalError()` emits the fatal `error` and then calls
   `maybeScheduleReconnect()`, which hands over to the auto-reconnect scheduler
-  only when playback had already started (or the stream is live) and the failure
-  was a network or media one. That gate, `canAutoReconnect()`, is checked before
+  only when the failure was a network or media one and playback had already
+  started, the stream is live, or the failure is a load timeout
+  (`detail.timedOut`). A stall at `loadTimeoutMs` is transient and comes before
+  live is known, so both watchdogs hand it to reconnect (the native one first
+  tears down and aborts the stalled element fetch); `load()` still rejects at
+  the timeout, and a load that later recovers plays when its effective
+  autoplay was on. A wrong URL errors rather than stalls, so it stays a
+  manual fatal before playback. That gate, `canAutoReconnect()`, is checked before
   the emit as well, so the fatal `error` already carries `detail.reconnecting:
   true` when a reconnect will follow. `scheduleReconnectAttempt()` emits
   `error:reconnecting` (`{ attempt, delayMs, elapsedMs?, windowMs? }`) and

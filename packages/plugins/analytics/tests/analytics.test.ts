@@ -186,6 +186,7 @@ describe('Analytics Plugin', () => {
 
       vi.advanceTimersByTime(400);
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       const videoStartEvent = beacons.find((b) => b.event === 'videoStart');
       expect(videoStartEvent?.startupTime).toBe(400);
@@ -202,10 +203,12 @@ describe('Analytics Plugin', () => {
 
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
       (api as any)._updateState({ paused: true, playing: false });
       (api as any)._trigger('playback:pause');
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       expect(beacons.filter((b) => b.event === 'videoStart')).toHaveLength(1);
     });
@@ -264,8 +267,8 @@ describe('Analytics Plugin', () => {
     });
   });
 
-  // SCAR-ANALYTICS-4: startupTime is the first frame (the first `playing: true`
-  // of the view) minus the earliest request signal. Driven through the real HLS
+  // Startup time is the first confirmed advancing frame minus the earliest
+  // request signal. Driven through the real HLS
   // element handlers on the analytics bus, so the order of state writes and
   // bus emits is the provider's own.
   describe('Startup time', () => {
@@ -274,6 +277,13 @@ describe('Analytics Plugin', () => {
 
     /** Dispatch an element event on the test video. */
     const fire = (type: string) => video.dispatchEvent(new Event(type));
+
+    /** Report playing, then an advancing frame at the same test clock time. */
+    const firstFrame = () => {
+      fire('playing');
+      video.currentTime += 0.01;
+      fire('timeupdate');
+    };
 
     /** Beacons of one event type sent so far. */
     const sent = (event: string) => beacons.filter((b) => b.event === event);
@@ -308,7 +318,7 @@ describe('Analytics Plugin', () => {
       vi.advanceTimersByTime(50);
       fire('play');
       vi.advanceTimersByTime(100);
-      fire('playing');
+      firstFrame();
 
       expect(sent('videoStart')).toHaveLength(1);
       expect(sent('videoStart')[0]?.startupTime).toBe(150);
@@ -323,7 +333,7 @@ describe('Analytics Plugin', () => {
 
       fire('play');
       vi.advanceTimersByTime(120);
-      fire('playing');
+      firstFrame();
 
       expect(sent('videoStart')).toHaveLength(1);
       expect(sent('videoStart')[0]?.startupTime).toBe(120);
@@ -343,7 +353,7 @@ describe('Analytics Plugin', () => {
       fire('loadedmetadata');
       fire('play');
       vi.advanceTimersByTime(300);
-      fire('playing');
+      firstFrame();
 
       expect(sent('videoStart')).toHaveLength(1);
       expect(sent('videoStart')[0]?.startupTime).toBe(300);
@@ -357,13 +367,13 @@ describe('Analytics Plugin', () => {
 
       fire('play');
       vi.advanceTimersByTime(120);
-      fire('playing');
+      firstFrame();
       vi.advanceTimersByTime(1000);
       fire('pause');
       vi.advanceTimersByTime(2000);
       fire('play');
       vi.advanceTimersByTime(80);
-      fire('playing');
+      firstFrame();
 
       expect(sent('videoStart')).toHaveLength(1);
       expect(plugin.getMetrics().startupTime).toBe(120);
@@ -378,13 +388,13 @@ describe('Analytics Plugin', () => {
 
       fire('play');
       vi.advanceTimersByTime(120);
-      fire('playing');
+      firstFrame();
       beacons = [];
 
       // `playing` stays true across a stall, so only the bus event can end it
       fire('waiting');
       vi.advanceTimersByTime(1000);
-      fire('playing');
+      firstFrame();
 
       expect(sent('rebufferStart')).toHaveLength(1);
       expect(sent('rebufferEnd')).toHaveLength(1);
@@ -400,7 +410,7 @@ describe('Analytics Plugin', () => {
       await fastPlugin.init(api);
       fire('play');
       vi.advanceTimersByTime(100);
-      fire('playing');
+      firstFrame();
 
       const slowApi = createMockAPI();
       await mountHls(slowApi);
@@ -408,7 +418,7 @@ describe('Analytics Plugin', () => {
       await slowPlugin.init(slowApi);
       fire('play');
       vi.advanceTimersByTime(5000);
-      fire('playing');
+      firstFrame();
 
       expect(slowPlugin.getMetrics().startupTime).toBe(5000);
       expect(slowPlugin.getQoEScore()).toBeLessThan(fastPlugin.getQoEScore()!);
@@ -571,6 +581,7 @@ describe('Analytics Plugin', () => {
       // Start playback first
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
       beacons = [];
 
       // Start rebuffer
@@ -606,6 +617,7 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       (api as any)._trigger('media:waiting');
       vi.advanceTimersByTime(1000);
@@ -636,6 +648,7 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       (api as any)._trigger('media:waiting');
       vi.advanceTimersByTime(750);
@@ -660,6 +673,7 @@ describe('Analytics Plugin', () => {
       await plugin.init(api);
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       (api as any)._trigger('media:waiting');
       vi.advanceTimersByTime(600);
@@ -947,6 +961,7 @@ describe('Analytics Plugin', () => {
       // Start playing, the way a provider reports it: play time needs the
       // `playing` state key, not just the play request
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
       (api as any)._trigger('playback:play');
       beacons = [];
 
@@ -968,6 +983,7 @@ describe('Analytics Plugin', () => {
     const feed = (latencies: number[]) => {
       // Readings before the view's first frame are not latency (HEI-35)
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
       for (const latency of latencies) {
         (api as any)._trigger('live:latency', { latency });
       }
@@ -1257,6 +1273,7 @@ describe('Analytics Plugin', () => {
       (api as any)._updateState({ ended: false });
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
     };
 
     /** Core's load(): writes the `source` state before the provider loads. */
@@ -1695,6 +1712,7 @@ describe('Analytics Plugin', () => {
       (api as any)._updateState({ ended: false });
       (api as any)._trigger('playback:play');
       (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
     };
 
     /** The element pauses. */
@@ -2379,4 +2397,15 @@ describe('Analytics Plugin', () => {
       }
     });
   });
+});
+
+it('keeps event timestamp unchanged and sentAt wire-only, overriding a hook-supplied dispatch value', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(10000);
+  const fetchMock = vi.fn().mockResolvedValue({}); vi.stubGlobal('fetch', fetchMock);
+  const beforeSend = vi.fn((payload: BeaconPayload) => { expect(payload).not.toHaveProperty('sentAt'); return { ...payload, sentAt: -1 }; });
+  const api = createMockAPI(); const plugin = createAnalyticsPlugin({ ...mockConfig, heartbeatInterval: 60000, beforeSend, headers: () => new Promise(resolve => setTimeout(() => resolve({}), 2000)) });
+  await plugin.init(api); await vi.advanceTimersByTimeAsync(2000);
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ timestamp: 10000, sentAt: 12000 });
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('custom');
+  await plugin.destroy(); await vi.advanceTimersByTimeAsync(2000); vi.unstubAllGlobals(); vi.useRealTimers();
 });

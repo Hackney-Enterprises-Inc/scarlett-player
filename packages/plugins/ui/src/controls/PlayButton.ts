@@ -6,6 +6,7 @@ import type { IPluginAPI } from '@scarlett-player/core';
 import type { Control } from './Control';
 import { icons } from '../icons';
 import { createButton, getVideo, setHTML, setAttr } from '../utils';
+import { replayFromEnd } from './replay';
 
 export class PlayButton implements Control {
   private el: HTMLButtonElement;
@@ -56,8 +57,11 @@ export class PlayButton implements Control {
     const ended = this.api.getState('ended');
 
     if (ended) {
-      video.currentTime = 0;
-      this.api.emit('playback:seeking', { time: 0 });
+      const target = replayFromEnd(this.api, video);
+      // null: the source was reloaded instead of seeked, and that load carries
+      // autoplay, so the stale element is not played.
+      if (target === null) return;
+      this.api.emit('playback:seeking', { time: target });
       video.play().catch(() => {});
     } else if (!video.paused) {
       // Check video.paused directly for immediate response

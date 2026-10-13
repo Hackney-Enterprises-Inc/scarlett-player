@@ -120,6 +120,26 @@ describe('reconnecting marker on fatal errors', () => {
     await plugin.destroy();
   });
 
+  // HEI-SCARLETT-57: a stall is transient, so a load timeout is marked and
+  // reconnected even before the stream is classified or has played
+  it('marks a load timeout before first play, before error:reconnecting', async () => {
+    vi.useFakeTimers();
+    const plugin = createHLSPlugin({ loadTimeoutMs: 1000 });
+    await plugin.init(api);
+    plugin.loadSource(SRC).catch(() => {});
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(fatals()).toHaveLength(1);
+    expect(fatals()[0].detail?.timedOut).toBe(true);
+    expect(fatals()[0].detail?.reconnecting).toBe(true);
+    const names = emits().map(([event]) => event);
+    expect(names.indexOf('error')).toBeLessThan(names.indexOf('error:reconnecting'));
+
+    await plugin.destroy();
+  });
+
   // HEI-SCARLETT-54: mux used to be excluded from auto-reconnect outright.
   // It now shares the media path, so a played source marks and schedules it
   // exactly like a media failure (the never-played case stays in mux-retry).

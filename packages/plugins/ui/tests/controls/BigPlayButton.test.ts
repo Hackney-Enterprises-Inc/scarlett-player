@@ -320,4 +320,126 @@ describe('BigPlayButton', () => {
 
     expect(document.body.contains(el)).toBe(false);
   });
+
+  describe('Replay on an ended stream', () => {
+    /** A TimeRanges stand-in with the given [start, end] pairs. */
+    const timeRanges = (pairs: Array<[number, number]>): TimeRanges =>
+      ({
+        length: pairs.length,
+        start: (i: number) => (pairs[i] ?? [0, 0])[0],
+        end: (i: number) => (pairs[i] ?? [0, 0])[1],
+      }) as unknown as TimeRanges;
+
+    /** Set what the element reports as its duration and seekable window. */
+    const setElementTimeline = (duration: number, seekable: Array<[number, number]>): HTMLVideoElement => {
+      const video = api.container.querySelector('video')!;
+      Object.defineProperty(video, 'duration', { value: duration, configurable: true });
+      Object.defineProperty(video, 'seekable', { value: timeRanges(seekable), configurable: true });
+      return video;
+    };
+
+    it('hls.js: an ENDLIST after a live window seeks to the start of the recording', () => {
+      api.__state.source = { src: 'https://cdn.example.com/event.m3u8', type: 'application/x-mpegURL' };
+      setElementTimeline(Infinity, [[100, 400]]);
+      api.__state.live = true;
+      api.__state.seekableRange = { start: 100, end: 400 };
+      api.__state.playing = true;
+      button.update();
+
+      // The ENDLIST level update: hls.js sets live false, clears the window,
+      // and the element now reports a finite duration over a VOD window.
+      api.__state.playing = false;
+      api.__state.paused = true;
+      api.__state.live = false;
+      api.__state.seekableRange = null;
+      const video = setElementTimeline(300, [[0, 300]]);
+      video.currentTime = 300;
+      api.__state.playbackState = 'ended';
+      setElementEnded(true);
+      button.update();
+      expect(button.render().getAttribute('aria-label')).toBe('Replay');
+
+      button.render().click();
+
+      expect(video.currentTime).toBe(0);
+      expect(video.play).toHaveBeenCalled();
+      expect(api.emit).not.toHaveBeenCalledWith('live:seektolive', undefined);
+      expect(api.emit).not.toHaveBeenCalledWith('media:load-request', expect.anything());
+      expect(api.logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('native: durationchange to Infinity, then to a finite value, then ended restarts the recording', () => {
+      api.__state.source = { src: 'https://cdn.example.com/event.m3u8', type: 'application/x-mpegURL' };
+      // Native never clears `live`, so it stays set through the whole sequence.
+      api.__state.live = true;
+      setElementTimeline(Infinity, [[0, 90]]);
+      api.__state.playing = true;
+      button.update();
+
+      // durationchange to a finite value: the playlist ended, live stays true.
+      api.__state.playing = false;
+      api.__state.paused = true;
+      const video = setElementTimeline(90, [[0, 90]]);
+      video.currentTime = 90;
+      setElementEnded(true);
+      api.__state.playbackState = 'ended';
+      button.update();
+      expect(button.render().getAttribute('aria-label')).toBe('Replay');
+
+      button.render().click();
+
+      expect(video.currentTime).toBe(0);
+      expect(video.play).toHaveBeenCalled();
+      expect(api.emit).not.toHaveBeenCalledWith('live:seektolive', undefined);
+      expect(api.emit).not.toHaveBeenCalledWith('media:load-request', expect.anything());
+    });
+
+    it('a sliding window that ended replays from the window start, not from 0', () => {
+      setElementTimeline(600, [[120, 600]]);
+      const video = api.container.querySelector('video')!;
+      video.currentTime = 600;
+      setElementEnded(true);
+      api.__state.playbackState = 'ended';
+      button.update();
+
+      button.render().click();
+
+      expect(video.currentTime).toBe(120);
+      expect(video.play).toHaveBeenCalled();
+    });
+
+    it('an element that ended with an infinite duration reloads the source with autoplay', () => {
+      const src = 'https://cdn.example.com/stalled/index.m3u8';
+      api.__state.source = { src, type: 'application/x-mpegURL' };
+      const video = setElementTimeline(Infinity, [[100, 400]]);
+      const setTime = vi.fn();
+      Object.defineProperty(video, 'currentTime', { get: () => 0, set: setTime, configurable: true });
+      setElementEnded(true);
+      api.__state.playbackState = 'ended';
+      button.update();
+
+      button.render().click();
+
+      expect(setTime).not.toHaveBeenCalled();
+      const loadRequests = vi
+        .mocked(api.emit)
+        .mock.calls.filter(([event]) => event === 'media:load-request');
+      expect(loadRequests).toEqual([['media:load-request', { src, autoplay: true }]]);
+    });
+
+    it('a VOD that ended still restarts at 0 (regression guard)', () => {
+      setElementTimeline(600, [[0, 600]]);
+      const video = api.container.querySelector('video')!;
+      video.currentTime = 600;
+      setElementEnded(true);
+      api.__state.playbackState = 'ended';
+      button.update();
+
+      button.render().click();
+
+      expect(video.currentTime).toBe(0);
+      expect(video.play).toHaveBeenCalled();
+      expect(api.emit).not.toHaveBeenCalledWith('media:load-request', expect.anything());
+    });
+  });
 });

@@ -103,14 +103,23 @@ export interface HLSPluginConfig {
   retryBackoffFactor?: number;
   /**
    * Watchdog for source loading in milliseconds (default: 30000, 0 disables).
-   * If the manifest has not parsed within this window the load fails with an
-   * error instead of leaving the viewer on a spinner forever.
+   * One ceiling over the whole load, in-load retries included. If the source
+   * has not loaded within this window (manifest parsed on hls.js,
+   * `loadedmetadata` on native HLS) the load is stopped, `load()` settles,
+   * and a fatal `error` with the message `Video took too long to load
+   * (network timeout)` and `detail.timedOut: true` is emitted instead of
+   * leaving the viewer on a spinner forever. With `autoReconnect` on, that
+   * error carries `detail.reconnecting: true` and auto-reconnect takes over.
    */
   loadTimeoutMs?: number;
   /**
-   * Automatically attempt to reconnect after a fatal network/media error
-   * once the stream had been playing (default: true). Viewers should not
-   * have to press anything when a connection blip resolves itself.
+   * Automatically attempt to reconnect after a fatal network/media/mux error
+   * (default: true). Viewers should not have to press anything when a
+   * connection blip resolves itself. Applies once the stream is classified
+   * live or its manifest has loaded once, and to a load that hit
+   * `loadTimeoutMs` even before that: a stall is transient, while a wrong
+   * URL errors rather than stalls. Any other failure of a source that never
+   * loaded stays manual.
    */
   autoReconnect?: boolean;
   /** First auto-reconnect delay in milliseconds (default: 2000) */
@@ -207,6 +216,21 @@ export interface IHLSPlugin extends Plugin<HLSPluginConfig> {
 
   /** Get live stream info */
   getLiveInfo(): HLSLiveInfo | null;
+
+  /**
+   * Start of the last playlist hls.js loaded, in seconds on the player
+   * timeline, including the final playlist of a live stream that ended with
+   * EXT-X-ENDLIST.
+   *
+   * Replay reads it to restart a finished sliding-window stream at its first
+   * available segment: once ENDLIST lands, `live` is false and
+   * `seekableRange` is cleared, and under MSE the element's finite `seekable`
+   * range starts at 0 whatever the playlist covers.
+   *
+   * @returns The window start, or null on native HLS (the element's own
+   *          `seekable` is accurate there) and before any playlist loaded
+   */
+  getPlaylistStart(): number | null;
 
   /** Switch from hls.js to native HLS (for AirPlay) */
   switchToNative(): Promise<void>;
