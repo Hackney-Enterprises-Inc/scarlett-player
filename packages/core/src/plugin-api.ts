@@ -59,8 +59,14 @@ export class PluginAPI implements IPluginAPI {
   /** Plugin ID this API belongs to */
   readonly pluginId: string;
 
-  /** Player container element */
-  readonly container: HTMLElement;
+  /** The player's container, while the API is live */
+  private readonly playerContainer: HTMLElement;
+
+  /** Stand-in container handed out once the API is revoked */
+  private detachedContainer: HTMLElement | null = null;
+
+  /** Set by `revoke()`, cleared by `restore()` */
+  private revoked = false;
 
   /** Scoped logger for this plugin */
   readonly logger: IPluginAPI['logger'];
@@ -90,7 +96,7 @@ export class PluginAPI implements IPluginAPI {
     this.pluginId = pluginId;
     this.stateManager = deps.stateManager;
     this.eventBus = deps.eventBus;
-    this.container = deps.container;
+    this.playerContainer = deps.container;
     this.getPluginFn = deps.getPlugin;
     this.getProviderDiagnosticsFn = deps.getProviderDiagnostics;
 
@@ -101,6 +107,16 @@ export class PluginAPI implements IPluginAPI {
       warn: (msg: string, metadata?: Record<string, any>) => deps.logger.warn(`[${pluginId}] ${msg}`, metadata),
       error: (msg: string, metadata?: Record<string, any>) => deps.logger.error(`[${pluginId}] ${msg}`, metadata),
     };
+  }
+
+  /**
+   * Player container element. Once the API is revoked this is a detached
+   * stand-in, so a late teardown neither finds nor changes the player's DOM.
+   */
+  get container(): HTMLElement {
+    if (!this.revoked) return this.playerContainer;
+    this.detachedContainer ??= document.createElement('div');
+    return this.detachedContainer;
   }
 
   /**
@@ -120,6 +136,7 @@ export class PluginAPI implements IPluginAPI {
    * @param value - New state value
    */
   setState<K extends StateKey>(key: K, value: StateValue<K>): void {
+    if (this.revoked) return;
     this.stateManager.set(key, value);
   }
 
@@ -133,6 +150,7 @@ export class PluginAPI implements IPluginAPI {
    * @param initialValue - Value used only when the key is new
    */
   defineState<K extends StateKey>(key: K, initialValue: StateValue<K>): void {
+    if (this.revoked) return;
     this.stateManager.define(key, initialValue);
   }
 
@@ -144,6 +162,7 @@ export class PluginAPI implements IPluginAPI {
    * @returns Unsubscribe function
    */
   on<T extends EventName>(event: T, handler: EventHandler<T>): () => void {
+    if (this.revoked) return () => {};
     return this.eventBus.on(event, handler);
   }
 
@@ -164,6 +183,7 @@ export class PluginAPI implements IPluginAPI {
    * @param payload - Event payload
    */
   emit<T extends EventName>(event: T, payload: EventPayload<T>): void {
+    if (this.revoked) return;
     this.eventBus.emit(event, payload);
   }
 
@@ -193,6 +213,7 @@ export class PluginAPI implements IPluginAPI {
    * @returns Unsubscribe function
    */
   subscribeToState(callback: (event: StateChangeEvent) => void): () => void {
+    if (this.revoked) return () => {};
     return this.stateManager.subscribe(callback);
   }
 
@@ -223,6 +244,31 @@ export class PluginAPI implements IPluginAPI {
       }
     }
     this.cleanupFns = [];
+  }
+
+  /**
+   * Cut the plugin off from the player while its teardown is still pending:
+   * run its cleanups now, make `setState`, `defineState`, `emit`, `on` and
+   * `subscribeToState` no-ops, and hand out a detached `container`. Used when
+   * the player stops waiting for a provider's teardown. Idempotent.
+   *
+   * @returns `true` when this call revoked it, `false` when it already was
+   * @internal
+   */
+  revoke(): boolean {
+    if (this.revoked) return false;
+    this.revoked = true;
+    this.runCleanups();
+    return true;
+  }
+
+  /**
+   * Undo `revoke()` before a fresh `init()`.
+   *
+   * @internal
+   */
+  restore(): void {
+    this.revoked = false;
   }
 
   /**

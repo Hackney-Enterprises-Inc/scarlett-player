@@ -182,6 +182,7 @@ export function setupHlsEventHandlers(
     onLevelDetails?: (details: HlsLevelDetails) => void;
     isLowLatencyRequested?: () => boolean;
     onFragLoaded?: () => void;
+    onFragBuffered?: () => void;
     getIsAutoQuality?: () => boolean;
     onAudioTracksUpdated?: (tracks: HlsAudioTrack[]) => void;
     onAudioTrackSwitched?: (index: number) => void;
@@ -299,6 +300,7 @@ export function setupHlsEventHandlers(
   addHandler('hlsFragBuffered', () => {
     api.setState('buffering', false);
     callbacks.onBufferUpdate?.();
+    callbacks.onFragBuffered?.();
   });
 
   // Fragment loading - update buffering state

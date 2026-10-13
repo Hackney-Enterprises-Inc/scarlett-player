@@ -195,12 +195,19 @@ seekable range is past the last loaded part, and seeking there stalls.
 ## Error Recovery
 
 Recoverable errors retry with jittered exponential backoff; the retry budget
-restores itself once media flows again, so a long live event's transient blips
-never accumulate into a terminal failure. When retries are exhausted after
-playback had started, the plugin tears down and rebuilds the pipeline
-automatically (emitting `error:reconnecting` and `error:recovered` for the
-UI), and reconnects immediately when the browser comes back online. Only after
-the reconnect window closes does the viewer see the retry UI.
+restores itself once media flows again (the network budget when a fragment
+downloads, the media budget when a fragment has been remuxed and buffered), so
+a long live event's transient blips never accumulate into a terminal failure.
+A terminal failure cancels any recovery still waiting on its backoff. Network errors spend
+`maxNetworkRetries`; media errors spend `maxMediaRetries`. hls.js `mux` errors
+(remux failures such as `remuxAllocError`) spend the `maxMediaRetries` budget
+too: same `recoverMediaError()` recovery, same `error:media` events, with
+`detail.type` staying `'mux'` so analytics can still tell the classes apart.
+When retries are exhausted after playback had started, the plugin tears down
+and rebuilds the pipeline automatically (emitting `error:reconnecting` and
+`error:recovered` for the UI), and reconnects immediately when the browser
+comes back online. Only after the reconnect window closes does the viewer see
+the retry UI.
 
 Where a recovered stream resumes: VOD goes back to the position the viewer had
 when the first failure hit. Native HLS live reloads (error recovery and
@@ -218,7 +225,9 @@ precedence. No saved DVR position is restored on a live hls.js reconnect.
 The fatal `error` that opens such a reconnect carries `detail.reconnecting:
 true`, decided before the event is emitted, so a listener (analytics, a host's
 telemetry) can tell a failure the plugin will try to recover from from a
-terminal one. `fatal` stays `true`. Normally `error:reconnecting` follows,
+terminal one. Network, media and mux failures qualify on a live source, and on
+a VOD once its manifest has loaded (whether or not it has started playing); a
+VOD whose manifest never loaded stays manual. `fatal` stays `true`. Normally `error:reconnecting` follows,
 then either `error:recovered` or `error:reconnect-exhausted` and a final fatal
 `error` with `detail.reconnectExhausted: true`. If the reconnect window has
 already run out, a qualifying fatal error can still carry the marker, but
@@ -236,9 +245,11 @@ on the first error. `loadTimeoutMs` stays one ceiling over the whole load,
 retries included, and a timeout ends the load even with budget left.
 
 A load that fails for good emits a fatal `error` with a structured code
-(`MEDIA_NETWORK_ERROR` or `MEDIA_DECODE_ERROR`) before `load()` settles, so the
-host never sees a generic `SOURCE_LOAD_FAILED` for it. Its `detail` carries
-`type`, `attempts` and `retriesExhausted`, and on the native path also:
+(`MEDIA_NETWORK_ERROR` or `MEDIA_DECODE_ERROR`; a mux failure is classified as
+a decode failure) before `load()` settles, so the host never sees a generic
+`SOURCE_LOAD_FAILED` for it. Its `detail` carries `type` (`'network'`,
+`'media'`, `'mux'` or `'other'`), `attempts` and `retriesExhausted`, and on the
+native path also:
 
 | Field | Meaning |
 |---|---|
@@ -254,11 +265,14 @@ when the error fired). When the browser gives no message, codes 4 and 2 read
 "Video playback error".
 
 `player.load(url)` resolves when the manifest has been parsed and the source is
-playable, and stays pending while that reconnect window is open rather than
-rejecting on the first failure inside it - the same contract the WHEP provider
-documents. Hosts that need progress listen to `error:reconnecting`,
-`error:recovered` and fatal `error`; a host that needs a hard bound sets a
-shorter `reconnectWindowMs` or races the promise itself.
+playable. It stays pending through the in-place retries above, and settles as
+soon as the plugin reports a fatal `error`, even when that error carries
+`detail.reconnecting: true` and auto-reconnect carries on behind it. It does
+not reject on a source failure: core reports the failure through the `error`
+event and the error state. This differs from the WHEP provider, whose `load()`
+stays pending while its reconnect scheduler works. Hosts that need progress
+listen to `error:reconnecting`, `error:recovered` and fatal `error`, not to the
+promise.
 
 ### Unsupported browsers
 

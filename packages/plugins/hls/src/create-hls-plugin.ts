@@ -767,11 +767,13 @@ export function createHLSPluginWith(
    * @returns Detail block for the fatal error event
    */
   const buildErrorDetail = (error: NativeHLSError, retriesExhausted: boolean): HLSErrorDetail => {
+    // mux attempts come from mediaRetryCount: the mux class spends the media
+    // retry budget (see handleHlsError()).
     const attempts =
       error.attempts ??
       (error.type === 'network'
         ? networkRetryCount
-        : error.type === 'media'
+        : error.type === 'media' || error.type === 'mux'
           ? mediaRetryCount
           : 0);
 
@@ -852,7 +854,24 @@ export function createHLSPluginWith(
   };
 
   /**
+   * Cancel an in-place recovery still waiting on its backoff. A terminal
+   * failure calls this before reporting, so a recovery scheduled by an
+   * earlier error in the same burst (audio then video remux, say) cannot
+   * fire after the fatal. Auto-reconnect has its own timer and is untouched.
+   */
+  const cancelPendingRetry = (): void => {
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+      retryTimeout = null;
+    }
+  };
+
+  /**
    * Handle HLS errors with recovery and retry limits.
+   *
+   * mux errors (hls.js remux failures) spend the media budget and share the
+   * media recovery: same `maxMediaRetries`, same `recoverMediaError()`,
+   * same `error:media` event.
    *
    * @param error - Parsed HLS error
    * @returns True when the error is terminal (fatal emitted, no further
@@ -877,6 +896,7 @@ export function createHLSPluginWith(
 
       if (errorCount >= MAX_ERRORS_IN_WINDOW) {
         api?.logger.error(`Too many fatal errors (${errorCount} in ${ERROR_WINDOW_MS}ms), giving up`);
+        cancelPendingRetry();
         emitFatalError(error, true);
         teardownPipeline(new Error(error.details));
         return true;
@@ -890,6 +910,7 @@ export function createHLSPluginWith(
 
           if (networkRetryCount >= maxRetries) {
             api?.logger.error(`Network error recovery failed after ${networkRetryCount} attempts`);
+            cancelPendingRetry();
             emitFatalError(error, true);
             return true;
           }
@@ -926,11 +947,19 @@ export function createHLSPluginWith(
           break;
         }
 
-        case 'media': {
+        // hls.js mux errors (fatal remux failures such as remuxAllocError)
+        // share the media budget and recovery: recoverMediaError() tears down
+        // and re-attaches the buffer pipeline the remuxer died in, which is
+        // the media-stage recovery hls.js documents for the host.
+        // `detail.type` stays 'mux' (from error.type) so analytics and the
+        // error table can still tell the classes apart.
+        case 'media':
+        case 'mux': {
           const maxRetries = mergedConfig.maxMediaRetries ?? 2;
 
           if (mediaRetryCount >= maxRetries) {
             api?.logger.error(`Media error recovery failed after ${mediaRetryCount} attempts`);
+            cancelPendingRetry();
             emitFatalError(error, true);
             return true;
           }
@@ -957,6 +986,7 @@ export function createHLSPluginWith(
 
         default:
           // Unrecoverable error - no retry
+          cancelPendingRetry();
           emitFatalError(error, false);
           return true;
       }
@@ -1179,9 +1209,10 @@ export function createHLSPluginWith(
         videoEl.addEventListener('error', onFatalVideoError);
 
         // Media is flowing again: restore the full retry budget. This is the
-        // native analog of the MSE branch's onFragLoaded reset - without it,
-        // blips spread across a long live event permanently consume the
-        // budget and an outage hours in becomes instantly terminal.
+        // native analog of the MSE branch's onFragLoaded and onFragBuffered
+        // resets - without it, blips spread across a long live event
+        // permanently consume the budget and an outage hours in becomes
+        // instantly terminal.
         const onPlayingResetBudget = () => {
           if (networkRetryCount > 0 || mediaRetryCount > 0) {
             api?.logger.debug('Native playback recovered, resetting retry budgets');
@@ -1422,13 +1453,24 @@ export function createHLSPluginWith(
         },
         onFragLoaded: () => {
           if (session !== loadSession) return;
-          // Media is flowing again: any earlier recovery worked, so restore
-          // the full retry budget. Without this, transient blips spread
-          // across a long live event permanently consume the budget and an
-          // outage hours in becomes instantly terminal.
-          if (networkRetryCount > 0 || mediaRetryCount > 0) {
-            api?.logger.debug('Playback recovered, resetting retry budgets');
+          // A fragment downloaded: the network recovered, so restore the
+          // network budget. Without this, transient blips spread across a
+          // long live event permanently consume the budget and an outage
+          // hours in becomes instantly terminal. The media budget waits for
+          // onFragBuffered: hls.js reports FRAG_LOADED before the remuxer
+          // runs, so a fragment that then fails to remux would otherwise
+          // refill the budget it is about to spend, and never exhaust it.
+          if (networkRetryCount > 0) {
+            api?.logger.debug('Fragment loaded, resetting network retry budget');
             networkRetryCount = 0;
+          }
+        },
+        onFragBuffered: () => {
+          if (session !== loadSession) return;
+          // A fragment was remuxed and appended: media and mux recovery
+          // worked, so restore the media budget
+          if (mediaRetryCount > 0) {
+            api?.logger.debug('Fragment buffered, resetting media retry budget');
             mediaRetryCount = 0;
           }
         },
@@ -1698,7 +1740,8 @@ export function createHLSPluginWith(
    *
    * @param error - Parsed HLS error
    * @returns True when auto-reconnect is on, a source is loaded, the stream
-   *          is live or has played, and the failure is network or media
+   *          is live or has played, and the failure is network, media, or
+   *          mux (which shares the media retry budget)
    */
   const canAutoReconnect = (error: HLSError): boolean => {
     if (mergedConfig.autoReconnect === false) return false;
@@ -1708,14 +1751,16 @@ export function createHLSPluginWith(
     // content has played at least once so a wrong URL does not retry forever.
     const isLive = (api?.getState('live') ?? false) && isLiveClassified;
     if (!isLive && !hasPlayedContent) return false;
-    return error.type === 'network' || error.type === 'media';
+    // mux joins media here as in handleHlsError(): a fatal remux failure on a
+    // stream worth reconnecting is just as recoverable as a media one.
+    return error.type === 'network' || error.type === 'media' || error.type === 'mux';
   };
 
   /**
    * Start auto-reconnecting after a fatal error, when it makes sense.
    *
    * Only kicks in when the stream had previously worked (manifest parsed) and
-   * the failure class is plausibly transient (network/media). Initial-load
+   * the failure class is plausibly transient (network/media/mux). Initial-load
    * failures stay manual: the viewer sees an error with a working Try Again,
    * because auto-retrying a wrong URL forever would just mask the problem.
    */

@@ -97,6 +97,21 @@ applies the unloaded state and emits `source:unloaded` with `{ src }`, the
 source the last `load()` asked for. The next `load()` works as on a fresh
 instance.
 
+The wait for the provider's teardown is bounded at 10 seconds. If the
+provider's `init()` or `destroy()` has not settled by then, the player logs a
+warning, cuts the provider off and goes ahead: `unload()` applies the unloaded
+state and emits `source:unloaded` as usual, and the teardown finishes whenever
+it settles. Cutting it off runs the provider's `api.onDestroy()` cleanups, turns
+its `setState`, `defineState`, `emit`, `on` and `subscribeToState` into no-ops,
+gives it a detached `api.container`, and pauses and removes the media elements
+in the player's container, so its late teardown cannot reach whatever loads
+next. The same bound applies when `load()` switches away from a provider, or
+waits for an `unload()` still tearing one down. The 10 seconds is fixed, not an
+option. The bound lets a different provider go ahead; a `load()` that needs the
+same provider again still waits until that provider's own teardown has
+finished, then initialises it with a working API. `destroy()` releases any such
+wait at once, without the warning.
+
 ```typescript
 await player.unload(); // leave the stream, keep the player
 await player.load('next.m3u8');
@@ -119,7 +134,7 @@ That reset leaves the other core keys alone: `poster`, `title`, `chapters`,
 With nothing loaded or loading it is a no-op and emits nothing. A `load()`
 called before the unload finishes owns the state: the unload still destroys the
 old provider, but applies no state and emits no `source:unloaded`, and the
-load starts its provider only after that teardown. It rejects
+load starts its provider only after that teardown (or the 10-second bound). It rejects
 once `destroy()` has been called; use `destroy()` to discard the player for
 good.
 

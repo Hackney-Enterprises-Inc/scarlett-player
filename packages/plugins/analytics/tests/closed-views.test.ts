@@ -112,3 +112,161 @@ describe('closed views stay closed', () => {
     expect(h.sent('error')).toHaveLength(2);
   });
 });
+
+// HEI-52: a host load() on a closed view opens the next view at once, so a
+// source that fails before it plays still sends its error beacon. A provider
+// re-writing the same src (hls.js manifest parsed, WHEP recovery) never opens
+// one; a pending playlist track still wins the load.
+describe('a new source on a closed view', () => {
+  let h: Awaited<ReturnType<typeof createHarness>>;
+
+  const SRC_A = 'https://cdn.example.com/a.m3u8';
+  const SRC_B = 'https://cdn.example.com/b.m3u8';
+
+  afterEach(async () => {
+    await h?.plugin.destroy();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  /**
+   * Core load(): resets playback (`playing` false, `paused` true), then
+   * writes the `source` state before the provider loads.
+   */
+  function load(src: string): void {
+    h.state.set('playing', false);
+    h.state.set('paused', true);
+    rewrite(src);
+  }
+
+  /** A provider writing `source` again during a load or a recovery. */
+  function rewrite(src: string): void {
+    h.state.set('source', { src, type: 'application/x-mpegURL' });
+  }
+
+  /** Core unload(): source written null, then the source:unloaded event. */
+  function unload(): void {
+    h.state.set('source', null);
+    h.bus.emit('source:unloaded', { src: SRC_A });
+  }
+
+  function fatal(message = 'fatal'): void {
+    h.bus.emit('media:error', { error: Object.assign(new Error(message), { fatal: true }) });
+  }
+
+  /** The element's `ended`, the way a provider reports it. */
+  function end(): void {
+    h.state.set('playing', false);
+    h.state.set('paused', true);
+    h.bus.emit('playback:ended', undefined);
+  }
+
+  it('reports a fatal before any play in the view a load after unload opens', async () => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+    unload();
+    expect(h.sent('viewEnd')).toHaveLength(1);
+
+    load(SRC_B);
+    expect(h.sent('viewStart')).toHaveLength(2);
+
+    fatal('404');
+    const secondViewId = h.sent('viewStart')[1].viewId;
+    expect(h.sent('error')).toHaveLength(1);
+    expect(h.sent('error')[0].viewId).toBe(secondViewId);
+    expect(h.sent('viewEnd')).toHaveLength(2);
+    expect(h.sent('viewEnd')[1]).toMatchObject({ viewId: secondViewId, exitType: 'error' });
+  });
+
+  it('opens a view on a load of the same URL after unload', async () => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+    unload();
+
+    load(SRC_A);
+
+    expect(h.sent('viewStart')).toHaveLength(2);
+    expect(h.sent('viewEnd')).toHaveLength(1);
+  });
+
+  it.each(['ended', 'fatal'] as const)('opens a view on a load of a different URL after %s, and the play after it opens no third view', async (reason) => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+    if (reason === 'ended') end();
+    else fatal();
+    expect(h.sent('viewEnd')).toHaveLength(1);
+
+    load(SRC_B);
+    expect(h.sent('viewStart')).toHaveLength(2);
+    expect(h.sent('playRequest')).toHaveLength(1);
+
+    h.play();
+    expect(h.sent('viewStart')).toHaveLength(2);
+    const secondViewId = h.sent('viewStart')[1].viewId;
+    expect(h.sent('playRequest').at(-1)?.viewId).toBe(secondViewId);
+    expect(h.sent('videoStart').at(-1)?.viewId).toBe(secondViewId);
+  });
+
+  it('opens no view when a provider re-writes the same src after a fatal', async () => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+    fatal();
+    expect(h.sent('viewEnd')).toHaveLength(1);
+
+    // hls.js manifest parsed re-writes the source with a fresh object
+    rewrite(SRC_A);
+
+    expect(h.sent('viewStart')).toHaveLength(1);
+    expect(h.sent('viewEnd')).toHaveLength(1);
+  });
+
+  it('opens no view on a same-src re-write after an idle end; the passive-resume rule still decides', async () => {
+    vi.useFakeTimers();
+    h = await createHarness({ heartbeatInterval: 1000, idleTimeout: 5000 });
+    load(SRC_A);
+    h.play();
+    h.state.set('playing', false);
+    h.state.set('paused', true);
+    h.bus.emit('playback:pause', undefined);
+    vi.advanceTimersByTime(5000);
+    expect(h.sent('viewEnd')).toHaveLength(1);
+
+    // WHEP recovery re-writes the same source, signed again
+    rewrite(`${SRC_A}?token=2`);
+    expect(h.sent('viewStart')).toHaveLength(1);
+
+    h.play();
+    expect(h.sent('viewStart')).toHaveLength(2);
+  });
+
+  it('opens exactly one view when a playlist track loads on a closed view', async () => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+    end();
+    expect(h.sent('viewEnd')).toHaveLength(1);
+
+    h.bus.emit('playlist:change', { track: { id: 'item-1', src: SRC_B, videoId: 'track-b' }, index: 1 });
+    load(SRC_B);
+
+    expect(h.sent('viewStart')).toHaveLength(2);
+    expect(h.sent('viewStart')[1]).toMatchObject({ videoId: 'track-b' });
+    expect(h.sent('viewEnd')).toHaveLength(1);
+  });
+
+  it('never ends or opens a view on a source write while a view is open', async () => {
+    h = await createHarness();
+    load(SRC_A);
+    h.play();
+
+    load(SRC_B);
+    load(SRC_A);
+
+    expect(h.sent('viewStart')).toHaveLength(1);
+    expect(h.sent('viewEnd')).toHaveLength(0);
+  });
+});

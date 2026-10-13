@@ -53,6 +53,14 @@ export interface PlayerOptions {
 }
 
 /**
+ * How long `load()` and `unload()` wait for a provider's teardown before going
+ * ahead without it. The teardown waits on the provider's pending `init()` and
+ * then its `destroy()`; a provider that never settles either would otherwise
+ * hang the player for good. Internal, not a `PlayerOptions` key.
+ */
+const PROVIDER_TEARDOWN_TIMEOUT_MS = 10_000;
+
+/**
  * Quality level interface for proxy methods.
  */
 export interface QualityLevel {
@@ -154,9 +162,16 @@ export class ScarlettPlayer {
   /**
    * An `unload()`'s provider destroy while it is in flight, so an `unload()`
    * that follows a newer `load()` in that window waits for the same teardown
-   * instead of resolving before the provider is gone.
+   * instead of resolving before the provider is gone. Cleared once the
+   * unload stops waiting for it, on settling or on the teardown bound.
    */
-  private providerTeardown: Promise<void> | null = null;
+  private providerTeardown: { promise: Promise<void>; providerId: string } | null = null;
+
+  /**
+   * Release functions of the bounded teardown waits in progress. `destroy()`
+   * calls them so no wait keeps its timer, or warns, after the player is gone.
+   */
+  private readonly teardownWaits = new Set<() => void>();
 
   /** The in-flight `unload()`, shared by a repeat call made before it ends. */
   private pendingUnload: { generation: number; promise: Promise<void> } | null = null;
@@ -460,6 +475,17 @@ export class ScarlettPlayer {
    * with it: clearing it here would blank the image over exactly the gap it
    * exists to cover, while the next source loads.
    *
+   * Before selecting a provider it waits for the previous provider's teardown
+   * (its pending `init()`, then its `destroy()`), and for one an `unload()`
+   * still has in flight. Each wait is bounded at 10 seconds: past that it logs
+   * a warning, cuts the old provider off (its cleanups run, its API stops
+   * reaching state, events and the container, and the media elements in the
+   * container are paused and removed) and goes ahead; the old provider's
+   * teardown finishes whenever it settles. A switch to a different provider
+   * never waits on an `init()` or `destroy()` that hangs for good. A load
+   * that selects the same provider again still waits for its teardown, since
+   * one plugin cannot start a fresh `init()` while the old one is pending.
+   *
    * Plays once the provider has loaded when the `autoplay` state key is set,
    * unless `options.autoplay` is given: then that value decides for this load
    * only and the state key is left as it is. The `media:load-request` handler
@@ -508,16 +534,20 @@ export class ScarlettPlayer {
       if (this._currentProvider) {
         const previousProviderId = this._currentProvider.id;
         this.logger.info('Destroying previous provider', { provider: previousProviderId });
-        await this.pluginManager.destroyPlugin(previousProviderId);
+        await this.waitForTeardown(
+          this.pluginManager.destroyPlugin(previousProviderId),
+          previousProviderId
+        );
         this._currentProvider = null;
       }
 
       // An unload() still tearing its provider down (it waits for a pending
       // init) has already cleared _currentProvider, so the block above saw
       // nothing. Wait for it: a teardown that lands after another provider
-      // has loaded removes that provider's reused media element.
+      // has loaded removes that provider's reused media element. Bounded
+      // like the wait above.
       if (this.providerTeardown) {
-        await this.providerTeardown;
+        await this.waitForTeardown(this.providerTeardown.promise, this.providerTeardown.providerId);
       }
 
       // Initialise non-provider plugins and the lifecycle listeners before a
@@ -608,8 +638,11 @@ export class ScarlettPlayer {
    * cancels a pending post-seek resume, and destroys the active provider,
    * which closes its connection or pipeline and removes its media element. A
    * provider still inside its `init()` is destroyed as soon as that settles.
-   * Then applies the unloaded state: `source` null, `playbackState` idle,
-   * not playing, paused, not ended, not buffering, waiting or seeking,
+   * The wait for that teardown is bounded at 10 seconds: when the provider's
+   * `init()` or `destroy()` has not settled by then, it logs a warning and
+   * goes ahead, and the teardown finishes whenever it settles. Then applies
+   * the unloaded state: `source` null, `playbackState` idle, not playing,
+   * paused, not ended, not buffering, waiting or seeking,
    * `currentTime`, `duration` and `bufferedAmount` 0, no error, not live, and
    * the provider-owned track, quality and live keys cleared. `poster`,
    * `title`, `chapters` and the user's settings (volume, rate, autoplay) are
@@ -620,12 +653,13 @@ export class ScarlettPlayer {
    * `load()` is called before the unload finishes, that load owns the state:
    * the unload still destroys the old provider but applies no state and emits
    * nothing, and the load selects its provider only once that teardown is
-   * done, whichever provider it is.
+   * done (or the 10-second bound has passed), whichever provider it is.
    *
    * The player stays usable: the next `load()` works as on a fresh instance.
    * Use `destroy()` instead to discard the player for good.
    *
-   * @returns Resolves once the provider is destroyed and the state applied
+   * @returns Resolves once the provider is destroyed (or the teardown bound
+   *   has passed) and the state applied
    * @throws When the player has been destroyed
    *
    * @example
@@ -692,16 +726,17 @@ export class ScarlettPlayer {
           error: (error as Error).message,
         });
       });
-      this.providerTeardown = teardown;
+      const pending = { promise: teardown, providerId: provider.id };
+      this.providerTeardown = pending;
       try {
-        await teardown;
+        await this.waitForTeardown(teardown, provider.id);
       } finally {
-        if (this.providerTeardown === teardown) {
+        if (this.providerTeardown === pending) {
           this.providerTeardown = null;
         }
       }
     } else if (this.providerTeardown) {
-      await this.providerTeardown;
+      await this.waitForTeardown(this.providerTeardown.promise, this.providerTeardown.providerId);
     }
 
     // A newer load() (or destroy()) took over while the provider went down
@@ -743,6 +778,67 @@ export class ScarlettPlayer {
 
     this.logger.info('Source unloaded');
     this.eventBus.emit('source:unloaded', { src });
+  }
+
+  /**
+   * Wait for a provider teardown, but no longer than
+   * `PROVIDER_TEARDOWN_TIMEOUT_MS`. On the bound it warns, isolates the
+   * provider (`isolateProvider()`) and resolves; the teardown keeps running
+   * and its late `destroy()` still happens. A rejected
+   * teardown rejects as before. The timer is always cleared, and `destroy()`
+   * releases the wait at once, without the warning.
+   *
+   * @param teardown - The provider's teardown (`PluginManager.destroyPlugin()`)
+   * @param providerId - The provider being torn down, for the warning
+   * @returns Resolves when the teardown settles or the bound is reached
+   */
+  private async waitForTeardown(teardown: Promise<void>, providerId: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let release!: () => void;
+    const bound = new Promise<void>((resolve) => {
+      release = resolve;
+      timer = setTimeout(() => {
+        this.logger.warn(
+          `Provider teardown did not settle within ${PROVIDER_TEARDOWN_TIMEOUT_MS} ms: ` +
+            'its init() or destroy() is still pending; cutting it off and going ahead. ' +
+            'A load() that needs this provider again still waits for it',
+          { provider: providerId }
+        );
+        this.isolateProvider(providerId);
+        resolve();
+      }, PROVIDER_TEARDOWN_TIMEOUT_MS);
+    });
+    this.teardownWaits.add(release);
+    try {
+      await Promise.race([teardown, bound]);
+    } finally {
+      clearTimeout(timer);
+      this.teardownWaits.delete(release);
+    }
+  }
+
+  /**
+   * Cut off a provider the player has stopped waiting for, so its late
+   * teardown cannot touch whatever loads next: revoke its plugin API and
+   * pause and remove the media elements in the container. Only the first
+   * bound to fire for a teardown does this: no other provider is active then,
+   * so those elements are the old provider's (or markup it adopted), and its
+   * normal `destroy()` would remove them too. A later bound on the same
+   * teardown (a superseded `load()`) may find a newer provider in place and
+   * leaves the container alone.
+   *
+   * @param providerId - The provider whose teardown timed out
+   */
+  private isolateProvider(providerId: string): void {
+    if (!this.pluginManager.abandonPlugin(providerId)) return;
+    for (const media of Array.from(this.container.querySelectorAll('video, audio'))) {
+      try {
+        (media as HTMLMediaElement).pause();
+      } catch {
+        // Nothing to stop: removing it is what matters
+      }
+      media.remove();
+    }
   }
 
   /**
@@ -1365,6 +1461,12 @@ export class ScarlettPlayer {
       // destroy() did not participate in the generation counter, so a destroy
       // mid-load left the generation matching and the continuation ran on.
       this.loadGeneration++;
+
+      // Release bounded provider-teardown waits: the superseded load or
+      // unload behind each one bails on the generation check, and none of
+      // them keeps a timer or warns after the player is gone
+      for (const release of this.teardownWaits) release();
+      this.teardownWaits.clear();
 
       // Clear any pending seek resume timeout
       if (this.seekResumeTimeout !== null) {
