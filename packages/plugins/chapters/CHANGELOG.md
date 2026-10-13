@@ -1,5 +1,7 @@
 # @scarlett-player/chapters
 
+## 1.24.0
+
 ## 1.23.0
 
 ## 1.22.0

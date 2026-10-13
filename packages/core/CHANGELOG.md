@@ -1,5 +1,11 @@
 # @scarlett-player/core
 
+## 1.24.0
+
+### Patch Changes
+
+- [#140](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/140) [`78343b4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/78343b49d9e6787c6d3795c1db40ab8ede8c8d6a) Thanks [@alexhackney](https://github.com/alexhackney)! - `unload()`, and `load()` switching to a different provider, no longer hang when the old provider's `init()` or `destroy()` never settles: after 10 seconds the player logs a warning, cuts the old provider off (its listeners, state writes and media element) and goes ahead.
+
 ## 1.23.0
 
 ### Minor Changes
