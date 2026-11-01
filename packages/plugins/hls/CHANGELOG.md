@@ -1,5 +1,13 @@
 # @scarlett-player/hls
 
+## 1.26.0
+
+### Patch Changes
+
+- [#142](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/142) [`70b170c`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/70b170c34728dd069cfcb4b3467f2ad264ec4d3b) Thanks [@alexhackney](https://github.com/alexhackney)! - An iOS element error that only reports the page releasing the video's source (code 4, no source on the element) is no longer recorded as a playback warning, so viewers leaving a page stop adding bursts of "Media source not supported" warnings to analytics.
+
+- [#142](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/142) [`70b170c`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/70b170c34728dd069cfcb4b3467f2ad264ec4d3b) Thanks [@alexhackney](https://github.com/alexhackney)! - `sanitizeUrl` now also redacts token-looking path segments (long hex, or `<expiry>_<nonce>_<sig>`) as `:redacted`, so path-signed CDN URLs no longer leak into logs and error details.
+
 ## 1.25.0
 
 ### Minor Changes

@@ -1,5 +1,7 @@
 # @scarlett-player/media-session
 
+## 1.26.0
+
 ## 1.25.0
 
 ## 1.24.0

@@ -1,5 +1,11 @@
 # @scarlett-player/analytics
 
+## 1.26.0
+
+### Minor Changes
+
+- [#142](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/142) [`70b170c`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/70b170c34728dd069cfcb4b3467f2ad264ec4d3b) Thanks [@alexhackney](https://github.com/alexhackney)! - Calling `trackEvent()` before `init()` now queues the event (up to 50, oldest dropped) and sends it on the first view with a `queuedForMs` field instead of throwing; `getViewId()` and `getSessionId()` now return `string | null` (null before `init()`), a typing change for callers that assumed `string`.
+
 ## 1.25.0
 
 ### Minor Changes
