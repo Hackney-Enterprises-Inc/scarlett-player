@@ -615,15 +615,15 @@ export interface IAnalyticsPlugin {
 
   /**
    * Get current view ID.
-   * @returns Current view ID
+   * @returns Current view ID, or null before `init()` has opened the first view
    */
-  getViewId(): string;
+  getViewId(): string | null;
 
   /**
    * Get current session ID.
-   * @returns Current session ID
+   * @returns Current session ID, or null before `init()` has opened the first view
    */
-  getSessionId(): string;
+  getSessionId(): string | null;
 
   /**
    * Get calculated QoE score (0-100).
@@ -663,6 +663,11 @@ export interface IAnalyticsPlugin {
 
   /**
    * Track a custom event.
+   *
+   * Safe to call before `init()`: the event is queued (at most 50, the oldest
+   * dropped past that), sent right after the first view's `viewStart`, and
+   * carries `queuedForMs`, how long it waited. `destroy()` discards the queue.
+   *
    * @param name - Event name
    * @param data - Event data
    */

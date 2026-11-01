@@ -33,4 +33,13 @@ describe('sanitizeUrl', () => {
     expect(sanitizeUrl(null)).toBeUndefined();
     expect(sanitizeUrl('')).toBeUndefined();
   });
+
+  it('redacts token-looking path segments', () => {
+    expect(
+      sanitizeUrl('https://cdn.example.com/1735689600_a1b2c3d4e5f60718_9f86d081884c7d659a2feaa0c55ad015/hls/x.m3u8')
+    ).toBe('https://cdn.example.com/:redacted/hls/x.m3u8');
+    expect(sanitizeUrl('https://cdn.example.com/live/my_stream_hd/1080p/x.m3u8')).toBe(
+      'https://cdn.example.com/live/my_stream_hd/1080p/x.m3u8'
+    );
+  });
 });

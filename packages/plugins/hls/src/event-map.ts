@@ -654,6 +654,24 @@ export function setupVideoEventHandlers(
   addHandler('error', () => {
     const error = video.error;
     if (error) {
+      // Code 4 on an element with no source at all (networkState NO_SOURCE,
+      // no `src`, no `currentSrc`) is the page releasing its media, which iOS
+      // reports in bursts ~10 ms apart as a viewer leaves (HEI-71). Nothing
+      // failed to play, so it is neither an element error nor an advisory
+      // `media:error`. A load that failed keeps its source on the element and
+      // is unaffected, as is every other error code.
+      if (
+        error.code === 4 &&
+        video.networkState === 3 &&
+        !video.currentSrc &&
+        !video.getAttribute('src')
+      ) {
+        api.logger.debug('Video element released its source (not a playback error)', {
+          code: error.code,
+          readyState: video.readyState,
+        });
+        return;
+      }
       api.logger.error('Video element error', { code: error.code, message: error.message });
       // Browsers often leave MediaError.message empty; name the two codes
       // that matter most rather than report a generic error.

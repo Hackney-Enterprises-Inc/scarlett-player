@@ -281,7 +281,10 @@ Every media element error is also reported on `media:error`, as an
 carries `mediaErrorCode`, `networkState` and `readyState` (the element's state
 when the error fired). When the browser gives no message, codes 4 and 2 read
 "Media source not supported" and "Media network error" rather than the generic
-"Video playback error".
+"Video playback error". The one exception is a code 4 error from an element
+that holds no source at all (`networkState` 3, no `src`, no `currentSrc`): that
+is the page releasing its media, which iOS reports in bursts as a viewer
+leaves, so it is logged at debug and not reported.
 
 `player.load(url)` resolves when the manifest has been parsed and the source is
 playable. It stays pending through the in-place retries above, and settles as
