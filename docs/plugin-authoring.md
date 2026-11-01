@@ -44,6 +44,10 @@ Non-provider plugins are initialised by the player's first `init()` or first `lo
 
 To expose an imperative API to the host, hang methods off the same object alongside `id`/`init`/`destroy`. `@scarlett-player/playlist` does this, which is why hosts can call `playlistPlugin.play(2)`.
 
+### Calling a plugin's API before its `init()`
+
+Your plugin object exists from the moment you build it, but the player calls `init()` later, so a host plugin can call your imperative API too early. Make every public method safe before `init()`: do not read state that `init()` assigns. Either return a typed empty value (the analytics plugin's `getViewId()` and `getSessionId()` return `null`), or queue the call in a bounded buffer and replay it from `init()` (analytics queues at most 50 `trackEvent()` calls, drops the oldest, and sends them on the first view with a `queuedForMs` field). Clear the buffer in `destroy()` so a re-`init()` never replays stale calls. A throw here is easy to lose: a caller that swallows errors drops the call silently.
+
 ## 1. Events
 
 `PlayerEventMap` is an interface, so you add your events by declaration merging. No core change, and `EventBus` never validates names at runtime.
@@ -91,7 +95,7 @@ Element seeks each within 2 s of the previous one count as one seek there.
 
 Emit a structured `error` (`{ code, message, fatal, timestamp, detail }`) and
 fill in whatever `PlayerErrorDetail` fields you actually know: `type`,
-`httpStatus`, `url` (sanitised: no query string or fragment), `attempts`,
+`httpStatus`, `url` (sanitised: no query string or fragment, token-looking path segments redacted), `attempts`,
 `retriesExhausted`, `reconnectExhausted`, `timedOut`, and for a media element
 error `mediaErrorCode`, `mediaErrorMessage`, `networkState` and `readyState`
 (read when the error fires, before the element moves on). Analytics forwards

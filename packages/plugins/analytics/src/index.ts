@@ -115,6 +115,12 @@ export type {
 const PLUGIN_VERSION = PKG_VERSION;
 const PLUGIN_NAME = 'scarlett-player';
 
+/**
+ * Most `trackEvent()` calls kept while the plugin has not been initialised.
+ * Past it the oldest queued event is dropped, so the newest taps survive.
+ */
+export const MAX_PRE_INIT_EVENTS = 50;
+
 /** How long a view may go without playing before it ends (ms): 30 minutes. */
 const DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1000;
 
@@ -201,7 +207,12 @@ export function createAnalyticsPlugin(
 
   // Plugin state
   let api: IPluginAPI | null = null;
-  let session: ViewSession;
+  // Unassigned until init() opens the first view; hasSession says whether it is
+  let session!: ViewSession;
+  let hasSession = false;
+  // trackEvent() calls made before init(), sent on the first view (bounded by
+  // MAX_PRE_INIT_EVENTS, cleared by destroy())
+  let preInitEvents: Array<{ name: string; data: Record<string, unknown>; queuedAt: number }> = [];
   let heartbeatTimer: NodeJS.Timeout | null = null;
   // When watch/play time was last accrued (see accrueTime)
   let lastHeartbeatTime = 0;
@@ -992,6 +1003,7 @@ export function createAnalyticsPlugin(
     progressRebuffer = false;
     idleEnded = false;
     session = initSession();
+    hasSession = true;
     resetSegments();
     frameTotalsKnown = false;
     decodedFramesTotal = droppedFramesTotal = 0;
@@ -1024,6 +1036,24 @@ export function createAnalyticsPlugin(
       onHeartbeatTick,
       mergedConfig.heartbeatInterval || 10000
     );
+  }
+
+  /**
+   * Send the events queued by `trackEvent()` before `init()`, on the view
+   * `startView()` just opened. Each carries `queuedForMs`, how long it waited.
+   */
+  function flushPreInitEvents(): void {
+    const queued = preInitEvents;
+    preInitEvents = [];
+    for (const event of queued) {
+      // The clock is read per event: a slow beforeSend or customBeacon moves
+      // each later event's `timestamp`, and `timestamp - queuedForMs` must
+      // still be when trackEvent() was called.
+      sendBeacon(`custom:${event.name}`, {
+        ...event.data,
+        queuedForMs: Math.max(0, Date.now() - event.queuedAt),
+      });
+    }
   }
 
   /**
@@ -2277,6 +2307,7 @@ export function createAnalyticsPlugin(
 
       // First view: viewStart and the heartbeat
       startView();
+      flushPreInitEvents();
 
       // Subscribe to player events
       const unsubPlay = api.on('playback:play', onPlayEvent);
@@ -2353,7 +2384,8 @@ export function createAnalyticsPlugin(
       }
 
       // Send final view end if not already sent
-      if (!session.viewEnd) {
+      preInitEvents = [];
+      if (hasSession && !session.viewEnd) {
         session.exitType = session.exitType || 'abandoned';
         sendViewEnd();
       }
@@ -2377,13 +2409,13 @@ export function createAnalyticsPlugin(
     // === Public API ===
 
     /** @returns Current view ID. */
-    getViewId(): string {
-      return session.viewId;
+    getViewId(): string | null {
+      return hasSession ? session.viewId : null;
     },
 
     /** @returns Current session ID. */
-    getSessionId(): string {
-      return session.sessionId;
+    getSessionId(): string | null {
+      return hasSession ? session.sessionId : null;
     },
 
     /** @returns QoE v2 score or null after fatal access denial. */
@@ -2419,6 +2451,14 @@ export function createAnalyticsPlugin(
 
     /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
     trackEvent(name: string, data: Record<string, unknown> = {}): void {
+      if (!hasSession) {
+        // Before init() there is no view to send on: hold it for the first one.
+        // Copied now: the caller may reuse or mutate `data` before init(), and a
+        // sent beacon is a snapshot of the call (top-level keys; nested values are shared).
+        preInitEvents.push({ name, data: { ...data }, queuedAt: Date.now() });
+        if (preInitEvents.length > MAX_PRE_INIT_EVENTS) preInitEvents.shift();
+        return;
+      }
       sendBeacon(`custom:${name}`, data);
     },
 
