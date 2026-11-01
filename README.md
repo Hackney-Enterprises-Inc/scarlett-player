@@ -555,7 +555,6 @@ configs), so no transpilation below that is applied.
 - [x] Viewer-created clips (range selection, loop preview, host submission)
 - [x] Low-latency HLS (LL-HLS) - part loading, latency catch-up, live metrics, GO LIVE
 - [x] WHEP (WebRTC) live monitoring - sub-second preview, bearer tokens, the HLS reconnect scheduler, receiver-side latency
-- [ ] Mobile gesture controls (swipe for volume and brightness) - Sprint 2
 - [ ] DRM support - Sprint 2
 - [ ] Internationalization (i18n) - Sprint 2
 - [ ] React component wrapper
