@@ -21,6 +21,22 @@ const LONG_HEX = /^[0-9a-fA-F]{32,}$/;
 const TOKEN_PART_CHARS = /^[A-Za-z0-9-]+$/;
 
 /**
+ * Percent-decode a path segment for matching only (a token may arrive with its
+ * `_` delimiters as `%5F`). The caller keeps the original segment when it does
+ * not match; an invalid escape leaves the segment as it was.
+ *
+ * @param segment - One path segment, without slashes
+ * @returns The decoded segment, or the input when it cannot be decoded
+ */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
  * Decide whether one path segment looks like a credential.
  *
  * Deliberately conservative; only two shapes qualify:
@@ -77,7 +93,7 @@ export function sanitizeUrl(url: string | undefined | null): string | undefined 
     }
     const path = parsed.pathname
       .split('/')
-      .map((segment) => (looksLikeToken(segment) ? REDACTED_SEGMENT : segment))
+      .map((segment) => (looksLikeToken(decodeSegment(segment)) ? REDACTED_SEGMENT : segment))
       .join('/');
     return `${parsed.origin}${path}`;
   } catch {

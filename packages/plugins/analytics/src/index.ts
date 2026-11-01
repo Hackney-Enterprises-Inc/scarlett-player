@@ -1045,9 +1045,14 @@ export function createAnalyticsPlugin(
   function flushPreInitEvents(): void {
     const queued = preInitEvents;
     preInitEvents = [];
-    const now = Date.now();
     for (const event of queued) {
-      sendBeacon(`custom:${event.name}`, { ...event.data, queuedForMs: Math.max(0, now - event.queuedAt) });
+      // The clock is read per event: a slow beforeSend or customBeacon moves
+      // each later event's `timestamp`, and `timestamp - queuedForMs` must
+      // still be when trackEvent() was called.
+      sendBeacon(`custom:${event.name}`, {
+        ...event.data,
+        queuedForMs: Math.max(0, Date.now() - event.queuedAt),
+      });
     }
   }
 
@@ -2448,7 +2453,9 @@ export function createAnalyticsPlugin(
     trackEvent(name: string, data: Record<string, unknown> = {}): void {
       if (!hasSession) {
         // Before init() there is no view to send on: hold it for the first one.
-        preInitEvents.push({ name, data, queuedAt: Date.now() });
+        // Copied now: the caller may reuse or mutate `data` before init(), and a
+        // sent beacon is a snapshot of the call (top-level keys; nested values are shared).
+        preInitEvents.push({ name, data: { ...data }, queuedAt: Date.now() });
         if (preInitEvents.length > MAX_PRE_INIT_EVENTS) preInitEvents.shift();
         return;
       }

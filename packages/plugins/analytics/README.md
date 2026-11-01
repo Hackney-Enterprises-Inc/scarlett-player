@@ -442,9 +442,10 @@ event is queued (at most 50; past that the oldest is dropped, so the newest
 survive). Right after the first `viewStart` the queue is sent on that view in
 call order, each event with an extra `queuedForMs` field: how many
 milliseconds it waited, so the original time is `timestamp - queuedForMs`.
-`queuedForMs` is event data, not a new top-level beacon field, so the wire
-format is unchanged (a backend that stores unknown keys keeps it as custom
-data). `destroy()` discards anything still queued; it is never replayed on a
+`queuedForMs` is a new top-level key in the beacon JSON, because event data is
+spread into the beacon root like any other custom field. A backend that stores
+unknown keys keeps it with the custom data (laravel-scarlett-player does);
+a strict schema must allow it. `destroy()` discards anything still queued; it is never replayed on a
 later `init()`. The usual privacy, `disableInDev` and `beforeSend` rules apply
 when the queue is sent.
 
