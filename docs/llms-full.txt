@@ -1,6 +1,6 @@
 # Scarlett Player
 
-> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.25.0). MIT licensed.
+> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.26.0). MIT licensed.
 
 # Scarlett Player - Architecture
 
@@ -644,9 +644,12 @@ provider will try to recover from by auto-reconnecting; it is absent on
 terminal errors.
 `url` must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported `sanitizeUrl()`, which strips the query string and the
-fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
-so a consumer whose playback URLs carry a credential in the path scrubs the path
-on its own side before forwarding the value to telemetry.
+fragment, keeps origin plus pathname, and replaces path segments that look like
+tokens with `:redacted`. Only two shapes are recognised: a segment that is a
+hex run of 32+ characters, and an underscore-joined `<expiry>_<nonce>_<sig>`
+segment with a signature-like part. A credential in any other path shape is not
+caught, so a consumer using one scrubs the path on its own side before
+forwarding the value to telemetry.
 
 Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
 
@@ -950,6 +953,10 @@ Non-provider plugins are initialised by the player's first `init()` or first `lo
 
 To expose an imperative API to the host, hang methods off the same object alongside `id`/`init`/`destroy`. `@scarlett-player/playlist` does this, which is why hosts can call `playlistPlugin.play(2)`.
 
+### Calling a plugin's API before its `init()`
+
+Your plugin object exists from the moment you build it, but the player calls `init()` later, so a host plugin can call your imperative API too early. Make every public method safe before `init()`: do not read state that `init()` assigns. Either return a typed empty value (the analytics plugin's `getViewId()` and `getSessionId()` return `null`), or queue the call in a bounded buffer and replay it from `init()` (analytics queues at most 50 `trackEvent()` calls, drops the oldest, and sends them on the first view with a `queuedForMs` field). Clear the buffer in `destroy()` so a re-`init()` never replays stale calls. A throw here is easy to lose: a caller that swallows errors drops the call silently.
+
 ## 1. Events
 
 `PlayerEventMap` is an interface, so you add your events by declaration merging. No core change, and `EventBus` never validates names at runtime.
@@ -997,7 +1004,7 @@ Element seeks each within 2 s of the previous one count as one seek there.
 
 Emit a structured `error` (`{ code, message, fatal, timestamp, detail }`) and
 fill in whatever `PlayerErrorDetail` fields you actually know: `type`,
-`httpStatus`, `url` (sanitised: no query string or fragment), `attempts`,
+`httpStatus`, `url` (sanitised: no query string or fragment, token-looking path segments redacted), `attempts`,
 `retriesExhausted`, `reconnectExhausted`, `timedOut`, and for a media element
 error `mediaErrorCode`, `mediaErrorMessage`, `networkState` and `readyState`
 (read when the error fires, before the element moves on). Analytics forwards

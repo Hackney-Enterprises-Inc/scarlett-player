@@ -2342,6 +2342,21 @@
   });
 
   // packages/core/src/utils/url.ts
+  function decodeSegment(segment) {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  }
+  function looksLikeToken(segment) {
+    if (LONG_HEX.test(segment)) return true;
+    const parts = segment.split("_");
+    if (parts.length < 3 || !parts.every((p) => TOKEN_PART_CHARS.test(p))) return false;
+    return parts.some(
+      (p) => /^[0-9a-fA-F]{16,}$/.test(p) || p.length >= 20 && /[A-Za-z]/.test(p) && /[0-9]/.test(p)
+    );
+  }
   function sanitizeUrl(url) {
     if (!url) return void 0;
     try {
@@ -2349,14 +2364,19 @@
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         return void 0;
       }
-      return `${parsed.origin}${parsed.pathname}`;
+      const path = parsed.pathname.split("/").map((segment) => looksLikeToken(decodeSegment(segment)) ? REDACTED_SEGMENT : segment).join("/");
+      return `${parsed.origin}${path}`;
     } catch {
       return void 0;
     }
   }
+  var REDACTED_SEGMENT, LONG_HEX, TOKEN_PART_CHARS;
   var init_url = __esm({
     "packages/core/src/utils/url.ts"() {
       "use strict";
+      REDACTED_SEGMENT = ":redacted";
+      LONG_HEX = /^[0-9a-fA-F]{32,}$/;
+      TOKEN_PART_CHARS = /^[A-Za-z0-9-]+$/;
     }
   });
 
@@ -42810,6 +42830,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     addHandler("error", () => {
       const error = video.error;
       if (error) {
+        if (error.code === 4 && video.networkState === 3 && !video.currentSrc && !video.getAttribute("src")) {
+          api.logger.debug("Video element released its source (not a playback error)", {
+            code: error.code,
+            readyState: video.readyState
+          });
+          return;
+        }
         api.logger.error("Video element error", { code: error.code, message: error.message });
         const fallbackMessage = error.code === 4 ? "Media source not supported" : error.code === 2 ? "Media network error" : "Video playback error";
         const playbackError = new Error(error.message || fallbackMessage);
@@ -54931,6 +54958,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   }
   var PLUGIN_VERSION = PKG_VERSION17;
   var PLUGIN_NAME = "scarlett-player";
+  var MAX_PRE_INIT_EVENTS = 50;
   var DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1e3;
   var SEEK_EMISSION_INTERVAL_MS = 1e3;
   var DEFAULT_CONFIG5 = {
@@ -54959,6 +54987,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let video = { ...configuredVideo };
     let api = null;
     let session;
+    let hasSession = false;
+    let preInitEvents = [];
     let heartbeatTimer = null;
     let lastHeartbeatTime = 0;
     let lastPlayingAt = 0;
@@ -55421,6 +55451,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       progressRebuffer = false;
       idleEnded = false;
       session = initSession();
+      hasSession = true;
       resetSegments();
       frameTotalsKnown = false;
       decodedFramesTotal = droppedFramesTotal = 0;
@@ -55450,6 +55481,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         onHeartbeatTick,
         mergedConfig.heartbeatInterval || 1e4
       );
+    }
+    function flushPreInitEvents() {
+      const queued = preInitEvents;
+      preInitEvents = [];
+      for (const event of queued) {
+        sendBeacon(`custom:${event.name}`, {
+          ...event.data,
+          queuedForMs: Math.max(0, Date.now() - event.queuedAt)
+        });
+      }
     }
     function switchVideo(next) {
       if (next.videoId === video.videoId) return;
@@ -56087,6 +56128,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         lastSourceKey = typeof initialSrc === "string" && initialSrc !== "" ? sourceKey(initialSrc) : null;
         viewContext = pageContext(mergedConfig.playerInitTime);
         startView();
+        flushPreInitEvents();
         const unsubPlay = api.on("playback:play", onPlayEvent);
         const unsubState = api.subscribeToState(onStateChange);
         const unsubMetadata = api.on("media:loadedmetadata", onLoadedMetadata);
@@ -56148,7 +56190,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
         }
-        if (!session.viewEnd) {
+        preInitEvents = [];
+        if (hasSession && !session.viewEnd) {
           session.exitType = session.exitType || "abandoned";
           sendViewEnd();
         }
@@ -56166,11 +56209,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       // === Public API ===
       /** @returns Current view ID. */
       getViewId() {
-        return session.viewId;
+        return hasSession ? session.viewId : null;
       },
       /** @returns Current session ID. */
       getSessionId() {
-        return session.sessionId;
+        return hasSession ? session.sessionId : null;
       },
       /** @returns QoE v2 score or null after fatal access denial. */
       getQoEScore() {
@@ -56197,6 +56240,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       },
       /** Send a host event through the normal privacy and transport rules. @param name - Custom event name. @param data - Event fields. */
       trackEvent(name, data = {}) {
+        if (!hasSession) {
+          preInitEvents.push({ name, data: { ...data }, queuedAt: Date.now() });
+          if (preInitEvents.length > MAX_PRE_INIT_EVENTS) preInitEvents.shift();
+          return;
+        }
         sendBeacon(`custom:${name}`, data);
       },
       /**
@@ -58423,7 +58471,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.25.0" : "dev";
+  var VERSION = true ? "1.26.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT

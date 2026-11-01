@@ -640,9 +640,12 @@ provider will try to recover from by auto-reconnecting; it is absent on
 terminal errors.
 `url` must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported `sanitizeUrl()`, which strips the query string and the
-fragment and keeps origin plus pathname. Path segments are NOT made safe by it,
-so a consumer whose playback URLs carry a credential in the path scrubs the path
-on its own side before forwarding the value to telemetry.
+fragment, keeps origin plus pathname, and replaces path segments that look like
+tokens with `:redacted`. Only two shapes are recognised: a segment that is a
+hex run of 32+ characters, and an underscore-joined `<expiry>_<nonce>_<sig>`
+segment with a signature-like part. A credential in any other path shape is not
+caught, so a consumer using one scrubs the path on its own side before
+forwarding the value to telemetry.
 
 Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
 
