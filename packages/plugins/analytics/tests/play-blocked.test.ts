@@ -96,12 +96,23 @@ describe('play blocked and start state', () => {
   it('reports a plugin:error as an error beacon', async () => {
     h = await createHarness();
     h.bus.emit('plugin:error', { name: 'hls', error: new TypeError('init boom') });
+    // Held for one task so a failure core also reports through `error` is sent once
+    expect(h.sent('error')).toHaveLength(0);
+    vi.advanceTimersByTime(1);
     const errors = h.sent('error');
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ errorCode: 'PLUGIN_SETUP_FAILED', errorCategory: 'player', errorSeverity: 'warning' });
     expect(String(errors[0]?.errorMessage)).toContain('hls');
     expect(String(errors[0]?.errorMessage)).toContain('init boom');
     expect(h.plugin.getMetrics().errorCount).toBe(1);
+  });
+
+  it('sends a held plugin:error before the view ends, never losing it', async () => {
+    h = await createHarness();
+    h.bus.emit('plugin:error', { name: 'hls', error: new TypeError('init boom') });
+    window.dispatchEvent(new Event('pagehide'));
+    expect(h.sent('error')).toHaveLength(1);
+    expect(h.sent('viewEnd')).toHaveLength(1);
   });
 
   it('does not drop an error payload with neither code nor message', async () => {

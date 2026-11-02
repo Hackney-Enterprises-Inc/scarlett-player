@@ -120,6 +120,46 @@ describe('QoE of a view with no first frame (qoeVersion 3)', () => {
     expect(end()).toMatchObject({ startState: 'never', qoeScore: 0, qoeVersion: 3 });
   });
 
+  // PR #143 review: a hidden tab sets exitType 'background' while the view is still
+  // running; that is not an end, so a heartbeat of a no-frame view must stay null.
+  it('keeps a running no-frame view null in a hidden tab', async () => {
+    h = await createHarness({ heartbeatInterval: 1000 });
+    h.attachVideo(false);
+    h.play(false);
+    vi.advanceTimersByTime(2000);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(3000);
+    const heartbeats = h.sent('heartbeat') as Array<Record<string, unknown>>;
+    expect(heartbeats.length).toBeGreaterThan(1);
+    expect(heartbeats.every((beat) => beat.qoeScore === null)).toBe(true);
+    // The final score of that view still follows its cause
+    expect(end()).toMatchObject({ qoeScore: 0 });
+  });
+
+  // PR #143 review: the tap after a refused autoplay is a NEW play request, so
+  // startup time is measured from the tap, not from the refused attempt.
+  it('measures startup from the tap after a block and sends a second playRequest', async () => {
+    h = await createHarness();
+    const v = h.attachVideo();
+    // Core's order: playback:play goes out while `playing` is still false, then the
+    // browser refuses the autoplay and the provider announces the block
+    h.bus.emit('playback:play', undefined);
+    h.bus.emit('playback:blocked', { reason: 'autoplay', name: 'NotAllowedError' });
+    expect(h.sent('playRequest')).toHaveLength(1);
+    vi.advanceTimersByTime(30000);
+    // The tap is a new request
+    h.bus.emit('playback:play', undefined);
+    h.play(false);
+    v.frame();
+    vi.advanceTimersByTime(2000);
+    const viewEnd = end();
+    expect(h.sent('playRequest')).toHaveLength(2);
+    expect(viewEnd.startState).toBe('played');
+    expect(viewEnd.startupTime as number).toBeLessThan(5000);
+    expect(viewEnd.qoeScore as number).toBeGreaterThan(50);
+  });
+
   it('keeps the error exit rules: 0, and null for an access denial', async () => {
     h = await createHarness();
     h.attachVideo(false);

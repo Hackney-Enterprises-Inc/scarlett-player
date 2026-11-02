@@ -937,7 +937,9 @@ export function createAnalyticsPlugin(
    */
   function qoeNoFrameCause(): 'tried' | 'idle' | 'open' | undefined {
     if (session.firstFrameTime !== null) return undefined;
-    if (session.exitType === null) return 'open';
+    // Open means no viewEnd yet. exitType is not the test: a hidden tab sets
+    // 'background' while the view is still running.
+    if (session.viewEnd === null) return 'open';
     if (session.errorCount > 0) return 'tried';
     if (session.playBlocked && session.playbackState === 'awaitingTap') return 'idle';
     return session.playRequestTime !== null ? 'tried' : 'idle';
@@ -967,6 +969,8 @@ export function createAnalyticsPlugin(
     // The unload path (sendRebufferEnd false) uses the synchronous unload
     // transport, so the trailing seeking and the unload viewEnd go out as two
     // dispatches in creation order; no seeking beacon may follow a viewEnd.
+    // A plugin failure still held for dedupe goes out before this view closes
+    flushPluginError();
     stopStallProgress();
     cancelFrameConfirmation();
     seekWindow.end(!sendRebufferEnd);
@@ -1456,6 +1460,9 @@ export function createAnalyticsPlugin(
     if (!api || session.viewEnd !== null) return;
     accrueTime();
     session.playBlocked = true;
+    // The refused request is settled: the viewer's tap is a new request, with its
+    // own playRequest beacon and its own start for the startup time
+    playRequestPending = false;
     if (session.firstFrameTime === null) session.playbackState = 'awaitingTap';
     sendBeacon('playBlocked', {
       reason: 'autoplay',
@@ -1465,24 +1472,53 @@ export function createAnalyticsPlugin(
   }
 
   /**
+   * A `plugin:error` waiting one task for the general `error` that may follow.
+   *
+   * `PluginManager.initPlugin()` emits `plugin:error` and rethrows, and a
+   * provider that fails inside `load()` is then reported again by core through
+   * `error`, carrying the very same Error as `originalError`. Reporting both
+   * would count one failure twice, so the plugin report waits: when the
+   * matching `error` arrives it takes the plugin's name and is the only beacon;
+   * otherwise (a plugin that failed outside load()) the held report goes out
+   * unchanged.
+   */
+  let pendingPluginError: { name: string; cause: unknown; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  /**
    * Handle a plugin that failed to initialise (`plugin:error`).
    *
    * Reported as a non-fatal `PLUGIN_SETUP_FAILED` error beacon (category
    * `player`) naming the plugin, so a silent init failure shows up server
    * side. It does not end the view: core reports a fatal error of its own
-   * when the player cannot play.
+   * when the player cannot play. The report is held for one task so that a
+   * failure core also reports through `error` is sent once (see
+   * `pendingPluginError`).
    *
    * @param payload - The plugin name and the error it threw
    */
   function onPluginError(payload: { name?: string; error?: unknown }): void {
-    const cause = payload?.error as { message?: unknown; name?: unknown } | undefined;
-    const message = typeof cause?.message === 'string' && cause.message ? cause.message : 'init failed';
+    flushPluginError();
+    const name = typeof payload?.name === 'string' ? payload.name : 'unknown';
+    pendingPluginError = {
+      name,
+      cause: payload?.error,
+      timer: setTimeout(flushPluginError, 0),
+    };
+  }
+
+  /** Send the held `plugin:error` report now, if there is one. */
+  function flushPluginError(): void {
+    const held = pendingPluginError;
+    if (!held) return;
+    pendingPluginError = null;
+    clearTimeout(held.timer);
+    const cause = held.cause as { message?: unknown; name?: unknown } | undefined;
     onCoreError({
       code: 'PLUGIN_SETUP_FAILED',
       name: typeof cause?.name === 'string' ? cause.name : undefined,
-      message: `Plugin ${typeof payload?.name === 'string' ? payload.name : 'unknown'}: ${message}`,
+      message: typeof cause?.message === 'string' && cause.message ? cause.message : 'init failed',
       fatal: false,
-    });
+    }, held.name);
   }
 
   /**
@@ -2110,9 +2146,19 @@ export function createAnalyticsPlugin(
    * generic `CoreError`, never dropped; an error after the view's viewEnd is
    * ignored. A fatal error marked
    * `detail.reconnecting` is sent as a warning and leaves the view open.
+   *
+   * @param err - The core `PlayerError`, or a hand-built payload
+   * @param pluginName - Set for a plugin init failure: the beacon names the plugin
    */
-  function onCoreError(err: any): void {
+  function onCoreError(err: any, pluginName?: string): void {
     if (!err || session.viewEnd !== null) return;
+    // The same Error as a held plugin:error: one failure, one beacon, naming the plugin
+    const held = pendingPluginError;
+    if (held && !pluginName && err.originalError !== undefined && err.originalError === held.cause) {
+      pendingPluginError = null;
+      clearTimeout(held.timer);
+      pluginName = held.name;
+    }
     const original = err.originalError || err;
     const code: string | undefined =
       typeof err.code === 'string' ? err.code
@@ -2136,6 +2182,8 @@ export function createAnalyticsPlugin(
       type = 'CoreError';
       message = 'Unknown core error';
     }
+
+    if (pluginName) message = `Plugin ${pluginName}: ${message}`;
 
     session.errorCount++;
     const category = classifyError(err);
@@ -2479,6 +2527,7 @@ export function createAnalyticsPlugin(
       }
 
       // Send final view end if not already sent
+      flushPluginError();
       preInitEvents = [];
       if (hasSession && !session.viewEnd) {
         session.exitType = session.exitType || 'abandoned';
