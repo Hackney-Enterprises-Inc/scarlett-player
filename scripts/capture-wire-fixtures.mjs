@@ -1413,12 +1413,12 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (viewEnd.fatalErrorCategory !== error.errorCategory || !Number.isInteger(viewEnd.warningCount)) fail('fatal category/warning count mismatch');
   });
 
-  check('QoE v2 on heartbeat and both viewEnd transports', () => {
+  check('QoE v3 on heartbeat and both viewEnd transports', () => {
     for (const r of beacons.filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)))) {
       if (eventOf(r) === 'heartbeat' && 'gaugeScale' in r.body) fail(`heartbeat (${r.scenario}) carries gaugeScale`);
       if (eventOf(r) === 'viewEnd' && r.body.gaugeScale !== 'percent') fail(`viewEnd (${r.scenario}) gaugeScale ${JSON.stringify(r.body.gaugeScale)}`);
       if (r.body.qoeVersion !== 3 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) {
-        fail(`${eventOf(r)} (${r.scenario}): invalid QoE v2`);
+        fail(`${eventOf(r)} (${r.scenario}): invalid QoE v3`);
       }
     }
   });
