@@ -543,7 +543,17 @@ position, and progress is also read from the element's own `timeupdate`, so
 WHEP confirms without rVFC. While casting, the receiver's advancing position
 confirms instead, since the local element stays paused. Safari can fire `playing`
 right after `play` without showing a frame, which made iOS startup times read
-1-7 ms. A view that never confirms sends no `videoStart`.
+1-7 ms. A view that never confirms sends no `videoStart`, so a view that
+older releases counted as started on iOS now counts as not started.
+
+A view that never confirms says why on its `viewEnd` as `startState`:
+`played`, `awaitingTap`, `failed` or `never`. When the browser's autoplay
+policy rejects `play()` with `NotAllowedError`, the provider emits
+`playback:blocked` (`PlaybackState` is unchanged), analytics sends a
+`playBlocked` beacon and the view is `awaitingTap` until the viewer plays, so
+"waiting for a tap" is separate from "stream failed". A failed plugin init
+(`plugin:error`) and an `error` payload with no code or message are reported
+as error beacons instead of being dropped.
 
 The analytics plugin waits `rebufferGraceMs` (250 ms by default) before counting
 an eligible post-first-frame stall. A stall that the browser never reports
@@ -577,7 +587,9 @@ that drops heartbeats sees sequence gaps. `seeking` carries `seekSource`
 ordering/source fields, **not** opt-in batch envelopes.
 
 Heartbeats and ordinary final `viewEnd` carry continuous QoE
-`qoeVersion: 2`; fatal access denial produces `qoeScore: null`. Heartbeats and
+`qoeVersion: 3`; fatal access denial produces `qoeScore: null`, and a view with no
+first frame is scored by cause (0 if it asked to play, null if it never asked or is
+awaiting a tap). Heartbeats and
 both `viewEnd`s (ordinary and unload) are built from one cumulative-metrics
 builder, so they carry the same counters and scores. Structured `error`
 beacons classify code/detail into `errorCategory` and `errorSeverity` (an
@@ -699,6 +711,13 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   (`{ attempts, elapsedMs, windowMs }`) and then a final fatal `error` carrying
   `detail.reconnectExhausted`. The final error deliberately does not go through
   `emitFatalError()`, which would re-enter the scheduler.
+- A mid-playback stall has its own ceiling, `stallTimeoutMs` (default 120000ms,
+  0 disables), because live has no reconnect window and a reload that stalls
+  again would otherwise start over. The clock starts at the first stall
+  detection, survives `cancelReconnect(true)` after a "successful" reconnect and
+  resets only on real playback progress. At the ceiling the same
+  `emitReconnectExhausted()` path runs with `detail.stalled: true`. Hidden,
+  offline and paused time is not counted.
 
 For a scheduled reconnect cycle, the ordering a UI can rely on is one or more
 `error:reconnecting`, then

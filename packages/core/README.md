@@ -202,6 +202,7 @@ plugin on a track change) and is written before the load it goes with.
 ```typescript
 player.on('player:ready', () => {});                  // Fires once, at the end of the first init()/load()
 player.on('playback:play', () => {});
+player.on('playback:blocked', ({ reason, name }) => {}); // Autoplay refused (NotAllowedError); waiting for the viewer's tap
 player.on('playback:pause', () => {});
 player.on('playback:ended', () => {});
 player.on('playback:timeupdate', ({ currentTime }) => {});
@@ -216,6 +217,12 @@ player.on('error:recovered', () => {});               // Self-heal succeeded, pl
 player.on('error:retry', ({ src }) => {});            // Viewer pressed Try Again
 player.on('source:unloaded', ({ src }) => {});        // unload() finished (not sent by a no-op or superseded unload)
 ```
+
+`playback:blocked` is emitted by a provider when the browser's autoplay policy
+rejects its `play()` call, after `playback:play` for the same request. It means
+"waiting for a tap", not a failure: the element stays paused and the viewer's
+own play works. It carries `reason: 'autoplay'` and the rejection's `name`.
+Other `play()` rejections are logged, not reported as blocked.
 
 `player:ready` is emitted once, at the end of the first initialisation pass, so
 a listener has to be attached before `init()` or `load()` runs. With

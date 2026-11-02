@@ -27,8 +27,10 @@
  * session): full session, unload, destroy, fatal error, clip create + retry,
  * a live stream abandoned by navigation (the latency summary keys), a live
  * HLS playlist-refresh outage that recovers over HTTP, a live playlist that
- * finishes with ENDLIST, plus optional batch. `--extended` adds a real-time
- * ten-minute long-outage capture. The assertions below run before anything
+ * finishes with ENDLIST, unmuted autoplay refused by Chromium's default policy
+ * (its own browser launch: every other scenario allows autoplay), and a live
+ * stream whose segments stop answering until the stall ceiling ends it, plus
+ * optional batch. `--extended` adds a real-time ten-minute long-outage capture. The assertions below run before anything
  * is written; a failure exits non-zero and writes nothing, because a fixture
  * set that contradicts the contract is worse than none.
  *
@@ -85,7 +87,10 @@ const CSRF_TOKEN = 'wire-csrf-token';
 const CUSTOM_DIMENSIONS = { tenant: 'wire', planTier: 'free', experiment: 42, beta: true };
 
 /** Live scenarios whose beacons may carry the latency summary. */
-const LIVE_SCENARIOS = new Set(['live', 'live-recovery', 'live-ended', 'live-long-outage']);
+const LIVE_SCENARIOS = new Set(['live', 'live-recovery', 'live-ended', 'live-long-outage', 'stall-ceiling']);
+
+/** The stall ceiling the stall-ceiling scenario configures, in ms; the production default is 120000. */
+const STALL_CEILING_MS = 15000;
 
 /** Hard-coded HLS live long-outage threshold; comparison is strictly greater. */
 const LONG_OUTAGE_MS = 600000;
@@ -484,6 +489,34 @@ const eventOf = (r) => (r.body && typeof r.body === 'object' ? r.body.event : un
 const transportOf = (r) => (!r.headers['x-api-key'] && r.query.api_key !== undefined ? 'sendBeacon' : 'fetch');
 
 /**
+ * Launch headless Chromium the way every scenario needs it.
+ *
+ * @param {{ allowAutoplay: boolean }} options - `true` lets core call play()
+ *        with no user gesture (every scenario but autoplay-blocked); `false`
+ *        keeps Chromium's default autoplay policy so an unmuted play() with no
+ *        gesture is refused with NotAllowedError.
+ * @returns {Promise<import('playwright').Browser>}
+ */
+function launchBrowser({ allowAutoplay }) {
+  return chromium.launch({
+    headless: true,
+    args: [
+      // REQUIRED, not belt-and-braces: with only the context's
+      // ignoreHTTPSErrors, headless Chromium drops the unload sendBeacon to
+      // the self-signed origin entirely - not even its preflight arrives
+      // (measured 2026-09-27, Playwright 1.62.1). sendBeacon runs outside
+      // the page's fetch stack, which the context flag does not reach.
+      '--ignore-certificate-errors',
+      // The external-origin guard: every hostname fails to resolve, so only
+      // the 127.0.0.1 IP literal is reachable.
+      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+      // play() through core without a user gesture
+      ...(allowAutoplay ? ['--autoplay-policy=no-user-gesture-required'] : []),
+    ],
+  });
+}
+
+/**
  * Open the page in a fresh context and wait for the player.
  *
  * @param {import('playwright').Browser} browser
@@ -491,7 +524,7 @@ const transportOf = (r) => (!r.headers['x-api-key'] && r.query.api_key !== undef
  * @param {string} beaconOrigin
  * @param {string} [src] - Playlist path; the page defaults to the fixture
  * @param {'vod'|'live'} [video] - Which videoId/videoTitle the beacons carry
- * @param {string} [mode] - Additional capture mode (privacy, native, batch, reconnect or extended)
+ * @param {string} [mode] - Additional capture mode (privacy, native, batch, reconnect, extended, autoplay, or stall:<ms>)
  * @returns {Promise<{ context: import('playwright').BrowserContext, page: import('playwright').Page, pageErrors: string[] }>}
  */
 async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod', mode) {
@@ -509,7 +542,11 @@ async function openPlayer(browser, pageOrigin, beaconOrigin, src, video = 'vod',
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   const query = new URLSearchParams({ beacon: beaconOrigin, src: src ?? '/__wire/master.m3u8', video });
-  if (mode) query.set(mode, '1');
+  if (mode) {
+    // `name` sets name=1; `name:value` sets name=value (stall:15000)
+    const [name, value = '1'] = mode.split(':');
+    query.set(name, value);
+  }
   await page.goto(`${pageOrigin}/scripts/wire-capture/index.html?${query}`);
   await page.waitForFunction(() => window.wire !== undefined);
   const initError = await page.evaluate(async () => {
@@ -991,6 +1028,93 @@ async function scenarioBatch(browser, pageOrigin, beaconOrigin) {
   return { notes: { pageErrors } };
 }
 
+/**
+ * Unmuted autoplay with no user gesture, in a browser that keeps Chromium's
+ * default autoplay policy. The page itself calls play() (mode `autoplay`):
+ * Playwright's page.evaluate carries user activation, so a runner-side play()
+ * would be allowed. The browser refuses with NotAllowedError, so analytics
+ * sends `playBlocked` and the view ends `awaitingTap`.
+ *
+ * @returns {Promise<{ notes: object }>}
+ */
+async function scenarioAutoplayBlocked(_browser, pageOrigin, beaconOrigin) {
+  const blockedBrowser = await launchBrowser({ allowAutoplay: false });
+  let context;
+  try {
+    const opened = await openPlayer(blockedBrowser, pageOrigin, beaconOrigin, undefined, 'vod', 'autoplay');
+    context = opened.context;
+    const { page, pageErrors } = opened;
+    const notes = { pageErrors };
+    await waitFor(
+      () => beaconsOf('autoplay-blocked').some((r) => eventOf(r) === 'playBlocked'),
+      10000,
+      'playBlocked beacon (was the autoplay policy really the default?)'
+    );
+    notes.state = await page.evaluate(() => {
+      const s = window.wire.player.getState();
+      return { playing: s.playing, paused: s.paused, currentTime: s.currentTime };
+    });
+    // A couple of heartbeats, so the view is clearly open and never playing
+    await waitFor(
+      () => beaconsOf('autoplay-blocked').filter((r) => eventOf(r) === 'heartbeat').length >= 2,
+      8000,
+      'two heartbeats while blocked'
+    );
+    await page.evaluate(() => window.wire.player.destroy());
+    await waitFor(
+      () => beaconsOf('autoplay-blocked').some((r) => eventOf(r) === 'viewEnd'),
+      8000,
+      'viewEnd after destroy'
+    );
+    return { notes };
+  } finally {
+    await context?.close();
+    await blockedBrowser.close();
+  }
+}
+
+/**
+ * A live stream whose segments stop answering after playback starts. The
+ * stall watchdog reconnects, the reconnect "recovers" and stalls again, and
+ * the stall ceiling (`stallTimeoutMs`, shortened to STALL_CEILING_MS here)
+ * ends it with one fatal error carrying `stalled: true`.
+ *
+ * @returns {Promise<{ notes: object }>}
+ */
+async function scenarioStallCeiling(browser, pageOrigin, beaconOrigin) {
+  liveOrigin.reset();
+  const { context, page, pageErrors } = await openPlayer(
+    browser, pageOrigin, beaconOrigin, '/__wire/live.m3u8', 'live', `stall:${STALL_CEILING_MS}`
+  );
+  const notes = { pageErrors, stallTimeoutMs: STALL_CEILING_MS };
+  try {
+    await play(page);
+    await waitPlaying(page);
+    await waitLive(page);
+    const heldAt = Date.now();
+    segmentHold.start();
+    try {
+      await waitFor(
+        () => beaconsOf('stall-ceiling').some((r) => eventOf(r) === 'error' && r.body.stalled === true),
+        150000,
+        'terminal stalled error beacon'
+      );
+      notes.stalledAfterHoldMs = Date.now() - heldAt;
+      await waitFor(
+        () => beaconsOf('stall-ceiling').some((r) => eventOf(r) === 'viewEnd'),
+        8000,
+        'viewEnd after the stalled error'
+      );
+    } finally {
+      segmentHold.release();
+    }
+  } finally {
+    liveOrigin.reset();
+    await context.close();
+  }
+  return { notes };
+}
+
 const SCENARIOS = [
   ['full-session', scenarioFullSession],
   ['unload', scenarioUnload],
@@ -1002,6 +1126,8 @@ const SCENARIOS = [
   ['live-ended', scenarioLiveEnded],
   ['privacy', scenarioPrivacy],
   ['native', scenarioNative],
+  ['autoplay-blocked', scenarioAutoplayBlocked],
+  ['stall-ceiling', scenarioStallCeiling],
 ];
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1215,16 @@ function selectFixtures(scenarioNotes, includeBatch) {
   beaconFixture('live-recovery', 'recovered');
   beaconFixture('live-recovery', 'viewEnd', { variant: 'recovered' });
   beaconFixture('live-ended', 'viewEnd', { variant: 'live-ended' });
+
+  // Autoplay refused: the beacon that says why, and the view's ending
+  beaconFixture('autoplay-blocked', 'playBlocked');
+  beaconFixture('autoplay-blocked', 'viewEnd', { variant: 'awaiting-tap' });
+
+  // Stall ceiling: the terminal error carries stalled: true
+  const stalledError = beaconsOf('stall-ceiling').find((r) => eventOf(r) === 'error' && r.body.stalled === true);
+  if (stalledError) put('error.fetch.stalled.json', stalledError, { event: 'error', transport: transportOf(stalledError), variant: 'stalled', scenario: 'stall-ceiling' });
+  else absent.push({ file: 'error.fetch.stalled.json', required: true, reason: 'no error beacon with stalled: true arrived in stall-ceiling' });
+  beaconFixture('stall-ceiling', 'viewEnd', { variant: 'stalled' });
   if (scenarioNotes['live-long-outage']) {
     const long = beaconsOf('live-long-outage').find((r) => eventOf(r) === 'reconnecting' && r.body.longOutage === true);
     if (long) put('reconnecting.fetch.long-outage.json', long, { event: 'reconnecting', transport: transportOf(long), variant: 'long-outage', scenario: 'live-long-outage' });
@@ -1281,7 +1417,7 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     for (const r of beacons.filter((r) => ['heartbeat', 'viewEnd'].includes(eventOf(r)))) {
       if (eventOf(r) === 'heartbeat' && 'gaugeScale' in r.body) fail(`heartbeat (${r.scenario}) carries gaugeScale`);
       if (eventOf(r) === 'viewEnd' && r.body.gaugeScale !== 'percent') fail(`viewEnd (${r.scenario}) gaugeScale ${JSON.stringify(r.body.gaugeScale)}`);
-      if (r.body.qoeVersion !== 2 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) {
+      if (r.body.qoeVersion !== 3 || (r.body.qoeScore !== null && !(typeof r.body.qoeScore === 'number' && r.body.qoeScore >= 0 && r.body.qoeScore <= 100))) {
         fail(`${eventOf(r)} (${r.scenario}): invalid QoE v2`);
       }
     }
@@ -1420,6 +1556,7 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (firstFrame('live')?.isLive !== true) fail(`live videoStart isLive ${JSON.stringify(firstFrame('live')?.isLive)}`);
     if (firstFrame('live-recovery')?.isLive !== true) fail(`live-recovery videoStart isLive ${JSON.stringify(firstFrame('live-recovery')?.isLive)}`);
     if (firstFrame('live-ended')?.isLive !== true) fail(`live-ended videoStart isLive ${JSON.stringify(firstFrame('live-ended')?.isLive)}`);
+    if (firstFrame('stall-ceiling')?.isLive !== true) fail(`stall-ceiling videoStart isLive ${JSON.stringify(firstFrame('stall-ceiling')?.isLive)}`);
     return `${ran.length} viewStart null`;
   });
 
@@ -1492,6 +1629,46 @@ function runAssertions(fixtures, absent, scenarioNotes, includeBatch) {
     if (viewEnd.completionRate !== null) fail(`live-ended completionRate ${viewEnd.completionRate}`);
     if (transportOf(ends[0]) !== 'fetch') fail(`live-ended arrived by ${transportOf(ends[0])}`);
     assertViewEndContract(viewEnd, { live: true });
+  });
+
+  check('autoplay-blocked sends playBlocked, never plays, and ends awaitingTap', () => {
+    const blocked = body('playBlocked.fetch.json');
+    const viewEnd = body('viewEnd.fetch.awaiting-tap.json');
+    if (!blocked || !viewEnd) fail('playBlocked or its viewEnd missing');
+    if (blocked.reason !== 'autoplay') fail(`playBlocked reason ${JSON.stringify(blocked.reason)}`);
+    if (blocked.errorName !== 'NotAllowedError') fail(`playBlocked errorName ${JSON.stringify(blocked.errorName)}`);
+    if (!Number.isFinite(blocked.readyState)) fail(`playBlocked readyState ${JSON.stringify(blocked.readyState)}`);
+    const events = beaconsOf('autoplay-blocked').map(eventOf);
+    if (events.includes('videoStart')) fail('a frame was shown although autoplay was refused');
+    if (events.filter((e) => e === 'viewEnd').length !== 1) fail('autoplay-blocked did not send exactly one viewEnd');
+    assertViewEndContract(viewEnd, { live: false });
+    if (viewEnd.startState !== 'awaitingTap') fail(`viewEnd startState ${JSON.stringify(viewEnd.startState)}`);
+    if (viewEnd.playTime !== 0 || viewEnd.startupTime !== null) fail(`playTime ${viewEnd.playTime} startupTime ${viewEnd.startupTime}`);
+    return `${blocked.errorName}, readyState ${blocked.readyState}`;
+  });
+
+  check('stall-ceiling ends with one terminal stalled error, then a viewEnd that played and errored', () => {
+    const error = body('error.fetch.stalled.json');
+    const viewEnd = body('viewEnd.fetch.stalled.json');
+    if (!error || !viewEnd) fail('stalled error or its viewEnd missing');
+    if (error.fatal !== true || error.errorSeverity !== 'fatal') fail(`error fatal ${error.fatal} severity ${error.errorSeverity}`);
+    if (error.stalled !== true || error.reconnectExhausted !== true) fail(`stalled ${error.stalled} reconnectExhausted ${error.reconnectExhausted}`);
+    if (error.errorCategory !== 'network') fail(`errorCategory ${error.errorCategory}`);
+    if (beaconsOf('stall-ceiling').filter((r) => eventOf(r) === 'error' && r.body.stalled === true).length !== 1) {
+      fail('more than one stalled error beacon');
+    }
+    assertViewEndContract(viewEnd, { live: true });
+    if (viewEnd.exitType !== 'error' || viewEnd.startState !== 'played') fail(`viewEnd exitType ${viewEnd.exitType} startState ${viewEnd.startState}`);
+    return `${scenarioNotes['stall-ceiling']?.stalledAfterHoldMs} ms after the hold, ceiling ${STALL_CEILING_MS} ms`;
+  });
+
+  check('viewEnd startState: played where a frame was shown, failed after a fatal error', () => {
+    for (const file of ['viewEnd.fetch.ended.json', 'viewEnd.sendBeacon.unload.json', 'viewEnd.fetch.destroy.json', 'viewEnd.fetch.recovered.json', 'viewEnd.fetch.live-ended.json', 'viewEnd.sendBeacon.live-unload.json']) {
+      const b = body(file);
+      if (b && b.startState !== 'played') fail(`${file} startState ${JSON.stringify(b.startState)}, expected played`);
+    }
+    const errored = body('viewEnd.fetch.error.json');
+    if (errored && errored.startState !== 'failed') fail(`viewEnd.fetch.error.json startState ${JSON.stringify(errored.startState)}, expected failed`);
   });
 
   if (scenarioNotes['live-long-outage']) {
@@ -1597,6 +1774,7 @@ function writeOutput(outDir, { fixtures, absent, assertions, chromiumVersion, ca
           ...(notes.elapsedSincePlayMs !== undefined ? { elapsedSincePlayMs: notes.elapsedSincePlayMs } : {}),
           ...(notes.assumptions ? { assumptions: notes.assumptions } : {}),
           ...(notes.currentTimeAfterRecovery !== undefined ? { currentTimeAfterRecovery: notes.currentTimeAfterRecovery } : {}),
+          ...(notes.stalledAfterHoldMs !== undefined ? { stalledAfterHoldMs: notes.stalledAfterHoldMs, stallTimeoutMs: notes.stallTimeoutMs } : {}),
         },
       ])
     ),
@@ -1638,22 +1816,7 @@ try {
   pageServer = pageSrv.server;
   pageOrigin = pageSrv.origin;
 
-  browser = await chromium.launch({
-    headless: true,
-    args: [
-      // REQUIRED, not belt-and-braces: with only the context's
-      // ignoreHTTPSErrors, headless Chromium drops the unload sendBeacon to
-      // the self-signed origin entirely - not even its preflight arrives
-      // (measured 2026-09-27, Playwright 1.62.1). sendBeacon runs outside
-      // the page's fetch stack, which the context flag does not reach.
-      '--ignore-certificate-errors',
-      // The external-origin guard: every hostname fails to resolve, so only
-      // the 127.0.0.1 IP literal is reachable.
-      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
-      // play() through core without a user gesture
-      '--autoplay-policy=no-user-gesture-required',
-    ],
-  });
+  browser = await launchBrowser({ allowAutoplay: true });
   const chromiumVersion = browser.version();
   const capturedAt = new Date().toISOString();
 

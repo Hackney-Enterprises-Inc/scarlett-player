@@ -29,7 +29,7 @@ For AI coding agents: [llms.txt](https://scarlettplayer.com/llms.txt) indexes th
 - **WHEP Monitoring** - Sub-second WebRTC playback over WHEP for a producer's low-delay preview (Tmesis, MediaMTX, any server that answers offers), with the HLS provider's reconnect scheduler
 - **AirPlay & Chromecast** - Built-in casting with session management
 - **Playlists** - Queue management, shuffle, repeat modes, auto-advance
-- **Analytics** - QoE v2 metrics, structured errors, opt-in privacy controls and beacon batching for compatible ingests
+- **Analytics** - QoE v3 metrics, structured errors, opt-in privacy controls and beacon batching for compatible ingests
 - **Sharing** - Native share sheet on mobile, copy link, social targets, embed codes, timestamped links
 - **Chapters** - Markers on the progress bar, a chapter list, and seek to chapter
 - **Touch Gestures** - Double-tap left or right to seek, keep tapping to go further
@@ -268,7 +268,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/audio-ui` | Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts |
 | `@scarlett-player/airplay` | AirPlay casting - Safari AirPlay with auto-detect |
 | `@scarlett-player/chromecast` | Chromecast - Google Cast SDK, session management, remote control |
-| `@scarlett-player/analytics` | Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics |
+| `@scarlett-player/analytics` | Analytics - QoE v3, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics |
 | `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
 | `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
@@ -287,8 +287,8 @@ endpoint. Its 250 ms rebuffer grace (`rebufferGraceMs: 0` restores immediate
 counting) excludes short waits from play time while retaining confirmed stalls'
 full duration. Every sent beacon carries per-view `beaconSeq`; `seeking` has
 `seekSource: 'player' | 'element'`. Heartbeats and both `viewEnd`s (ordinary
-and page unload) carry the same counters, `qoeVersion: 2` and a continuous
-`qoeScore` (`null` for fatal access denial). Error beacons include a
+and page unload) carry the same counters, `qoeVersion: 3` and a continuous
+`qoeScore` (`null` for fatal access denial or a view that never played and never asked to). Error beacons include a
 structured category, severity and validated diagnostics, not raw detail URLs.
 Player-requested `seeking` beacons are coalesced to at most one per second
 per view (the first seek of a burst sends at once, then the latest target), while

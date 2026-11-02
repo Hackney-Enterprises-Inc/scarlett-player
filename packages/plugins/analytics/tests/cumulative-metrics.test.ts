@@ -58,7 +58,7 @@ describe('cumulative metrics', () => {
     for (const key of [...COUNTERS, 'rebufferRatio', 'qoeScore', 'qoeVersion', 'completionRate']) {
       expect(viewEnd).toHaveProperty(key);
     }
-    expect(viewEnd).toMatchObject({ seekCount: 1, qoeVersion: 2, exitType: 'abandoned' });
+    expect(viewEnd).toMatchObject({ seekCount: 1, qoeVersion: 3, exitType: 'abandoned' });
     expect(viewEnd.qoeScore).toBeGreaterThan(0);
   });
 

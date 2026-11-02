@@ -28,7 +28,7 @@ One JSON per request, `<event>.<transport>[.<variant>].json`, each
 `{ fixture, request, response? }`, plus `_session.sequence.json` (every beacon
 of the full session in arrival order) and `manifest.json` (versions, selected
 scenarios, files, expected-but-absent fixtures with a reason, assertion
-results). Producer version is the analytics `package.json` version. Ten
+results). Producer version is the analytics `package.json` version. Twelve
 scenarios in a fresh browser context each: full session ending on `ended`,
 unload (`sendBeacon`), `destroy()`, fatal playlist 404, a clip whose first
 POST gets a 500 and whose retry gets a 202, a live stream abandoned by
@@ -37,7 +37,16 @@ navigation (`viewStart.fetch.live.json`, `heartbeat.fetch.live.json`,
 recovers (`reconnecting.fetch.json`, `error.fetch.reconnecting.json`,
 `recovered.fetch.json`, `viewEnd.fetch.recovered.json`), a live playlist that
 finishes with `EXT-X-ENDLIST` (`viewEnd.fetch.live-ended.json`), an
-anonymous/privacy view, and a native MP4 control. With `--batch`, an eleventh
+anonymous/privacy view, a native MP4 control, unmuted autoplay refused by
+Chromium's default policy (`playBlocked.fetch.json` with `reason: 'autoplay'`,
+`errorName: 'NotAllowedError'`, and `viewEnd.fetch.awaiting-tap.json` with
+`startState: 'awaitingTap'`), and a live stream whose segments stop answering
+until the stall ceiling ends it (`error.fetch.stalled.json` with
+`stalled: true` and `reconnectExhausted: true`, and `viewEnd.fetch.stalled.json`,
+`startState: 'played'`, `exitType: 'error'`; the scenario sets `stallTimeoutMs`
+to 15 s through the page's `stall` parameter and takes about 45 s). Every
+`viewEnd` carries `startState`, checked against the first-frame `startupTime`.
+With `--batch`, a thirteenth
 scenario writes `batch.fetch.json` from the local HTTPS recorder; **Laravel
 v0.3.0 rejects batch bodies (422)**, so this does not verify Laravel
 compatibility. With `--extended`, `reconnecting.fetch.long-outage.json` is
@@ -81,7 +90,7 @@ on other captured events; the runner's core seek to 20 s is `'player'`;
 `X-API-Key` and the host header
 on every fetch beacon and only `?api_key=` on the unload beacon; the preflight
 names `x-api-key`; every `viewEnd` (fetch and unload) carries the shared 1.22
-required fields including `qoeVersion: 2`, finite-or-null bitrates, counters,
+required fields including `qoeVersion: 3`, finite-or-null bitrates, counters,
 pause/reconnect durations in milliseconds and seek counts; live-only latency
 and DVR fields stay off VOD, every `viewEnd` carries `gaugeScale: 'percent'`
 with `completionRate` and `rebufferRatio` in 0..100 (`rebufferRatio` may be
@@ -91,7 +100,13 @@ on every `viewStart`, `false` on the VOD `videoStart` and ended `viewEnd`, and
 `true` on the live `videoStart`; a fatal error sends `error` (with `errorCode`) and then a `viewEnd`
 with `exitType: 'error'`; a recoverable live outage sends `reconnecting`, a
 warning-severity `error` marked `reconnecting`, and `recovered` on one view
-with `reconnectCount: 1` before that view's `viewEnd`; a live playlist that
+with `reconnectCount: 1` before that view's `viewEnd`; a refused autoplay sends `playBlocked` (`reason`
+`autoplay`, `errorName` `NotAllowedError`, numeric `readyState`), no `videoStart`, and
+one `viewEnd` with `startState: 'awaitingTap'`, `playTime` 0 and a null `startupTime`;
+the stall ceiling sends exactly one fatal `error` with `stalled: true` and
+`reconnectExhausted: true`, then a `viewEnd` with `exitType: 'error'` and
+`startState: 'played'`; every other `viewEnd` is `played` (`failed` after the
+fatal playlist 404); a live playlist that
 finishes with `ENDLIST` sends exactly one `viewEnd` with `exitType: 'liveEnded'`,
 `isLive: true` and `completionRate: null`; the live heartbeat and live unload `viewEnd` carry
 `isLive: true` and all five latency summary keys (`liveLatencySamples`,
@@ -99,7 +114,7 @@ finishes with `ENDLIST` sends exactly one `viewEnd` with `exitType: 'liveEnded'`
 be `false` on the standard-latency playlist) and no VOD beacon carries any; custom dimensions at the top level; clip create and retry share
 `clientRequestId` and body (`capturedAt` is minted per attempt) and carry the
 CSRF header; heartbeats never go backwards in payload timestamp/sequence order; every bus `quality:change` produced
-a matching `qualityChange` beacon; QoE v2 and structured fatal-error fields;
+a matching `qualityChange` beacon; QoE v3 and structured fatal-error fields;
 anonymous viewStart context without URL query/fragment, `beforeSend` and DNT
 suppression; measured hls.js `media:segment` values and segment interval metrics
 with no fabricated segment data on native MP4; nothing left `127.0.0.1`. The
@@ -117,6 +132,13 @@ but the runner still holds segments until a confirmed stall or its timeout.
 transport reordering.
 
 ## Traps a future edit could reintroduce
+
+- **The autoplay-blocked scenario must not play from the runner.** It has its
+  own browser launch without `--autoplay-policy=no-user-gesture-required` (the
+  shared launch needs that flag for every other scenario), and the page calls
+  `play()` itself (`?autoplay=1`). Playwright's `page.evaluate` carries user
+  activation, so a runner-side `play()` would be allowed and no `playBlocked`
+  would ever be sent. Verified by observing `NotAllowedError` in the capture.
 
 - **`--ignore-certificate-errors` on the browser launch is required.** With
   only the context's `ignoreHTTPSErrors`, the unload `sendBeacon` to the

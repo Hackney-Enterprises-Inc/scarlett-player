@@ -125,6 +125,10 @@ const DEFAULT_CONFIG: HLSPluginConfig = {
   reconnectBaseDelayMs: 2000,
   reconnectMaxDelayMs: 30000,
   reconnectWindowMs: 300000,
+  // Stall ceiling: a mid-playback stall that survives reconnects for this
+  // long ends in a fatal error instead of an endless silent rebuffer
+  // (HEI-SCARLETT-70)
+  stallTimeoutMs: 120000,
   // Never index a malformed live playlist refresh blindly
   validatePlaylists: true,
 };
@@ -372,6 +376,15 @@ export function createHLSPluginWith(
   let stallWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let lastStallCheckTime = 0;
   let lastStallCheckPosition = 0;
+  // Stall ceiling: armed at the first stall detection and kept across
+  // reconnect attempts (a "successful" reconnect that stalls again must not
+  // buy the stream a fresh clock). Cleared only by real playback progress,
+  // a paused/hidden/offline viewer, a new source, or destroy.
+  let stallCeilingTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallStartedAt = 0;
+  // When the watchdog first saw the player `seeking` in the current unbroken
+  // run of checks (0 = not seeking). A seek that never ends is a stall.
+  let seekingSince = 0;
 
   /**
    * Measure the live state of the active pipeline.
@@ -1313,8 +1326,11 @@ export function createHLSPluginWith(
 
       try {
         await video?.play();
-      } catch {
+      } catch (e) {
         // Autoplay policy blocked the resume; the play button still works
+        api?.logger.info('Native error recovery: resume refused; waiting for the viewer', {
+          reason: (e as { name?: unknown } | null)?.name,
+        });
       }
     } catch {
       if (session !== loadSession) return;
@@ -1772,8 +1788,15 @@ export function createHLSPluginWith(
     });
   };
 
-  /** Cancel any pending auto-reconnect and reset its bookkeeping */
-  const cancelReconnect = () => {
+  /**
+   * Cancel any pending auto-reconnect and reset its bookkeeping.
+   *
+   * @param keepStall - Keep the stall ceiling clock running. A reconnect that
+   *        merely reloaded the source has not proven playback works again;
+   *        every other caller (new source, switch, destroy) ends the stall.
+   */
+  const cancelReconnect = (keepStall = false) => {
+    if (!keepStall) clearStallCeiling();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -1787,17 +1810,77 @@ export function createHLSPluginWith(
   };
 
   /**
+   * Whether stall detection is meaningful right now.
+   *
+   * A hidden tab (timers and decoding are throttled, mobile browsers suspend
+   * the page) and an offline browser both stop `currentTime` without the
+   * stream being at fault; the `online` listener already retries the second.
+   *
+   * @returns True when the page is visible and the browser reports a network
+   */
+  const stallCheckable = (): boolean => {
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    return true;
+  };
+
+  /** Disarm the stall ceiling and forget when the current stall began. */
+  const clearStallCeiling = (): void => {
+    if (stallCeilingTimer) {
+      clearTimeout(stallCeilingTimer);
+      stallCeilingTimer = null;
+    }
+    stallStartedAt = 0;
+  };
+
+  /**
+   * Give up on a stall that outlived `stallTimeoutMs`.
+   *
+   * Stops the reconnect loop (live included, which has no window of its
+   * own) and reports through the same terminal path as an exhausted window,
+   * with `detail.stalled: true`. Skipped, with the clock cleared for the next
+   * detection to restart, when the viewer paused or the page is hidden or
+   * offline: that is not the stream's stall.
+   */
+  const onStallCeiling = (): void => {
+    stallCeilingTimer = null;
+    if (!api || stallStartedAt === 0) return;
+    if (api.getState('paused') || !stallCheckable()) {
+      stallStartedAt = 0;
+      return;
+    }
+    const elapsed = Date.now() - stallStartedAt;
+    api.logger.warn(`Playback stalled for ${Math.round(elapsed / 1000)}s, giving up`);
+    stopStallWatchdog();
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    // Supersede a reconnect attempt that is mid-load, so it cannot "recover"
+    // after the fatal error has been reported
+    loadSession++;
+    teardownPipeline(new Error('HLS load cancelled: playback stalled'));
+    isReconnecting = false;
+    stallStartedAt = 0;
+    emitReconnectExhausted(elapsed, mergedConfig.stallTimeoutMs ?? 0, true);
+  };
+
+  /**
    * Start the playback stall watchdog.
    *
-   * Monitors timeupdate events: if `video.currentTime` fails to advance
-   * within the timeout window while the player believes it is playing,
-   * a recoverable network error is synthesized into `maybeScheduleReconnect`.
+   * Monitors `video.currentTime`: if it fails to advance within the timeout
+   * window while the player believes it is playing, a recoverable network
+   * error is synthesized into `maybeScheduleReconnect` and the stall ceiling
+   * (`stallTimeoutMs`) is armed. Checks are skipped while the page is hidden
+   * or the browser is offline, and the baseline is reset so that time is not
+   * counted. Shared by the hls.js and native pipelines.
    */
   const startStallWatchdog = (): void => {
     if (!video || stallWatchdogTimer) return;
 
     lastStallCheckTime = Date.now();
     lastStallCheckPosition = video.currentTime;
+    seekingSince = 0;
 
     const levelTargetDuration =
       (hls as any)?.targetDuration ??
@@ -1813,20 +1896,36 @@ export function createHLSPluginWith(
       const isPlaying = api.getState('playing');
       const isSeeking = api.getState('seeking');
 
-      if (!isPlaying || isSeeking) {
-        // Not in a state where stall detection is meaningful
+      // A seek that outlives one stall threshold is not a seek any more: with
+      // no segment arriving, hls.js keeps re-seeking to the moving live window
+      // and `currentTime` jumps forward while nothing is shown. Count the
+      // seeking time as stalled time and ignore those jumps.
+      let stuckSeeking = false;
+      if (isPlaying && isSeeking && stallCheckable()) {
+        if (seekingSince === 0) seekingSince = Date.now();
+        stuckSeeking = Date.now() - seekingSince >= targetDuration * 1000;
+      } else {
+        seekingSince = 0;
+      }
+
+      if (!isPlaying || (isSeeking && !stuckSeeking) || !stallCheckable()) {
+        // Not in a state where stall detection is meaningful. Restart the
+        // baseline so hidden/offline time is not counted as stalled time.
+        lastStallCheckTime = Date.now();
+        lastStallCheckPosition = video.currentTime;
         stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
         return;
       }
 
-      const elapsed = Date.now() - lastStallCheckTime;
+      const elapsed = stuckSeeking ? Date.now() - seekingSince : Date.now() - lastStallCheckTime;
       const positionDelta = video.currentTime - lastStallCheckPosition;
 
-      if (positionDelta > 0.5) {
-        // Making progress — reset the watchdog
+      if (!stuckSeeking && positionDelta > 0.5) {
+        // Making progress: reset the watchdog and the stall ceiling
         lastStallCheckTime = Date.now();
         lastStallCheckPosition = video.currentTime;
-      } else if (elapsed > targetDuration * 1000) {
+        clearStallCeiling();
+      } else if (stuckSeeking || elapsed > targetDuration * 1000) {
         // Stalled: time hasn't advanced for longer than the target duration.
         // Synthesize a recoverable network error.
         api.logger.warn('Playback stall detected — no timeupdate progress', {
@@ -1835,6 +1934,15 @@ export function createHLSPluginWith(
           targetDuration: Math.round(targetDuration),
         });
 
+        // The ceiling clock starts at the FIRST detection and survives the
+        // reconnects that follow
+        const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+        if (ceilingMs > 0 && stallStartedAt === 0) {
+          stallStartedAt = Date.now();
+          stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs) as unknown as ReturnType<typeof setTimeout>;
+        }
+
+        seekingSince = 0;
         const stallError: HLSError = {
           type: 'network',
           details: 'Playback stalled — no data received',
@@ -1875,8 +1983,11 @@ export function createHLSPluginWith(
    *
    * @param elapsedMs - How long the provider kept trying
    * @param windowMs - The window it was working against
+   * @param stalled - True when the stall ceiling (`stallTimeoutMs`) ended it
+   *        rather than the reconnect window; the fatal error then carries
+   *        `detail.stalled: true`
    */
-  const emitReconnectExhausted = (elapsedMs: number, windowMs: number) => {
+  const emitReconnectExhausted = (elapsedMs: number, windowMs: number, stalled = false) => {
     if (reconnectExhausted) return;
     reconnectExhausted = true;
 
@@ -1888,15 +1999,20 @@ export function createHLSPluginWith(
     api?.setState('playbackState', 'error');
     api?.setState('buffering', false);
     api?.emit('error', {
-      code: trigger ? mapFatalErrorCode(trigger) : ErrorCode.PLAYBACK_FAILED,
-      message: `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1000)}s`,
+      code: stalled
+        ? ErrorCode.MEDIA_NETWORK_ERROR
+        : trigger ? mapFatalErrorCode(trigger) : ErrorCode.PLAYBACK_FAILED,
+      message: stalled
+        ? `Playback stalled for ${Math.round(elapsedMs / 1000)}s and did not recover`
+        : `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1000)}s`,
       fatal: true,
       timestamp: Date.now(),
       detail: {
-        type: trigger?.type ?? 'other',
+        type: trigger?.type ?? (stalled ? 'network' : 'other'),
         retriesExhausted: true,
         attempts,
         reconnectExhausted: true,
+        ...(stalled ? { stalled: true } : {}),
       },
     });
   };
@@ -2105,17 +2221,23 @@ export function createHLSPluginWith(
         elapsedMs: Date.now() - reconnectWindowStart,
       });
       api.logger.info('Auto-reconnect succeeded');
-      cancelReconnect();
+      cancelReconnect(true);
 
       // Respect the paused state: do not blare audio for viewers who had
       // explicitly paused before the outage.
       const wasPaused = api.getState('paused');
+      // The reload tore the watchdog down: re-arm it so a stream that comes
+      // back and stalls again keeps counting toward the stall ceiling
+      if (api.getState('playing')) startStallWatchdog();
       if (!wasPaused) {
         try {
           await video?.play();
-        } catch {
+        } catch (e) {
           // Autoplay policy blocked the resume; the play button now works
           // reliably, so the viewer is one click away
+          api.logger.info('Auto-reconnect: resume refused; waiting for the viewer', {
+            reason: (e as { name?: unknown } | null)?.name,
+          });
         }
       } else {
         api.logger.info('Stream reconnected while paused; maintaining pause at live edge');
@@ -2185,7 +2307,19 @@ export function createHLSPluginWith(
           await video.play();
         } catch (e) {
           playbackGate.corePlayRequested = false;
-          api?.logger.error('Play failed', e);
+          const name = (e as { name?: unknown } | null)?.name;
+          if (name === 'NotAllowedError') {
+            // The autoplay policy, not a fault: the element stays paused and
+            // the viewer's own tap works. Tell the bus so analytics can
+            // separate "waiting for a tap" from a stream that never started.
+            api?.logger.info('Play blocked by the autoplay policy; waiting for the viewer');
+            api?.emit('playback:blocked', {
+              reason: 'autoplay',
+              name: 'NotAllowedError',
+            });
+          } else {
+            api?.logger.warn('Play failed', e);
+          }
         }
       });
 
@@ -2630,7 +2764,7 @@ export function createHLSPluginWith(
         try {
           await video.play();
         } catch (e) {
-          api?.logger.debug('Could not auto-resume after switch');
+          api?.logger.info('Could not auto-resume after switch', { reason: (e as { name?: unknown } | null)?.name });
         }
       }
 
@@ -2699,7 +2833,7 @@ export function createHLSPluginWith(
         try {
           await video.play();
         } catch (e) {
-          api?.logger.debug('Could not auto-resume after switch');
+          api?.logger.info('Could not auto-resume after switch', { reason: (e as { name?: unknown } | null)?.name });
         }
       }
 

@@ -40,6 +40,26 @@ export interface PlayerEventMap {
   /** Playback started */
   'playback:play': void;
 
+  /**
+   * A play request was refused before any media played, and the player is now
+   * waiting for the viewer to tap play.
+   *
+   * Emitted by a provider when the browser's autoplay policy rejects
+   * `play()` (a `NotAllowedError`: no user gesture yet, sound on). Nothing is
+   * broken: the element stays paused and the viewer's own tap works. It is the
+   * only signal that separates "waiting for a tap" from "stream failed" or
+   * "stream offline", so analytics can report the three apart.
+   * `playback:play` has already been emitted for the request; there is no
+   * event when the viewer later plays. `PlaybackState` is unchanged.
+   * A core older than this event never emits it; consumers must not rely on it.
+   */
+  'playback:blocked': {
+    /** Why the request was refused. Only `autoplay` exists today. */
+    reason: 'autoplay';
+    /** The rejection's `DOMException` name, when it has one (`NotAllowedError`). */
+    name?: string;
+  };
+
   /** Playback paused */
   'playback:pause': void;
 

@@ -914,7 +914,7 @@ describe('Analytics Plugin', () => {
       expect(errors[1]?.errorCode).toBeUndefined();
     });
 
-    it('should ignore an error payload with neither code nor message', async () => {
+    it('should report an error payload with neither code nor message generically', async () => {
       const plugin = createAnalyticsPlugin({
         ...mockConfig,
         customBeacon: mockBeacon,
@@ -925,8 +925,11 @@ describe('Analytics Plugin', () => {
       (api as any)._trigger('error', { fatal: true });
       (api as any)._trigger('error', { code: 42 });
 
-      expect(beacons).toHaveLength(0);
-      expect(plugin.getMetrics().errorCount).toBe(0);
+      const errors = beacons.filter((b) => b.event === 'error');
+      // The fatal one ends the view, so the second is after viewEnd and ignored
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ errorType: 'CoreError', errorMessage: 'Unknown core error', fatal: true });
+      expect(plugin.getMetrics().errorCount).toBe(1);
     });
   });
 
@@ -1183,6 +1186,13 @@ describe('Analytics Plugin', () => {
       (api as any)._trigger('playback:play');
       vi.advanceTimersByTime(500);
       (api as any)._trigger('playback:play');
+
+      // No frame has been shown yet, so there is nothing to score (qoeVersion 3)
+      expect(plugin.getQoEScore()).toBeNull();
+
+      // Once a frame is confirmed the running score is a real measurement
+      (api as any)._updateState({ paused: false, playing: true });
+      (api as any)._trigger('playback:timeupdate', { currentTime: api.getState('currentTime') + 0.01 });
 
       const qoeScore = plugin.getQoEScore();
       expect(qoeScore).toBeGreaterThan(0);

@@ -130,6 +130,7 @@ const WHITELISTED_DETAIL_BOOLEANS = [
   'reconnectExhausted',
   'reconnecting',
   'timedOut',
+  'stalled',
 ] as const;
 
 /**

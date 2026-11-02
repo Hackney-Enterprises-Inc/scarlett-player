@@ -274,6 +274,28 @@ describe.each([
     expect(emits('playback:play')).toBe(0);
   });
 
+  it('emits playback:blocked when the browser refuses a core play with NotAllowedError', async () => {
+    const video = getVideo();
+    setPaused(video, true);
+    vi.spyOn(video, 'play').mockRejectedValue(new DOMException('gesture needed', 'NotAllowedError'));
+
+    await busHandler('playback:play')?.();
+
+    expect(api.emit).toHaveBeenCalledWith('playback:blocked', { reason: 'autoplay', name: 'NotAllowedError' });
+    expect(emits('playback:blocked')).toBe(1);
+  });
+
+  it('does not emit playback:blocked for any other play rejection', async () => {
+    const video = getVideo();
+    setPaused(video, true);
+    vi.spyOn(video, 'play').mockRejectedValue(new DOMException('no source', 'NotSupportedError'));
+
+    await busHandler('playback:play')?.();
+
+    expect(emits('playback:blocked')).toBe(0);
+    expect(api.logger.warn).toHaveBeenCalled();
+  });
+
   it('emits playback:pause when the element pauses on its own', () => {
     getVideo().dispatchEvent(new Event('pause'));
 
