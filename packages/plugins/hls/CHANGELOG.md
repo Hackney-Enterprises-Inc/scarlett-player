@@ -1,5 +1,15 @@
 # @scarlett-player/hls
 
+## 1.27.0
+
+### Minor Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - A playback stall that outlasts the new `stallTimeoutMs` (default 120 s, 0 disables) now ends in a fatal error with `detail.stalled: true` instead of rebuffering silently, a seek that never ends (no segment arriving) now counts as a stall, and the stall watchdog no longer fires while the tab is hidden or the browser is offline.
+
+### Patch Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - Emit `playback:blocked` when the browser refuses autoplay, log other play failures as warnings, and log refused resumes instead of swallowing them.
+
 ## 1.26.0
 
 ### Patch Changes

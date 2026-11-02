@@ -1,5 +1,11 @@
 # @scarlett-player/whep
 
+## 1.27.0
+
+### Patch Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - Emit `playback:blocked` when the browser refuses autoplay on a WHEP stream, so the view is reported as waiting for a tap.
+
 ## 1.26.0
 
 ## 1.25.0

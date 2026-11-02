@@ -1,5 +1,15 @@
 # @scarlett-player/core
 
+## 1.27.0
+
+### Minor Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - Add a `playback:blocked` event, emitted when the browser's autoplay policy refuses a play request, so a view waiting for a tap can be told apart from a failed or offline stream.
+
+### Patch Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - The error beacon carries `stalled: true` when playback ended in the HLS stall ceiling, so an ingest can tell a stall from a reconnect window that ran out.
+
 ## 1.26.0
 
 ### Patch Changes

@@ -1,5 +1,15 @@
 # @scarlett-player/analytics
 
+## 1.27.0
+
+### Minor Changes
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - Report why a view never played: a `playBlocked` beacon, a `startState` on `viewEnd` (`played`, `awaitingTap`, `failed`, `never`), and error beacons for failed plugin init and code-less errors that used to be dropped.
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - Scores of views that never showed a first frame change and `qoeVersion` moves from 2 to 3: a view that asked to play and got no frame now scores 0, one that never asked or is still waiting for a tap scores null, and heartbeats before the first frame carry a null score instead of reading near 100; views that played score as before.
+
+- [#143](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/143) [`2da2572`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/2da2572cb432f69b82c378e2ad1a5058ceb7867a) Thanks [@alexhackney](https://github.com/alexhackney)! - The error beacon carries `stalled: true` when playback ended in the HLS stall ceiling, so an ingest can tell a stall from a reconnect window that ran out.
+
 ## 1.26.0
 
 ### Minor Changes
