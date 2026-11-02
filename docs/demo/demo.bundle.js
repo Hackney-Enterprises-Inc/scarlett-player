@@ -1952,7 +1952,8 @@
         "retriesExhausted",
         "reconnectExhausted",
         "reconnecting",
-        "timedOut"
+        "timedOut",
+        "stalled"
       ];
     }
   });
@@ -43086,6 +43087,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     reconnectBaseDelayMs: 2e3,
     reconnectMaxDelayMs: 3e4,
     reconnectWindowMs: 3e5,
+    // Stall ceiling: a mid-playback stall that survives reconnects for this
+    // long ends in a fatal error instead of an endless silent rebuffer
+    // (HEI-SCARLETT-70)
+    stallTimeoutMs: 12e4,
     // Never index a malformed live playlist refresh blindly
     validatePlaylists: true
   };
@@ -43163,6 +43168,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let stallWatchdogTimer = null;
     let lastStallCheckTime = 0;
     let lastStallCheckPosition = 0;
+    let stallCeilingTimer = null;
+    let stallStartedAt = 0;
+    let seekingSince = 0;
     const readLiveMetrics = () => {
       const metrics = hls && !isNative ? computeLiveMetrics({
         kind: "hls",
@@ -43633,7 +43641,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         api?.setState("buffering", false);
         try {
           await video?.play();
-        } catch {
+        } catch (e) {
+          api?.logger.info("Native error recovery: resume refused; waiting for the viewer", {
+            reason: e?.name
+          });
         }
       } catch {
         if (session !== loadSession) return;
@@ -43911,7 +43922,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         hls.loadSource(src);
       });
     };
-    const cancelReconnect = () => {
+    const cancelReconnect = (keepStall = false) => {
+      if (!keepStall) clearStallCeiling();
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -43923,10 +43935,43 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       reconnectExhausted = false;
       isReconnecting = false;
     };
+    const stallCheckable = () => {
+      if (typeof document !== "undefined" && document.hidden) return false;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+      return true;
+    };
+    const clearStallCeiling = () => {
+      if (stallCeilingTimer) {
+        clearTimeout(stallCeilingTimer);
+        stallCeilingTimer = null;
+      }
+      stallStartedAt = 0;
+    };
+    const onStallCeiling = () => {
+      stallCeilingTimer = null;
+      if (!api || stallStartedAt === 0) return;
+      if (api.getState("paused") || !stallCheckable()) {
+        stallStartedAt = 0;
+        return;
+      }
+      const elapsed = Date.now() - stallStartedAt;
+      api.logger.warn(`Playback stalled for ${Math.round(elapsed / 1e3)}s, giving up`);
+      stopStallWatchdog();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      loadSession++;
+      teardownPipeline(new Error("HLS load cancelled: playback stalled"));
+      isReconnecting = false;
+      stallStartedAt = 0;
+      emitReconnectExhausted(elapsed, mergedConfig.stallTimeoutMs ?? 0, true);
+    };
     const startStallWatchdog = () => {
       if (!video || stallWatchdogTimer) return;
       lastStallCheckTime = Date.now();
       lastStallCheckPosition = video.currentTime;
+      seekingSince = 0;
       const levelTargetDuration = hls?.targetDuration ?? hls?.levels?.[hls?.currentLevel]?.details?.targetduration ?? 0;
       const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
       const checkInterval = Math.min(targetDuration * 1e3, 3e4);
@@ -43934,21 +43979,37 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         if (!video || !api) return;
         const isPlaying = api.getState("playing");
         const isSeeking = api.getState("seeking");
-        if (!isPlaying || isSeeking) {
+        let stuckSeeking = false;
+        if (isPlaying && isSeeking && stallCheckable()) {
+          if (seekingSince === 0) seekingSince = Date.now();
+          stuckSeeking = Date.now() - seekingSince >= targetDuration * 1e3;
+        } else {
+          seekingSince = 0;
+        }
+        if (!isPlaying || isSeeking && !stuckSeeking || !stallCheckable()) {
+          lastStallCheckTime = Date.now();
+          lastStallCheckPosition = video.currentTime;
           stallWatchdogTimer = setTimeout(check, checkInterval);
           return;
         }
-        const elapsed = Date.now() - lastStallCheckTime;
+        const elapsed = stuckSeeking ? Date.now() - seekingSince : Date.now() - lastStallCheckTime;
         const positionDelta = video.currentTime - lastStallCheckPosition;
-        if (positionDelta > 0.5) {
+        if (!stuckSeeking && positionDelta > 0.5) {
           lastStallCheckTime = Date.now();
           lastStallCheckPosition = video.currentTime;
-        } else if (elapsed > targetDuration * 1e3) {
+          clearStallCeiling();
+        } else if (stuckSeeking || elapsed > targetDuration * 1e3) {
           api.logger.warn("Playback stall detected \u2014 no timeupdate progress", {
             elapsed: Math.round(elapsed),
             currentTime: video.currentTime,
             targetDuration: Math.round(targetDuration)
           });
+          const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+          if (ceilingMs > 0 && stallStartedAt === 0) {
+            stallStartedAt = Date.now();
+            stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs);
+          }
+          seekingSince = 0;
           const stallError = {
             type: "network",
             details: "Playback stalled \u2014 no data received",
@@ -43967,7 +44028,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         stallWatchdogTimer = null;
       }
     };
-    const emitReconnectExhausted = (elapsedMs, windowMs) => {
+    const emitReconnectExhausted = (elapsedMs, windowMs, stalled = false) => {
       if (reconnectExhausted) return;
       reconnectExhausted = true;
       const attempts = reconnectAttempts;
@@ -43976,15 +44037,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api?.setState("playbackState", "error");
       api?.setState("buffering", false);
       api?.emit("error", {
-        code: trigger ? mapFatalErrorCode(trigger) : "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
-        message: `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1e3)}s`,
+        code: stalled ? "MEDIA_NETWORK_ERROR" /* MEDIA_NETWORK_ERROR */ : trigger ? mapFatalErrorCode(trigger) : "PLAYBACK_FAILED" /* PLAYBACK_FAILED */,
+        message: stalled ? `Playback stalled for ${Math.round(elapsedMs / 1e3)}s and did not recover` : `HLS auto-reconnect gave up after ${attempts} attempts over ${Math.round(elapsedMs / 1e3)}s`,
         fatal: true,
         timestamp: Date.now(),
         detail: {
-          type: trigger?.type ?? "other",
+          type: trigger?.type ?? (stalled ? "network" : "other"),
           retriesExhausted: true,
           attempts,
-          reconnectExhausted: true
+          reconnectExhausted: true,
+          ...stalled ? { stalled: true } : {}
         }
       });
     };
@@ -44084,12 +44146,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           elapsedMs: Date.now() - reconnectWindowStart
         });
         api.logger.info("Auto-reconnect succeeded");
-        cancelReconnect();
+        cancelReconnect(true);
         const wasPaused = api.getState("paused");
+        if (api.getState("playing")) startStallWatchdog();
         if (!wasPaused) {
           try {
             await video?.play();
-          } catch {
+          } catch (e) {
+            api.logger.info("Auto-reconnect: resume refused; waiting for the viewer", {
+              reason: e?.name
+            });
           }
         } else {
           api.logger.info("Stream reconnected while paused; maintaining pause at live edge");
@@ -44139,7 +44205,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             await video.play();
           } catch (e) {
             playbackGate.corePlayRequested = false;
-            api?.logger.error("Play failed", e);
+            const name = e?.name;
+            if (name === "NotAllowedError") {
+              api?.logger.info("Play blocked by the autoplay policy; waiting for the viewer");
+              api?.emit("playback:blocked", {
+                reason: "autoplay",
+                name: "NotAllowedError"
+              });
+            } else {
+              api?.logger.warn("Play failed", e);
+            }
           }
         });
         const unsubPause = api.on("playback:pause", () => {
@@ -44442,7 +44517,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           try {
             await video.play();
           } catch (e) {
-            api?.logger.debug("Could not auto-resume after switch");
+            api?.logger.info("Could not auto-resume after switch", { reason: e?.name });
           }
         }
         api?.logger.info("Switched to native HLS");
@@ -44491,7 +44566,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           try {
             await video.play();
           } catch (e) {
-            api?.logger.debug("Could not auto-resume after switch");
+            api?.logger.info("Could not auto-resume after switch", { reason: e?.name });
           }
         }
         api?.logger.info("Switched to hls.js");
@@ -45443,9 +45518,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         await video.play();
       } catch (error) {
         isCorePlayRequested = false;
+        const name = error?.name;
         api?.logger.info("WHEP: autoplay refused; waiting for the viewer", {
-          reason: error?.name
+          reason: name
         });
+        if (name === "NotAllowedError") {
+          api?.emit("playback:blocked", { reason: "autoplay", name });
+        }
       }
     };
     const setupEventListeners = (videoEl) => {
@@ -54464,6 +54543,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     return "unknown";
   }
+  var QOE_VERSION = 3;
   function calculateQoEScore(params) {
     const {
       startupTime,
@@ -54473,9 +54553,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       maxBitrate,
       exitType,
       warningCount,
-      fatalErrorCategory
+      fatalErrorCategory,
+      noFrameCause
     } = params;
     if (exitType === "error") return fatalErrorCategory === "access" ? null : 0;
+    if (noFrameCause !== void 0) return noFrameCause === "tried" ? 0 : null;
     const scores = [
       startupTime === null ? 100 : 100 * 0.5 ** (Math.max(0, startupTime) / 4e3),
       Math.min(
@@ -54911,7 +54993,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     for (const key of ["httpStatus", "mediaErrorCode", "networkState", "readyState", "attempts"]) {
       if (typeof input[key] === "number" && Number.isFinite(input[key])) result[key] = input[key];
     }
-    for (const key of ["retriesExhausted", "reconnectExhausted", "reconnecting", "timedOut"]) {
+    for (const key of ["retriesExhausted", "reconnectExhausted", "reconnecting", "timedOut", "stalled"]) {
       if (typeof input[key] === "boolean") result[key] = input[key];
     }
     return result;
@@ -55209,6 +55291,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         avgBitrate: null,
         playbackState: "loading",
         exitType: null,
+        playBlocked: false,
         lastKnownIsLive: null
       };
     }
@@ -55344,7 +55427,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         errorCount: session.errorCount,
         warningCount: session.warningCount,
         qoeScore: getQoEScore(),
-        qoeVersion: 2,
+        qoeVersion: QOE_VERSION,
         // Absent entirely on VOD: nothing ever emitted a live:latency reading
         ...latencySampler.summary() ?? {},
         ...resolveIsLive() === true ? { dvrTime: reportedCredit().dvrTime } : {},
@@ -55377,6 +55460,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         rebufferRatio,
         ...session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {},
         exitType: session.exitType,
+        startState: resolveStartState(),
         completionRate,
         // Declares the units of both gauges. It rides the viewEnd data, which
         // buildPayload spreads after customDimensions, so a host dimension of
@@ -55416,10 +55500,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         maxBitrate: session.maxBitrate,
         exitType: session.exitType,
         warningCount: session.warningCount,
-        fatalErrorCategory: session.fatalErrorCategory
+        fatalErrorCategory: session.fatalErrorCategory,
+        noFrameCause: qoeNoFrameCause()
       });
     }
+    function qoeNoFrameCause() {
+      if (session.firstFrameTime !== null) return void 0;
+      if (session.viewEnd === null) return "open";
+      if (session.errorCount > 0) return "tried";
+      if (session.playBlocked && session.playbackState === "awaitingTap") return "idle";
+      return session.playRequestTime !== null ? "tried" : "idle";
+    }
     function finalizeView(sendRebufferEnd) {
+      flushPluginError();
       stopStallProgress();
       cancelFrameConfirmation();
       seekWindow.end(!sendRebufferEnd);
@@ -55626,6 +55719,47 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     function markedReconnecting(detail) {
       return !!detail && typeof detail === "object" && detail.reconnecting === true;
+    }
+    function resolveStartState() {
+      if (session.firstFrameTime !== null) return "played";
+      if (session.exitType === "error" || session.errorCount > 0) return "failed";
+      if (session.playBlocked && session.playbackState === "awaitingTap") return "awaitingTap";
+      return "never";
+    }
+    function onPlayBlocked(payload) {
+      if (!api || session.viewEnd !== null) return;
+      accrueTime();
+      session.playBlocked = true;
+      playRequestPending = false;
+      if (session.firstFrameTime === null) session.playbackState = "awaitingTap";
+      sendBeacon("playBlocked", {
+        reason: "autoplay",
+        ...typeof payload?.name === "string" && payload.name ? { errorName: payload.name } : {},
+        readyState: api.container.querySelector("video")?.readyState ?? 0
+      });
+    }
+    let pendingPluginError = null;
+    function onPluginError(payload) {
+      flushPluginError();
+      const name = typeof payload?.name === "string" ? payload.name : "unknown";
+      pendingPluginError = {
+        name,
+        cause: payload?.error,
+        timer: setTimeout(flushPluginError, 0)
+      };
+    }
+    function flushPluginError() {
+      const held = pendingPluginError;
+      if (!held) return;
+      pendingPluginError = null;
+      clearTimeout(held.timer);
+      const cause = held.cause;
+      onCoreError({
+        code: "PLUGIN_SETUP_FAILED",
+        name: typeof cause?.name === "string" ? cause.name : void 0,
+        message: typeof cause?.message === "string" && cause.message ? cause.message : "init failed",
+        fatal: false
+      }, held.name);
     }
     function onPlayEvent() {
       if (!api?.getState("playing")) {
@@ -55970,8 +56104,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         sendViewEnd();
       }
     }
-    function onCoreError(err) {
+    function onCoreError(err, pluginName) {
       if (!err || session.viewEnd !== null) return;
+      const held = pendingPluginError;
+      if (held && !pluginName && err.originalError !== void 0 && err.originalError === held.cause) {
+        pendingPluginError = null;
+        clearTimeout(held.timer);
+        pluginName = held.name;
+      }
       const original = err.originalError || err;
       const code = typeof err.code === "string" ? err.code : typeof original.code === "string" ? original.code : void 0;
       let type;
@@ -55984,8 +56124,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         type = code || name || "CoreError";
         message = typeof err.message === "string" && err.message || "Unknown core error";
       } else {
-        return;
+        type = "CoreError";
+        message = "Unknown core error";
       }
+      if (pluginName) message = `Plugin ${pluginName}: ${message}`;
       session.errorCount++;
       const category = classifyError(err);
       const fatal = err.fatal === true;
@@ -56140,6 +56282,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         const unsubSeeked = api.on("playback:seeked", onSeekEnded);
         const unsubError = api.on("media:error", onError);
         const unsubCoreError = api.on("error", onCoreError);
+        const unsubPluginError = api.on("plugin:error", onPluginError);
+        const unsubBlocked = api.on("playback:blocked", onPlayBlocked);
         const unsubRecovered = api.on("error:recovered", onRecovered);
         const unsubReconnecting = api.on("error:reconnecting", onReconnecting);
         const unsubUnloaded = api.on("source:unloaded", onSourceUnloaded);
@@ -56159,6 +56303,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           unsubEnded,
           unsubError,
           unsubCoreError,
+          unsubPluginError,
+          unsubBlocked,
           unsubRecovered,
           unsubReconnecting,
           unsubUnloaded,
@@ -56190,6 +56336,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
         }
+        flushPluginError();
         preInitEvents = [];
         if (hasSession && !session.viewEnd) {
           session.exitType = session.exitType || "abandoned";
@@ -56308,7 +56455,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             },
             qoe: {
               score: null,
-              version: 2
+              version: QOE_VERSION
             }
           };
         }
@@ -56344,7 +56491,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         };
         const qoe = {
           score: getQoEScore(),
-          version: 2
+          version: QOE_VERSION
         };
         const rawPlaybackState = api.getState("playbackState") || "idle";
         const currentTime = Number.isFinite(api.getState("currentTime")) ? api.getState("currentTime") : null;
@@ -58471,7 +58618,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.26.0" : "dev";
+  var VERSION = true ? "1.27.0" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT

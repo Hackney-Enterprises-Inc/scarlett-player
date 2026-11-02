@@ -1,6 +1,6 @@
 # Scarlett Player
 
-> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.26.0). MIT licensed.
+> Open-source, plugin-based video and audio player for the web, written in TypeScript: HLS adaptive streaming, native formats, WHEP live playback, captions, chapters, clips and casting, with a Vue wrapper and a CDN embed. Published to npm as @scarlett-player/* packages, all at one version (currently 1.27.0). MIT licensed.
 
 Every guide and comparison below is also a web page at the same path without `index.md`. https://scarlettplayer.com/llms-full.txt holds all of them in one file.
 
@@ -27,7 +27,7 @@ Every guide and comparison below is also a web page at the same path without `in
 - [@scarlett-player/audio-ui](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/audio-ui): Audio UI - compact player with artwork, progress, shuffle/repeat controls, multiple layouts
 - [@scarlett-player/airplay](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/airplay): AirPlay casting - Safari AirPlay with auto-detect
 - [@scarlett-player/chromecast](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/chromecast): Chromecast - Google Cast SDK, session management, remote control
-- [@scarlett-player/analytics](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/analytics): Analytics - QoE v2, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics
+- [@scarlett-player/analytics](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/analytics): Analytics - QoE v3, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics
 - [@scarlett-player/playlist](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/playlist): Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence
 - [@scarlett-player/media-session](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/media-session): Media Session - lock screen controls, media keys, album art, seek bar
 - [@scarlett-player/captions](https://github.com/Hackney-Enterprises-Inc/scarlett-player/tree/main/packages/plugins/captions): Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language
