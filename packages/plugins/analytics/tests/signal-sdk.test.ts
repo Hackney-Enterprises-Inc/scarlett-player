@@ -93,7 +93,7 @@ describe('Signal privacy and context', () => {
   });
 });
 
-describe('error classification and QoE v2', () => {
+describe('error classification and QoE v3', () => {
   it.each([
     [{ detail: { httpStatus: 403 }, code: 'MEDIA_NETWORK_ERROR' }, 'access'],
     [{ code: 'MEDIA_NETWORK_ERROR' }, 'network'],
@@ -124,9 +124,9 @@ describe('error classification and QoE v2', () => {
     expect(h.sent('error')[0]).toMatchObject({ errorCategory: 'network', errorSeverity: 'warning', httpStatus: 500, attempts: 2 });
     expect(JSON.stringify(h.sent('error')[0])).not.toContain('token=secret');
     vi.advanceTimersByTime(1000);
-    expect(h.sent('heartbeat')[0]).toMatchObject({ warningCount: 1, qoeVersion: 2 });
+    expect(h.sent('heartbeat')[0]).toMatchObject({ warningCount: 1, qoeVersion: 3 });
     h.bus.emit('error', { code: 'SOURCE_LOAD_FAILED', message: 'denied', fatal: true, detail: { httpStatus: 403 } } as any);
-    expect(h.sent('viewEnd')[0]).toMatchObject({ fatalErrorCategory: 'access', qoeScore: null, qoeVersion: 2 });
+    expect(h.sent('viewEnd')[0]).toMatchObject({ fatalErrorCategory: 'access', qoeScore: null, qoeVersion: 3 });
     expect(h.plugin.getQoEScore()).toBeNull();
     await h.plugin.destroy();
   });

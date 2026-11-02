@@ -22,11 +22,12 @@ function vodViewEnd(overrides = {}) {
     errorCount: 0,
     warningCount: 0,
     qoeScore: 90,
-    qoeVersion: 2,
+    qoeVersion: 3,
     rebufferRatio: 0,
     exitType: 'completed',
     completionRate: 100,
     gaugeScale: 'percent',
+    startState: 'played',
     ...overrides,
   };
 }
@@ -94,8 +95,9 @@ describe('assertViewEndContract', () => {
     assert.throws(() => assertViewEndContract(subset), /lacks required field/);
   });
 
-  it('fails qoeVersion other than 2', () => {
+  it('fails qoeVersion other than 3', () => {
     assert.throws(() => assertViewEndContract(vodViewEnd({ qoeVersion: 1 })), /qoeVersion/);
+    assert.throws(() => assertViewEndContract(vodViewEnd({ qoeVersion: 2 })), /qoeVersion/);
   });
 
   it('fails non-finite bitrate', () => {
@@ -147,6 +149,45 @@ describe('assertViewEndContract', () => {
 
   it('fails negative counters', () => {
     assert.throws(() => assertViewEndContract(vodViewEnd({ seekCount: -1 })), /seekCount/);
+  });
+
+  it('accepts every startState with a startupTime that agrees with it', () => {
+    assertViewEndContract(vodViewEnd({ startState: 'played', startupTime: 400 }));
+    assertViewEndContract(vodViewEnd({ startState: 'awaitingTap', startupTime: null, exitType: 'abandoned', completionRate: null, qoeScore: null }));
+    for (const startState of ['failed', 'never']) {
+      assertViewEndContract(vodViewEnd({ startState, startupTime: null, exitType: 'abandoned', completionRate: null, qoeScore: 0 }));
+    }
+  });
+
+  it('scores a view that never played 0 or null, and one awaiting a tap null (qoeVersion 3)', () => {
+    const noFrame = { startupTime: null, exitType: 'abandoned', completionRate: null };
+    assert.throws(() => assertViewEndContract(vodViewEnd({ ...noFrame, startState: 'never', qoeScore: 90 })), /qoeScore/);
+    assert.throws(() => assertViewEndContract(vodViewEnd({ ...noFrame, startState: 'failed', qoeScore: 40 })), /qoeScore/);
+    assert.throws(() => assertViewEndContract(vodViewEnd({ ...noFrame, startState: 'awaitingTap', qoeScore: 0 })), /qoeScore/);
+    assertViewEndContract(vodViewEnd({ ...noFrame, startState: 'never', qoeScore: null }));
+  });
+
+  it('fails a viewEnd without startState', () => {
+    const body = vodViewEnd();
+    delete body.startState;
+    assert.throws(() => assertViewEndContract(body), /startState/);
+  });
+
+  it('fails an unknown startState', () => {
+    assert.throws(() => assertViewEndContract(vodViewEnd({ startState: 'waiting' })), /startState/);
+    assert.throws(() => assertViewEndContract(vodViewEnd({ startState: null })), /startState/);
+  });
+
+  it('fails a played view with no startupTime, and a never-played view with one', () => {
+    assert.throws(() => assertViewEndContract(vodViewEnd({ startState: 'played', startupTime: null })), /startState/);
+    assert.throws(
+      () => assertViewEndContract(vodViewEnd({ startState: 'awaitingTap', startupTime: 400, exitType: 'abandoned', completionRate: null, qoeScore: null })),
+      /startState/
+    );
+  });
+
+  it('lists startState among the required fields', () => {
+    assert.ok(VIEW_END_REQUIRED.includes('startState'));
   });
 
   it('lists every required 1.22 field', () => {

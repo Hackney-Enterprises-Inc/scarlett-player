@@ -87,6 +87,7 @@ export type AnalyticsEventType =
   | 'viewStart'
   | 'viewEnd'
   | 'playRequest'
+  | 'playBlocked'
   | 'videoStart'
   | 'heartbeat'
   | 'pause'
@@ -110,9 +111,21 @@ export type ViewerPlan = 'free' | 'ppv' | 'subscriber' | 'premium' | string;
 export type ExitType = 'completed' | 'liveEnded' | 'abandoned' | 'error' | 'background' | null;
 
 /**
- * Playback state for session tracking.
+ * Playback state for session tracking. `awaitingTap` is a play request the
+ * browser refused (autoplay policy): the view is waiting for the viewer, and
+ * it clears when the next play request or first frame follows.
  */
-export type SessionPlaybackState = 'loading' | 'playing' | 'paused' | 'ended' | 'error';
+export type SessionPlaybackState = 'loading' | 'playing' | 'paused' | 'ended' | 'error' | 'awaitingTap';
+
+/**
+ * Why a view did or did not start, sent on `viewEnd` as `startState`.
+ *
+ * - `played`: a first frame was confirmed (`videoStart` was sent)
+ * - `awaitingTap`: the browser refused autoplay (`playBlocked`) and the viewer has not tapped again since
+ * - `failed`: no first frame, and an error beacon was sent (or the view ended in error)
+ * - `never`: no first frame and nothing explains it (stream offline without an error, a stall, an idle page)
+ */
+export type StartState = 'played' | 'awaitingTap' | 'failed' | 'never';
 
 /**
  * Device type enumeration.
@@ -382,6 +395,9 @@ export interface ViewSession {
   /** How the view ended */
   exitType: ExitType;
 
+  /** The browser refused a play request in this view (`playback:blocked`) */
+  playBlocked: boolean;
+
   // === Classification ===
   /**
    * Last known live classification: null until the provider has classified
@@ -418,6 +434,19 @@ export interface BeaconPayload {
 
   /** Frame-confirmation signal on videoStart; playing alone is not confirmation. */
   firstFrameSource?: 'rvfc' | 'progress';
+  /**
+   * On playBlocked: why the play request was refused. Only `autoplay` exists:
+   * the browser's autoplay policy, so the view is waiting for a tap.
+   */
+  reason?: 'autoplay';
+  /** On playBlocked: the rejection's name (`NotAllowedError`), when the provider reported one. */
+  errorName?: string;
+  /**
+   * On viewEnd: how the view started. Separates a viewer who never tapped
+   * play (`awaitingTap`) from a start that errored (`failed`) and one with no
+   * explanation (`never`); see {@link StartState}.
+   */
+  startState?: StartState;
   /** Element readyState at the play request (0 when no element is available). */
   readyState?: number;
   /** True on playRequest when the request position is greater than zero. */
@@ -445,9 +474,16 @@ export interface BeaconPayload {
   /** Milliseconds from host-supplied playerInitTime to plugin initialization. */
   playerInitMs?: number;
 
-  /** Continuous QoE scoring contract identifier. */
-  qoeVersion?: 2;
-  /** Null for an access-denied fatal view. */
+  /**
+   * Continuous QoE scoring contract identifier. 3 since the release that scores
+   * views with no first frame by cause (1 and 2 are older producers).
+   */
+  qoeVersion?: 3;
+  /**
+   * Null for an access-denied fatal view, a view that never asked to play or
+   * is still waiting for a tap, and a running view that has shown no frame
+   * yet. 0 for a view that asked to play and never got a frame.
+   */
   qoeScore?: number | null;
 
   /**
@@ -474,6 +510,12 @@ export interface BeaconPayload {
   retriesExhausted?: boolean;
   /** Whether reconnect attempts were exhausted. */
   reconnectExhausted?: boolean;
+  /**
+   * On a fatal error beacon: playback froze and stayed frozen past the
+   * provider's stall ceiling (`stallTimeoutMs`), as opposed to a reconnect
+   * window that simply ran out.
+   */
+  stalled?: boolean;
   /**
    * On an error beacon: the provider will auto-reconnect, so the fatal
    * error is reported as a warning and the view stays open.
@@ -741,7 +783,7 @@ export interface AnalyticsMetricsSnapshot {
  */
 export interface AnalyticsQoESnapshot {
   score: number | null;
-  version: 2;
+  version: 3;
 }
 
 /**

@@ -269,8 +269,10 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
    * Start playback on the element after the remote stream attaches.
    *
    * A rejection is the autoplay policy (no gesture yet, sound on): the
-   * element stays paused and the viewer's own play works. It is logged, not
-   * reported, because nothing is broken.
+   * element stays paused and the viewer's own play works. Nothing is broken,
+   * so it is no error: a `NotAllowedError` is announced as `playback:blocked`
+   * (analytics reports the view as waiting for a tap), anything else is only
+   * logged.
    */
   const playElement = async (): Promise<void> => {
     if (!video) return;
@@ -278,9 +280,13 @@ export function createWHEPPlugin(config?: WHEPPluginConfig): IWHEPPlugin {
       await video.play();
     } catch (error) {
       isCorePlayRequested = false;
+      const name = (error as Error | null)?.name;
       api?.logger.info('WHEP: autoplay refused; waiting for the viewer', {
-        reason: (error as Error)?.name,
+        reason: name,
       });
+      if (name === 'NotAllowedError') {
+        api?.emit('playback:blocked', { reason: 'autoplay', name });
+      }
     }
   };
 

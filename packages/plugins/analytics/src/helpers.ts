@@ -317,11 +317,26 @@ export function getConnectionType(): string {
 }
 
 /**
+ * The QoE scoring contract this plugin implements, sent as `qoeVersion` on
+ * every beacon that carries `qoeScore` and in the diagnostics snapshot.
+ * 1 and 2 are older producers; 3 scores a view with no first frame by cause
+ * (HEI-SCARLETT-87).
+ */
+export const QOE_VERSION = 3 as const;
+
+/**
  * Calculate Quality of Experience (QoE) score.
  * Score ranges from 0-100 based on multiple factors.
  *
+ * `noFrameCause` scores a view that never showed a first frame by why:
+ * `tried` (it asked to play and failed) is 0, `idle` (it never asked, or the
+ * browser refused autoplay and it is still waiting for a tap) and `open` (the
+ * view is still running, so there is nothing to measure yet) are null, which a
+ * reader excludes from averages. Absent, the view played and is scored on its
+ * measurements. An error exit is decided first, whatever the cause.
+ *
  * @param params - QoE calculation parameters
- * @returns QoE score (0-100), or null for a fatal access denial
+ * @returns QoE score (0-100), or null for a fatal access denial or a view that could not be measured
  */
 export function calculateQoEScore(params: {
   startupTime: number | null;
@@ -332,6 +347,8 @@ export function calculateQoEScore(params: {
   exitType: string | null;
   warningCount: number;
   fatalErrorCategory: string | null;
+  /** Why the view has no first frame; absent when it played. See above. */
+  noFrameCause?: 'tried' | 'idle' | 'open';
 }): number | null {
   const {
     startupTime,
@@ -342,8 +359,10 @@ export function calculateQoEScore(params: {
     exitType,
     warningCount,
     fatalErrorCategory,
+    noFrameCause,
   } = params;
   if (exitType === 'error') return fatalErrorCategory === 'access' ? null : 0;
+  if (noFrameCause !== undefined) return noFrameCause === 'tried' ? 0 : null;
   const scores = [
     startupTime === null ? 100 : 100 * 0.5 ** (Math.max(0, startupTime) / 4000),
     Math.min(

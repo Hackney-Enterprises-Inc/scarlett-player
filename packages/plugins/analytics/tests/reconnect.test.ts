@@ -345,3 +345,17 @@ it('keeps a pre-frame load timeout marked reconnecting open without an error exi
   expect(h.plugin.getMetrics()).toMatchObject({ exitType: null, reconnectCount: 1, rebufferCount: 0 });
   await h.plugin.destroy(); expect(h.sent('viewEnd')[0]?.exitType).toBe('abandoned');
 });
+
+it('marks the terminal error of a stall ceiling with stalled: true so the server can tell it from a closed reconnect window', async () => {
+  const h = await createHarness();
+  h.bus.emit('error', { code: ErrorCode.MEDIA_NETWORK_ERROR, timestamp: Date.now(), message: 'Playback stalled for 120s and did not recover', fatal: true, detail: { type: 'network', retriesExhausted: true, attempts: 3, reconnectExhausted: true, stalled: true } });
+  expect(h.sent('error').at(-1)).toMatchObject({ errorSeverity: 'fatal', reconnectExhausted: true, stalled: true });
+  await h.plugin.destroy();
+});
+
+it('does not send stalled when the detail has none or it is not a boolean', async () => {
+  const h = await createHarness();
+  h.bus.emit('error', { code: ErrorCode.MEDIA_NETWORK_ERROR, timestamp: Date.now(), message: 'x', fatal: true, detail: { type: 'network', stalled: 'yes' as unknown as boolean } });
+  expect(h.sent('error').at(-1)).not.toHaveProperty('stalled');
+  await h.plugin.destroy();
+});

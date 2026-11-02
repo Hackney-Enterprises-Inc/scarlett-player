@@ -31,7 +31,7 @@ export function errorDetail(detail: unknown): Record<string, number | boolean> {
   for (const key of ['httpStatus', 'mediaErrorCode', 'networkState', 'readyState', 'attempts']) {
     if (typeof input[key] === 'number' && Number.isFinite(input[key])) result[key] = input[key] as number;
   }
-  for (const key of ['retriesExhausted', 'reconnectExhausted', 'reconnecting', 'timedOut']) {
+  for (const key of ['retriesExhausted', 'reconnectExhausted', 'reconnecting', 'timedOut', 'stalled']) {
     if (typeof input[key] === 'boolean') result[key] = input[key] as boolean;
   }
   return result;

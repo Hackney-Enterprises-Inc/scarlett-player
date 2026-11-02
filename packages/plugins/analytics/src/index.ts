@@ -28,6 +28,7 @@ import type {
   BeaconPayload,
   AnalyticsPluginInstance,
   AnalyticsEventType,
+  StartState,
   AnalyticsVideo,
   AnalyticsDiagnosticsSnapshot,
   AnalyticsMetricsSnapshot,
@@ -47,6 +48,7 @@ import {
   getPlayerSize,
   getConnectionType,
   calculateQoEScore,
+  QOE_VERSION,
   createLatencySampler,
   finitePercent,
   isDevelopment,
@@ -97,6 +99,7 @@ export type {
   IAnalyticsPlugin,
   AnalyticsPluginInstance,
   AnalyticsEventType,
+  StartState,
   AnalyticsVideo,
   AnalyticsDiagnosticsSnapshot,
   AnalyticsMetricsSnapshot,
@@ -544,6 +547,7 @@ export function createAnalyticsPlugin(
       avgBitrate: null,
       playbackState: 'loading',
       exitType: null,
+      playBlocked: false,
       lastKnownIsLive: null,
     };
   }
@@ -790,7 +794,7 @@ export function createAnalyticsPlugin(
       errorCount: session.errorCount,
       warningCount: session.warningCount,
       qoeScore: getQoEScore(),
-      qoeVersion: 2,
+      qoeVersion: QOE_VERSION,
       // Absent entirely on VOD: nothing ever emitted a live:latency reading
       ...(latencySampler.summary() ?? {}),
       ...(resolveIsLive() === true ? { dvrTime: reportedCredit().dvrTime } : {}),
@@ -848,6 +852,7 @@ export function createAnalyticsPlugin(
       rebufferRatio,
       ...(session.fatalErrorCategory ? { fatalErrorCategory: session.fatalErrorCategory } : {}),
       exitType: session.exitType,
+      startState: resolveStartState(),
       completionRate,
       // Declares the units of both gauges. It rides the viewEnd data, which
       // buildPayload spreads after customDimensions, so a host dimension of
@@ -915,7 +920,29 @@ export function createAnalyticsPlugin(
       exitType: session.exitType,
       warningCount: session.warningCount,
       fatalErrorCategory: session.fatalErrorCategory,
+      noFrameCause: qoeNoFrameCause(),
     });
+  }
+
+  /**
+   * Why this view has no first frame, for its QoE score (HEI-SCARLETT-87).
+   *
+   * A running view is `open`: there is nothing to measure yet, so a heartbeat
+   * carries a null score rather than a flattering one. Once it has ended, a
+   * view that errored or asked to play without getting a frame `tried`; one
+   * that never asked, or was refused autoplay and is still waiting for a tap,
+   * is `idle` (not the player's fault).
+   *
+   * @returns The cause, or undefined when a first frame was confirmed
+   */
+  function qoeNoFrameCause(): 'tried' | 'idle' | 'open' | undefined {
+    if (session.firstFrameTime !== null) return undefined;
+    // Open means no viewEnd yet. exitType is not the test: a hidden tab sets
+    // 'background' while the view is still running.
+    if (session.viewEnd === null) return 'open';
+    if (session.errorCount > 0) return 'tried';
+    if (session.playBlocked && session.playbackState === 'awaitingTap') return 'idle';
+    return session.playRequestTime !== null ? 'tried' : 'idle';
   }
 
   /**
@@ -942,6 +969,8 @@ export function createAnalyticsPlugin(
     // The unload path (sendRebufferEnd false) uses the synchronous unload
     // transport, so the trailing seeking and the unload viewEnd go out as two
     // dispatches in creation order; no seeking beacon may follow a viewEnd.
+    // A plugin failure still held for dedupe goes out before this view closes
+    flushPluginError();
     stopStallProgress();
     cancelFrameConfirmation();
     seekWindow.end(!sendRebufferEnd);
@@ -1397,6 +1426,99 @@ export function createAnalyticsPlugin(
   function markedReconnecting(detail: unknown): boolean {
     return !!detail && typeof detail === 'object'
       && (detail as Record<string, unknown>).reconnecting === true;
+  }
+
+  /**
+   * How this view started, for `viewEnd`.
+   *
+   * A confirmed first frame is `played` whatever happened after. Without one,
+   * an error beacon (or an error exit) is `failed`, a refused play request the
+   * viewer has not tapped again since is `awaitingTap`, and nothing else is
+   * `never` (a tap after a refusal that still produced no frame included).
+   *
+   * @returns The view's start state
+   */
+  function resolveStartState(): StartState {
+    if (session.firstFrameTime !== null) return 'played';
+    if (session.exitType === 'error' || session.errorCount > 0) return 'failed';
+    if (session.playBlocked && session.playbackState === 'awaitingTap') return 'awaitingTap';
+    return 'never';
+  }
+
+  /**
+   * Handle `playback:blocked`: the browser refused a play request.
+   *
+   * `playback:play` has already marked the view playing; nothing is playing,
+   * so it goes back to `awaitingTap` and accrues no play time. Sends one
+   * `playBlocked` beacon per refusal. Ignored after the view's viewEnd. A
+   * block after a first frame (a resume the browser refused) is reported but
+   * leaves the view's state alone.
+   *
+   * @param payload - Reason and rejection name from the provider
+   */
+  function onPlayBlocked(payload?: { reason?: string; name?: string }): void {
+    if (!api || session.viewEnd !== null) return;
+    accrueTime();
+    session.playBlocked = true;
+    // The refused request is settled: the viewer's tap is a new request, with its
+    // own playRequest beacon and its own start for the startup time
+    playRequestPending = false;
+    if (session.firstFrameTime === null) session.playbackState = 'awaitingTap';
+    sendBeacon('playBlocked', {
+      reason: 'autoplay',
+      ...(typeof payload?.name === 'string' && payload.name ? { errorName: payload.name } : {}),
+      readyState: api.container.querySelector('video')?.readyState ?? 0,
+    });
+  }
+
+  /**
+   * A `plugin:error` waiting one task for the general `error` that may follow.
+   *
+   * `PluginManager.initPlugin()` emits `plugin:error` and rethrows, and a
+   * provider that fails inside `load()` is then reported again by core through
+   * `error`, carrying the very same Error as `originalError`. Reporting both
+   * would count one failure twice, so the plugin report waits: when the
+   * matching `error` arrives it takes the plugin's name and is the only beacon;
+   * otherwise (a plugin that failed outside load()) the held report goes out
+   * unchanged.
+   */
+  let pendingPluginError: { name: string; cause: unknown; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  /**
+   * Handle a plugin that failed to initialise (`plugin:error`).
+   *
+   * Reported as a non-fatal `PLUGIN_SETUP_FAILED` error beacon (category
+   * `player`) naming the plugin, so a silent init failure shows up server
+   * side. It does not end the view: core reports a fatal error of its own
+   * when the player cannot play. The report is held for one task so that a
+   * failure core also reports through `error` is sent once (see
+   * `pendingPluginError`).
+   *
+   * @param payload - The plugin name and the error it threw
+   */
+  function onPluginError(payload: { name?: string; error?: unknown }): void {
+    flushPluginError();
+    const name = typeof payload?.name === 'string' ? payload.name : 'unknown';
+    pendingPluginError = {
+      name,
+      cause: payload?.error,
+      timer: setTimeout(flushPluginError, 0),
+    };
+  }
+
+  /** Send the held `plugin:error` report now, if there is one. */
+  function flushPluginError(): void {
+    const held = pendingPluginError;
+    if (!held) return;
+    pendingPluginError = null;
+    clearTimeout(held.timer);
+    const cause = held.cause as { message?: unknown; name?: unknown } | undefined;
+    onCoreError({
+      code: 'PLUGIN_SETUP_FAILED',
+      name: typeof cause?.name === 'string' ? cause.name : undefined,
+      message: typeof cause?.message === 'string' && cause.message ? cause.message : 'init failed',
+      fatal: false,
+    }, held.name);
   }
 
   /**
@@ -2020,12 +2142,23 @@ export function createAnalyticsPlugin(
    * emit `{ code, message, fatal }` with no `Error` at all. An `Error` keeps
    * its `name` as the error type; a structured error without one reports its
    * `code`. Either way `errorCode` carries the code when there is one. A
-   * payload with neither a string `code` nor a string `message` is ignored,
-   * as is any error after the view's viewEnd. A fatal error marked
+   * payload with neither a string `code` nor a string `message` is sent as a
+   * generic `CoreError`, never dropped; an error after the view's viewEnd is
+   * ignored. A fatal error marked
    * `detail.reconnecting` is sent as a warning and leaves the view open.
+   *
+   * @param err - The core `PlayerError`, or a hand-built payload
+   * @param pluginName - Set for a plugin init failure: the beacon names the plugin
    */
-  function onCoreError(err: any): void {
+  function onCoreError(err: any, pluginName?: string): void {
     if (!err || session.viewEnd !== null) return;
+    // The same Error as a held plugin:error: one failure, one beacon, naming the plugin
+    const held = pendingPluginError;
+    if (held && !pluginName && err.originalError !== undefined && err.originalError === held.cause) {
+      pendingPluginError = null;
+      clearTimeout(held.timer);
+      pluginName = held.name;
+    }
     const original = err.originalError || err;
     const code: string | undefined =
       typeof err.code === 'string' ? err.code
@@ -2044,8 +2177,13 @@ export function createAnalyticsPlugin(
       type = code || name || 'CoreError';
       message = (typeof err.message === 'string' && err.message) || 'Unknown core error';
     } else {
-      return;
+      // No string code or message: still a failure, and the one that used to
+      // vanish. Reported generically rather than dropped.
+      type = 'CoreError';
+      message = 'Unknown core error';
     }
+
+    if (pluginName) message = `Plugin ${pluginName}: ${message}`;
 
     session.errorCount++;
     const category = classifyError(err);
@@ -2321,6 +2459,9 @@ export function createAnalyticsPlugin(
       const unsubSeeked = api.on('playback:seeked', onSeekEnded);
       const unsubError = api.on('media:error', onError);
       const unsubCoreError = api.on('error', onCoreError);
+      const unsubPluginError = api.on('plugin:error', onPluginError);
+      // Absent from a core older than this event: it just never fires
+      const unsubBlocked = api.on('playback:blocked', onPlayBlocked);
       const unsubRecovered = api.on('error:recovered', onRecovered);
       const unsubReconnecting = api.on('error:reconnecting', onReconnecting);
       const unsubUnloaded = api.on('source:unloaded', onSourceUnloaded);
@@ -2345,6 +2486,8 @@ export function createAnalyticsPlugin(
         unsubEnded,
         unsubError,
         unsubCoreError,
+        unsubPluginError,
+        unsubBlocked,
         unsubRecovered,
         unsubReconnecting,
         unsubUnloaded,
@@ -2384,6 +2527,7 @@ export function createAnalyticsPlugin(
       }
 
       // Send final view end if not already sent
+      flushPluginError();
       preInitEvents = [];
       if (hasSession && !session.viewEnd) {
         session.exitType = session.exitType || 'abandoned';
@@ -2524,7 +2668,7 @@ export function createAnalyticsPlugin(
           },
           qoe: {
             score: null,
-            version: 2,
+            version: QOE_VERSION,
           },
         };
       }
@@ -2571,7 +2715,7 @@ export function createAnalyticsPlugin(
 
       const qoe: AnalyticsQoESnapshot = {
         score: getQoEScore(),
-        version: 2,
+        version: QOE_VERSION,
       };
 
       const rawPlaybackState = api.getState('playbackState') || 'idle';

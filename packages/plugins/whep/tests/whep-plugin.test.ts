@@ -647,6 +647,29 @@ describe('the latency estimate', () => {
   });
 });
 
+describe('autoplay refusal', () => {
+  it('announces playback:blocked for a NotAllowedError and reports no error', async () => {
+    installFetch([answer()]);
+    (HTMLMediaElement.prototype.play as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async () => { throw new DOMException('gesture needed', 'NotAllowedError'); }
+    );
+    const { plugin, api } = await setup();
+    await load(plugin);
+    expect(api.emitted('playback:blocked')).toEqual([{ reason: 'autoplay', name: 'NotAllowedError' }]);
+    expect(fatalErrors(api)).toEqual([]);
+  });
+
+  it('does not announce playback:blocked for another play rejection', async () => {
+    installFetch([answer()]);
+    (HTMLMediaElement.prototype.play as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async () => { throw new DOMException('aborted', 'AbortError'); }
+    );
+    const { plugin, api } = await setup();
+    await load(plugin);
+    expect(api.emitted('playback:blocked')).toEqual([]);
+  });
+});
+
 describe('playback controls', () => {
   it('plays and pauses the element on the core events without echoing them', async () => {
     installFetch([answer()]);

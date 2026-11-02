@@ -1,5 +1,7 @@
 /**
- * Independent 1.22 viewEnd wire-contract checks for the capture harness.
+ * Independent 1.22 viewEnd wire-contract checks for the capture harness, plus
+ * `startState` (the release after 1.26.0). The harness bundles the player from
+ * source, so this always checks the current producer.
  *
  * Mirrors the production payload builder's field set without importing it.
  * Normal fetch and unload sendBeacon viewEnds share these required fields.
@@ -29,6 +31,7 @@ export const VIEW_END_REQUIRED = [
   'exitType',
   'completionRate',
   'gaugeScale',
+  'startState',
 ];
 
 /** Live-only latency summary; absent on VOD. */
@@ -54,6 +57,9 @@ export const SEGMENT_KEYS = [
 export const FRAME_KEYS = ['decodedFrames', 'droppedFrames'];
 
 const EXIT_TYPES = new Set(['completed', 'liveEnded', 'abandoned', 'error', 'background']);
+
+/** Why a view did or did not start playing; sent on every viewEnd by the producer that carries it. */
+export const START_STATES = new Set(['played', 'awaitingTap', 'failed', 'never']);
 
 const COUNTERS = [
   'rebufferCount',
@@ -118,7 +124,7 @@ export function assertViewEndContract(body, options = {}) {
     if (!(key in body)) throw new Error(`viewEnd lacks required field ${key}`);
   }
 
-  if (body.qoeVersion !== 2) throw new Error(`qoeVersion ${JSON.stringify(body.qoeVersion)}, expected 2`);
+  if (body.qoeVersion !== 3) throw new Error(`qoeVersion ${JSON.stringify(body.qoeVersion)}, expected 3`);
   if (body.qoeScore !== null && !(typeof body.qoeScore === 'number' && body.qoeScore >= 0 && body.qoeScore <= 100)) {
     throw new Error(`qoeScore ${JSON.stringify(body.qoeScore)}`);
   }
@@ -139,6 +145,21 @@ export function assertViewEndContract(body, options = {}) {
     throw new Error(`rebufferRatio ${JSON.stringify(body.rebufferRatio)} is not null or a percent`);
   }
   if (!EXIT_TYPES.has(body.exitType)) throw new Error(`exitType ${JSON.stringify(body.exitType)}`);
+  if (!START_STATES.has(body.startState)) throw new Error(`startState ${JSON.stringify(body.startState)} is not one of ${[...START_STATES].join(', ')}`);
+  // qoeVersion 3: a view with no first frame is scored by cause, never with a
+  // flattering number. It tried and failed (0), or could not be measured (null).
+  if (body.startState !== 'played' && body.qoeScore !== null && body.qoeScore !== 0) {
+    throw new Error(`qoeScore ${JSON.stringify(body.qoeScore)} on startState ${body.startState}: a view with no first frame scores 0 or null`);
+  }
+  if (body.startState === 'awaitingTap' && body.qoeScore !== null) {
+    throw new Error(`qoeScore ${JSON.stringify(body.qoeScore)} on startState awaitingTap: a view waiting for a tap is not scored`);
+  }
+  // startupTime is measured at the first confirmed frame, which is exactly what
+  // separates 'played' from every other start state
+  if (body.startState === 'played' && body.startupTime === null) throw new Error('startState played but startupTime is null');
+  if (body.startState !== 'played' && body.startupTime !== null) {
+    throw new Error(`startState ${body.startState} but startupTime ${JSON.stringify(body.startupTime)} says a frame was shown`);
+  }
 
   if (live) {
     if (body.completionRate !== null) throw new Error(`live completionRate ${JSON.stringify(body.completionRate)}, expected null`);

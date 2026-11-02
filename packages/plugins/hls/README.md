@@ -62,6 +62,15 @@ position now lands where `seekToLive()` would and keeps playing. This holds on
 both hls.js and native Safari playback. VOD seeks still clamp to
 `[0, duration]`.
 
+## Autoplay refusal
+
+When the browser rejects the element's `play()` for a core `play()` request with
+a `NotAllowedError` (autoplay policy: no gesture yet, sound on), the plugin
+emits `playback:blocked { reason: 'autoplay', name }` and logs at info. The
+element stays paused and the viewer's own play works. Any other rejection is
+logged as a warning and emits nothing. A resume the browser refuses after a
+reconnect or error recovery is logged at info, not emitted.
+
 ## Segment measurements
 
 Both the regular and light hls.js builds emit the core `media:segment` event
@@ -126,6 +135,7 @@ createHLSPlugin({
   reconnectBaseDelayMs: 2000,
   reconnectMaxDelayMs: 30000,
   reconnectWindowMs: 300000,    // Keep trying for 5 minutes
+  stallTimeoutMs: 120000,       // Fatal error if a mid-playback stall outlasts this; 0 disables
 });
 ```
 
@@ -275,6 +285,29 @@ where they apply, the fields below (the media error fields are native only):
 | `mediaErrorCode` | `MediaError.code` of the element error (1 aborted, 2 network, 3 decode, 4 source not supported) |
 | `mediaErrorMessage` | `MediaError.message`, when the browser gave one |
 | `timedOut` | `true` when `loadTimeoutMs` ended the load, on either path (native or hls.js). The message is exactly `Video took too long to load (network timeout)`, `retriesExhausted` is `false`, and on native the media error fields describe the last error seen, if any |
+| `stalled` | `true` when `stallTimeoutMs` ended a mid-playback stall (see below); `reconnectExhausted` is `true` too |
+
+### Stall watchdog and `stallTimeoutMs`
+
+While playing, a watchdog checks that `currentTime` advances, every
+`max(15 s, 4 x target duration)` capped at 30 s, on both hls.js and native HLS.
+When it has not moved for that long it starts auto-reconnect, as for a fatal
+network error. Checks are skipped while the page is hidden or the browser
+reports it is offline (the `online` event already retries), and that time is
+not counted as stalled time. A seek is not a stall, but one that never ends is:
+when the player has been `seeking` for a whole check interval with no segment
+arriving (hls.js then keeps re-seeking to the moving live window, so
+`currentTime` jumps forward while nothing is shown), the jumps are ignored and
+the seeking time counts as stalled time. The analytics error beacon carries
+`stalled: true` on the terminal error.
+
+`stallTimeoutMs` (default `120000`, `0` disables) bounds the whole stall. Its
+clock starts at the first detection and keeps running across reconnect attempts,
+including one that reloads fine and stalls again; only real playback progress
+resets it. When it runs out, live and VOD alike, reconnecting stops and the
+player emits `error:reconnect-exhausted` followed by a fatal `error`
+(`MEDIA_NETWORK_ERROR`, `detail.stalled: true`) instead of rebuffering silently
+forever. It does not run while the viewer is paused.
 
 Every media element error is also reported on `media:error`, as an
 `Error` whose numeric `code` is the `MediaError.code` and whose `detail`

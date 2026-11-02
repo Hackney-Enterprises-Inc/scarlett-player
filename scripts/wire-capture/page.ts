@@ -18,6 +18,15 @@
  *   extended   - fail playlist loads fast for the ten-minute long-outage
  *                fixture; reconnect delays and analytics idleTimeout stay at
  *                production defaults.
+ *   autoplay   - call `player.play()` from the page itself right after
+ *                `createPlayer` resolves, with no user gesture, unmuted. The
+ *                autoplay-blocked scenario loads this page in a browser that
+ *                keeps Chromium's default autoplay policy. The runner must not
+ *                call play() itself: Playwright's `page.evaluate` carries user
+ *                activation, which would let the play through.
+ *   stall      - set the HLS plugin's `stallTimeoutMs` to this many
+ *                milliseconds (the stall-ceiling scenario). Absent, the
+ *                production default applies.
  *
  * Bundled by the runner with esbuild into a temp directory, with
  * `__PKG_VERSION__` defined from packages/plugins/analytics/package.json so
@@ -72,6 +81,9 @@ const batch = params.has('batch');
 const native = params.has('native');
 const reconnect = params.has('reconnect');
 const extended = params.has('extended');
+const autoplay = params.has('autoplay');
+const stallParam = Number(params.get('stall'));
+const stallTimeoutMs = Number.isFinite(stallParam) && stallParam > 0 ? stallParam : undefined;
 
 const hlsConfig = {
   maxBufferLength: 4,
@@ -80,6 +92,7 @@ const hlsConfig = {
     ? { maxNetworkRetries: 0, retryDelayMs: 50, reconnectBaseDelayMs: 250 }
     : {}),
   ...(extended ? { maxNetworkRetries: 0, retryDelayMs: 50 } : {}),
+  ...(stallTimeoutMs !== undefined ? { stallTimeoutMs } : {}),
 };
 
 /**
@@ -181,8 +194,16 @@ handle.ready = createPlayer({
     clips,
   ],
 }).then(
-  (player) => {
+  async (player) => {
     handle.player = player;
+    if (autoplay) {
+      // No gesture: the page, not the runner, asks to play (see the header)
+      try {
+        await player.play();
+      } catch (error) {
+        handle.initError = `play() threw: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
   },
   (error: unknown) => {
     handle.initError = error instanceof Error ? error.message : String(error);

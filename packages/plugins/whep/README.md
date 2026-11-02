@@ -51,7 +51,9 @@ does (absolute inside the container, `playsInline`, no native controls, the
    server then frees the session by ICE timeout, as when it sends none);
 3. attaches the remote tracks to the element and calls `play()`. When the
    browser's autoplay policy refuses (sound on, no gesture yet), the element
-   stays paused and the viewer's own play works;
+   stays paused and the viewer's own play works. A `NotAllowedError` is
+   announced as `playback:blocked` (`{ reason: 'autoplay', name }`) so analytics
+   can report a view waiting for a tap; it is not an error;
 4. polls `getStats()` once a second for a latency estimate (below).
 
 `destroy()` `DELETE`s the session, closes the connection, and removes the

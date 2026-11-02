@@ -129,6 +129,18 @@ export interface HLSPluginConfig {
   /** Total window to keep auto-reconnecting in milliseconds (default: 300000 = 5 min) */
   reconnectWindowMs?: number;
   /**
+   * Hard ceiling on a mid-playback stall in milliseconds (default: 120000,
+   * 0 disables). The stall watchdog notices `currentTime` not advancing
+   * while the player is playing and starts auto-reconnect; this bounds how
+   * long that can go on. The clock starts at the first stall detection,
+   * survives reconnect attempts that "succeed" and stall again, and resets
+   * only when playback really progresses. When it runs out, reconnecting
+   * stops (live and VOD alike) and a fatal `error` with
+   * `detail.stalled: true` follows `error:reconnect-exhausted`. Not counted
+   * while the page is hidden, the browser is offline, or the viewer paused.
+   */
+  stallTimeoutMs?: number;
+  /**
    * Validate every playlist response before it reaches the M3U8 parser
    * (default: true). A live refresh that returns an error page, a
    * master-only response, or an empty document becomes a normal network

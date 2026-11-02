@@ -63,6 +63,12 @@ export interface PlayerErrorDetail {
    */
   reconnectExhausted?: boolean;
   /**
+   * True on a terminal error a provider emits because playback stalled past
+   * its stall ceiling (the HLS plugin's `stallTimeoutMs`) and did not recover.
+   * Accompanies `reconnectExhausted`.
+   */
+  stalled?: boolean;
+  /**
    * True on a fatal error the provider will try to recover from by
    * auto-reconnecting: `error:reconnecting` follows, then either
    * `error:recovered` or a terminal error with `reconnectExhausted`.

@@ -72,7 +72,7 @@ describe('Analytics Plugin Diagnostics', () => {
     expect(diagnostics.providers).toEqual({});
     expect(diagnostics.errors).toEqual([]);
     expect(diagnostics.qoe.score).toBeNull();
-    expect(diagnostics.qoe.version).toBe(2);
+    expect(diagnostics.qoe.version).toBe(3);
   });
 
   it('composes safe playback state, provider diagnostics, viewId, metrics, and QoE', async () => {
@@ -97,7 +97,7 @@ describe('Analytics Plugin Diagnostics', () => {
       bandwidthEstimate: 5000000,
     });
     expect(diagnostics.metrics).toBeDefined();
-    expect(diagnostics.qoe.version).toBe(2);
+    expect(diagnostics.qoe.version).toBe(3);
 
     // Whitelist check: must NOT dump ViewSession secrets or custom dimensions
     const jsonStr = JSON.stringify(diagnostics);

@@ -123,17 +123,18 @@ The plugin automatically tracks these events:
 |-------|-------------|------|
 | `viewStart` | A view began: player initialized, another video (see [Views and track changes](#views-and-track-changes)), or a replay after `ended` | viewId, sessionId, environment, pageUrl (origin + pathname only), optional referrerOrigin, pageLoadToInitMs, optional playerInitMs |
 | `playRequest` | Play requested: core `play()`, a control or autoplay | timestamp, readyState (element readiness), resume (`currentTime > 0` at the request) |
+| `playBlocked` | The browser refused a play request (autoplay policy, a `NotAllowedError`): the view is waiting for the viewer to tap play. Sent when the provider emits `playback:blocked`; a core or provider older than that event never sends it | reason: `autoplay`, optional errorName (`NotAllowedError`), readyState. See [Start state](#start-state) |
 | `videoStart` | First frame confirmed by rVFC or advancing timeupdate, once per view | firstFrameSource: `rvfc` or `progress`; startupTime: play request (core `play()`, control or autoplay) to first frame, in ms |
-| `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 2, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional measurement fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames, decodedFramesTotal, droppedFramesTotal (see below) |
+| `heartbeat` | Periodic update (10s default) while the view is open | watchTime (time the view has been open), playTime (only the time actually spent playing, not stalled or paused), rebufferCount, rebufferDuration, reconnectCount, reconnectDuration, avgBitrate, maxBitrate, qualityChanges, pauseCount, pauseDuration (a pause still in progress included), seekCount, elementSeekCount, errorCount, warningCount, qoeScore, qoeVersion: 3, currentTime, duration; on live views the [latency fields](#live-latency) and dvrTime; optional measurement fields segmentCount, segmentBytes, segmentLoadAvgMs, segmentLoadMaxMs, segmentErrors, segmentThroughputBps, decodedFrames, droppedFrames, decodedFramesTotal, droppedFramesTotal (see below) |
 | `pause` | Playback paused by the viewer. Not sent, and not counted in pauseCount, for the pause the element fires when the media ends (the one `ended` follows). A pause in the last half-second of VOD is sent a moment later, once `ended` has not followed it | currentTime, pauseCount |
 | `seeking` | A player-requested seek started: the first request of a burst, then the burst's latest target once per second; or the first element-driven seek of a burst (see [Seek tracking](#seek-tracking)) | seekTo: the seek target in seconds (not the position the seek left), seekCount at emission, seekSource: `'player'` or `'element'`; on live seeks with an available window, seekableStart and seekableEnd (seconds) |
 | `rebufferStart` | Waiting persisted through `rebufferGraceMs`, visible playback froze for 2 s, or a provider reconnect began; duration starts at waiting, the last sampled advance, or reconnect | rebufferCount, cause: `waiting`, `progress` or `reconnect` |
 | `rebufferEnd` | Confirmed buffering ended, whether by resuming or the stall ending in a pause or the view ending (another video, `ended`, a fatal error, `destroy()`) | duration, totalRebufferTime (ms, including the grace) |
 | `qualityChange` | Quality level changed (manual selection or an automatic ABR switch) | bitrate, width, height, auto |
-| `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), optional errorCode (string or number), fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, networkState, readyState, attempts, retriesExhausted, reconnectExhausted, reconnecting, timedOut when the provider supplies them; online (boolean, when `navigator.onLine` is available); sourceHost (the source's host name only: no scheme, port, path, query or fragment; absent for `blob:`/`data:` sources). Classification uses code/detail, not message text: an element error with no player code is classified by its MediaError code (2 `network`, 3 `media`, 4 `source`). No raw detail or signed URL is sent. A fatal error marked `reconnecting` is sent with errorSeverity `warning` (see [Reconnects](#reconnects)) |
+| `error` | Error occurred: a media element error or player `error` event | errorType, errorMessage (URL query/fragment stripped), optional errorCode (string or number), fatal, errorCategory, errorSeverity; validated httpStatus, mediaErrorCode, networkState, readyState, attempts, retriesExhausted, reconnectExhausted, reconnecting, timedOut, stalled (true on the terminal error of the HLS stall ceiling) when the provider supplies them; online (boolean, when `navigator.onLine` is available); sourceHost (the source's host name only: no scheme, port, path, query or fragment; absent for `blob:`/`data:` sources). Classification uses code/detail, not message text: an element error with no player code is classified by its MediaError code (2 `network`, 3 `media`, 4 `source`). No raw detail or signed URL is sent. A fatal error marked `reconnecting` is sent with errorSeverity `warning` (see [Reconnects](#reconnects)) |
 | `reconnecting` | The provider started auto-reconnecting (see [Reconnects](#reconnects)) | reconnectCount; attempt, delayMs and elapsedMs when supplied as finite numbers; longOutage (when true) |
 | `recovered` | A reconnect succeeded (see [Reconnects](#reconnects)) | duration (ms of the outage), reconnectCount; attempt and elapsedMs when supplied as finite numbers |
-| `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, optional fatalErrorCategory, completionRate and gaugeScale. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or null when no finite duration is known. startupTime is null until the first frame. Both gauges are declared by gaugeScale and bounded as described in [Gauge units](#gauge-units) |
+| `viewEnd` | View ended: the video ended, a terminal fatal error, another video, `player.unload()`, the [idle timeout](#idle-views), the page unloading, or the plugin being destroyed | Everything the heartbeat carries except currentTime and duration, plus startupTime, rebufferRatio, exitType, startState (see [Start state](#start-state)), optional fatalErrorCategory, completionRate and gaugeScale. The unload `viewEnd` carries the same fields. watchTime and playTime include the time since the last heartbeat; pauseDuration includes a pause still open when the view ends. completionRate is null on every live view, 100 for a `completed` view, otherwise the position over the duration, or the last known pair when a `load()` has already zeroed them, or null when no finite duration is known. startupTime is null until the first frame. Both gauges are declared by gaugeScale and bounded as described in [Gauge units](#gauge-units) |
 
 Segment fields and the original frame fields are interval measurements.
 `segmentCount`, `segmentBytes`, `segmentLoadAvgMs`, `segmentLoadMaxMs` and
@@ -210,6 +211,32 @@ from the element's own `timeupdate`, so a provider that emits no bus
 `timeupdate` (WHEP) still confirms in a browser without rVFC.
 `playRequest.readyState` and `resume` describe readiness and a nonzero request
 position, so a warm resume can be distinguished from a cold start.
+
+### Start state
+
+A view that never plays used to look the same whatever the cause. `viewEnd`
+carries `startState` to tell them apart:
+
+| `startState` | Meaning |
+|---|---|
+| `played` | A first frame was confirmed (`videoStart` was sent), whatever happened afterwards |
+| `awaitingTap` | The browser refused autoplay (a `playBlocked` beacon was sent) and the viewer has not tapped again since. Nothing is broken |
+| `failed` | No first frame, and an `error` beacon was sent or the view ended with exitType `error` (a stream that is offline and errors lands here, with `fatalErrorCategory`) |
+| `never` | No first frame and nothing explains it: no error, no refusal. A native Safari stream that retries silently, a stall before the first frame, or a page left open |
+
+While a view is `awaitingTap` no `playTime` accrues and the idle timeout still
+applies, so such a view ends as `abandoned` with `startState: 'awaitingTap'`.
+Group by `startState` rather than counting `abandoned` exits to separate
+autoplay blocks from real failures. `startState` also decides the QoE score of a
+view that never played (see [QoE](#quality-of-experience-qoe-score)). `startState` is
+additive: an ingest that does not know it keeps it as an extra field.
+
+A plugin that fails to initialise (core's `plugin:error`) is sent as a
+non-fatal `error` beacon with errorCode `PLUGIN_SETUP_FAILED` and
+errorCategory `player`, naming the plugin in errorMessage; it does not end the
+view. An `error` event with neither a string `code` nor a string `message` is
+no longer dropped: it is sent as errorType `CoreError`, errorMessage
+`Unknown core error`, category `unknown`.
 
 ### Rebuffer grace and time accounting
 
@@ -642,8 +669,17 @@ heartbeat and no final beacon, and a replay after `ended` was not measured.
 
 ## Quality of Experience (QoE) Score
 
-`qoeVersion: 2` identifies the continuous scoring contract on each heartbeat
-and ordinary `viewEnd` carrying `qoeScore`. The score averages the available
+`qoeVersion: 3` identifies the continuous scoring contract on each heartbeat
+and ordinary `viewEnd` carrying `qoeScore`. Compare scores only within one
+version:
+
+| `qoeVersion` | Producer | What changed |
+|---|---|---|
+| 1 | player 1.19 and earlier | Startup always counted as 100 (the play request was taken as the start) |
+| 2 | 1.20 to 1.26 | Continuous scoring; a view with no first frame still scored near 100 |
+| 3 | the release after 1.26 | A view that never showed a first frame is scored by cause (below) |
+
+For a view that **played** (a first frame was confirmed), the score averages the available
 components: startup `100 × 0.5^(startupTime/4000)` (100 if unknown), smoothness
 `min(100 / sqrt(1 + (rebufferCount/2)^2), 100 × exp(-10 × rebufferDuration/watchTime))`,
 and bitrate quality `clamp(20 + 15 × log2(maxBitrate/250000), 10, 100)`.
@@ -652,13 +688,30 @@ as low quality. Non-fatal warnings subtract `min(20, 3 × warningCount)` from
 the mean. A fatal playback exit scores 0; a view ended by a structured 401,
 403 or 451 access error scores **null**, rather than counting an entitlement
 denial as playback failure. The final result is rounded and clamped to 0–100.
-`getQoEScore()` therefore returns `number | null`.
+
+A view that **never showed a first frame** is not scored on its measurements
+(its startup, rebuffer and bitrate inputs say nothing about a view that
+never played). Under `qoeVersion: 3` it is scored by cause, decided when the
+view ends:
+
+| Cause | `startState` | Score |
+|---|---|---|
+| It asked to play (a `playRequest`) or errored, and no frame came | `failed`, or `never` after a play request | **0** |
+| It never asked to play (a page opened and left), or autoplay was refused and the viewer never tapped | `never` without a play request, `awaitingTap` | **null** |
+| A blocked play that was tapped but still produced no frame | `never` (the tap ended `awaitingTap`) | **0** |
+
+While such a view is still open, heartbeats carry `qoeScore: null` (there is
+nothing to measure yet) rather than a running score that would read as healthy.
+A null is "not measured", not zero: leave it out of averages (`AVG` ignores it)
+and count views with `qoeScore IS NULL` separately if you want the share that
+never started. An error exit is decided first: fatal exits score 0, access
+denials null. `getQoEScore()` therefore returns `number | null`.
 
 Access the score:
 
 ```typescript
 const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
-const qoeScore = analytics.getQoEScore(); // 0–100, or null for a fatal access denial
+const qoeScore = analytics.getQoEScore(); // 0–100, or null (access denial, or a view that could not be measured)
 ```
 
 ## Metrics API
@@ -682,7 +735,7 @@ console.log({
 ## Diagnostics API
 
 Get a synchronous, side-effect free snapshot of player state, provider contributions,
-whitelisted session metrics, and continuous QoE v2:
+whitelisted session metrics, and continuous QoE v3:
 
 ```typescript
 const analytics = player.getPlugin<IAnalyticsPlugin>('analytics');
@@ -693,7 +746,7 @@ console.log(snapshot.viewId);        // Current generated view ID
 console.log(snapshot.playbackState); // Whitelisted playback state projection
 console.log(snapshot.providers);     // Ready provider contributions
 console.log(snapshot.metrics);       // Whitelisted session totals (settled vs open)
-console.log(snapshot.qoe);           // { score: number | null, version: 2 }
+console.log(snapshot.qoe);           // { score: number | null, version: 3 }
 console.log(snapshot.errors);        // Bounded recent structured errors (max 20)
 ```
 
@@ -1032,6 +1085,15 @@ The plugin is designed for minimal performance impact:
 5. If only `viewEnd` is missing, check the endpoint's auth: that beacon
    carries the key as `?api_key=` rather than a header (see
    [API key transport](#api-key-transport))
+
+### Views that never play
+
+Read `startState` on `viewEnd`. `awaitingTap` with a `playBlocked` beacon is
+the browser's autoplay policy, not a fault: start muted, or show a play button.
+`failed` has an `error` beacon with a category. `never` with no `error` and no
+`playBlocked` means the player saw neither a frame nor a failure, such as a
+live stream that is offline and retrying; it needs a look at the source, not
+the player.
 
 ### Missing Events
 
