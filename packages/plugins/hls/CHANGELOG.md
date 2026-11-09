@@ -1,5 +1,15 @@
 # @scarlett-player/hls
 
+## 1.27.1
+
+### Patch Changes
+
+- [#144](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/144) [`3881dc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/3881dc474c45bf96a14b49b8a1deab66c5757d46) Thanks [@alexhackney](https://github.com/alexhackney)! - The hls.js library load is retried once after a short delay on a failed download; this is best-effort, as some browsers cache a failed import and will not refetch.
+
+- [#144](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/144) [`3881dc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/3881dc474c45bf96a14b49b8a1deab66c5757d46) Thanks [@alexhackney](https://github.com/alexhackney)! - Native HLS live streams now report `live: false` once the stream ends, as hls.js does, and a reloaded native VOD is no longer marked live by a NaN duration.
+
+- [#144](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/144) [`3881dc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/3881dc474c45bf96a14b49b8a1deab66c5757d46) Thanks [@alexhackney](https://github.com/alexhackney)! - On iOS/Safari, the first failed reload of an outage (auto-reconnect, error recovery or the AirPlay switch reload) is still reported as a `source` media error tagged `reconnecting` with its attempt number, while repeat failures are only logged instead of raising a "Media source not supported" warning per attempt, and a suspended page is no longer mistaken for a playback stall.
+
 ## 1.27.0
 
 ### Minor Changes

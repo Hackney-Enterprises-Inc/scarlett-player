@@ -1,5 +1,7 @@
 # @scarlett-player/whep
 
+## 1.27.1
+
 ## 1.27.0
 
 ### Patch Changes

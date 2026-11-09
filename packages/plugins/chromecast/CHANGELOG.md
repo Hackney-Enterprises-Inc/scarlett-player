@@ -1,5 +1,11 @@
 # @scarlett-player/chromecast
 
+## 1.27.1
+
+### Patch Changes
+
+- [#144](https://github.com/Hackney-Enterprises-Inc/scarlett-player/pull/144) [`3881dc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/3881dc474c45bf96a14b49b8a1deab66c5757d46) Thanks [@alexhackney](https://github.com/alexhackney)! - Source URLs and the poster URL in load and Chromecast logs are now sanitized; chromecast now requires core ^1.26.0 (was ^1.8.0).
+
 ## 1.27.0
 
 ## 1.26.0

@@ -1,5 +1,7 @@
 # @scarlett-player/audio-ui
 
+## 1.27.1
+
 ## 1.27.0
 
 ## 1.26.0

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.27.1
+
+### Patch Changes
+
+- Updated dependencies [[`3881dc4`](https://github.com/Hackney-Enterprises-Inc/scarlett-player/commit/3881dc474c45bf96a14b49b8a1deab66c5757d46)]:
+  - @scarlett-player/core@1.27.1
+
 ## 1.27.0
 
 ### Patch Changes
