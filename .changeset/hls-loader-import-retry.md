@@ -2,4 +2,4 @@
 '@scarlett-player/hls': patch
 ---
 
-Playback no longer fails on a single flaky hls.js download: the library load is retried once after a short delay before reporting an error.
+The hls.js library load is retried once after a short delay on a failed download; this is best-effort, as some browsers cache a failed import and will not refetch.

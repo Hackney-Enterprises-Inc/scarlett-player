@@ -93,9 +93,12 @@ const HLS_IMPORT_RETRY_DELAY_MS = 1000;
 /**
  * Run a dynamic import and, if it rejects, retry it once after a short delay.
  *
- * A rejected import is usually a failed chunk fetch (flaky network, or a stale
- * hashed chunk after a deploy), which a second attempt often clears. Only the
- * import is retried: a module that loads but reports no support is not.
+ * This is a best-effort single retry. A rejected import is often a failed chunk
+ * fetch (flaky network, or a stale hashed chunk after a deploy). Some browsers
+ * cache a failed module fetch, so the retry helps only where the browser actually
+ * refetches after a failed import; where it does not, the original error surfaces
+ * after the delay. Only the import is retried: a module that loads but reports no
+ * support is not.
  *
  * @param importModule - Thunk around the literal `import()`, so the bundler still sees it
  * @returns The imported module
@@ -119,7 +122,8 @@ async function importWithOneRetry<T>(importModule: () => Promise<T>): Promise<T>
  * - ID3 tag parsing
  * - EME/DRM support
  *
- * If the dynamic import rejects, it is retried once after about 1 s. Concurrent
+ * If the dynamic import rejects, it is retried once after about 1 s (best-effort;
+ * see `importWithOneRetry`). Concurrent
  * callers share the same in-flight load. A final import failure resets the
  * loading state so a later call retries; a constructor that loaded but
  * reports `isSupported()` false stays cached and is returned as is.
