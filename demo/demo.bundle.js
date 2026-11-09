@@ -2724,7 +2724,7 @@
           this.pendingRecoveryAutoplay = null;
           const commandsAtStart = this.playbackCommands;
           try {
-            this.logger.info("Loading source", { source });
+            this.logger.info("Loading source", { source: sanitizeUrl(source) });
             this.stateManager.update({
               playing: false,
               paused: true,
@@ -2751,7 +2751,7 @@
             }
             await this.ensureInitialized();
             if (generation !== this.loadGeneration) {
-              this.logger.info("Load superseded by newer load call", { source });
+              this.logger.info("Load superseded by newer load call", { source: sanitizeUrl(source) });
               return;
             }
             const provider = this.pluginManager.selectProvider(source);
@@ -2770,7 +2770,7 @@
             this.logger.info("Provider selected", { provider: provider.id });
             await this.pluginManager.initPlugin(provider.id);
             if (generation !== this.loadGeneration) {
-              this.logger.info("Load superseded by newer load call", { source });
+              this.logger.info("Load superseded by newer load call", { source: sanitizeUrl(source) });
               return;
             }
             this.stateManager.set("source", { src: source, type: this.detectMimeType(source) });
@@ -2778,7 +2778,7 @@
               await provider.loadSource(source);
             }
             if (generation !== this.loadGeneration) {
-              this.logger.info("Load superseded by newer load call", { source });
+              this.logger.info("Load superseded by newer load call", { source: sanitizeUrl(source) });
               return;
             }
             const shouldPlay = options?.autoplay ?? this.stateManager.getValue("autoplay");
@@ -3174,7 +3174,7 @@
         setPoster(url) {
           this.checkDestroyed();
           this.stateManager.set("poster", url);
-          this.logger.debug("Poster set", { poster: url });
+          this.logger.debug("Poster set", { poster: sanitizeUrl(url) });
         }
         /**
          * Subscribe to an event.
@@ -42307,6 +42307,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent
     };
   }
+  var HLS_IMPORT_RETRY_DELAY_MS = 1e3;
+  async function importWithOneRetry(importModule) {
+    try {
+      return await importModule();
+    } catch {
+      await new Promise((resolve2) => setTimeout(resolve2, HLS_IMPORT_RETRY_DELAY_MS));
+      return importModule();
+    }
+  }
   async function loadHlsJs() {
     if (hlsConstructor) {
       return hlsConstructor;
@@ -42316,7 +42325,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     loadingPromise = (async () => {
       try {
-        const hlsModule = await Promise.resolve().then(() => (init_hls(), hls_exports));
+        const hlsModule = await importWithOneRetry(() => Promise.resolve().then(() => (init_hls(), hls_exports)));
         hlsConstructor = hlsModule.default;
         if (!hlsConstructor.isSupported()) {
           throw new Error("hls.js is not supported in this browser");
@@ -42717,11 +42726,22 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       api.setState("currentAudioTrack", null);
     };
   }
-  function setupVideoEventHandlers(video, api, getLiveMetrics, gate) {
+  function setupVideoEventHandlers(video, api, getLiveMetrics, gate, options) {
     const handlers = [];
+    let lastEvent = null;
+    let lastProgressAt = null;
+    let lastProgressTime = video.currentTime;
     const addHandler = (event, handler) => {
-      video.addEventListener(event, handler);
-      handlers.push({ event, handler });
+      const tracked = (e) => {
+        if (event === "timeupdate" && video.currentTime !== lastProgressTime) {
+          lastProgressTime = video.currentTime;
+          lastProgressAt = Date.now();
+        }
+        if (event !== "error") lastEvent = event;
+        handler(e);
+      };
+      video.addEventListener(event, tracked);
+      handlers.push({ event, handler: tracked });
     };
     const syncEndedFromElement = () => {
       if (video.ended || !api.getState("ended")) return;
@@ -42775,11 +42795,17 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     });
     addHandler("durationchange", () => {
       const rawDuration = video.duration;
-      const isLive = !Number.isFinite(rawDuration) || rawDuration === Infinity;
-      if (isLive) {
+      if (Number.isNaN(rawDuration)) {
+        api.setState("duration", 0);
+      } else if (!Number.isFinite(rawDuration)) {
         api.setState("live", true);
         api.setState("duration", 0);
       } else {
+        if (options?.native && api.getState("live") === true) {
+          api.setState("live", false);
+          resetLiveMetrics(api);
+          api.logger.info("Native live stream ended (finite duration)");
+        }
         api.setState("duration", rawDuration || 0);
       }
       api.emit("media:loadedmetadata", { duration: api.getState("duration") });
@@ -42838,6 +42864,26 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           });
           return;
         }
+        let reloadDetail = null;
+        if (error.code === 4 && video.readyState === 0) {
+          const reload = options?.reload?.() ?? null;
+          if (reload) {
+            if (!reload.report) {
+              api.logger.info("Native reload failed (not reported)", {
+                phase: reload.phase,
+                attempt: reload.attempt,
+                code: error.code,
+                networkState: video.networkState,
+                currentSrcSet: Boolean(video.currentSrc),
+                msSinceProgress: lastProgressAt === null ? void 0 : Date.now() - lastProgressAt,
+                lastEvent: lastEvent ?? void 0,
+                visibility: typeof document !== "undefined" ? document.visibilityState : void 0
+              });
+              return;
+            }
+            reloadDetail = { reconnecting: true, attempts: reload.attempt };
+          }
+        }
         api.logger.error("Video element error", { code: error.code, message: error.message });
         const fallbackMessage = error.code === 4 ? "Media source not supported" : error.code === 2 ? "Media network error" : "Video playback error";
         const playbackError = new Error(error.message || fallbackMessage);
@@ -42847,7 +42893,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
             detail: {
               mediaErrorCode: error.code,
               networkState: video.networkState,
-              readyState: video.readyState
+              readyState: video.readyState,
+              ...reloadDetail
             }
           });
         }
@@ -43171,6 +43218,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     let stallCeilingTimer = null;
     let stallStartedAt = 0;
     let seekingSince = 0;
+    let lastCheckRanAt = 0;
+    let stallCheckIntervalMs = 15e3;
+    let reloadErrorReported = false;
     const readLiveMetrics = () => {
       const metrics = hls && !isNative ? computeLiveMetrics({
         kind: "hls",
@@ -43296,6 +43346,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       mediaRetryCount = 0;
       errorCount = 0;
       errorWindowStart = 0;
+      reloadErrorReported = false;
       lastLevelDetails = null;
       lastLiveMetrics = null;
       lastKnownTargetLatency = null;
@@ -43630,7 +43681,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       try {
         teardownPipeline(new Error("HLS load cancelled: native error recovery"));
         api?.setState("playbackState", "loading");
-        await loadNative(saved_src);
+        await loadNative(saved_src, false, {
+          phase: "recovery",
+          attempt: networkRetryCount + mediaRetryCount
+        });
         if (session !== loadSession) return;
         if (was_live) {
           rejoinNativeLiveEdge();
@@ -43652,12 +43706,21 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         handleNativeFatalError(error, resumePosition);
       }
     };
-    const loadNative = async (src, initial = false) => {
+    const loadNative = async (src, initial = false, reload) => {
       const session = loadSession;
       const videoEl = getOrCreateVideo();
       isNative = true;
+      let reloadInFlight = reload !== void 0;
       if (api) {
-        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
+        cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate, {
+          native: true,
+          reload: () => {
+            if (!reload || !reloadInFlight) return null;
+            const report = !reloadErrorReported;
+            reloadErrorReported = true;
+            return { phase: reload.phase, attempt: reload.attempt, report };
+          }
+        });
       }
       mediaTypeClassifier?.beginSource(src);
       mediaTypeClassifier?.attach(videoEl);
@@ -43667,6 +43730,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         let last_error = null;
         const settle = () => {
           settled = true;
+          reloadInFlight = false;
           if (abortPendingLoad2 === abort) {
             abortPendingLoad2 = null;
           }
@@ -43692,6 +43756,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           }
           settle();
           hasPlayedContent = true;
+          reloadErrorReported = false;
           if (initial) {
             networkRetryCount = 0;
             mediaRetryCount = 0;
@@ -43934,6 +43999,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       reconnectTriggerError = null;
       reconnectExhausted = false;
       isReconnecting = false;
+      reloadErrorReported = false;
     };
     const stallCheckable = () => {
       if (typeof document !== "undefined" && document.hidden) return false;
@@ -43955,6 +44021,15 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         return;
       }
       const elapsed = Date.now() - stallStartedAt;
+      const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+      if (elapsed - ceilingMs > 2 * stallCheckIntervalMs) {
+        api.logger.info("Stall ceiling ran late; page was suspended, restarting the clock", {
+          elapsedMs: Math.round(elapsed)
+        });
+        stallStartedAt = Date.now();
+        stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs);
+        return;
+      }
       api.logger.warn(`Playback stalled for ${Math.round(elapsed / 1e3)}s, giving up`);
       stopStallWatchdog();
       if (reconnectTimer) {
@@ -43975,8 +44050,24 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       const levelTargetDuration = hls?.targetDuration ?? hls?.levels?.[hls?.currentLevel]?.details?.targetduration ?? 0;
       const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
       const checkInterval = Math.min(targetDuration * 1e3, 3e4);
+      stallCheckIntervalMs = checkInterval;
+      lastCheckRanAt = Date.now();
       const check = () => {
         if (!video || !api) return;
+        const ranAt = Date.now();
+        const sinceLastCheck = ranAt - lastCheckRanAt;
+        const late = sinceLastCheck > 2 * checkInterval;
+        lastCheckRanAt = ranAt;
+        if (late) {
+          api.logger.info("Stall check ran late; page was suspended, not stalled", {
+            sinceLastCheckMs: Math.round(sinceLastCheck)
+          });
+          lastStallCheckTime = ranAt;
+          lastStallCheckPosition = video.currentTime;
+          seekingSince = 0;
+          stallWatchdogTimer = setTimeout(check, checkInterval);
+          return;
+        }
         const isPlaying = api.getState("playing");
         const isSeeking = api.getState("seeking");
         let stuckSeeking = false;
@@ -44128,7 +44219,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         currentSrc = saved_src;
         api.setState("playbackState", "loading");
         if (was_native && loader.supportsNativeHLS()) {
-          await loadNative(saved_src);
+          await loadNative(saved_src, false, { phase: "reconnect", attempt: reconnectAttempts });
         } else {
           await loadWithHlsJs(saved_src);
         }
@@ -44506,7 +44597,11 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         cleanup(new Error("HLS load cancelled: switching to native HLS"));
         currentSrc = savedSrc;
         lastKnownTargetLatency = savedTargetLatency;
-        const load = loadNative(savedSrc, takes_over);
+        const load = loadNative(
+          savedSrc,
+          takes_over,
+          takes_over ? void 0 : { phase: "switch", attempt: 1 }
+        );
         takeOverUserLoad(session, load);
         await load;
         if (session !== loadSession) return;
@@ -46319,6 +46414,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     };
   }
 
+  // packages/plugins/chromecast/src/index.ts
+  init_src();
+
   // packages/plugins/chromecast/src/cast-loader.ts
   var CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
   var CAST_SDK_TIMEOUT_MS = 1e4;
@@ -46557,7 +46655,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
           stopRemoteMedia();
           return;
         }
-        api.logger.debug("Media loaded on Chromecast", { src, startTime });
+        api.logger.debug("Media loaded on Chromecast", { src: sanitizeUrl(src), startTime });
       } catch (error) {
         if (destroyed) return;
         api.logger.error("Failed to load media on Chromecast", { error });
@@ -58618,7 +58716,7 @@ ${indent}src: ${tsString(config.src)},`;
   }
 
   // demo/demo.ts
-  var VERSION = true ? "1.27.0" : "dev";
+  var VERSION = true ? "1.27.1" : "dev";
   window.SCARLETT_VERSION = VERSION;
   var VIDEO_DURATION_SECONDS = 634;
   var CAPTIONS_VTT_EN = `WEBVTT

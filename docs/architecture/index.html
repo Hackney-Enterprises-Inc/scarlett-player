@@ -46,7 +46,7 @@
       <a href="../#start">Get started</a>
       <a class="github" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
-    <span class="version-badge" id="version">v1.27.0</span>
+    <span class="version-badge" id="version">v1.27.1</span>
   </header>
 
   <main id="main" class="docs wrap">
@@ -762,7 +762,8 @@ playback and media (<code>PLAYBACK_FAILED</code>, <code>MEDIA_DECODE_ERROR</code
 <code>httpStatus</code>, <code>url</code>, <code>mediaErrorCode</code>, <code>mediaErrorMessage</code>, <code>networkState</code>,
 <code>readyState</code> and <code>timedOut</code>. <code>reconnecting: true</code> marks a fatal error the
 provider will try to recover from by auto-reconnecting; it is absent on
-terminal errors.
+terminal errors. It also rides on the non-fatal <code>media:error</code> for the first
+failed native reload of an outage.
 <code>url</code> must be sanitised by the provider before it is set. The HLS plugin does
 that with its exported <code>sanitizeUrl()</code>, which strips the query string and the
 fragment, keeps origin plus pathname, and replaces path segments that look like
@@ -1029,7 +1030,7 @@ with <code>PIPELINE_ERROR_DECODE</code> a few seconds into part-driven playback.
       <a href="https://www.npmjs.com/package/@scarlett-player/core">npm ↗</a>
       <a href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/blob/main/LICENSE">MIT license</a>
       <a href="../llms.txt" title="The documentation as Markdown, for AI coding agents">llms.txt</a>
-      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.27.0">v1.27.0</a>
+      <a id="release" href="https://github.com/Hackney-Enterprises-Inc/scarlett-player/releases/tag/v1.27.1">v1.27.1</a>
     </div>
   </footer>
 </body>
