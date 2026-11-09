@@ -412,7 +412,9 @@ describe('getLiveInfo()', () => {
         value: { length: 1, start: () => 100, end: () => 160 },
         configurable: true,
       });
-      // jsdom leaves duration NaN, which is how the native path classifies live
+      // A live native stream reports an Infinity duration. (jsdom's NaN is the
+      // element's reset value and classifies nothing.)
+      Object.defineProperty(video, 'duration', { value: Infinity, configurable: true });
       video.dispatchEvent(new Event('durationchange'));
       video.dispatchEvent(new Event('loadedmetadata'));
       await flush();
@@ -475,6 +477,8 @@ describe('getLiveInfo()', () => {
       // loadNative() settles on loadedmetadata, so the switch has to be driven
       const switching = plugin.switchToNative();
       await flush();
+      // The native element reports a live stream as an Infinity duration
+      Object.defineProperty(video, 'duration', { value: Infinity, configurable: true });
       video.dispatchEvent(new Event('durationchange'));
       video.dispatchEvent(new Event('loadedmetadata'));
       await switching;

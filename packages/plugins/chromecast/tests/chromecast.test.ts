@@ -1005,6 +1005,61 @@ describe('Chromecast Plugin', () => {
     });
   });
 
+  describe('load logging', () => {
+    // A signed URL: query token plus a `<expiry>_<nonce>_<sig>` path segment
+    // that core's sanitizeUrl redacts.
+    const PATH_TOKEN = '1700000000_ab12cd34ef56ab78_9f8e7d6c5b4a3921';
+    const QUERY_SECRET = 'SECRET-QUERY-TOKEN-7f3a9c';
+    const SIGNED_SRC = `https://cdn.example/v/${PATH_TOKEN}/master.m3u8?token=${QUERY_SECRET}`;
+
+    beforeEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 Chrome/120.0.0.0',
+        configurable: true,
+      });
+      mockSDK = createMockCastSDK();
+      mockSDK.setup();
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 jsdom',
+        configurable: true,
+      });
+    });
+
+    it('never logs the raw source URL when loadMedia succeeds', async () => {
+      const { api } = createMockApi();
+      const plugin = chromecastPlugin();
+      await plugin.init(api);
+      mockSDK.sessionHandlers.forEach((handler) => handler({ sessionState: 'SESSION_STARTED' }));
+      await Promise.resolve();
+      // SESSION_STARTED loads the player's current source (example.com) on its own.
+      // Clear that call so the count below covers only the signed media:load-request.
+      mockSDK.mockSession.loadMedia.mockClear();
+
+      const loadRequest = (api.on as any).mock.calls.find(
+        (args: any[]) => args[0] === 'media:load-request'
+      )?.[1];
+      expect(loadRequest).toBeDefined();
+      await loadRequest({ src: SIGNED_SRC });
+
+      expect(mockSDK.mockSession.loadMedia).toHaveBeenCalledTimes(1);
+      expect(api.logger.debug).toHaveBeenCalledWith(
+        'Media loaded on Chromecast',
+        expect.objectContaining({ src: 'https://cdn.example/v/:redacted/master.m3u8' })
+      );
+      const payloads = JSON.stringify([
+        ...(api.logger.debug as any).mock.calls,
+        ...(api.logger.info as any).mock.calls,
+        ...(api.logger.warn as any).mock.calls,
+        ...(api.logger.error as any).mock.calls,
+      ]);
+      expect(payloads).not.toContain(QUERY_SECRET);
+      expect(payloads).not.toContain(PATH_TOKEN);
+    });
+  });
+
   describe('graceful degradation', () => {
     it('should not throw when methods called before init', () => {
       const plugin = chromecastPlugin();

@@ -86,12 +86,44 @@ export function describeSupport(): HlsSupportProbes {
   };
 }
 
+/** Delay before the single retry of a rejected hls.js dynamic import (ms). */
+const HLS_IMPORT_RETRY_DELAY_MS = 1000;
+
+/**
+ * Run a dynamic import and, if it rejects, retry it once after a short delay.
+ *
+ * This is a best-effort single retry. A rejected import is often a failed chunk
+ * fetch (flaky network, or a stale hashed chunk after a deploy). Some browsers
+ * cache a failed module fetch, so the retry helps only where the browser actually
+ * refetches after a failed import; where it does not, the original error surfaces
+ * after the delay. Only the import is retried: a module that loads but reports no
+ * support is not.
+ *
+ * @param importModule - Thunk around the literal `import()`, so the bundler still sees it
+ * @returns The imported module
+ * @throws The error from the second attempt if both attempts reject
+ */
+async function importWithOneRetry<T>(importModule: () => Promise<T>): Promise<T> {
+  try {
+    return await importModule();
+  } catch {
+    await new Promise<void>((resolve) => setTimeout(resolve, HLS_IMPORT_RETRY_DELAY_MS));
+    return importModule();
+  }
+}
+
 /**
  * Lazily load hls.js library.
  * Only loads once, subsequent calls return cached constructor.
  *
+ * If the dynamic import rejects, it is retried once after about 1 s (best-effort;
+ * see `importWithOneRetry`). Concurrent
+ * callers share the same in-flight load. A final import failure resets the
+ * loading state so a later call retries; a constructor that loaded but
+ * reports `isSupported()` false stays cached and is returned as is.
+ *
  * @returns Promise resolving to hls.js constructor
- * @throws Error if hls.js is not available
+ * @throws Error prefixed `Failed to load hls.js:` if hls.js is not available
  */
 export async function loadHlsJs(): Promise<HlsConstructor> {
   // Return cached constructor
@@ -108,7 +140,7 @@ export async function loadHlsJs(): Promise<HlsConstructor> {
   loadingPromise = (async () => {
     try {
       // Dynamic import - hls.js is not bundled with the plugin
-      const hlsModule = await import('hls.js');
+      const hlsModule = await importWithOneRetry(() => import('hls.js'));
       hlsConstructor = hlsModule.default as HlsConstructor;
 
       if (!hlsConstructor.isSupported()) {

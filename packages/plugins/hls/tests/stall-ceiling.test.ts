@@ -295,6 +295,33 @@ describe('stall ceiling', () => {
       await plugin.destroy();
     });
 
+    it('does not give up on a stall whose ceiling timer ran late (suspended page)', async () => {
+      // TSP-571: iOS suspends timers with the page but the wall clock runs on,
+      // so a ceiling timer that wakes ten minutes late measured the sleep as
+      // stall time and ended playback with a fatal. Live, so the reconnect
+      // window is not what ends it.
+      vi.useFakeTimers();
+      const plugin = await loadNatively({ stallTimeoutMs: 60000 });
+      state.live = true;
+      listeners.forEach((l) => l({ key: 'live', value: true }));
+      stubCurrentTime(10);
+      setPlaying(true);
+
+      await vi.advanceTimersByTimeAsync(30001);
+      expect(stallDetections()).toHaveLength(1);
+
+      // The page sleeps for ten minutes with no timer running, then wakes
+      vi.setSystemTime(Date.now() + 600_000);
+      await vi.advanceTimersByTimeAsync(61000);
+      expect(stalledErrors()).toHaveLength(0);
+
+      // The clock started over: a stall that really lasts the ceiling still ends
+      await vi.advanceTimersByTimeAsync(61000);
+      expect(stalledErrors()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
     it('does not fire the ceiling while hidden mid-stall', async () => {
       vi.useFakeTimers();
       const plugin = await loadNatively({ stallTimeoutMs: 60000 });
