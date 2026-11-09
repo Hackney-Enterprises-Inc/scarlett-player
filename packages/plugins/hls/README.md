@@ -196,7 +196,14 @@ On native Safari HLS there is no latency API, so `latency` is the distance to
 threshold stays deliberately loose. Treat those numbers as an approximation.
 
 When a live stream ends with `EXT-X-ENDLIST`, `live` turns false and
-`seekableRange` is cleared. `provider.getPlaylistStart()` still answers the
+`seekableRange` is cleared. On native Safari HLS the signal is the element's
+duration: it is `Infinity` while the stream is live and turns finite once the
+playlist ends, which sets `live` to false and clears `seekableRange`,
+`liveEdge`, `liveLatency` and `lowLatencyMode` as on hls.js (logged at info as
+"Native live stream ended (finite duration)"). A `NaN` duration, the element's reset value while a
+reload re-runs the load, classifies nothing: it neither sets nor clears `live`.
+hls.js reads the end from the playlist instead, because its MSE duration is
+finite while the stream is live. `provider.getPlaylistStart()` still answers the
 start of the last playlist hls.js loaded, in seconds on the player timeline,
 which the UI's Replay uses to restart a finished sliding window at its first
 segment (under MSE the element's finite `seekable` range starts at 0). It
@@ -294,7 +301,11 @@ While playing, a watchdog checks that `currentTime` advances, every
 When it has not moved for that long it starts auto-reconnect, as for a fatal
 network error. Checks are skipped while the page is hidden or the browser
 reports it is offline (the `online` event already retries), and that time is
-not counted as stalled time. A seek is not a stall, but one that never ends is:
+not counted as stalled time. The same goes for a suspended page: iOS stops
+timers while a page is backgrounded or locked, but the clock keeps running, so a
+check that runs more than two intervals late (and a `stallTimeoutMs` timer that
+fires that late) starts its measurement over instead of counting the gap as a
+stall. A seek is not a stall, but one that never ends is:
 when the player has been `seeking` for a whole check interval with no segment
 arriving (hls.js then keeps re-seeking to the moving live window, so
 `currentTime` jumps forward while nothing is shown), the jumps are ignored and
@@ -318,6 +329,21 @@ when the error fired). When the browser gives no message, codes 4 and 2 read
 that holds no source at all (`networkState` 3, no `src`, no `currentSrc`): that
 is the page releasing its media, which iOS reports in bursts as a viewer
 leaves, so it is logged at debug and not reported.
+
+The other exception is the plugin's own reload failing on native HLS
+(auto-reconnect, native error recovery, an AirPlay switch). A reload re-runs the
+element's load algorithm, and Safari reports a failure before `loadedmetadata`
+as code 4 with `readyState` 0 whatever the real cause, so for a source that was
+playing it is not an unsupported format. Only the first such failure of an
+outage is reported on `media:error`, and its `detail` also carries
+`reconnecting: true` and `attempts` (the attempt number). Its category stays
+that of code 4 (`source`): no `detail.type` is set. The later failures of the
+same outage are logged at info ("Native reload failed (not reported)", with the
+phase, attempt and element state) and emit nothing. The next outage, after a
+reload has loaded, reports its first failure again. Errors from the first load
+of a `loadSource()`, other codes and any code 4 with metadata loaded are
+reported as before. The same `detail` keys appeared only on fatal `error`
+events until now.
 
 `player.load(url)` resolves when the manifest has been parsed and the source is
 playable. It stays pending through the in-place retries above, and settles as

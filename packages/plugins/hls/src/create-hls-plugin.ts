@@ -31,6 +31,7 @@ import type {
   HlsSupportProbes,
 } from './types';
 import { audioTrackIndex, setupHlsEventHandlers, setupVideoEventHandlers } from './event-map';
+import type { NativeReloadContext } from './event-map';
 import type { PlaybackGate } from './event-map';
 import { createMediaTypeClassifier } from './media-type';
 import type { MediaTypeClassifier } from './media-type';
@@ -385,6 +386,15 @@ export function createHLSPluginWith(
   // When the watchdog first saw the player `seeking` in the current unbroken
   // run of checks (0 = not seeking). A seek that never ends is a stall.
   let seekingSince = 0;
+  // When the watchdog's check last ran, and how often it is meant to. A check
+  // that runs far later than that means timers were suspended (iOS background,
+  // lock, app switch), not that the stream stalled.
+  let lastCheckRanAt = 0;
+  let stallCheckIntervalMs = 15000;
+  // Whether this outage's first failed provider reload has been reported on
+  // `media:error`. Later failures of the same outage are logged only. Reset
+  // when the outage ends (a successful load, `cancelReconnect`, `cleanup`).
+  let reloadErrorReported = false;
 
   /**
    * Measure the live state of the active pipeline.
@@ -643,6 +653,7 @@ export function createHLSPluginWith(
     mediaRetryCount = 0;
     errorCount = 0;
     errorWindowStart = 0;
+    reloadErrorReported = false;
 
     // Live bookkeeping belongs to the playlist being abandoned. Left behind,
     // the next source (or the other side of a provider switch) inherits the
@@ -1308,7 +1319,10 @@ export function createHLSPluginWith(
 
       api?.setState('playbackState', 'loading');
 
-      await loadNative(saved_src);
+      await loadNative(saved_src, false, {
+        phase: 'recovery',
+        attempt: networkRetryCount + mediaRetryCount,
+      });
 
       // A user load, a destroy, or a reconnect superseded this recovery
       if (session !== loadSession) return;
@@ -1362,24 +1376,48 @@ export function createHLSPluginWith(
    * timeout rejects without emitting. The exception is a switch that takes
    * over a user load still pending: that reload is the user's initial load.
    *
+   * Those reloads pass `reload`, which makes the element's own code 4 /
+   * `readyState` 0 failure (WebKit's report of any pre-metadata failure) a
+   * provider reload failure until the load settles: the first of an outage
+   * is reported tagged, the rest are logged (TSP-571).
+   *
    * @param src - Source URL
    * @param initial - Whether this is the first load of a user `loadSource()`
+   * @param reload - Which provider path started this reload and its attempt
+   *        number. Omitted for an initial load, where a wrong URL must stay
+   *        an ordinary, untagged element error.
    * @returns Resolves on `loadedmetadata`
    * @throws Error when the load fails, times out, or is superseded. A
    *         superseded load rejects with "HLS load cancelled..."; a user
    *         `loadSource()` superseded by a provider switch does not surface
    *         that, it waits for the switch's load instead (`awaitUserLoad()`)
    */
-  const loadNative = async (src: string, initial = false): Promise<void> => {
+  const loadNative = async (
+    src: string,
+    initial = false,
+    reload?: Pick<NativeReloadContext, 'phase' | 'attempt'>
+  ): Promise<void> => {
     const session = loadSession;
     const videoEl = getOrCreateVideo();
     isNative = true;
+
+    // True from the moment this reload starts until its load settles. The
+    // element handlers read it through the getter below; `settle()` clears it.
+    let reloadInFlight = reload !== undefined;
 
     // Same single entry point as the hls.js path below: readLiveMetrics()
     // picks its source from the live pipeline, so on this branch it measures
     // the element's own `seekable` range - the only source there is here.
     if (api) {
-      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate);
+      cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate, {
+        native: true,
+        reload: () => {
+          if (!reload || !reloadInFlight) return null;
+          const report = !reloadErrorReported;
+          reloadErrorReported = true;
+          return { phase: reload.phase, attempt: reload.attempt, report };
+        },
+      });
     }
 
     // Native HLS has no manifest event to classify from, so the element's
@@ -1397,6 +1435,9 @@ export function createHLSPluginWith(
 
       const settle = () => {
         settled = true;
+        // The reload (if this was one) is over: later element errors are the
+        // playback's own again
+        reloadInFlight = false;
         // Only release the abort hook if it is still ours - a newer load may
         // have installed its own by the time a stale listener fires
         if (abortPendingLoad === abort) {
@@ -1429,6 +1470,9 @@ export function createHLSPluginWith(
         settle();
 
         hasPlayedContent = true;
+        // The source loaded: whatever outage was reporting is over, so the
+        // next one's first failed reload is reported again
+        reloadErrorReported = false;
 
         // Retries spent getting the source up must not shorten playback's
         // budget; a recovery reload keeps its count so it can still run out
@@ -1807,6 +1851,7 @@ export function createHLSPluginWith(
     reconnectTriggerError = null;
     reconnectExhausted = false;
     isReconnecting = false;
+    reloadErrorReported = false;
   };
 
   /**
@@ -1840,7 +1885,9 @@ export function createHLSPluginWith(
    * own) and reports through the same terminal path as an exhausted window,
    * with `detail.stalled: true`. Skipped, with the clock cleared for the next
    * detection to restart, when the viewer paused or the page is hidden or
-   * offline: that is not the stream's stall.
+   * offline: that is not the stream's stall. Also skipped, with the clock
+   * restarted, when the timer fires more than two check intervals late: the
+   * page was suspended and the wall clock counted time nothing could stall.
    */
   const onStallCeiling = (): void => {
     stallCeilingTimer = null;
@@ -1850,6 +1897,18 @@ export function createHLSPluginWith(
       return;
     }
     const elapsed = Date.now() - stallStartedAt;
+    // The timer ran more than two check intervals late: the page was suspended
+    // (iOS background, lock), and the wall clock kept counting. That is not
+    // `stallTimeoutMs` of stall, so restart the clock rather than give up.
+    const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+    if (elapsed - ceilingMs > 2 * stallCheckIntervalMs) {
+      api.logger.info('Stall ceiling ran late; page was suspended, restarting the clock', {
+        elapsedMs: Math.round(elapsed),
+      });
+      stallStartedAt = Date.now();
+      stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs) as unknown as ReturnType<typeof setTimeout>;
+      return;
+    }
     api.logger.warn(`Playback stalled for ${Math.round(elapsed / 1000)}s, giving up`);
     stopStallWatchdog();
     if (reconnectTimer) {
@@ -1873,7 +1932,9 @@ export function createHLSPluginWith(
    * error is synthesized into `maybeScheduleReconnect` and the stall ceiling
    * (`stallTimeoutMs`) is armed. Checks are skipped while the page is hidden
    * or the browser is offline, and the baseline is reset so that time is not
-   * counted. Shared by the hls.js and native pipelines.
+   * counted. So is a check that runs more than two intervals late: timers were
+   * suspended (iOS background, lock, app switch), and the gap is not a stall.
+   * Shared by the hls.js and native pipelines.
    */
   const startStallWatchdog = (): void => {
     if (!video || stallWatchdogTimer) return;
@@ -1889,9 +1950,31 @@ export function createHLSPluginWith(
     const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
     // targetDuration is in seconds; setTimeout wants ms, so convert before capping.
     const checkInterval = Math.min(targetDuration * 1000, 30000);
+    stallCheckIntervalMs = checkInterval;
+    lastCheckRanAt = Date.now();
 
     const check = () => {
       if (!video || !api) return;
+
+      // Timers do not run while iOS suspends the page (background, lock, app
+      // switch), but the wall clock does. A check that runs far later than
+      // its interval would read that suspension as a stall of the whole gap
+      // and reload while the network is still coming back. Start the
+      // measurement over instead.
+      const ranAt = Date.now();
+      const sinceLastCheck = ranAt - lastCheckRanAt;
+      const late = sinceLastCheck > 2 * checkInterval;
+      lastCheckRanAt = ranAt;
+      if (late) {
+        api.logger.info('Stall check ran late; page was suspended, not stalled', {
+          sinceLastCheckMs: Math.round(sinceLastCheck),
+        });
+        lastStallCheckTime = ranAt;
+        lastStallCheckPosition = video.currentTime;
+        seekingSince = 0;
+        stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+        return;
+      }
 
       const isPlaying = api.getState('playing');
       const isSeeking = api.getState('seeking');
@@ -2188,7 +2271,7 @@ export function createHLSPluginWith(
       api.setState('playbackState', 'loading');
 
       if (was_native && loader.supportsNativeHLS()) {
-        await loadNative(saved_src);
+        await loadNative(saved_src, false, { phase: 'reconnect', attempt: reconnectAttempts });
       } else {
         // loadWithHlsJs creates its own fresh hls.js instance
         await loadWithHlsJs(saved_src);
@@ -2747,7 +2830,11 @@ export function createHLSPluginWith(
       lastKnownTargetLatency = savedTargetLatency;
 
       // Load with native HLS
-      const load = loadNative(savedSrc, takes_over);
+      const load = loadNative(
+        savedSrc,
+        takes_over,
+        takes_over ? undefined : { phase: 'switch', attempt: 1 }
+      );
       takeOverUserLoad(session, load);
       await load;
 

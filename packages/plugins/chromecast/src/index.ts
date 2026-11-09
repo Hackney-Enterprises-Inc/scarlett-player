@@ -8,6 +8,7 @@
  */
 
 import type { IPluginAPI } from '@scarlett-player/core';
+import { sanitizeUrl } from '@scarlett-player/core';
 import { loadCastSDK, isCastSupported } from './cast-loader';
 import type {
   IChromecastPlugin,
@@ -312,7 +313,7 @@ export function chromecastPlugin(): IChromecastPlugin {
         stopRemoteMedia();
         return;
       }
-      api.logger.debug('Media loaded on Chromecast', { src, startTime });
+      api.logger.debug('Media loaded on Chromecast', { src: sanitizeUrl(src), startTime });
     } catch (error) {
       // No chromecast:error for a player that is gone.
       if (destroyed) return;

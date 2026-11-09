@@ -140,4 +140,34 @@ describe('playback stall watchdog', () => {
 
     await plugin.destroy();
   });
+
+  // TSP-571: iOS suspends timers while a page is backgrounded or locked but
+  // the wall clock keeps running, so the first overdue check used to read the
+  // whole gap as one stall and reload while the network was still coming back.
+  it('does not read a suspended page as a stall', async () => {
+    vi.useFakeTimers();
+    const plugin = await loadNatively();
+    stubCurrentTime(10);
+    setPlaying(true);
+
+    // Ten minutes pass with no timer running, then the check fires
+    vi.setSystemTime(Date.now() + 600_000);
+    await vi.advanceTimersByTimeAsync(15_001);
+
+    expect(api.logger.warn).not.toHaveBeenCalledWith(
+      'Playback stall detected — no timeupdate progress',
+      expect.anything()
+    );
+    expect(api.emit).not.toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+    // The measurement started over, and a genuine freeze is still caught
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(api.logger.warn).toHaveBeenCalledWith(
+      'Playback stall detected — no timeupdate progress',
+      expect.anything()
+    );
+    expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+    await plugin.destroy();
+  });
 });

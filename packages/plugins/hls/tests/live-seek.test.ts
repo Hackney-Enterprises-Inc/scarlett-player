@@ -250,9 +250,15 @@ describe('live seek clamp', () => {
       expect(currentTime).toBe(157);
     });
 
-    it('keeps a seek inside the window, even when duration is not a number', async () => {
-      // NaN used to collapse the old `video.duration || 0` clamp to 0
-      await loadNative();
+    it('keeps a seek inside the window after a reload resets the duration to NaN', async () => {
+      // A NaN duration classifies nothing (WP-A2): a reload re-running the load
+      // algorithm must neither end the live stream nor collapse a seek to 0.
+      const { video } = await loadNative(Infinity);
+      expect(state.live).toBe(true);
+
+      Object.defineProperty(video, 'duration', { value: NaN, configurable: true });
+      video.dispatchEvent(new Event('durationchange'));
+      expect(state.live).toBe(true);
 
       seek(130);
 

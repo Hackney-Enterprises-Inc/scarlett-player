@@ -574,7 +574,7 @@ export class ScarlettPlayer {
     const commandsAtStart = this.playbackCommands;
 
     try {
-      this.logger.info('Loading source', { source });
+      this.logger.info('Loading source', { source: sanitizeUrl(source) });
 
       // Reset playback state when loading new source
       this.stateManager.update({
@@ -619,7 +619,7 @@ export class ScarlettPlayer {
 
       // Bail if a newer load() was called while we were awaiting
       if (generation !== this.loadGeneration) {
-        this.logger.info('Load superseded by newer load call', { source });
+        this.logger.info('Load superseded by newer load call', { source: sanitizeUrl(source) });
         return;
       }
 
@@ -645,7 +645,7 @@ export class ScarlettPlayer {
 
       // Bail if superseded
       if (generation !== this.loadGeneration) {
-        this.logger.info('Load superseded by newer load call', { source });
+        this.logger.info('Load superseded by newer load call', { source: sanitizeUrl(source) });
         return;
       }
 
@@ -660,7 +660,7 @@ export class ScarlettPlayer {
 
       // Bail if superseded
       if (generation !== this.loadGeneration) {
-        this.logger.info('Load superseded by newer load call', { source });
+        this.logger.info('Load superseded by newer load call', { source: sanitizeUrl(source) });
         return;
       }
 
@@ -1136,7 +1136,7 @@ export class ScarlettPlayer {
     this.checkDestroyed();
 
     this.stateManager.set('poster', url);
-    this.logger.debug('Poster set', { poster: url });
+    this.logger.debug('Poster set', { poster: sanitizeUrl(url) });
   }
 
   /**

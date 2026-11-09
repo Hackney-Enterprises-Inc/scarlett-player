@@ -427,6 +427,46 @@ export interface PlaybackGate {
 }
 
 /**
+ * A reload of the native source that the provider itself started.
+ *
+ * Auto-reconnect, native error recovery and an AirPlay switch all re-run the
+ * element's load algorithm on the same URL, which puts `readyState` back to 0.
+ * A failure of that reload before `loadedmetadata` is reported by WebKit as
+ * code 4 (`MEDIA_ERR_SRC_NOT_SUPPORTED`) whatever the real cause was, so it
+ * says nothing about the stream's format (TSP-571).
+ */
+export interface NativeReloadContext {
+  /** Which provider path started the reload. Logged only, never beaconed. */
+  phase: 'reconnect' | 'recovery' | 'switch';
+  /** 1-based attempt number of this outage's reload. */
+  attempt: number;
+  /**
+   * Whether this failure is the first of its outage and so is reported on
+   * `media:error`. When false it is logged at info and nothing is emitted.
+   */
+  report: boolean;
+}
+
+/** Pipeline context for {@link setupVideoEventHandlers}. */
+export interface VideoHandlerOptions {
+  /**
+   * The handlers are attached to the native pipeline. `durationchange` then
+   * treats a finite duration as the end of a live stream (EXT-X-ENDLIST), which
+   * hls.js reports through level details instead. Its MSE duration is finite
+   * while live, so the hls.js path must leave this unset.
+   */
+  native?: boolean;
+  /**
+   * Reports the provider reload in flight, or null when there is none.
+   *
+   * Called once per element error that has the failed-reload shape (code 4,
+   * `readyState` 0), so an implementation may record the first report as a
+   * side effect of the call.
+   */
+  reload?: () => NativeReloadContext | null;
+}
+
+/**
  * Setup HTML5 video element event handlers.
  *
  * Emits `playback:play` on `playing` and `playback:pause` on `pause` for every
@@ -442,18 +482,37 @@ export interface PlaybackGate {
  *        the element event they cause is not echoed back onto the bus. Omitted
  *        (in tests, and by any caller with no commands of its own) means every
  *        transition is treated as element-driven.
+ * @param options - Pipeline context, see {@link VideoHandlerOptions}. Omitted
+ *        (the hls.js path, tests) means no provider reload is ever in flight
+ *        and `durationchange` follows the MSE rules.
+ * @returns A function that removes every handler this call attached
  */
 export function setupVideoEventHandlers(
   video: HTMLVideoElement,
   api: IPluginAPI,
   getLiveMetrics?: () => LiveMetrics | null,
-  gate?: PlaybackGate
+  gate?: PlaybackGate,
+  options?: VideoHandlerOptions
 ): () => void {
   const handlers: Array<{ event: string; handler: EventListener }> = [];
 
+  // Diagnostics for a failed provider reload, logged and never beaconed: the
+  // last event the element fired and when its position last advanced.
+  let lastEvent: string | null = null;
+  let lastProgressAt: number | null = null;
+  let lastProgressTime = video.currentTime;
+
   const addHandler = (event: string, handler: EventListener) => {
-    video.addEventListener(event, handler);
-    handlers.push({ event, handler });
+    const tracked: EventListener = (e) => {
+      if (event === 'timeupdate' && video.currentTime !== lastProgressTime) {
+        lastProgressTime = video.currentTime;
+        lastProgressAt = Date.now();
+      }
+      if (event !== 'error') lastEvent = event;
+      handler(e);
+    };
+    video.addEventListener(event, tracked);
+    handlers.push({ event, handler: tracked });
   };
 
   /**
@@ -572,11 +631,24 @@ export function setupVideoEventHandlers(
 
   addHandler('durationchange', () => {
     const rawDuration = video.duration;
-    const isLive = !Number.isFinite(rawDuration) || rawDuration === Infinity;
-    if (isLive) {
+    if (Number.isNaN(rawDuration)) {
+      // NaN is the reset value while a reload re-runs the load algorithm: no
+      // duration is known yet, so it classifies nothing. Counting it as live
+      // flipped a reloaded native VOD to `live` for good. `duration` is still
+      // zeroed, as it always was.
+      api.setState('duration', 0);
+    } else if (!Number.isFinite(rawDuration)) {
       api.setState('live', true);
       api.setState('duration', 0);
     } else {
+      // A live stream's native duration turns finite once the playlist ends
+      // (EXT-X-ENDLIST), which hls.js reports through level details. Native
+      // only: under MSE the duration is finite while the stream is live.
+      if (options?.native && api.getState('live') === true) {
+        api.setState('live', false);
+        resetLiveMetrics(api);
+        api.logger.info('Native live stream ended (finite duration)');
+      }
       api.setState('duration', rawDuration || 0);
     }
     api.emit('media:loadedmetadata', { duration: api.getState('duration') });
@@ -672,6 +744,34 @@ export function setupVideoEventHandlers(
         });
         return;
       }
+
+      // Code 4 with nothing loaded, while the provider's own reload is in
+      // flight, is that reload failing (WebKit reports any pre-metadata
+      // failure as "not supported", TSP-571). Only the first failure of an
+      // outage is reported, tagged so a dashboard can tell it from a format
+      // problem; the retries after it are logged. Every other error, and any
+      // error with no reload in flight, takes the path below unchanged.
+      let reloadDetail: Record<string, unknown> | null = null;
+      if (error.code === 4 && video.readyState === 0) {
+        const reload = options?.reload?.() ?? null;
+        if (reload) {
+          if (!reload.report) {
+            api.logger.info('Native reload failed (not reported)', {
+              phase: reload.phase,
+              attempt: reload.attempt,
+              code: error.code,
+              networkState: video.networkState,
+              currentSrcSet: Boolean(video.currentSrc),
+              msSinceProgress: lastProgressAt === null ? undefined : Date.now() - lastProgressAt,
+              lastEvent: lastEvent ?? undefined,
+              visibility: typeof document !== 'undefined' ? document.visibilityState : undefined,
+            });
+            return;
+          }
+          reloadDetail = { reconnecting: true, attempts: reload.attempt };
+        }
+      }
+
       api.logger.error('Video element error', { code: error.code, message: error.message });
       // Browsers often leave MediaError.message empty; name the two codes
       // that matter most rather than report a generic error.
@@ -686,6 +786,7 @@ export function setupVideoEventHandlers(
             mediaErrorCode: error.code,
             networkState: video.networkState,
             readyState: video.readyState,
+            ...reloadDetail,
           },
         });
       }
