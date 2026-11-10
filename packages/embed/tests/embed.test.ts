@@ -1392,6 +1392,71 @@ describe('addons: use() and addonRuntime', () => {
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('initAll()'));
   });
 
+  // F6: the once-per-page key is the addon plus the reason, so one reason
+  // cannot hide a more actionable one.
+  it('says each distinct chapters warning once: audio "video only", then video "load the addon"', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns);
+
+    await api.create({ container, type: 'audio', src: 'a.mp3', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'audio', src: 'a.mp3', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+
+    const messages = vi.mocked(console.warn).mock.calls.map((call) => String(call[0]));
+    expect(messages.filter((m) => m.includes('applies to video players only'))).toHaveLength(1);
+    expect(messages.filter((m) => m.includes('embed.addon.chapters.js'))).toHaveLength(1);
+    expect(messages).toHaveLength(2);
+  });
+
+  it('warns once for the same missing chapters addon across two video players', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns);
+
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.chapters.js'));
+  });
+
+  // F7: pending plus created players are counted per map, so a rejected first
+  // create no longer leaves the map marked consumed.
+  it('does not warn "after players were created" when the only create() rejected', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    vi.mocked(createPlayer).mockRejectedValueOnce(new Error('PROVIDER_NOT_FOUND'));
+
+    await expect(api.create({ container, src: 'v.m3u8' })).rejects.toThrow('PROVIDER_NOT_FOUND');
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('after players were created'));
+  });
+
+  it('keeps the late warning when a second create() is still pending as the first rejects', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    const release: { resolve?: () => void } = {};
+    const gate = new Promise<void>((resolve) => {
+      release.resolve = resolve;
+    });
+    vi.mocked(createPlayer).mockRejectedValueOnce(new Error('PROVIDER_NOT_FOUND'));
+    vi.mocked(createPlayer).mockImplementationOnce(async (config: PlayerOptions) => {
+      await gate;
+      return { container: config.container, config, destroy: vi.fn(), once: vi.fn() } as unknown as ScarlettPlayer;
+    });
+
+    const first = api.create({ container, src: 'v.m3u8' });
+    const second = api.create({ container, src: 'v.m3u8' });
+    await expect(first).rejects.toThrow('PROVIDER_NOT_FOUND');
+
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('after players were created'));
+
+    release.resolve?.();
+    await second;
+  });
+
   it('exposes a frozen addonRuntime with the bare package version and the build\'s UI functions', async () => {
     const api = createScarlettPlayerAPI(freshVideoCreators(), videoOnlyTypes, '9.9.9-video', uiFns);
     const { injectSharedStyles } = await import('@scarlett-player/core');

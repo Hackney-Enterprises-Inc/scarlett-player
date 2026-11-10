@@ -119,10 +119,32 @@ export interface ScarlettPlayerAPIOptions {
 }
 
 /**
- * Plugin-creator maps that have created at least one player, so `use()` can
+ * Count of pending plus created players per creators map, so `use()` can
  * tell the host that a late registration misses the players already built.
+ * A rejected create decrements it, so a map whose only create failed is not
+ * reported as consumed, while a concurrent create still in flight keeps it so.
  */
-const initialisedCreators = new WeakSet<PluginCreators>();
+const livePlayerCounts = new WeakMap<PluginCreators, number>();
+
+/**
+ * Whether any player built from this creators map is pending or created.
+ *
+ * @param creators - The creators map that identifies the page
+ * @returns True while at least one player is in flight or exists
+ */
+function hasLivePlayers(creators: PluginCreators): boolean {
+  return (livePlayerCounts.get(creators) ?? 0) > 0;
+}
+
+/**
+ * Adjust the pending-plus-created player count for a creators map.
+ *
+ * @param creators - The creators map that identifies the page
+ * @param delta - +1 when a create starts, -1 when it rejects
+ */
+function adjustLivePlayers(creators: PluginCreators, delta: 1 | -1): void {
+  livePlayerCounts.set(creators, Math.max(0, (livePlayerCounts.get(creators) ?? 0) + delta));
+}
 
 /**
  * Names each build bundles but deprecates, per creators map.
@@ -145,7 +167,10 @@ const deprecatedBundledCreators = new WeakMap<PluginCreators, Set<AddonName>>();
 const addonProvidedCreators = new WeakMap<PluginCreators, Set<AddonName>>();
 
 /**
- * Addon names a page has already been warned about, per creators map.
+ * Addon notices a page has already been warned about, per creators map. The
+ * key is the addon name for the common "load the addon" message, and
+ * `addon:reason` for the build or player-type messages, so each distinct
+ * message is said once and one reason never hides another.
  *
  * Keyed by the map rather than by a module-level set so that every test map
  * starts clean with no reset, and so two entries on one page (a full build
@@ -154,7 +179,7 @@ const addonProvidedCreators = new WeakMap<PluginCreators, Set<AddonName>>();
  * each thing once. Chapters and clips move from once per player to once per
  * page here as well (DC1).
  */
-const warnedAddons = new WeakMap<PluginCreators, Set<AddonName>>();
+const warnedAddons = new WeakMap<PluginCreators, Set<string>>();
 
 /**
  * Read one of the per-creators-map addon sets, creating it on first use.
@@ -183,12 +208,18 @@ function addonNamesIn(
  *
  * @param creators - The creators map this player is being built from
  * @param addon - The addon the notice is about
- * @returns True the first time this addon is noticed on this page
+ * @param reason - Which message is being said, when an addon has several
+ * @returns True the first time this addon and reason are noticed on this page
  */
-function firstAddonNotice(creators: PluginCreators, addon: AddonName): boolean {
-  const noticed = addonNamesIn(warnedAddons, creators);
-  if (noticed.has(addon)) return false;
-  noticed.add(addon);
+function firstAddonNotice(creators: PluginCreators, addon: AddonName, reason?: string): boolean {
+  let noticed = warnedAddons.get(creators);
+  if (!noticed) {
+    noticed = new Set<string>();
+    warnedAddons.set(creators, noticed);
+  }
+  const key = reason ? `${addon}:${reason}` : addon;
+  if (noticed.has(key)) return false;
+  noticed.add(key);
   return true;
 }
 
@@ -231,17 +262,20 @@ function warnAddonUnavailable(
   type: PlayerType,
   notice?: { consequence?: string; enables?: string }
 ): void {
-  if (!firstAddonNotice(creators, addon)) return;
+  const audioBuild = ADDON_VIDEO_ONLY.has(addon) && !availableTypes.includes('video');
+  const notVideo = !audioBuild && ADDON_VIDEO_ONLY.has(addon) && type !== 'video';
+  const reason = audioBuild ? 'audio-build' : notVideo ? 'video-only' : undefined;
+  if (!firstAddonNotice(creators, addon, reason)) return;
 
   const load = loadAddonSentence(addon, notice?.enables);
   const tail = notice?.consequence ? `${notice.consequence} ${load}` : load;
 
-  if (ADDON_VIDEO_ONLY.has(addon) && !availableTypes.includes('video')) {
+  if (audioBuild) {
     console.warn(
       `[ScarlettPlayer] ${attribute} ignored: the ${addon} addon needs a video build ` +
       '(embed.js or embed.video.js); this is the audio build.'
     );
-  } else if (ADDON_VIDEO_ONLY.has(addon) && type !== 'video') {
+  } else if (notVideo) {
     console.warn(`[ScarlettPlayer] ${attribute} ignored: ${addon} applies to video players only.`);
   } else {
     console.warn(`[ScarlettPlayer] ${attribute} ignored: ${tail}`);
@@ -566,18 +600,25 @@ export async function createEmbedPlayer(
     // late, and the player already in flight must not be retroactively
     // changed (SCAR-EMBED-4 review F2). Marking after the await left that
     // window silent.
-    initialisedCreators.add(pluginCreators);
+    adjustLivePlayers(pluginCreators, 1);
 
-    // Create player
-    const player = await createPlayer({
-      container,
-      src: config.src || config.playlist?.[0]?.src || '',
-      autoplay: config.autoplay || false,
-      muted: config.muted || false,
-      poster: config.poster || config.artwork || config.playlist?.[0]?.poster,
-      loop: config.loop || false,
-      plugins,
-    });
+    // Create player. Only a rejection here releases the count: once it
+    // resolves, the player exists whatever the steps below do.
+    let player: ScarlettPlayer;
+    try {
+      player = await createPlayer({
+        container,
+        src: config.src || config.playlist?.[0]?.src || '',
+        autoplay: config.autoplay || false,
+        muted: config.muted || false,
+        poster: config.poster || config.artwork || config.playlist?.[0]?.poster,
+        loop: config.loop || false,
+        plugins,
+      });
+    } catch (error) {
+      adjustLivePlayers(pluginCreators, -1);
+      throw error;
+    }
 
     // Apply post-initialization settings
     const video = container.querySelector('video');
@@ -779,7 +820,7 @@ export function createScarlettPlayerAPI(
           console.warn(`[ScarlettPlayer] use("${name}") replaces an earlier registration.`);
         }
       }
-      if (initialisedCreators.has(pluginCreators)) {
+      if (hasLivePlayers(pluginCreators)) {
         console.warn(
           `[ScarlettPlayer] use("${name}") after players were created: it applies only to ` +
           'players created from now on. Load the addon before DOMContentLoaded, or register ' +
