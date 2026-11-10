@@ -34,7 +34,7 @@ For AI coding agents: [llms.txt](https://scarlettplayer.com/llms.txt) indexes th
 - **Chapters** - Markers on the progress bar, a chapter list, and seek to chapter
 - **Touch Gestures** - Double-tap left or right to seek, keep tapping to go further
 - **Clips** - Two-handle in/out range selection, loop preview, and host submission (callback or built-in POST); the player captures the range, the server renders the clip
-- **Captions** - WebVTT subtitles and closed captions, HLS subtitle extraction, auto-select by language
+- **Captions** - WebVTT subtitles and closed captions, HLS subtitle extraction, auto-select by language, viewer-adjustable caption styling
 - **Watermark** - Anti-piracy text or image overlay with dynamic repositioning
 - **Audio Player** - Compact audio UI with artwork, progress, and media session integration
 - **Modern UI** - Video and audio controls with keyboard shortcuts and theming
@@ -271,7 +271,7 @@ Lighter builds available: `embed.video.umd.cjs` (video only) and `embed.audio.um
 | `@scarlett-player/analytics` | Analytics - QoE v3, structured error diagnostics, grace-filtered rebuffers, bitrate and engagement metrics, per-view beacon sequence, privacy/context controls, opt-in batching for compatible ingests, and a `getDiagnostics()` snapshot of current metrics |
 | `@scarlett-player/playlist` | Playlist - queue management, shuffle (Fisher-Yates), repeat modes, auto-advance, persistence |
 | `@scarlett-player/media-session` | Media Session - lock screen controls, media keys, album art, seek bar |
-| `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language |
+| `@scarlett-player/captions` | Captions - WebVTT subtitles/closed captions, HLS subtitle extraction, auto-select by language, viewer-adjustable caption styling |
 | `@scarlett-player/watermark` | Watermark - anti-piracy text/image overlay, configurable position, opacity, dynamic repositioning |
 | `@scarlett-player/share` | Share - native share sheet on mobile, copy link, social targets, embed codes, playback timestamps |
 | `@scarlett-player/chapters` | Chapters - markers on the progress bar, chapter list, seek to chapter, WebVTT chapters track support |
@@ -480,7 +480,7 @@ WHEP Monitor panel and in the package README) and join
 
 ### Versioning
 
-Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 19 packages share the same version number.
+Uses [Changesets](https://github.com/changesets/changesets) with fixed versioning - all 19 packages share the same version number. Releases are automated on merge to `main`; see [Releasing](docs/contributing.md#releasing).
 
 ```bash
 pnpm changeset        # Create a changeset for your changes

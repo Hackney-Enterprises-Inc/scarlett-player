@@ -2,6 +2,15 @@
  * Captions Plugin Types
  */
 
+import type { Plugin } from '@scarlett-player/core';
+import type { CaptionStyle, CaptionsStyleApi } from './caption-style';
+
+/**
+ * The captions plugin instance: a core plugin plus the caption style methods
+ * ({@link CaptionsStyleApi}).
+ */
+export type CaptionsPlugin = Plugin & CaptionsStyleApi;
+
 export interface CaptionSource {
   /** BCP 47 language code (e.g., 'en', 'es') */
   language: string;
@@ -30,6 +39,20 @@ export interface CaptionsPluginConfig {
   autoSelect?: boolean;
   /** Preferred language for auto-select (BCP 47 code) - default: 'en' */
   defaultLanguage?: string;
+  /**
+   * Default caption text style, under the viewer's own saved choice. Fields
+   * left out keep the browser default. Invalid fields are dropped with a
+   * warning. With no style here and none saved, no stylesheet is added.
+   */
+  style?: CaptionStyle;
+  /**
+   * Save the viewer's caption style in `localStorage` and read it back on the
+   * next load - default: true. With false, nothing is read or written and a
+   * viewer's change lasts for this player only.
+   */
+  persistStyle?: boolean;
+  /** `localStorage` key for the viewer's caption style - default: 'scarlett-caption-style' */
+  styleStorageKey?: string;
   /** Index signature for PluginConfig compatibility */
   [key: string]: unknown;
 }

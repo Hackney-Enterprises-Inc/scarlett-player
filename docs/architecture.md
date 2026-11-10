@@ -719,6 +719,29 @@ Recovery lives in the provider, not in core. In `@scarlett-player/hls`:
   resets only on real playback progress. At the ceiling the same
   `emitReconnectExhausted()` path runs with `detail.stalled: true`. Hidden,
   offline and paused time is not counted.
+- The stall watchdog sums eligible check gaps without progress and arms at a
+  source's first `playing`. It is not stopped by `playing: false`: a pause
+  freezes the clock (nothing added, nothing reset), so a pause/play during a
+  stall keeps detection running, and a resumed but buffering element counts. A
+  finished seek re-bases the position, so its jump is not progress. A native
+  live stream ticks at 1 s: at `liveStallNudgeMs` (4000) of stalled time
+  `nudgeNativeLiveStall()` seeks to the sync position, reusing the clamp of
+  `rejoinNativeLiveEdge()`, once per episode (and arms the ceiling), and at 15 s
+  the stall hands off to `maybeScheduleReconnect()`. Suspension tolerance is
+  `max(2 x tick, 10 s)`, for the check and for the ceiling timer.
+- Native load has an attach half (`attachNative()`: element handlers and
+  media-type evidence) and a fetch half (`fetchNative()`: `src`, the
+  `loadTimeoutMs` watchdog, `loadedmetadata`). `loadNative()` runs both.
+  With `autoStartLoad: false` the native branches of `loadSource()` and
+  `switchToNative()` run only the attach half (`deferNativeLoad()`) and wait for
+  play intent: `armPlayIntent()` puts an own-property wrapper on the element's
+  `play` that starts the fetch synchronously, then calls the original `play`, and
+  removes itself (and is removed by `teardownPipeline()`). `nativePauseReleaseMs`
+  releases a paused native live source the same way (`releaseNativeSource()`:
+  handlers off, `src` removed, `load()`), and the next play resumes it as a
+  provider reload that rejoins the live edge. `attemptReconnect()` on a paused,
+  deferred or released native source loads nothing and ends the cycle with
+  `error:recovered`.
 
 For a scheduled reconnect cycle, the ordering a UI can rely on is one or more
 `error:reconnecting`, then

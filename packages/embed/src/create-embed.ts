@@ -247,6 +247,11 @@ export async function createEmbedPlayer(
       console.warn(
         '[ScarlettPlayer] data-captions ignored: captions need a video build (embed.js or embed.video.js).'
       );
+    } else if (config.captions?.style && Object.keys(config.captions.style).length > 0) {
+      // One warning either way: sources with a style get the message above.
+      console.warn(
+        '[ScarlettPlayer] Caption style ignored: captions need a video build (embed.js or embed.video.js).'
+      );
     }
 
     // Add gestures on video, where the bar is narrowest and the skip buttons

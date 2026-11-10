@@ -377,5 +377,56 @@ describe('stall ceiling', () => {
 
       await plugin.destroy();
     });
+
+    it('keeps the stall clock across a pause/play during a stall (HEI-SCARLETT-62)', async () => {
+      vi.useFakeTimers();
+      const plugin = createHLSPlugin({ stallTimeoutMs: 60000 });
+      await plugin.init(api);
+      const promise = plugin.loadSource(SRC);
+      promise.catch(() => {});
+      await flush();
+      fireManifest(created[0]);
+      await flush();
+      await promise;
+
+      stubCurrentTime(10);
+      setPlaying(true);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // The viewer pauses and plays again: a pause neither adds nor resets
+      state.paused = true;
+      setPlaying(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      state.paused = false;
+      setPlaying(true);
+
+      // 10 s before the pause + 20 s after it: detected at the second tick
+      await vi.advanceTimersByTimeAsync(19_001);
+      expect(stallDetections()).toHaveLength(1);
+
+      await plugin.destroy();
+    });
+
+    it('does not count paused time as stalled time', async () => {
+      vi.useFakeTimers();
+      const plugin = createHLSPlugin({ stallTimeoutMs: 60000 });
+      await plugin.init(api);
+      const promise = plugin.loadSource(SRC);
+      promise.catch(() => {});
+      await flush();
+      fireManifest(created[0]);
+      await flush();
+      await promise;
+
+      stubCurrentTime(10);
+      setPlaying(true);
+      state.paused = true;
+      setPlaying(false);
+
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(stallDetections()).toHaveLength(0);
+
+      await plugin.destroy();
+    });
   });
 });

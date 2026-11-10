@@ -1848,3 +1848,315 @@ describe('SettingsMenu speed needs a 60 s DVR window', () => {
   });
 
 });
+
+describe('SettingsMenu - caption style', () => {
+  type StyleValues = Record<string, string | number>;
+
+  /**
+   * A stand-in for the captions plugin's style methods, holding a viewer layer
+   * over fixed integrator defaults the way the real plugin does.
+   *
+   * @param defaults - Integrator defaults under the viewer's overrides
+   * @returns The stub, with vitest mocks for each method
+   */
+  function createStylePlugin(defaults: StyleValues = {}) {
+    let overrides: StyleValues = {};
+    return {
+      getCaptionStyle: vi.fn(() => ({ ...defaults, ...overrides })),
+      getCaptionStyleOverrides: vi.fn(() => ({ ...overrides })),
+      setCaptionStyle: vi.fn((patch: Record<string, string | number | null>) => {
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === null) delete overrides[key];
+          else overrides[key] = value;
+        }
+      }),
+      resetCaptionStyle: vi.fn(() => {
+        overrides = {};
+      }),
+    };
+  }
+
+  let api: ReturnType<typeof createMockApi>;
+  let menu: SettingsMenu;
+  let el: HTMLElement;
+  let plugin: ReturnType<typeof createStylePlugin>;
+
+  /**
+   * Build a menu whose API returns `stylePlugin` for the `captions` plugin id.
+   *
+   * @param stylePlugin - Value `getPlugin('captions')` returns
+   */
+  function mount(stylePlugin: unknown): void {
+    api = createMockApi({ textTracks: MOCK_TRACKS });
+    api.getPlugin.mockImplementation((id: string) => (id === 'captions' ? stylePlugin : null));
+    menu = new SettingsMenu(api);
+    el = menu.render();
+    (el.querySelector('.sp-settings__btn') as HTMLButtonElement).click();
+  }
+
+  /**
+   * Click the chevron row carrying a label.
+   *
+   * @param label - Row label text
+   */
+  function clickRow(label: string): void {
+    const row = Array.from(el.querySelectorAll<HTMLElement>('.sp-settings-panel__row')).find(
+      (r) => r.querySelector('.sp-settings-panel__label')?.textContent === label
+    );
+    if (!row) throw new Error(`No row labelled ${label}`);
+    row.click();
+  }
+
+  /**
+   * Click the option item carrying a data-id.
+   *
+   * @param id - The item's data-id
+   */
+  function clickItem(id: string): void {
+    const item = el.querySelector<HTMLElement>(`.sp-settings-panel__item[data-id="${id}"]`);
+    if (!item) throw new Error(`No item with data-id ${id}`);
+    item.click();
+  }
+
+  /** @returns Label to value text for every chevron row in the open panel. */
+  function rowValues(): Record<string, string> {
+    const values: Record<string, string> = {};
+    el.querySelectorAll('.sp-settings-panel__row').forEach((r) => {
+      values[r.querySelector('.sp-settings-panel__label')!.textContent!] =
+        r.querySelector('.sp-settings-panel__value')!.textContent!;
+    });
+    return values;
+  }
+
+  /** @returns The data-id of the checked item in the open panel. */
+  function activeId(): string | null | undefined {
+    return el.querySelector('.sp-settings-panel__item--active')?.getAttribute('data-id');
+  }
+
+  beforeEach(() => {
+    plugin = createStylePlugin();
+  });
+
+  afterEach(() => {
+    menu.destroy();
+  });
+
+  it('shows a Style row in the Captions panel when the captions plugin exposes setCaptionStyle', () => {
+    mount(plugin);
+    clickRow('Captions');
+
+    expect(rowValues()).toEqual({ Style: 'Default' });
+    // The row comes after the track items.
+    const last = el.querySelector('.sp-settings-panel')!.lastElementChild!;
+    expect(last.querySelector('.sp-settings-panel__label')?.textContent).toBe('Style');
+  });
+
+  it('shows no Style row without a captions style API', () => {
+    mount(null);
+    clickRow('Captions');
+    expect(el.querySelector('.sp-settings-panel__row')).toBeNull();
+    menu.destroy();
+
+    // An older captions plugin: present, but without the style methods.
+    mount({ id: 'captions' });
+    clickRow('Captions');
+    expect(el.querySelector('.sp-settings-panel__row')).toBeNull();
+  });
+
+  it('labels the Style row Custom once the viewer has overrides', () => {
+    plugin.setCaptionStyle({ fontSize: 150 });
+    mount(plugin);
+    clickRow('Captions');
+
+    expect(rowValues()).toEqual({ Style: 'Custom' });
+  });
+
+  it('lists one row per field with the effective value, plus Reset', () => {
+    plugin = createStylePlugin({ color: 'yellow', backgroundColor: '#1a2b3c', edgeStyle: 'drop-shadow' });
+    plugin.setCaptionStyle({ fontSize: 150, backgroundOpacity: 0.25, fontFamily: 'serif' });
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+
+    expect(menu.getPanel()).toBe('caption-style');
+    expect(rowValues()).toEqual({
+      'Text size': '150%',
+      'Text color': 'Yellow',
+      'Background color': '#1a2b3c',
+      'Background opacity': '25%',
+      'Edge style': 'Drop shadow',
+      Font: 'Serif',
+    });
+    expect(el.querySelector('.sp-settings-panel__item[data-id="reset"]')?.textContent).toContain('Reset');
+  });
+
+  it('shows Default for every field when nothing is set', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+
+    expect(new Set(Object.values(rowValues()))).toEqual(new Set(['Default']));
+  });
+
+  it('picking 150% calls setCaptionStyle({ fontSize: 150 }) and keeps the menu open on the caption-style panel', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Text size');
+    expect(menu.getPanel()).toBe('caption-style:size');
+    expect(activeId()).toBe('default');
+
+    clickItem('150');
+
+    expect(plugin.setCaptionStyle).toHaveBeenCalledWith({ fontSize: 150 });
+    expect(menu.isMenuOpen()).toBe(true);
+    expect(menu.getPanel()).toBe('caption-style');
+    expect(rowValues()['Text size']).toBe('150%');
+  });
+
+  it('picking Default clears the field with null', () => {
+    plugin.setCaptionStyle({ color: 'red' });
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Text color');
+    expect(activeId()).toBe('red');
+
+    clickItem('default');
+
+    expect(plugin.setCaptionStyle).toHaveBeenLastCalledWith({ color: null });
+    expect(menu.getPanel()).toBe('caption-style');
+  });
+
+  it('passes numbers for opacity and strings for colour, edge and font', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+
+    const picks: [string, string, Record<string, string | number>][] = [
+      ['Background color', 'black', { backgroundColor: 'black' }],
+      ['Background opacity', '0.75', { backgroundOpacity: 0.75 }],
+      ['Edge style', 'outline', { edgeStyle: 'outline' }],
+      ['Font', 'monospace', { fontFamily: 'monospace' }],
+    ];
+    for (const [row, id, patch] of picks) {
+      clickRow(row);
+      clickItem(id);
+      expect(plugin.setCaptionStyle).toHaveBeenLastCalledWith(patch);
+    }
+  });
+
+  it('checks Default, not the integrator value, when the viewer has no override', () => {
+    plugin = createStylePlugin({ fontSize: 75 });
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    expect(rowValues()['Text size']).toBe('75%');
+
+    clickRow('Text size');
+    expect(activeId()).toBe('default');
+  });
+
+  it('Reset calls resetCaptionStyle and stays on the caption-style panel', () => {
+    plugin.setCaptionStyle({ fontSize: 200 });
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+
+    clickItem('reset');
+
+    expect(plugin.resetCaptionStyle).toHaveBeenCalledTimes(1);
+    expect(menu.isMenuOpen()).toBe(true);
+    expect(menu.getPanel()).toBe('caption-style');
+    expect(rowValues()['Text size']).toBe('Default');
+  });
+
+  it('Escape from size options returns to style panel, then captions, then main', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Text size');
+
+    const escape = (): boolean => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    escape();
+    expect(menu.getPanel()).toBe('caption-style');
+    escape();
+    expect(menu.getPanel()).toBe('captions');
+    escape();
+    expect(menu.getPanel()).toBe('main');
+    expect(menu.isMenuOpen()).toBe(true);
+    escape();
+    expect(menu.isMenuOpen()).toBe(false);
+  });
+
+  it('the back header walks the same way up', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Font');
+
+    const back = (): void => (el.querySelector('.sp-settings-panel__header') as HTMLElement).click();
+
+    back();
+    expect(menu.getPanel()).toBe('caption-style');
+    back();
+    expect(menu.getPanel()).toBe('captions');
+    back();
+    expect(menu.getPanel()).toBe('main');
+  });
+
+  it('update while on a caption-style panel re-renders checkmarks when the style changed elsewhere', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Text size');
+    expect(activeId()).toBe('default');
+
+    plugin.setCaptionStyle({ fontSize: 200 });
+    menu.update();
+
+    expect(menu.getPanel()).toBe('caption-style:size');
+    expect(activeId()).toBe('200');
+  });
+
+  it('update leaves the panel DOM alone when the style did not change', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    const firstRow = el.querySelector('.sp-settings-panel__row');
+
+    api.setState('currentTime', 12);
+    menu.update();
+    menu.update();
+
+    expect(el.querySelector('.sp-settings-panel__row')).toBe(firstRow);
+  });
+
+  it('falls back to main when the tracks go away while on a style panel', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+    clickRow('Text size');
+
+    api.setState('textTracks', []);
+    menu.update();
+
+    expect(menu.isMenuOpen()).toBe(true);
+    expect(menu.getPanel()).toBe('main');
+    expect(Object.keys(rowValues())).toEqual(['Speed']);
+  });
+
+  it('keeps every row and option reachable by the menu keyboard handling', () => {
+    mount(plugin);
+    clickRow('Captions');
+    clickRow('Style');
+
+    // Back header, six field rows, Reset.
+    expect(el.querySelectorAll('[role="menuitem"]')).toHaveLength(8);
+
+    clickRow('Text color');
+    // Back header, Default, eight colours.
+    expect(el.querySelectorAll('[role="menuitem"]')).toHaveLength(10);
+  });
+});

@@ -414,6 +414,11 @@ test(core): add PluginManager integration tests
 7. `pnpm run typecheck`
 8. `pnpm run test`
 
+On pull requests only, one more cheap step runs after the documentation build
+check: `node scripts/release-notify.mjs --dry-run`. It builds the release Slack
+message from the current CHANGELOGs and prints it without sending anything, so a
+CHANGELOG format change shows up before a release rather than during one.
+
 On a push to `main` — not on pull requests — CI then installs Chromium and
 ffmpeg, generates the HLS fixture with `node scripts/hls-fixture.mjs`, and runs
 `node scripts/verify-browser.mjs` against a freshly built demo bundle, which it
@@ -446,6 +451,46 @@ If a publish target fails, fix the cause and start the workflow again from
 Actions > Release > Run workflow on `main`. Packages already on npm are
 skipped. Do not use "Re-run jobs" on the failed run: it would version the old
 merge commit again and stop when `main` already has the release commit.
+
+Once a release is fully out (npm, demo, tag, GitHub release and CDN), the
+`notify` job posts one Slack message with the version, the changelog entries
+(de-duplicated across packages) and links to the release, the run, npm and the
+CDN. It is skipped on ordinary merges and on any failed release. It needs the
+repository secret `SLACK_RELEASE_WEBHOOK_URL`, an incoming-webhook URL that fixes
+the channel; keep it in Doppler and let the Doppler sync mirror it, like the
+`B2_*` values. Without the secret the job logs a warning and stays green. For
+the first release, point the webhook at a private test channel and re-point it
+afterwards.
+
+To preview the message without sending it:
+`node scripts/release-notify.mjs --dry-run --version <version>`. It never reads
+the secret and makes no network call.
+
+A message goes out once per release: after Slack accepts it, the script appends
+an invisible `<!-- slack-notified -->` marker to the GitHub release body, and a
+re-run sees it and stops. If the notify job fails, retry it with "Re-run failed
+jobs", not Run workflow (the tag exists, so Run workflow would skip it). If a
+failure says the message WAS sent but marking failed, do not re-run; it would
+post a duplicate. If you finish a failed CDN upload by hand with
+`doppler run -- ./scripts/upload-cdn.sh`, no notification goes out.
+
+A network error from the script says the message MAY have been sent. Check the
+Slack channel before re-running the job; a re-run posts a duplicate if the first
+post arrived. A non-2xx response from Slack means it was not sent.
+
+If npm published but the demo step failed, the tag exists and the release job
+fails, so `notify` (and `cdn`) are skipped, and a rerun finds the tag and skips
+them again. No Slack message is ever sent for that release. Recover by hand:
+finish the CDN upload with `doppler run -- ./scripts/upload-cdn.sh`, then
+preview with `node scripts/release-notify.mjs --dry-run --version <version>`
+and post the message to the channel manually.
+
+The CI dry-run step fails if a version's changelog section has entries the
+parser cannot read, which means the changelog format changed and
+`scripts/release-notify/summary.mjs` needs updating.
+
+For the changeset and version flow see the "Versioning" section of the root
+`README.md`.
 
 Never commit `demo/demo.bundle.js` or `docs/demo/demo.bundle.js`. The release
 workflow rebuilds and commits both on every push to `main`, so a bundle

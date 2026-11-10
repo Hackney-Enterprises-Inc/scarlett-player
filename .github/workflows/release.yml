@@ -533,6 +533,7 @@ jobs:
             echo "| demo site | ${DEMO} |"
             echo "| GitHub release + tag | ${TAG} |"
             echo "| CDN | ${cdn} |"
+            echo "| Slack | runs in the notify job |"
           } >> $GITHUB_STEP_SUMMARY
 
           if [ "$NPM" = "failure" ] || [ "$DEMO" = "failure" ]; then
@@ -621,3 +622,64 @@ jobs:
           echo "<div data-scarlett-player data-src=\"video.m3u8\"></div>" >> $GITHUB_STEP_SUMMARY
           echo "<div data-scarlett-player data-src=\"audio.m3u8\" data-type=\"audio\"></div>" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # Tell Slack a release is fully out: npm, the demo, the tag and GitHub release
+  # (all implied by the release job succeeding with published == 'true') and the
+  # CDN upload. Nothing is sent on a failed release or an ordinary main merge,
+  # because the job is skipped unless every condition below holds.
+  #
+  # always() is needed for the same reason as on cdn: without it a skipped
+  # upstream short-circuits the expression, and with it every condition has to
+  # be explicit.
+  #
+  # Dedupe: one message per release. A rerun after a success finds the tag and
+  # the release job reports published == 'false', so this job is skipped. A
+  # re-run of this job alone is stopped by the `<!-- slack-notified -->` marker
+  # the script writes into the GitHub release body after Slack accepts the post.
+  # If cdn fails, "Re-run failed jobs" re-runs cdn and then this job; do not use
+  # Run workflow for that, the tag already exists and the whole run would skip.
+  #
+  # The webhook is SLACK_RELEASE_WEBHOOK_URL, a repository secret (Doppler syncs
+  # it like the B2_* values). It reaches the script only through env and is never
+  # printed. A missing secret warns and leaves the job green.
+  #
+  # Known gap: if npm succeeds but the demo step fails, the release job creates
+  # the tag and then fails, so this job is skipped, and a rerun finds the tag
+  # (published == 'false') and skips it again. A demo-failed release therefore
+  # never notifies; send it by hand (docs/contributing.md#releasing). The cdn
+  # job shares the same gap.
+  #
+  # Checks out the release tag, not github.sha: the versioned CHANGELOGs exist
+  # only in the "chore: release packages" commit the tag points at. No pnpm
+  # install: the script has no dependencies.
+  notify:
+    name: Notify Slack
+    needs: [release, cdn]
+    if: >-
+      always()
+      && needs.release.result == 'success'
+      && needs.release.outputs.published == 'true'
+      && needs.cdn.result == 'success'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Notify Slack
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: node scripts/release-notify.mjs --version "${{ needs.release.outputs.version }}"

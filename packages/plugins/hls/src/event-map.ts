@@ -437,7 +437,7 @@ export interface PlaybackGate {
  */
 export interface NativeReloadContext {
   /** Which provider path started the reload. Logged only, never beaconed. */
-  phase: 'reconnect' | 'recovery' | 'switch';
+  phase: 'reconnect' | 'recovery' | 'switch' | 'resume';
   /** 1-based attempt number of this outage's reload. */
   attempt: number;
   /**

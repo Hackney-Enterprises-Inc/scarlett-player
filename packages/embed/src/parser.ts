@@ -1,4 +1,17 @@
-import type { EmbedClipsConfig, EmbedConfig, PlayerType } from './types';
+import type { EmbedCaptionStyle, EmbedClipsConfig, EmbedConfig, PlayerType } from './types';
+
+/**
+ * Caption style attributes: attribute name, the `captions.style` field it
+ * fills, and whether the value is a number.
+ */
+const CAPTION_STYLE_ATTRIBUTES = [
+  ['data-captions-font-size', 'fontSize', true],
+  ['data-captions-color', 'color', false],
+  ['data-captions-background-color', 'backgroundColor', false],
+  ['data-captions-background-opacity', 'backgroundOpacity', true],
+  ['data-captions-edge-style', 'edgeStyle', false],
+  ['data-captions-font-family', 'fontFamily', false],
+] as const;
 
 /**
  * Helper to get attribute with fallback aliases
@@ -222,6 +235,29 @@ export function parseDataAttributes(element: HTMLElement): Partial<EmbedConfig> 
     if (sources) {
       config.captions = { sources };
     }
+  }
+
+  // Caption style defaults. Merged beside `sources`, and enough on their own to
+  // create the captions config, so subtitles read from an HLS manifest are
+  // styled too. Only type coercion happens here: the captions plugin validates
+  // every field and warns about what it drops, so the two cannot drift apart.
+  // A size or opacity that is not a number is passed through as written for
+  // that reason.
+  const captionStyle: Record<string, string | number> = {};
+  for (const [attribute, field, numeric] of CAPTION_STYLE_ATTRIBUTES) {
+    const value = element.getAttribute(attribute)?.trim();
+    if (!value) continue;
+    const parsed = numeric ? Number(value) : NaN;
+    captionStyle[field] = isNaN(parsed) ? value : parsed;
+  }
+  if (Object.keys(captionStyle).length > 0) {
+    config.captions = { ...config.captions, style: captionStyle as EmbedCaptionStyle };
+  }
+
+  // Only the exact string "false" disables it, as with the analytics flags.
+  const persistCaptionStyle = element.getAttribute('data-captions-persist-style');
+  if (persistCaptionStyle !== null) {
+    config.captions = { ...config.captions, persistStyle: persistCaptionStyle !== 'false' };
   }
 
   // Chapters: a JSON array when the value starts with `[`, otherwise a WebVTT

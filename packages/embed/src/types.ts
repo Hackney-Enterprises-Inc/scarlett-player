@@ -224,6 +224,52 @@ export interface CaptionsConfig {
   extractFromHLS?: boolean;
   autoSelect?: boolean;
   defaultLanguage?: string;
+  /**
+   * Default caption text style, under the viewer's own saved choice. Set from
+   * the `data-captions-*` style attributes. The captions plugin validates it
+   * and warns about fields it drops.
+   */
+  style?: EmbedCaptionStyle;
+  /**
+   * Save the viewer's caption style in `localStorage` - default: true. Set
+   * from `data-captions-persist-style`.
+   */
+  persistStyle?: boolean;
+}
+
+/**
+ * A caption colour: one of eight named colours, or a `#rgb` / `#rrggbb` hex
+ * string.
+ */
+export type EmbedCaptionColor =
+  | 'white'
+  | 'yellow'
+  | 'green'
+  | 'cyan'
+  | 'blue'
+  | 'magenta'
+  | 'red'
+  | 'black'
+  | `#${string}`;
+
+/**
+ * Caption text style, in the captions plugin's own shape (`CaptionStyle` in
+ * `@scarlett-player/captions`), restated here so the embed's types stand
+ * alone. Every field is optional; a field left out keeps the browser default.
+ */
+export interface EmbedCaptionStyle {
+  /** Text size as a percentage of the browser's cue size */
+  fontSize?: 50 | 75 | 100 | 150 | 200;
+  /** Text colour */
+  color?: EmbedCaptionColor;
+  /** Background colour; drawn at 0.8 opacity unless `backgroundOpacity` is set */
+  backgroundColor?: EmbedCaptionColor;
+  /** Background opacity; on black unless `backgroundColor` is set */
+  backgroundOpacity?: 0 | 0.25 | 0.5 | 0.75 | 1;
+  /** Text edge treatment */
+  edgeStyle?: 'none' | 'drop-shadow' | 'raised' | 'depressed' | 'outline';
+  /** Generic font family */
+  fontFamily?: 'sans-serif' | 'serif' | 'monospace';
 }
 
 /**

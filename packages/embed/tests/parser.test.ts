@@ -366,6 +366,82 @@ describe('parseDataAttributes', () => {
       expect(parseDataAttributes(element).captions).toBeUndefined();
       expect(warn).toHaveBeenCalledTimes(1);
     });
+
+    it('parses data-captions-font-size and data-captions-color into captions.style alongside sources', () => {
+      const sources = [{ language: 'en', label: 'English', src: '/en.vtt' }];
+      element.setAttribute('data-captions', JSON.stringify(sources));
+      element.setAttribute('data-captions-font-size', '150');
+      element.setAttribute('data-captions-color', 'yellow');
+
+      expect(parseDataAttributes(element).captions).toEqual({
+        sources,
+        style: { fontSize: 150, color: 'yellow' },
+      });
+    });
+
+    it('parses every caption style attribute, numbers as numbers', () => {
+      element.setAttribute('data-captions-font-size', '75');
+      element.setAttribute('data-captions-color', '#FFCC00');
+      element.setAttribute('data-captions-background-color', 'black');
+      element.setAttribute('data-captions-background-opacity', '0.5');
+      element.setAttribute('data-captions-edge-style', 'drop-shadow');
+      element.setAttribute('data-captions-font-family', 'serif');
+
+      expect(parseDataAttributes(element).captions).toEqual({
+        style: {
+          fontSize: 75,
+          color: '#FFCC00',
+          backgroundColor: 'black',
+          backgroundOpacity: 0.5,
+          edgeStyle: 'drop-shadow',
+          fontFamily: 'serif',
+        },
+      });
+    });
+
+    it('creates captions config from style attributes alone, for HLS subtitles', () => {
+      element.setAttribute('data-captions-background-opacity', '0');
+
+      expect(parseDataAttributes(element).captions).toEqual({ style: { backgroundOpacity: 0 } });
+    });
+
+    it('keeps the style when data-captions is invalid JSON', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-captions', '[{ language: en }');
+      element.setAttribute('data-captions-font-size', '200');
+
+      expect(parseDataAttributes(element).captions).toEqual({ style: { fontSize: 200 } });
+    });
+
+    it('passes a non-numeric size or opacity through for the captions plugin to reject', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      element.setAttribute('data-captions-font-size', 'big');
+      element.setAttribute('data-captions-background-opacity', 'half');
+
+      expect(parseDataAttributes(element).captions).toEqual({
+        style: { fontSize: 'big', backgroundOpacity: 'half' },
+      });
+      // The parser coerces only; the plugin is the one validator and the one warning.
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('ignores empty caption style attributes', () => {
+      element.setAttribute('data-captions-font-size', '');
+      element.setAttribute('data-captions-color', '  ');
+
+      expect(parseDataAttributes(element).captions).toBeUndefined();
+    });
+
+    it('reads data-captions-persist-style, where only "false" disables', () => {
+      element.setAttribute('data-captions-persist-style', 'false');
+      expect(parseDataAttributes(element).captions).toEqual({ persistStyle: false });
+
+      element.setAttribute('data-captions-persist-style', 'true');
+      expect(parseDataAttributes(element).captions).toEqual({ persistStyle: true });
+
+      element.setAttribute('data-captions-persist-style', '0');
+      expect(parseDataAttributes(element).captions).toEqual({ persistStyle: true });
+    });
   });
 
   describe('chapters attribute parsing', () => {

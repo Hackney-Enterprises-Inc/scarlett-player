@@ -35,7 +35,7 @@ describe('playback stall watchdog', () => {
     vi.spyOn(hlsLoader, 'isHlsJsSupported').mockReturnValue(false);
     vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(true);
 
-    state = { live: false, playing: false, seeking: false };
+    state = { live: false, playing: false, seeking: false, paused: false };
     listeners = [];
 
     api = createMockAPI();
@@ -93,6 +93,12 @@ describe('playback stall watchdog', () => {
     listeners.forEach((listener) => listener({ key: 'playing', value }));
   };
 
+  /** Flip `paused` the way the element's `pause`/`play` handlers do. */
+  const setPaused = (value: boolean): void => {
+    state.paused = value;
+    listeners.forEach((listener) => listener({ key: 'paused', value }));
+  };
+
   it('does not re-check at millisecond cadence while playing without a stall', async () => {
     vi.useFakeTimers();
     const plugin = await loadNatively();
@@ -137,6 +143,48 @@ describe('playback stall watchdog', () => {
       expect.anything()
     );
     expect(api.emit).toHaveBeenCalledWith('error:reconnecting', expect.anything());
+
+    await plugin.destroy();
+  });
+
+  // HEI-SCARLETT-62: a viewer's pause/play used to stop the watchdog and start
+  // it again with a fresh baseline, so a stall that outlived a pause/play was
+  // never reported at all (a stalled element fires `waiting`, not `playing`).
+  it('keeps the stall clock when the viewer pauses and plays during a stall', async () => {
+    vi.useFakeTimers();
+    const plugin = await loadNatively();
+    stubCurrentTime(10);
+    setPlaying(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    setPaused(true);
+    setPlaying(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    // No `playing` follows: the stalled element only fires `waiting`
+    setPaused(false);
+
+    await vi.advanceTimersByTimeAsync(19_001);
+    expect(api.logger.warn).toHaveBeenCalledWith(
+      'Playback stall detected — no timeupdate progress',
+      expect.anything()
+    );
+
+    await plugin.destroy();
+  });
+
+  it('does not count time the viewer spent paused', async () => {
+    vi.useFakeTimers();
+    const plugin = await loadNatively();
+    stubCurrentTime(10);
+    setPlaying(true);
+
+    setPaused(true);
+    setPlaying(false);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(api.logger.warn).not.toHaveBeenCalledWith(
+      'Playback stall detected — no timeupdate progress',
+      expect.anything()
+    );
 
     await plugin.destroy();
   });
