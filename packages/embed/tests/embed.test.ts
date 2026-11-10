@@ -36,6 +36,7 @@ const mockPlaylistPlugin = mockPlugin('playlist', 'Playlist Plugin');
 const mockMediaSessionPlugin = mockPlugin('media-session', 'Media Session Plugin');
 const mockGesturesPlugin = mockPlugin('gestures', 'Gestures Plugin');
 const mockSharePlugin = mockPlugin('share', 'Share Plugin');
+const mockWatermarkPlugin = mockPlugin('watermark', 'Watermark Plugin');
 
 // Mock plugin creators
 const fullPluginCreators: PluginCreators = {
@@ -143,6 +144,9 @@ describe('createEmbedPlayer', () => {
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    // 1.28 warns about attributes whose addon is not loaded, so this suite
+    // silences and asserts on warnings too.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.clearAllMocks();
   });
 
@@ -600,6 +604,8 @@ describe('createEmbedPlayer', () => {
     expect(pluginsOf(player)).not.toContain(mockSharePlugin);
     // And no share slot in the layout: nothing could fill it.
     expect(uiConfigOf(noSharePluginCreators.videoUI)).not.toHaveProperty('controls');
+    // 1.28 (§4.3): the attribute cannot take effect, so say which addon would.
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.share.js'));
   });
 
   it('should share from the video build', async () => {
@@ -1094,6 +1100,40 @@ describe('addons: use() and addonRuntime', () => {
     audioUI: vi.fn(() => mockAudioUIPlugin),
   });
 
+  /**
+   * The audio entry's own map: playlist and media session bundled, and not
+   * deprecated, because O2 keeps them in that build past 2.0.0.
+   */
+  const freshAudioEntryCreators = (): PluginCreators => ({
+    ...freshAudioCreators(),
+    playlist: vi.fn(() => mockPlaylistPlugin),
+    mediaSession: vi.fn(() => mockMediaSessionPlugin),
+  });
+
+  /**
+   * A full-build creators map: every creator the full entry ships, the five
+   * 1.28 deprecates included. Fresh per test, because `use()` mutates it.
+   */
+  const freshFullCreators = (): PluginCreators => ({
+    hls: vi.fn(() => mockHLSPlugin),
+    native: vi.fn(() => mockNativePlugin),
+    videoUI: vi.fn(() => mockVideoUIPlugin),
+    accentTextTone: vi.fn(() => DERIVED_TONE),
+    audioUI: vi.fn(() => mockAudioUIPlugin),
+    analytics: vi.fn(() => mockAnalyticsPlugin),
+    playlist: vi.fn(() => mockPlaylistPlugin),
+    mediaSession: vi.fn(() => mockMediaSessionPlugin),
+    gestures: vi.fn(() => mockGesturesPlugin),
+    share: vi.fn(() => mockSharePlugin),
+    watermark: vi.fn(() => mockWatermarkPlugin),
+  });
+
+  /** What the full entry passes as `deprecatedBundled` (plan §4.2). */
+  const FULL_DEPRECATED = ['analytics', 'playlist', 'mediaSession', 'watermark', 'share'] as const;
+
+  /** What the video entry passes as `deprecatedBundled`. */
+  const VIDEO_DEPRECATED = ['watermark', 'share'] as const;
+
   const uiFns = { registerControl: vi.fn(), unregisterControl: vi.fn(() => true) };
 
   beforeEach(() => {
@@ -1148,9 +1188,14 @@ describe('addons: use() and addonRuntime', () => {
     const creators = freshVideoCreators();
     const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
 
-    api.use('share' as never, vi.fn(() => mockSharePlugin));
+    // 'share' was the example here until 1.28 made it a real addon name.
+    api.use('airplay' as never, vi.fn(() => mockSharePlugin));
     expect(creators.share).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Accepted names: chapters, clips'));
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Accepted names: chapters, clips, analytics, playlist, mediaSession, watermark, share'
+      )
+    );
   });
 
   it('replaces an earlier use() with a warning', () => {
@@ -1165,6 +1210,178 @@ describe('addons: use() and addonRuntime', () => {
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('replaces an earlier registration'));
   });
 
+  // 1.28 (plan §4.2): a name the build bundles but deprecates is left out of
+  // `builtIn`, so an addon loaded beside the build replaces the bundled copy
+  // instead of being refused. That is what lets a host migrate before 2.0.0
+  // takes the bundled copies away.
+  it('replaces a creator the build bundles but deprecates, silently, and uses the addon', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns, {
+      deprecatedBundled: FULL_DEPRECATED,
+    });
+    const addonAnalytics = vi.fn(() => mockAnalyticsPlugin);
+
+    api.use('analytics', addonAnalytics);
+
+    expect(creators.analytics).toBe(addonAnalytics);
+    expect(console.warn).not.toHaveBeenCalled();
+
+    const player = await api.create({
+      container,
+      src: 'v.m3u8',
+      analytics: { beaconUrl: 'https://beacon.example' },
+    });
+
+    expect(addonAnalytics).toHaveBeenCalledTimes(1);
+    expect(pluginsOf(player)).toContain(mockAnalyticsPlugin);
+    // The bundled copy is gone, and its deprecation notice with it.
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('notices once per page that a deprecated bundled creator is still the one in use', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns, {
+      deprecatedBundled: FULL_DEPRECATED,
+    });
+
+    await api.create({ container, src: 'v.m3u8', analytics: { beaconUrl: 'https://beacon.example' } });
+    await api.create({ container, src: 'v.m3u8', analytics: { beaconUrl: 'https://beacon.example' } });
+
+    expect(creators.analytics).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.analytics.js'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('2.0.0'));
+  });
+
+  it('warns and replaces on a second use() of a deprecated-bundled name', () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns, {
+      deprecatedBundled: FULL_DEPRECATED,
+    });
+    const first = vi.fn(() => mockAnalyticsPlugin);
+    const second = vi.fn(() => mockAnalyticsPlugin);
+
+    api.use('analytics', first);
+    expect(console.warn).not.toHaveBeenCalled();
+
+    api.use('analytics', second);
+    expect(creators.analytics).toBe(second);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('replaces an earlier registration'));
+  });
+
+  it('still refuses a name the build provides and does not deprecate', () => {
+    // The audio build keeps playlist and media session past 2.0.0 (O2), so it
+    // passes no deprecatedBundled and use() refuses them as before.
+    const creators = freshAudioEntryCreators();
+    const bundled = creators.playlist;
+    const api = createScarlettPlayerAPI(creators, ['audio', 'audio-mini'], '1.0.0-audio');
+
+    api.use('playlist', vi.fn(() => mockPlaylistPlugin));
+
+    expect(creators.playlist).toBe(bundled);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('playlist is already provided by this build')
+    );
+  });
+
+  it('lets an addon take over the video build\'s deprecated watermark', () => {
+    const creators = { ...freshVideoCreators(), watermark: vi.fn(() => mockWatermarkPlugin) };
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0-video', uiFns, {
+      deprecatedBundled: VIDEO_DEPRECATED,
+    });
+    const addonWatermark = vi.fn(() => mockWatermarkPlugin);
+
+    api.use('watermark', addonWatermark);
+
+    expect(creators.watermark).toBe(addonWatermark);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('says nothing about a creator the audio build keeps bundled and undeprecated', async () => {
+    const creators = freshAudioEntryCreators();
+    const api = createScarlettPlayerAPI(creators, ['audio', 'audio-mini'], '1.0.0-audio');
+
+    await api.create({ container, type: 'audio', src: 'a.mp3' });
+
+    expect(creators.mediaSession).toHaveBeenCalledTimes(1);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('notices the deprecated bundled share creator once per page', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns, {
+      deprecatedBundled: FULL_DEPRECATED,
+    });
+    const config = { src: 'v.m3u8', shareUrl: 'https://example.com/watch/abc' };
+
+    await api.create({ container, ...config });
+    await api.create({ container, ...config });
+
+    expect(creators.share).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.share.js'));
+  });
+
+  it('installs analytics exactly once per player when the addon replaces the bundled copy', async () => {
+    const creators = freshFullCreators();
+    const bundled = creators.analytics;
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns, {
+      deprecatedBundled: FULL_DEPRECATED,
+    });
+    const addonAnalytics = vi.fn(() => mockAnalyticsPlugin);
+    api.use('analytics', addonAnalytics);
+
+    await api.create({ container, src: 'v.m3u8', analytics: { beaconUrl: 'https://beacon.example' } });
+    await api.create({ container, src: 'v.m3u8', analytics: { beaconUrl: 'https://beacon.example' } });
+
+    // One viewStart path per player: the bundled creator is never reached, so
+    // no player can end up carrying two analytics plugins.
+    expect(bundled).not.toHaveBeenCalled();
+    expect(addonAnalytics).toHaveBeenCalledTimes(2);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  // F2: the map is marked consumed before `await createPlayer`, so a use()
+  // that lands while the first player is still pending is told it is late.
+  it('tells a use() that lands while the first create() is pending that it is late', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    const release: { resolve?: () => void } = {};
+    const gate = new Promise<void>((resolve) => {
+      release.resolve = resolve;
+    });
+    // Held once: the first createPlayer() waits, every later one runs as usual.
+    vi.mocked(createPlayer).mockImplementationOnce(async (config: PlayerOptions) => {
+      await gate;
+
+      return {
+        container: config.container,
+        config,
+        destroy: vi.fn(),
+        unload: vi.fn().mockResolvedValue(undefined),
+        seek: vi.fn(),
+        once: vi.fn(),
+      } as unknown as ScarlettPlayer;
+    });
+
+    const pending = api.create({ container, src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    // Not awaited: the player is still in flight, its plugin array long since
+    // assembled.
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('initAll()'));
+
+    release.resolve?.();
+    const inFlight = await pending;
+    // The in-flight player is not retroactively changed: the creator was not
+    // in the map when its plugin array was assembled, so it warned and
+    // installed nothing.
+    expect(pluginsOf(inFlight)).not.toContain(chaptersPlugin);
+
+    const next = await api.create({ container, src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    expect(pluginsOf(next)).toContain(chaptersPlugin);
+  });
+
   it('warns that a use() after players exist applies only to later players', async () => {
     const creators = freshVideoCreators();
     const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
@@ -1173,6 +1390,71 @@ describe('addons: use() and addonRuntime', () => {
     api.use('chapters', vi.fn(() => chaptersPlugin));
     expect(creators.chapters).toBeDefined();
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('initAll()'));
+  });
+
+  // F6: the once-per-page key is the addon plus the reason, so one reason
+  // cannot hide a more actionable one.
+  it('says each distinct chapters warning once: audio "video only", then video "load the addon"', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns);
+
+    await api.create({ container, type: 'audio', src: 'a.mp3', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'audio', src: 'a.mp3', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+
+    const messages = vi.mocked(console.warn).mock.calls.map((call) => String(call[0]));
+    expect(messages.filter((m) => m.includes('applies to video players only'))).toHaveLength(1);
+    expect(messages.filter((m) => m.includes('embed.addon.chapters.js'))).toHaveLength(1);
+    expect(messages).toHaveLength(2);
+  });
+
+  it('warns once for the same missing chapters addon across two video players', async () => {
+    const creators = freshFullCreators();
+    const api = createScarlettPlayerAPI(creators, fullAvailableTypes, '1.0.0', uiFns);
+
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+    await api.create({ container, type: 'video', src: 'v.m3u8', chapters: { src: 'c.vtt' } });
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.chapters.js'));
+  });
+
+  // F7: pending plus created players are counted per map, so a rejected first
+  // create no longer leaves the map marked consumed.
+  it('does not warn "after players were created" when the only create() rejected', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    vi.mocked(createPlayer).mockRejectedValueOnce(new Error('PROVIDER_NOT_FOUND'));
+
+    await expect(api.create({ container, src: 'v.m3u8' })).rejects.toThrow('PROVIDER_NOT_FOUND');
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('after players were created'));
+  });
+
+  it('keeps the late warning when a second create() is still pending as the first rejects', async () => {
+    const creators = freshVideoCreators();
+    const api = createScarlettPlayerAPI(creators, videoOnlyTypes, '1.0.0', uiFns);
+    const release: { resolve?: () => void } = {};
+    const gate = new Promise<void>((resolve) => {
+      release.resolve = resolve;
+    });
+    vi.mocked(createPlayer).mockRejectedValueOnce(new Error('PROVIDER_NOT_FOUND'));
+    vi.mocked(createPlayer).mockImplementationOnce(async (config: PlayerOptions) => {
+      await gate;
+      return { container: config.container, config, destroy: vi.fn(), once: vi.fn() } as unknown as ScarlettPlayer;
+    });
+
+    const first = api.create({ container, src: 'v.m3u8' });
+    const second = api.create({ container, src: 'v.m3u8' });
+    await expect(first).rejects.toThrow('PROVIDER_NOT_FOUND');
+
+    api.use('chapters', vi.fn(() => chaptersPlugin));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('after players were created'));
+
+    release.resolve?.();
+    await second;
   });
 
   it('exposes a frozen addonRuntime with the bare package version and the build\'s UI functions', async () => {
@@ -1280,6 +1562,86 @@ describe('addons: use() and addonRuntime', () => {
     expect(uiConfigOf(creators.videoUI)).not.toHaveProperty('controls');
   });
 
+  // DC1: once per page, not once per player. A page with ten players says each
+  // thing once, and every test map starts clean with no reset.
+  it('warns once per page for a missing chapters or clips addon, across two players', async () => {
+    const creators = freshVideoCreators();
+    const config = {
+      src: 'v.m3u8',
+      chapters: { src: 'c.vtt' },
+      clips: { endpoint: '/api/clips', csrf: 'meta' as const },
+    };
+
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+
+    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.chapters.js'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.clips.js'));
+  });
+
+  it('warns once per page when the analytics addon is not loaded at all', async () => {
+    const creators = freshVideoCreators();
+    const config = { src: 'v.m3u8', analytics: { beaconUrl: 'https://beacon.example' } };
+
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+
+    // No beacons at all: the plugin is what sends them.
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('data-analytics-beacon-url'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.analytics.js'));
+  });
+
+  // F6: what is lost without the playlist addon is navigation, not playback.
+  // The source precedence is unchanged, so a configured src still wins.
+  it('keeps the configured src as the playback source when the playlist addon is absent', async () => {
+    const creators = freshVideoCreators();
+    const player = await createEmbedPlayer(
+      container,
+      { src: 'standalone.m3u8', playlist: [{ src: 'one.m3u8' }, { src: 'two.m3u8' }] },
+      creators,
+      videoOnlyTypes
+    );
+
+    expect((player as unknown as { config: { src: string } }).config.src).toBe('standalone.m3u8');
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('only the first item plays'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.playlist.js'));
+  });
+
+  // DC3: no media session warning for a titled video player, because
+  // `data-title` is on nearly every embed and also feeds share.
+  it('warns on an audio player when the media session addon is missing, and stays silent on a titled video player', async () => {
+    const audio = freshAudioCreators();
+    const audioTypes: PlayerType[] = ['audio', 'audio-mini'];
+
+    await createEmbedPlayer(container, { src: 'a.mp3', type: 'audio' }, audio, audioTypes);
+    await createEmbedPlayer(container, { src: 'a.mp3', type: 'audio-mini' }, audio, audioTypes);
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('embed.addon.media-session.js'));
+
+    vi.clearAllMocks();
+    const video = freshVideoCreators();
+    await createEmbedPlayer(container, { src: 'v.m3u8', title: 'Bout 13' }, video, videoOnlyTypes);
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  // DC4: a missing anti-piracy overlay is a content-protection loss, so this
+  // one is an error rather than a warning.
+  it('errors once when the watermark addon is missing', async () => {
+    const creators = freshVideoCreators();
+    const config = { src: 'v.m3u8', watermark: { text: 'DRAFT' } };
+
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+    await createEmbedPlayer(container, { ...config }, creators, videoOnlyTypes);
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('embed.addon.watermark.js'));
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
   it('builds the layout in the agreed order when share, clip and chapters are all on', async () => {
     const creators = {
       ...freshVideoCreators(),
@@ -1306,7 +1668,7 @@ describe('addons: use() and addonRuntime', () => {
     expect(at('chapters')).toBeLessThan(at('settings'));
   });
 
-  it('warns in an audio build that captions, chapters and clips need a video build, installing nothing', async () => {
+  it('warns in an audio build that captions, chapters and clips need a video build, and media session its addon', async () => {
     const creators = freshAudioCreators();
     const api = createScarlettPlayerAPI(creators, ['audio', 'audio-mini'], '1.0.0-audio');
     const chapters = vi.fn(() => chaptersPlugin);
@@ -1327,8 +1689,11 @@ describe('addons: use() and addonRuntime', () => {
     expect(clips).not.toHaveBeenCalled();
     expect(pluginsOf(player)).toEqual([mockHLSPlugin, mockNativePlugin, mockAudioUIPlugin]);
     const warnings = vi.mocked(console.warn).mock.calls.map((c) => String(c[0]));
-    expect(warnings).toHaveLength(3);
-    expect(warnings.every((w) => /video build/.test(w))).toBe(true);
+    // Captions, chapters and clips need a video build; media session is not
+    // video-only, so it names its addon file instead (§4.3).
+    expect(warnings).toHaveLength(4);
+    expect(warnings.filter((w) => /video build/.test(w))).toHaveLength(3);
+    expect(warnings.some((w) => w.includes('embed.addon.media-session.js'))).toBe(true);
   });
 
   it('leaves config and plugin list byte-identical for an embed with no new attributes and no addon', async () => {

@@ -29,6 +29,26 @@
     "./addons/clips": {
       "import": "./dist/embed.addon.clips.js",
       "require": "./dist/embed.addon.clips.umd.cjs"
+    },
+    "./addons/analytics": {
+      "import": "./dist/embed.addon.analytics.js",
+      "require": "./dist/embed.addon.analytics.umd.cjs"
+    },
+    "./addons/playlist": {
+      "import": "./dist/embed.addon.playlist.js",
+      "require": "./dist/embed.addon.playlist.umd.cjs"
+    },
+    "./addons/media-session": {
+      "import": "./dist/embed.addon.media-session.js",
+      "require": "./dist/embed.addon.media-session.umd.cjs"
+    },
+    "./addons/watermark": {
+      "import": "./dist/embed.addon.watermark.js",
+      "require": "./dist/embed.addon.watermark.umd.cjs"
+    },
+    "./addons/share": {
+      "import": "./dist/embed.addon.share.js",
+      "require": "./dist/embed.addon.share.umd.cjs"
     }
   },
   "files": [
@@ -37,7 +57,7 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "rimraf dist tsconfig.tsbuildinfo && tsc && vite build && BUILD_VIDEO=true vite build && BUILD_AUDIO=true vite build && BUILD_ADDON=chapters vite build && BUILD_ADDON=clips vite build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc && vite build && BUILD_VIDEO=true vite build && BUILD_AUDIO=true vite build && BUILD_ADDON=chapters vite build && BUILD_ADDON=clips vite build && BUILD_ADDON=analytics vite build && BUILD_ADDON=playlist vite build && BUILD_ADDON=media-session vite build && BUILD_ADDON=watermark vite build && BUILD_ADDON=share vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

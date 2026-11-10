@@ -14,25 +14,34 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 - **Unified API** - Single API for video, audio, and compact audio players
 - **iframe Support** - Helper page for URL-based iframe embeds
 - **Sharing** - Opt-in share button on video: OS share sheet, copy link, embed code
-- **Addons** - Chapters and viewer clips as separate CDN files, loaded only by the pages that use them, see [Addons](#addons)
+- **Addons** - Chapters, clips, analytics, playlist, media session, watermark and share as separate CDN files, loaded only by the pages that use them, see [Addons](#addons)
 
 ## Installation
 
 ### CDN Usage (Recommended for Embeds)
 
 ```html
-<!-- Full build (video + audio + all plugins) -->
+<!-- Option A: Full build (video + audio + all plugins) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Video-only build (lightweight) -->
+<!-- Option B: Video-only build (lightweight) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.video.umd.cjs"></script>
 
-<!-- Audio-only build (audio + playlist + media-session) -->
+<!-- Option C: Audio-only build (audio + playlist + media-session) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
 
-<!-- Optional addons, after a full or video build (see Addons) -->
+<!-- Load one of the three builds above, not several: each sets window.ScarlettPlayer,
+     and the Audio build replaces it. -->
+
+<!-- Optional addons, only after the Full or Video build and from the same
+     version directory (see Addons) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.analytics.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.playlist.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.media-session.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.watermark.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.share.umd.cjs"></script>
 ```
 
 ### NPM Installation
@@ -162,26 +171,26 @@ The simplest way to embed a player. Just add the script and use data attributes:
 
 #### Audio-specific Attributes
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `data-title` | string | Track/episode title |
-| `data-artist` | string | Artist/creator name |
-| `data-album` | string | Album name |
-| `data-artwork` | string | Album art / cover image URL |
-| `data-playlist` | JSON | Array of `{ src, videoId?, title?, artist?, poster?, artwork?, duration? }` (Full and Audio builds). Each item that loads is its own analytics view, reported under its `videoId`, or under `data-analytics-video-id` when it has none. The first item's `videoId` applies from the first view unless `data-src` names a different source |
+| Attribute | Type | Builds | Description |
+|-----------|------|--------|-------------|
+| `data-title` | string | Full, Audio, with the [media-session addon](#addons) for Video | Track/episode title. On a video player the media-session addon installs only when this attribute is present |
+| `data-artist` | string | Full, Audio, with the [media-session addon](#addons) for Video | Artist/creator name. On a video player it does not enable the addon on its own: `data-title` is required |
+| `data-album` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album name. On a video player it does not enable the addon on its own: `data-title` is required |
+| `data-artwork` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album art / cover image URL. On a video player it does not enable the addon on its own: `data-title` is required |
+| `data-playlist` | JSON | Full, Audio (or Video with the [playlist addon](#addons)) | Array of `{ src, videoId?, title?, artist?, poster?, artwork?, duration? }`. Each item that loads is its own analytics view, reported under its `videoId`, or under `data-analytics-video-id` when it has none. The first item's `videoId` applies from the first view unless `data-src` names a different source |
 
-#### Analytics Attributes (Full build)
+#### Analytics Attributes (Full build, or any build with the analytics addon)
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `data-analytics-beacon-url` | string | Beacon endpoint. Setting it enables the analytics plugin |
-| `data-analytics-video-id` | string | Video identifier sent with every beacon |
-| `data-analytics-api-key` | string | Optional API key |
-| `data-analytics-anonymous` | boolean | Use per-view anonymous identifiers without persistent storage; default `false` |
-| `data-analytics-respect-dnt` | boolean | Respect browser Do Not Track / Global Privacy Control and suppress beacons; default `false` |
-| `data-analytics-batch` | boolean | Opt in to batch requests; default `false`. Requires an endpoint that accepts `{ batch: 1, sentAt, events: [...] }` rather than single-beacon bodies |
+| Attribute | Type | Builds | Description |
+|-----------|------|--------|-------------|
+| `data-analytics-beacon-url` | string | Full, or any build with the [analytics addon](#addons) | Beacon endpoint. Setting it enables the analytics plugin |
+| `data-analytics-video-id` | string | as above | Video identifier sent with every beacon |
+| `data-analytics-api-key` | string | as above | Optional API key |
+| `data-analytics-anonymous` | boolean | as above | Use per-view anonymous identifiers without persistent storage; default `false` |
+| `data-analytics-respect-dnt` | boolean | as above | Respect browser Do Not Track / Global Privacy Control and suppress beacons; default `false` |
+| `data-analytics-batch` | boolean | as above | Opt in to batch requests; default `false`. Requires an endpoint that accepts `{ batch: 1, sentAt, events: [...] }` rather than single-beacon bodies |
 
-These options apply only to the **Full** build and **none enables analytics by
+These options apply to the **Full** build, or to any build with the [analytics addon](#addons), and **none enables analytics by
 itself**: supply a nonempty `data-analytics-beacon-url` to install the plugin.
 Boolean attributes are `true` when present (including an empty value); only
 the exact value `false` disables one. Batch tuning (`intervalMs`, `maxEvents`),
@@ -480,43 +489,78 @@ All builds are available at `https://assets.thestreamplatform.com/scarlett-playe
 
 | Build | Files | Features |
 |-------|-------|----------|
-| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session + Sharing + Captions |
-| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight), Sharing, Captions |
+| **Full** | `embed.js` / `embed.umd.cjs` | Video + Audio + Analytics + Playlist + Media Session + Sharing + Captions + Watermark |
+| **Video** | `embed.video.js` / `embed.video.umd.cjs` | Video player only (lightweight), Sharing, Captions, Watermark |
 | **Audio** | `embed.audio.js` / `embed.audio.umd.cjs` | Audio + Playlist + Media Session, on `hls.js/light` (no ID3, no sharing) |
-| **Addons** | `embed.addon.chapters.*` / `embed.addon.clips.*` | Chapters, Clips; loaded after a Full or Video build, see [Addons](#addons) |
+| **Addons** | `embed.addon.chapters.*` / `embed.addon.clips.*` / `embed.addon.analytics.*` / `embed.addon.playlist.*` / `embed.addon.media-session.*` / `embed.addon.watermark.*` / `embed.addon.share.*` | Chapters, Clips, Analytics, Playlist, Media Session, Watermark, Share; loaded after a build, see [Addons](#addons) |
 
 **Which build should I use?**
 
-- Use **Full** (`embed.umd.cjs`) if you need both video and audio, or want analytics
-- Use **Video** (`embed.video.umd.cjs`) for video-only sites to reduce bundle size
+- Use **Full** (`embed.umd.cjs`) if you need both video and audio, or want analytics, playlist, media session or watermark
+- Use **Video** (`embed.video.umd.cjs`) for video-only sites to reduce bundle size; add the share, watermark or analytics addon when you need them
 - Use **Audio** (`embed.audio.umd.cjs`) for audio-only sites (podcasts, music streaming). It is built on `hls.js/light`, so it cannot read ID3 timed metadata: see [Audio build: hls.js/light](#audio-build-hlsjslight)
-- Add an **addon** (`embed.addon.chapters.umd.cjs`, `embed.addon.clips.umd.cjs`) after the Full or Video build when a page needs chapters or viewer clips
+- Add an **addon** (`embed.addon.<name>.umd.cjs`) after the build when a page needs a feature not bundled there. The Full build bundles every plugin that is now an addon, except chapters and clips, which no build has carried; in 2.0.0 the bundled ones move to addons, so loading the addons beside the Full build is what keeps today's behaviour through the upgrade
 
 **Note:** Using a build without support for a player type will throw an error. For example, using the Video build and setting `data-type="audio"` will fail with a helpful error message.
 
 ## Addons
 
-The embed builds stay as they are: what a build carries today it keeps, and anything new ships as an **addon**, a separate file a page loads only when it wants the feature. An addon registers its plugin with the embed already on the page through `ScarlettPlayer.use()`, and uses that embed's own UI, so its control appears in the embed's control bar.
+The embed builds stay as they are in 1.28: every bundled copy is still in the
+builds. Each bundled copy that is deprecated (analytics, playlist, media session,
+watermark and share in Full; watermark and share in Video) logs a one-time deprecation
+notice when a page relies on it. The Audio build's playlist and media session are
+not deprecated: they stay bundled in 2.0.0, and their addons are refused beside
+Audio. Media session on a titled video player in Full logs no notice. In 2.0.0
+the Full and Video builds stop carrying the deprecated plugins, so a page that
+loads the matching addon beside its build keeps the feature. An addon registers its
+plugin with the embed already on the page through `ScarlettPlayer.use()`, and
+uses that embed's own UI, so its control appears in the embed's control bar.
 
-| Addon | Files | Adds | Enables |
-|-------|-------|------|---------|
-| Chapters | `embed.addon.chapters.js` / `embed.addon.chapters.umd.cjs` | Chapter markers on the progress bar, a chapter list control, seek to chapter | `data-chapters` |
-| Clips | `embed.addon.clips.js` / `embed.addon.clips.umd.cjs` | A clip control: the viewer picks a range with two handles, previews it and submits it to your endpoint | `data-clips-*` |
+| Addon | Files | Builds | Adds | Enables |
+|-------|-------|--------|------|---------|
+| Chapters | `embed.addon.chapters.js` / `embed.addon.chapters.umd.cjs` | Full, Video | Chapter markers on the progress bar, a chapter list control, seek to chapter | `data-chapters` |
+| Clips | `embed.addon.clips.js` / `embed.addon.clips.umd.cjs` | Full, Video | A clip control: the viewer picks a range with two handles, previews it and submits it to your endpoint | `data-clips-*` |
+| Analytics | `embed.addon.analytics.js` / `embed.addon.analytics.umd.cjs` | Full, Video, Audio | Beacon sending, QoE metrics, structured errors, privacy controls | `data-analytics-beacon-url`, `create({ analytics })` |
+| Playlist | `embed.addon.playlist.js` / `embed.addon.playlist.umd.cjs` | Full, Video (Audio: built in, addon refused) | Queue management, shuffle, repeat modes, auto-advance | `data-playlist`, `create({ playlist })` |
+| Media Session | `embed.addon.media-session.js` / `embed.addon.media-session.umd.cjs` | Full, Video (Audio: built in, addon refused) | Lock-screen controls, media keys, album art, seek bar | audio `data-title`/`data-artist`/`data-album`/`data-artwork`, `create({ title?, artist?, album?, artwork? })` |
+| Watermark | `embed.addon.watermark.js` / `embed.addon.watermark.umd.cjs` | Full, Video | Anti-piracy text or image overlay with dynamic repositioning | `create({ watermark })` (no data attribute) |
+| Share | `embed.addon.share.js` / `embed.addon.share.umd.cjs` | Full, Video | OS share sheet on mobile, copy link, embed code, playback timestamps | `data-share-url`, `data-embed-base-url`, `iframe.html?share-url=` |
+
+**Deprecated in 1.28, removed in 2.0.0.** The five new addons above replace plugins that are still bundled in the 1.28 builds. In the Full and Video builds, when a page uses a deprecated bundled plugin without loading its addon, the build logs a one-time deprecation warning (Audio's playlist and media session are not deprecated and log none). Load the addon beside the build to silence the warning and keep the feature when the build stops bundling it in 2.0.0.
 
 ```html
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.analytics.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.playlist.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.media-session.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.watermark.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.share.umd.cjs"></script>
 
 <div data-scarlett-player data-src="https://example.com/event.m3u8"
   data-chapters="https://example.com/event/chapters.vtt"
-  data-clips-endpoint="/api/scarlett/clips" data-clips-csrf="meta" data-clips-media-id="abc123"></div>
+  data-clips-endpoint="/api/scarlett/clips" data-clips-csrf="meta" data-clips-media-id="abc123"
+  data-analytics-beacon-url="https://example.com/beacons" data-analytics-video-id="event-1"
+  data-playlist='[{"src":"https://example.com/track1.m3u8","title":"Track 1"}]'
+  data-share-url="https://example.com/watch/abc"></div>
 ```
 
-- **Builds.** Addons work beside the Full and Video builds, on video players. Beside the Audio build, or on an audio player, the attribute is ignored with a warning.
+- **Builds.** Chapters and clips work beside the Full and Video builds, on video players. Analytics works beside all three builds. Playlist and media session work beside Full and Video; the Audio build already bundles both and refuses their addons ("already provided by this build"). Watermark works beside Full and Video. Share is video only (the `shareEnabled` gate: `type === 'video' && shareUrl && controls !== false`). Beside a build that never had the plugin, the attribute is ignored with a warning - exactly one per page, per addon. `data-share-url` on an audio player is silent, because the share gate requires a video player.
 - **Load order.** The embed first, then the addons. Plain, `defer` or `type="module"` `<script>` tags in that order all run before the embed auto-initialises players (it scans at `DOMContentLoaded`, after every deferred and module script), so nothing else is needed. An addon loaded before the embed logs an error and does nothing; an addon registered after players were created applies only to players created afterwards (`ScarlettPlayer.create()` or a later `initAll()`), and the embed warns about it. Pages using `type="module"` import the ESM files (`embed.js`, then `embed.addon.<name>.js`) in the same order.
+- **Analytics load order.** Analytics depends on a second file loading before the first player is created. If the addon loads after `create()` has already run for a player, that player never sends beacons. Load `embed.addon.analytics.umd.cjs` (or `.js` for module pages) before any player on the page is created, the same as every other addon, to keep coverage. The DOM-ready scan already covers plain, `defer` and module scripts in document order, so the usual `<script>` ordering is enough.
 - **Versions.** Pin both files to the same `v<version>/` directory, or load both from `latest/`; never mix. An addon refuses to register with an embed of a different version and logs both versions, because a cached `latest/` file beside a newer one is exactly how a mismatched pair happens.
-- **Without the addon**, `data-chapters` or `data-clips-endpoint` logs one warning naming the addon file and installs nothing; the rest of the player is unaffected.
+- **Without the addon**, an attribute that needs it logs one warning naming the addon file and installs nothing; the rest of the player is unaffected. Two exceptions: a missing watermark logs a `console.error`, and in 1.28 a build that bundles the plugin (Full, and Video for watermark and share) installs the bundled copy instead. A titled video player without media session logs nothing. The full migration table below maps each attribute or option to the addon file and the builds it works beside.
+
+### Migration table (attribute or option → addon file → builds)
+
+| Trigger | Addon file | Builds | What happens without the addon |
+|---------|-----------|--------|-------------------------------|
+| `data-analytics-beacon-url`, `data-analytics-video-id`, `data-analytics-api-key`, `data-analytics-anonymous`, `data-analytics-respect-dnt`, `data-analytics-batch`, or `create({ analytics })` | `embed.addon.analytics` | Full, Video, Audio | No beacons. One warning: "data-analytics-beacon-url ignored: load embed.addon.analytics…" (the Full build bundles analytics, so it logs only a deprecation notice instead, and only when the bundled copy is used) |
+| `data-playlist`, or `create({ playlist })` | `embed.addon.playlist` | Full, Video (Audio: built in, addon refused) | No playlist navigation. When `data-src` is set the player plays that source, and the first playlist item is the fallback only when `data-src` is absent. One warning: "data-playlist ignored: only the first item plays; load embed.addon.playlist.js (or …umd.cjs) after the embed to enable playlist navigation." |
+| audio `data-title`/`data-artist`/`data-album`/`data-artwork`, or `create({ title?, artist?, album?, artwork? })` | `embed.addon.media-session` | Full, Video (Audio: built in, addon refused) | No lock-screen or media-key metadata for audio players (one warning). Titled video players: no warning, but they lose lock-screen metadata in 2.0; load the addon to keep it |
+| `create({ watermark })` | `embed.addon.watermark` | Full, Video | No anti-piracy overlay. One `console.error` (missing watermark is a content-protection loss) |
+| `data-share-url`, `data-embed-base-url`, or `iframe.html?share-url=` | `embed.addon.share` | Full, Video | No share button. One warning: "data-share-url ignored: load embed.addon.share…". `iframe.html` loads the addon itself in 2.0; until then, add it beside the embed when `share-url` is set |
 
 ### Clips and your CSRF token
 

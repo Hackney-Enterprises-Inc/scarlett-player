@@ -226,12 +226,19 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
      media session, captions, gestures, watermark, share -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Or pin a version: .../scarlett-player/v1.15.1/embed.umd.cjs -->
+<!-- Or pin a version: .../scarlett-player/v1.28.0/embed.umd.cjs -->
 
 <!-- Optional addons, after the embed and from the same version directory:
-     chapters (data-chapters) and viewer clips (data-clips-*) -->
+     chapters (data-chapters), clips (data-clips-*), analytics (data-analytics-*),
+     playlist (data-playlist), media session (audio title/artist/album/artwork),
+     watermark (create({ watermark })), share (data-share-url) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.analytics.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.playlist.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.media-session.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.watermark.umd.cjs"></script>
+<script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.share.umd.cjs"></script>
 
 <!-- Video player via data attributes -->
 <div data-scarlett-player
@@ -303,16 +310,24 @@ reported as `reconnecting`/`recovered` beacons; a view not playing for
 new IDs per view without storage. `beforeSend` can alter or drop beacons
 (non-object results other than `null` preserve the original payload), and
 `playerInitTime` supplies optional view-start timing. `pageUrl` contains only
-origin and pathname; `referrerOrigin` is origin-only. The full embed bundle
-supports `data-analytics-anonymous`, `data-analytics-respect-dnt` and
+origin and pathname; `referrerOrigin` is origin-only. The full embed bundle,
+or any embed build with the analytics addon, supports
+`data-analytics-anonymous`, `data-analytics-respect-dnt` and
 `data-analytics-batch`, but none enables analytics without
-`data-analytics-beacon-url`. The Laravel Composer package's default pinned
-**1.19.1** embed bundle does not have these newer attributes; repin that bundle
-separately before using them. Batching defaults **off** (one POST per beacon).
-Opting in sends `{ batch: 1, sentAt, events }` and requires a compatible custom
-ingest: **Laravel v0.3.0 rejects batches (422)**. See the
+`data-analytics-beacon-url`. In 1.28 the analytics plugin is still bundled in
+the Full build; in 2.0.0 it moves to `embed.addon.analytics`, so a full-build
+page that wants beacons keeps them by loading the addon beside the embed. The
+analytics addon also works beside the Video and Audio builds, which do not
+bundle it today. The Laravel Composer package's default pinned **1.19.1**
+embed bundle does not have these newer attributes; repin that bundle separately
+before using them. Batching defaults **off** (one POST per beacon). Opting in
+sends `{ batch: 1, sentAt, events }` and requires a compatible custom ingest:
+**Laravel v0.3.0 rejects batches (422)**. See the
 [analytics README](./packages/plugins/analytics/README.md) for the full wire
 contract and [embed README](./packages/embed/README.md) for bundle attributes.
+Analytics coverage depends on the addon loading before the first player is
+created: a late addon leaves earlier players without beacons, so load
+`embed.addon.analytics` before any `create()` call on the page.
 
 On hls.js HLS, the core `media:segment` event reports measured fragment
 `durationMs`, `bytes`, `ok` and `kind`; analytics includes interval segment
