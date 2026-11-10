@@ -170,7 +170,11 @@ export interface HLSPluginConfig {
    * `duration` and the other state keys keep their values. The next `play()`
    * on the element fetches the source again and rejoins the live edge.
    * Native live only: VOD and hls.js are never released. While released the
-   * element shows its poster (or black) rather than the last frame.
+   * element shows its poster (or black) rather than the last frame. The timer
+   * starts on a viewer pause of a source that has been played; a native live
+   * source loaded but never played never changes `paused` and is not released
+   * by this option. Use `autoStartLoad: false` to keep an unplayed native
+   * source from loading before Play.
    */
   nativePauseReleaseMs?: number;
   /**

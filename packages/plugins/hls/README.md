@@ -112,7 +112,7 @@ createHLSPlugin({
   autoStartLoad: true,          // false: fetch nothing until Play (hls.js and native; see below)
   startPosition: -1,
   loadTimeoutMs: 30000,         // Load watchdog, then auto-reconnect; 0 disables
-  nativePauseReleaseMs: 0,      // Native live only: release a source paused this long; 0 = off
+  nativePauseReleaseMs: 0,      // Native live only: release a played source paused this long; 0 = off
 
   // Live / low latency (see below). Every key here except lowLatencyMode is
   // left to hls.js unless you set it - none is ever passed as undefined.
@@ -418,6 +418,12 @@ reload, so a failure hands off to auto-reconnect) and rejoins the live edge. VOD
 is never released. While released the element shows its `poster`, or black,
 instead of the last frame. A release is not a stall: the stall clock and ceiling
 are cleared.
+
+The timer starts on a viewer pause of a source that has been played (and after a
+reconnect, a resumed fetch or a provider switch); a native live source loaded
+but never played never changes `paused` and so is not released. That case is
+covered by `autoStartLoad: false`, which keeps the source and its `load()`
+deferred until the first play.
 
 ### Unsupported browsers
 
