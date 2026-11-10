@@ -53,6 +53,10 @@ export interface EmbedConfig {
    * that expires. Leaving this unset leaves the control bar exactly as it was,
    * which is why an existing embed never grows a button it did not ask for.
    *
+   * The full and video builds bundle the share plugin (deprecated in 1.28,
+   * removed in 2.0.0); load `embed.addon.share` to keep the button. Without
+   * it the attribute is ignored and the control bar keeps its default layout.
+   *
    * Inside an iframe embed this is the parameter that makes sharing correct at
    * all. `window.location.href` there is the player page, not the page the
    * viewer is on, and cross-origin rules stop the plugin reading the parent, so
@@ -101,7 +105,16 @@ export interface EmbedConfig {
   startTime?: number;
   /** Custom class name for the container */
   className?: string;
-  /** Media title (for audio/media session) */
+  /**
+   * Media title (for audio/media session).
+   *
+   * Also feeds the share sheet's title. Lock-screen and media-key metadata
+   * come from the media session plugin, which the full and audio builds
+   * bundle (deprecated in 1.28 in the full build) and the video build takes
+   * from `embed.addon.media-session`. A titled video player whose build has
+   * neither is silent about it, because `data-title` is on nearly every embed
+   * and also feeds share.
+   */
   title?: string;
   /** Artist name (for audio/media session) */
   artist?: string;
@@ -109,11 +122,35 @@ export interface EmbedConfig {
   album?: string;
   /** Artwork URL (alias for poster, for audio) */
   artwork?: string;
-  /** Playlist items */
+  /**
+   * Playlist items.
+   *
+   * Without the playlist plugin only the first item plays: the player's source
+   * falls back to `playlist[0].src` and nothing advances. The full and audio
+   * builds bundle the plugin (deprecated in 1.28 in the full build); every
+   * other build loads `embed.addon.playlist` beside it.
+   */
   playlist?: PlaylistItem[];
-  /** Analytics configuration */
+  /**
+   * Analytics configuration. Installed only when `beaconUrl` is supplied;
+   * other options alone never enable tracking.
+   *
+   * The full build bundles the analytics plugin (deprecated in 1.28, removed
+   * in 2.0.0); the video and audio builds never carry it, and any host that
+   * wants beacons past 2.0.0 loads `embed.addon.analytics` from the same
+   * version. An addon registered after players exist only reaches players
+   * created later, so a late one loses the views in between.
+   */
   analytics?: AnalyticsConfig;
-  /** Watermark configuration */
+  /**
+   * Watermark configuration. Programmatic only: there is no data attribute,
+   * so only `create({ watermark })` can ask for it.
+   *
+   * The full and video builds bundle the plugin (deprecated in 1.28, removed
+   * in 2.0.0); load `embed.addon.watermark` to keep the overlay. A missing
+   * watermark is a content-protection loss, so the embed logs an error rather
+   * than a warning.
+   */
   watermark?: WatermarkConfig;
   /** Captions configuration */
   captions?: CaptionsConfig;
@@ -149,8 +186,12 @@ export interface PlaylistItem {
 }
 
 /**
- * Analytics options for the full embed build. Analytics is installed only when
+ * Analytics options for the embed. Analytics is installed only when
  * `beaconUrl` is supplied; other options alone never enable tracking.
+ *
+ * The full build bundles the analytics plugin (deprecated in 1.28, removed in
+ * 2.0.0); the video and audio builds never carry it, and any host that wants
+ * beacons past 2.0.0 loads `embed.addon.analytics` from the same version.
  */
 export interface AnalyticsConfig {
   /** Endpoint required to enable analytics. */
@@ -301,6 +342,14 @@ export interface ScarlettPlayerGlobal {
   /**
    * Register a plugin creator an addon provides. Call before players
    * initialise; a player created earlier does not pick it up.
+   *
+   * Seven names are accepted: chapters, clips, analytics, playlist,
+   * mediaSession, watermark and share. A name this build bundles but
+   * deprecates in 1.28 (the full build's five, the video build's watermark and
+   * share) replaces the bundled creator silently; a name the build provides and
+   * does not deprecate, such as the audio build's playlist and media session,
+   * is refused with "already provided by this build". A second `use()` of the
+   * same name warns and replaces.
    */
   use(name: AddonName, creator: AddonCreator): void;
   /**

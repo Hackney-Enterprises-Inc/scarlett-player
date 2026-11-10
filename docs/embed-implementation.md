@@ -16,8 +16,10 @@ pnpm --filter @scarlett-player/embed dev     # Vite dev server over demo.html
 
 The build is `rimraf dist && tsc && vite build && BUILD_VIDEO=true vite build &&
 BUILD_AUDIO=true vite build && BUILD_ADDON=chapters vite build &&
-BUILD_ADDON=clips vite build`: `tsc` emits the declarations, then Vite writes
-the three builds and the two addons into the same `dist`. `emptyOutDir` is
+BUILD_ADDON=clips vite build && BUILD_ADDON=analytics vite build &&
+BUILD_ADDON=playlist vite build && BUILD_ADDON=media-session vite build &&
+BUILD_ADDON=watermark vite build && BUILD_ADDON=share vite build`: `tsc` emits the declarations, then Vite writes
+the three builds and the seven addons into the same `dist`. `emptyOutDir` is
 pinned to `false` because the runs share that directory and the declarations
 are already in it.
 
@@ -45,8 +47,9 @@ packages/embed/
 │   ├── parser.ts          # Data attribute parsing
 │   ├── types.ts           # EmbedConfig, ScarlettPlayerGlobal, PlayerType
 │   ├── version.ts         # __PKG_VERSION__, replaced at build time
-│   └── addons/            # Addon entries (chapters.ts, clips.ts), the runtime
-│                          # lookup and the core/ui shims they build against
+│   └── addons/            # Addon entries (chapters.ts, clips.ts, analytics.ts,
+│                          # playlist.ts, media-session.ts, watermark.ts, share.ts),
+│                          # the runtime lookup and the core/ui shims they build against
 ├── tests/                 # embed, parser, iframe-error, version
 ├── demo.html              # Interactive demo page
 ├── iframe.html            # iframe embed helper (published alongside dist)
@@ -75,16 +78,20 @@ dist/ (generated)
 | Full (`embed`) | `src/index.ts` | hls, native, ui, audio-ui, analytics, playlist, media-session, watermark, captions, gestures, share |
 | Video (`embed.video`) | `src/index-video.ts` | hls, native, ui, watermark, captions, gestures, share |
 | Audio (`embed.audio`) | `src/index-audio.ts` | hls/light, native, audio-ui, playlist, media-session |
-| Addons (`embed.addon.chapters`, `embed.addon.clips`) | `src/addons/chapters.ts`, `src/addons/clips.ts` | chapters, clips; each registers into the embed already on the page |
+| Addons (`embed.addon.chapters`, `embed.addon.clips`, `embed.addon.analytics`, `embed.addon.playlist`, `embed.addon.media-session`, `embed.addon.watermark`, `embed.addon.share`) | `src/addons/<stem>.ts` for each of the seven stems | each registers into the embed already on the page |
 
-Chapters and clips are not in any embed build; they ship as addons, separate
-files a page loads after a Full or Video build. An addon registers its plugin
-through `ScarlettPlayer.use()` and reaches core and the UI only through the
-embed's frozen `ScarlettPlayer.addonRuntime`, so its control lands in the
+Chapters, clips, analytics, watermark and share are not in the Full or Video
+build in 2.0, and playlist and media session leave Full the same way;
+the Audio build keeps its bundled playlist and media session (O2). In 1.28 the
+five plugins a build carries today are still bundled in the builds that carried them and ship as addons
+beside those builds (the Audio build refuses the playlist and media-session
+addons). An addon registers its
+plugin through `ScarlettPlayer.use()` and reaches core and the UI only through
+the embed's frozen `ScarlettPlayer.addonRuntime`, so its control lands in the
 embed's own control bar (the UI control registry is per module copy). The
-builds stay as they are; new features are addons. Load order, the version rule
-and the clips CSRF opt-in are in the
-[embed README's Addons section](../packages/embed/README.md#addons).
+builds stay as they are in 1.28; new features are addons. Load order, the
+version rule, the per-addon builds each works beside and the clips CSRF opt-in
+are in the [embed README's Addons section](../packages/embed/README.md#addons).
 
 All three builds assign the same `window.ScarlettPlayer` global, so a page
 loads exactly one of them, plus any addons.
@@ -164,7 +171,7 @@ The global surface is `ScarlettPlayerGlobal` in `src/types.ts`:
 | `initAll()` | `Promise<void>` | Re-scan the DOM for player elements |
 | `version` | `string` | The embed package version |
 | `availableTypes` | `PlayerType[]` | Which of `video` / `audio` this build ships |
-| `use(name, creator)` | `void` | Register an addon's plugin creator (`chapters` or `clips`); the addon files call it themselves |
+| `use(name, creator)` | `void` | Register an addon's plugin creator (`chapters`, `clips`, `analytics`, `playlist`, `mediaSession`, `watermark` or `share`); the addon files call it themselves, and the embed's `use()` also accepts a deprecated-bundled name to replace a bundled creator without a replacement warning in 1.28 |
 | `addonRuntime` | `AddonRuntime` | Frozen: the embed's version and its own `injectSharedStyles`, `registerControl`, `unregisterControl`, for addon bundles only |
 
 ### 3. iframe embed (isolated)
@@ -376,7 +383,7 @@ table, and watch what Vite prints during `pnpm build`.
 ```bash
 pnpm install
 pnpm --filter @scarlett-player/embed dev        # Vite dev server
-pnpm --filter @scarlett-player/embed build      # all three builds and both addons
+pnpm --filter @scarlett-player/embed build      # all three builds and seven addons
 pnpm --filter @scarlett-player/embed test       # vitest
 pnpm --filter @scarlett-player/embed typecheck
 ```

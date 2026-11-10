@@ -11,6 +11,8 @@ import { parseDataAttributes, applyContainerStyles } from './parser';
 import { buildControlLayout } from './control-layout';
 import {
   ADDON_NAMES,
+  ADDON_VIDEO_ONLY,
+  addonFile,
   type AddonCreator,
   type AddonName,
   type AddonRuntime,
@@ -99,38 +101,173 @@ export interface AddonUIFunctions {
 }
 
 /**
+ * Build-level options for `createScarlettPlayerAPI()`.
+ */
+export interface ScarlettPlayerAPIOptions {
+  /**
+   * Names this build still bundles but deprecates in 1.28.
+   *
+   * The full build passes analytics, playlist, media session, watermark and
+   * share; the video build passes watermark and share; the audio build passes
+   * none, because O2 keeps playlist and media session there past 2.0.0. A name
+   * listed here is left out of `builtIn`, so `use()` of it replaces the
+   * bundled creator silently instead of being refused, and the bundled copy
+   * warns once per page until an addon takes over. Deleted in 2.0.0, together
+   * with the bundled copies themselves.
+   */
+  deprecatedBundled?: readonly AddonName[];
+}
+
+/**
  * Plugin-creator maps that have created at least one player, so `use()` can
  * tell the host that a late registration misses the players already built.
  */
 const initialisedCreators = new WeakSet<PluginCreators>();
 
 /**
- * Warn about an addon-backed attribute that cannot take effect, and say why.
+ * Names each build bundles but deprecates, per creators map.
  *
+ * Written once by `createScarlettPlayerAPI()` from the entry's
+ * `deprecatedBundled` option, and read by `createEmbedPlayer()`, which sees
+ * only the map. A map that never went through an entry (a test passing real
+ * creators straight to `createEmbedPlayer`) has no entry here and therefore
+ * deprecates nothing.
+ */
+const deprecatedBundledCreators = new WeakMap<PluginCreators, Set<AddonName>>();
+
+/**
+ * Names an addon has replaced through `use()`, per creators map.
+ *
+ * The other half of the deprecation rule: a host that has migrated to the
+ * addon must not also be told the bundled copy it no longer uses is
+ * deprecated.
+ */
+const addonProvidedCreators = new WeakMap<PluginCreators, Set<AddonName>>();
+
+/**
+ * Addon names a page has already been warned about, per creators map.
+ *
+ * Keyed by the map rather than by a module-level set so that every test map
+ * starts clean with no reset, and so two entries on one page (a full build
+ * and a video build) warn independently. This is what makes the warnings
+ * once per page rather than once per player: a page with ten players says
+ * each thing once. Chapters and clips move from once per player to once per
+ * page here as well (DC1).
+ */
+const warnedAddons = new WeakMap<PluginCreators, Set<AddonName>>();
+
+/**
+ * Read one of the per-creators-map addon sets, creating it on first use.
+ *
+ * @param map - The WeakMap the set lives in
+ * @param creators - The creators map that identifies the page
+ * @returns The set for that map, empty on first use
+ */
+function addonNamesIn(
+  map: WeakMap<PluginCreators, Set<AddonName>>,
+  creators: PluginCreators
+): Set<AddonName> {
+  let names = map.get(creators);
+  if (!names) {
+    names = new Set<AddonName>();
+    map.set(creators, names);
+  }
+  return names;
+}
+
+/**
+ * Whether an addon notice still has to be logged for this page.
+ *
+ * Records the name on the first call, so the second player built from the
+ * same map says nothing.
+ *
+ * @param creators - The creators map this player is being built from
+ * @param addon - The addon the notice is about
+ * @returns True the first time this addon is noticed on this page
+ */
+function firstAddonNotice(creators: PluginCreators, addon: AddonName): boolean {
+  const noticed = addonNamesIn(warnedAddons, creators);
+  if (noticed.has(addon)) return false;
+  noticed.add(addon);
+  return true;
+}
+
+/**
+ * The sentence every missing-addon warning ends with: which file to load.
+ *
+ * @param addon - The addon that would provide the feature
+ * @param enables - What loading it turns on, for an addon whose benefit is
+ *   worth naming (playlist navigation, lock-screen metadata)
+ * @returns The "load …" sentence
+ */
+function loadAddonSentence(addon: AddonName, enables = 'it'): string {
+  const file = addonFile(addon);
+  return `load ${file}.js (or ${file}.umd.cjs) after the embed to enable ${enables}.`;
+}
+
+/**
+ * Warn, at most once per page, that an addon-backed attribute cannot take
+ * effect, and say why.
+ *
+ * Generalised over all seven addons. A `videoOnly` one (chapters, clips,
+ * share) also names the build or the player type it needs; the rest work
+ * beside every build and on every player type, so they only name the file to
+ * load.
+ *
+ * @param creators - The creators map this player is being built from, which
+ *   identifies the page for the once-per-page rule
  * @param attribute - The attribute (or config key) that was ignored
  * @param addon - The addon that would provide it
  * @param availableTypes - The player types this build supports
  * @param type - The type of the player being created
+ * @param notice - Optional tailoring: `consequence` is prepended to the load
+ *   sentence and `enables` replaces its trailing "it"
  */
 function warnAddonUnavailable(
+  creators: PluginCreators,
   attribute: string,
   addon: AddonName,
   availableTypes: PlayerType[],
-  type: PlayerType
+  type: PlayerType,
+  notice?: { consequence?: string; enables?: string }
 ): void {
-  if (!availableTypes.includes('video')) {
+  if (!firstAddonNotice(creators, addon)) return;
+
+  const load = loadAddonSentence(addon, notice?.enables);
+  const tail = notice?.consequence ? `${notice.consequence} ${load}` : load;
+
+  if (ADDON_VIDEO_ONLY.has(addon) && !availableTypes.includes('video')) {
     console.warn(
       `[ScarlettPlayer] ${attribute} ignored: the ${addon} addon needs a video build ` +
       '(embed.js or embed.video.js); this is the audio build.'
     );
-  } else if (type !== 'video') {
+  } else if (ADDON_VIDEO_ONLY.has(addon) && type !== 'video') {
     console.warn(`[ScarlettPlayer] ${attribute} ignored: ${addon} applies to video players only.`);
   } else {
-    console.warn(
-      `[ScarlettPlayer] ${attribute} ignored: load embed.addon.${addon}.js ` +
-      `(or embed.addon.${addon}.umd.cjs) after the embed to enable it.`
-    );
+    console.warn(`[ScarlettPlayer] ${attribute} ignored: ${tail}`);
   }
+}
+
+/**
+ * Notice, at most once per page, that a creator this build bundles but
+ * deprecates in 1.28 was used as the bundled copy.
+ *
+ * Silent for a map whose entry never deprecated the name, and silent once
+ * `use()` has replaced it with the addon: that host has already migrated.
+ *
+ * @param creators - The creators map this player is being built from
+ * @param addon - The deprecated-bundled name that was used
+ */
+function noticeDeprecatedBundled(creators: PluginCreators, addon: AddonName): void {
+  if (!deprecatedBundledCreators.get(creators)?.has(addon)) return;
+  if (addonProvidedCreators.get(creators)?.has(addon)) return;
+  if (!firstAddonNotice(creators, addon)) return;
+
+  const file = addonFile(addon);
+  console.warn(
+    `[ScarlettPlayer] ${addon} is bundled in this build until 2.0.0; load ${file}.js ` +
+    `(or ${file}.umd.cjs) from the same version to keep it.`
+  );
 }
 
 /**
@@ -223,6 +360,14 @@ export async function createEmbedPlayer(
           duration: item.duration,
         })),
       }));
+      noticeDeprecatedBundled(pluginCreators, 'playlist');
+    } else if (config.playlist?.length) {
+      // The player still plays: `src` below falls back to playlist[0].src, so
+      // what is lost is navigation and advance, not playback (F6).
+      warnAddonUnavailable(pluginCreators, 'data-playlist', 'playlist', availableTypes, type, {
+        consequence: 'only the first item plays;',
+        enables: 'playlist navigation',
+      });
     }
 
     // Add media session plugin if available (for audio types or if metadata provided)
@@ -233,11 +378,27 @@ export async function createEmbedPlayer(
         album: config.album,
         artwork: config.artwork || config.poster || config.playlist?.[0]?.artwork,
       }));
+      // Audio players only: a titled video player gets no notice either way,
+      // because `data-title` is on every Laravel embed and also feeds share,
+      // so warning there would be noise on pages that never asked for media
+      // session (DC3).
+      if (type !== 'video') noticeDeprecatedBundled(pluginCreators, 'mediaSession');
+    } else if (type !== 'video') {
+      warnAddonUnavailable(pluginCreators, 'media session', 'mediaSession', availableTypes, type, {
+        enables: 'lock-screen metadata',
+      });
     }
 
     // Add watermark plugin if available and configured
     if (pluginCreators.watermark && config.watermark) {
       plugins.push(pluginCreators.watermark(config.watermark));
+      noticeDeprecatedBundled(pluginCreators, 'watermark');
+    } else if (config.watermark) {
+      // DC4: a missing anti-piracy overlay is a content-protection loss, so
+      // this one is an error rather than a warning.
+      if (firstAddonNotice(pluginCreators, 'watermark')) {
+        console.error(`[ScarlettPlayer] watermark ignored: ${loadAddonSentence('watermark')}`);
+      }
     }
 
     // Add captions plugin if available
@@ -276,6 +437,11 @@ export async function createEmbedPlayer(
       // copying a snippet that points nowhere.
       if (config.embedBaseUrl) shareConfig.embedBaseUrl = config.embedBaseUrl;
       plugins.push(pluginCreators.share(shareConfig));
+      noticeDeprecatedBundled(pluginCreators, 'share');
+    } else if (shareEnabled) {
+      // The layout stays the UI default below, because nothing registered the
+      // control the slot would hold.
+      warnAddonUnavailable(pluginCreators, 'data-share-url', 'share', availableTypes, type);
     }
 
     // Chapters and clips arrive as addons (`embed.addon.<name>`) through
@@ -287,14 +453,14 @@ export async function createEmbedPlayer(
         plugins.push(pluginCreators.chapters({ ...config.chapters }));
         chaptersEnabled = true;
       } else {
-        warnAddonUnavailable('data-chapters', 'chapters', availableTypes, type);
+        warnAddonUnavailable(pluginCreators, 'data-chapters', 'chapters', availableTypes, type);
       }
     }
 
     let clipsEnabled = false;
     if (config.clips) {
       if (type !== 'video' || !pluginCreators.clips) {
-        warnAddonUnavailable('data-clips-endpoint', 'clips', availableTypes, type);
+        warnAddonUnavailable(pluginCreators, 'data-clips-endpoint', 'clips', availableTypes, type);
       } else if (config.clips.csrf !== 'meta') {
         // A third-party bundle reading the host page's CSRF token is
         // behaviour the host has to ask for; without it the endpoint could
@@ -345,6 +511,16 @@ export async function createEmbedPlayer(
       }
 
       plugins.push(analytics);
+      noticeDeprecatedBundled(pluginCreators, 'analytics');
+    } else if (config.analytics?.beaconUrl) {
+      // No beacons at all: the plugin is what sends them.
+      warnAddonUnavailable(
+        pluginCreators,
+        'data-analytics-beacon-url',
+        'analytics',
+        availableTypes,
+        type
+      );
     }
 
     // Add UI plugin based on type
@@ -385,6 +561,13 @@ export async function createEmbedPlayer(
       }
     }
 
+    // Mark the map consumed BEFORE the await, not after it. A `use()` that
+    // lands while this createPlayer() is still pending has to be told it is
+    // late, and the player already in flight must not be retroactively
+    // changed (SCAR-EMBED-4 review F2). Marking after the await left that
+    // window silent.
+    initialisedCreators.add(pluginCreators);
+
     // Create player
     const player = await createPlayer({
       container,
@@ -395,7 +578,6 @@ export async function createEmbedPlayer(
       loop: config.loop || false,
       plugins,
     });
-    initialisedCreators.add(pluginCreators);
 
     // Apply post-initialization settings
     const video = container.querySelector('video');
@@ -517,17 +699,38 @@ export async function initAll(
 }
 
 /**
- * Create the global ScarlettPlayer API
+ * Create the global ScarlettPlayer API.
+ *
+ * @param pluginCreators - The creators this build ships, mutated in place by `use()`
+ * @param availableTypes - The player types this build supports
+ * @param version - The build's reported version, `-video` / `-audio` suffix included
+ * @param ui - The UI package's control-registry functions, for the addon runtime
+ * @param options - Build-level options; `deprecatedBundled` carries the 1.28 deprecation
+ * @returns The `window.ScarlettPlayer` API object
  */
 export function createScarlettPlayerAPI(
   pluginCreators: PluginCreators,
   availableTypes: PlayerType[],
   version: string,
-  ui?: AddonUIFunctions
+  ui?: AddonUIFunctions,
+  options?: ScarlettPlayerAPIOptions
 ): ScarlettPlayerGlobal {
   // Names this build ships itself, fixed at creation so a later `use()` that
-  // replaces an addon is told apart from one that would shadow the build.
-  const builtIn = new Set<AddonName>(ADDON_NAMES.filter((name) => pluginCreators[name]));
+  // replaces an addon is told apart from one that would shadow the build. The
+  // 1.28 deprecated-bundled names are left out on purpose: an addon loaded
+  // beside a build that still carries that plugin replaces the bundled copy
+  // instead of being refused, which is what lets a host migrate before 2.0.0
+  // (§4.2).
+  const deprecated = new Set<AddonName>(options?.deprecatedBundled ?? []);
+  const builtIn = new Set<AddonName>(
+    ADDON_NAMES.filter((name) => pluginCreators[name] && !deprecated.has(name))
+  );
+
+  // createEmbedPlayer() sees only the map, so the deprecation list travels
+  // beside it rather than through a new parameter on every caller.
+  if (deprecated.size > 0) {
+    deprecatedBundledCreators.set(pluginCreators, deprecated);
+  }
 
   const noVideoUI = (): never => {
     throw new Error('[ScarlettPlayer] this embed build has no video UI; addons need embed.js or embed.video.js');
@@ -564,7 +767,17 @@ export function createScarlettPlayerAPI(
         return;
       }
       if (pluginCreators[name]) {
-        console.warn(`[ScarlettPlayer] use("${name}") replaces an earlier registration.`);
+        // 1.28: the first use() of a name this build bundles but deprecates
+        // replaces the bundled copy silently and is recorded as addon-provided,
+        // so the bundled copy's deprecation notice stays quiet for a host that
+        // has migrated. A second use() of the same name still warns, as it
+        // always did.
+        const provided = addonNamesIn(addonProvidedCreators, pluginCreators);
+        if (deprecated.has(name) && !provided.has(name)) {
+          provided.add(name);
+        } else {
+          console.warn(`[ScarlettPlayer] use("${name}") replaces an earlier registration.`);
+        }
       }
       if (initialisedCreators.has(pluginCreators)) {
         console.warn(

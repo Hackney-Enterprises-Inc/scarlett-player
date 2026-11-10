@@ -11,6 +11,11 @@
  * Does NOT include: Video UI, Analytics
  * Use embed.js for full features or embed.video.js for video.
  *
+ * Playlist and media session stay bundled here past 2.0.0 as well (O2: they
+ * are why this build exists), so they are not deprecated and `use()` still
+ * refuses them as already provided. Analytics is the one plugin this build
+ * never carries: load `embed.addon.analytics` for beacons.
+ *
  * @packageDocumentation
  */
 
@@ -62,6 +67,10 @@ const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
   // No UI functions: this build ships no @scarlett-player/ui. `use()` and
   // `addonRuntime` still exist, so an addon loaded beside it registers and
   // createEmbedPlayer then warns that the addon needs a video build.
+  //
+  // No `deprecatedBundled` either: O2 keeps playlist and media session in
+  // this build for 2.0.0, so they are not deprecated and `use()` refuses them
+  // with "already provided by this build", as SCAR-EMBED-3 does today.
 );
 
 if (typeof window !== 'undefined') {

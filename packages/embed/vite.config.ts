@@ -35,7 +35,7 @@ const SHARED_CHUNK_NAMES = new Set([HLS_CHUNK_NAME, HLS_LIGHT_CHUNK_NAME]);
  * - Default: Full build with all features (embed.js)
  * - BUILD_VIDEO=true: Video-only build (embed.video.js)
  * - BUILD_AUDIO=true: Audio-only build (embed.audio.js)
- * - BUILD_ADDON=chapters|clips: addon (embed.addon.<name>.js), see below
+ * - BUILD_ADDON=<stem>: addon (embed.addon.<stem>.js), see below
  *
  * All embed builds expose window.ScarlettPlayer; addons register into it
  */
@@ -44,7 +44,7 @@ const isVideo = process.env.BUILD_VIDEO === 'true';
 const isAudio = process.env.BUILD_AUDIO === 'true';
 
 /**
- * Addon builds: BUILD_ADDON=chapters|clips (embed.addon.<name>.js).
+ * Addon builds: BUILD_ADDON=<stem> (embed.addon.<stem>.js).
  *
  * An addon is loaded beside an embed build and registers its plugin through
  * `ScarlettPlayer.use()`. It must not carry its own `@scarlett-player/core` or
@@ -52,8 +52,22 @@ const isAudio = process.env.BUILD_AUDIO === 'true';
  * second copy would register the addon's control where the embed's bar never
  * looks. Both specifiers are aliased to shims that delegate, at call time, to
  * the embed's `window.ScarlettPlayer.addonRuntime` (src/addons/runtime.ts).
+ *
+ * Seven stems as of 1.28: chapters and clips, which no build has ever carried,
+ * plus analytics, playlist, media-session, watermark and share, which the
+ * builds still bundle but deprecate. A stem is the kebab-case package name the
+ * Laravel package builds `embed.addon.<stem>` from, so `media-session` is the
+ * one that differs from its `use()` name.
  */
-const ADDONS = ['chapters', 'clips'] as const;
+const ADDONS = [
+  'chapters',
+  'clips',
+  'analytics',
+  'playlist',
+  'media-session',
+  'watermark',
+  'share',
+] as const;
 const addon = process.env.BUILD_ADDON as (typeof ADDONS)[number] | undefined;
 if (addon !== undefined && !ADDONS.includes(addon)) {
   throw new Error(`BUILD_ADDON must be one of ${ADDONS.join(', ')}; got "${addon}"`);
@@ -62,13 +76,42 @@ if (addon !== undefined && !ADDONS.includes(addon)) {
 /**
  * Exact-match aliases for an addon build. Anchored so a subpath such as
  * `@scarlett-player/ui/something` is never silently redirected to a shim.
+ *
+ * The third is the one exception to "core resolves to the shim": the two pure
+ * values `core-shim.ts` re-exports as bundled copies (`ErrorCode`,
+ * `sanitizeUrl`) come from core's own source, so an addon carries a copy of
+ * each rather than a second delegate that would have to resolve at call time.
+ * Anchored to those two paths and nothing else, so any other core subpath
+ * still fails the build the way a new run-time import does.
  */
 const addonAliases = addon
   ? [
       { find: /^@scarlett-player\/core$/, replacement: resolve(__dirname, 'src/addons/core-shim.ts') },
       { find: /^@scarlett-player\/ui$/, replacement: resolve(__dirname, 'src/addons/ui-shim.ts') },
+      {
+        find: /^@scarlett-player\/core\/(error-handler|utils\/url)$/,
+        replacement: resolve(__dirname, '../core/src/$1.ts'),
+      },
     ]
   : [];
+
+/**
+ * The UMD global name for an addon build.
+ *
+ * Inert today: an addon entry has no exports, so the UMD wrapper assigns no
+ * global and this name changes no output byte. It only matters if an entry
+ * ever gains exports, and then it has to be a valid identifier (a kebab stem
+ * like `ScarlettPlayerAddonMedia-session` is not one), so the step is derived
+ * rather than special-cased.
+ *
+ * @param stem - The addon's file stem
+ * @returns `ScarlettPlayerAddon<Pascal>`, e.g. `ScarlettPlayerAddonMediaSession`
+ */
+const addonGlobalName = (stem: string): string =>
+  `ScarlettPlayerAddon${stem
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')}`;
 
 // Determine entry point and output name
 let entry: string;
@@ -233,10 +276,11 @@ export default defineConfig({
     lib: {
       entry,
       // Every embed build owns window.ScarlettPlayer. An addon must NOT use that
-      // name: its UMD wrapper would assign its own (empty) exports over the
-      // embed API it is about to call. scripts/verify-browser.mjs scenario 12
-      // pins window.ScarlettPlayer.create after both addons load.
-      name: addon ? `ScarlettPlayerAddon${addon[0].toUpperCase()}${addon.slice(1)}` : 'ScarlettPlayer',
+      // name: if an entry ever gained exports, its UMD wrapper would assign them
+      // over the embed API it is about to call. Today the entries have no
+      // exports, so no global is assigned whatever the name. scripts/verify-browser.mjs
+      // scenario 12 pins window.ScarlettPlayer.create after both addons load.
+      name: addon ? addonGlobalName(addon) : 'ScarlettPlayer',
       formats: ['es', 'umd'],
       fileName,
     },

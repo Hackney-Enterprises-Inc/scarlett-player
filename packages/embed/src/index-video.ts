@@ -12,6 +12,9 @@
  *
  * Chapters and clips are addons: load `embed.addon.chapters` /
  * `embed.addon.clips` after this file and they register through `use()`.
+ * Watermark and share are still bundled here, but deprecated as of 1.28:
+ * load `embed.addon.watermark` / `embed.addon.share` beside this file to take
+ * over from the bundled copies, and to keep them in 2.0.0.
  *
  * @packageDocumentation
  */
@@ -62,7 +65,10 @@ const ScarlettPlayerAPI: ScarlettPlayerGlobal = createScarlettPlayerAPI(
   VERSION,
   // The addon runtime hands addons THIS bundle's control registry, so a
   // control an addon registers lands in this build's control bar.
-  { registerControl, unregisterControl }
+  { registerControl, unregisterControl },
+  // 1.28: the two plugins this build still carries but deprecates. See the
+  // full entry for what the list does.
+  { deprecatedBundled: ['watermark', 'share'] }
 );
 
 if (typeof window !== 'undefined') {

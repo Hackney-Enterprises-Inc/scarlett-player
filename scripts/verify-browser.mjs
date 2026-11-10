@@ -2791,6 +2791,276 @@ ${addonTags}
   }
 }
 
+// ============================================================ SCENARIO 14
+// Optional-plugin addons (SCAR-EMBED-4, 1.28 semantics). Analytics, playlist,
+// media session, watermark and share each ship as an addon bundle, and every
+// build still carries them as deprecated bundled copies. So:
+//   - with the addons loaded, the addon replaces the bundled creator silently:
+//     zero [ScarlettPlayer] warnings or errors, one analytics view per player;
+//   - without them everything still works off the bundled copies and each of
+//     the five prints exactly one deprecation notice per page;
+//   - the video build has no analytics or playlist at all, so beside the
+//     analytics addon it gains beacons, and `data-playlist` warns once.
+// Like scenario 12, nothing short of a real browser loading the built files
+// shows that the addon's controls land in the embed's own control registry.
+{
+  console.log('\n--- Scenario 14: optional-plugin addons (local fixture) ---');
+
+  const BEACON = 'http://127.0.0.1:8899/api/scarlett/beacon';
+  const SHARE_URL = 'http://127.0.0.1:8899/watch/s14';
+  const PLAYLIST = JSON.stringify([
+    { src: FIXTURE_VOD, title: 'One' },
+    { src: FIXTURE_VOD, title: 'Two' },
+  ]);
+  const ADDONS_ALL = ['analytics', 'playlist', 'media-session', 'watermark', 'share'];
+
+  /** Host markup: a titled video with every attribute, a titled audio player, and a mount for create(). */
+  const FULL_BODY = `
+<div id="vid" style="width:640px" data-scarlett-player data-src="${FIXTURE_VOD}" data-muted="true"
+  data-title="Video fixture" data-analytics-beacon-url="${BEACON}" data-analytics-video-id="s14-video"
+  data-playlist='${PLAYLIST}' data-share-url="${SHARE_URL}"></div>
+<div id="aud" style="width:640px" data-scarlett-player data-type="audio" data-src="${FIXTURE_VOD}"
+  data-muted="true" data-title="Audio fixture" data-analytics-beacon-url="${BEACON}"
+  data-analytics-video-id="s14-audio"></div>
+<div id="prog" style="width:640px"></div>`;
+
+  /**
+   * Serve a host page from the local origin and open it, plain script tags in
+   * document order (the way the README tells a host to load addons).
+   *
+   * @param {object} opts
+   * @param {string} opts.build - Embed bundle file name in packages/embed/dist
+   * @param {string[]} opts.addons - Addon file stems to load, in order; repeats are loaded repeatedly
+   * @param {string} opts.body - Host markup
+   * @param {Record<string, (text: string) => string>} [opts.rewrite] - Per-stem rewrite of the served addon file
+   * @param {string} [opts.ready] - Selector that marks auto-init as finished
+   * @returns {Promise<object>} The page, the [ScarlettPlayer] warnings and errors, the beacon bodies and `collect`
+   */
+  const openHostPage14 = async ({ build, addons, body, rewrite = {}, ready = '#vid .sp-controls' }) => {
+    const { page, collect } = await newTrackedPage();
+    const warnings = [];
+    const errors = [];
+    page.on('console', (msg) => {
+      if (!msg.text().startsWith('[ScarlettPlayer]')) return;
+      if (msg.type() === 'warning') warnings.push(msg.text());
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+    const beacons = [];
+    await page.route(BEACON, async (route) => {
+      const request = route.request();
+      if (request.method() === 'POST') beacons.push(request.postData() ?? '');
+      await route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*' } });
+    });
+    const rewritten = [];
+    for (const [stem, fn] of Object.entries(rewrite)) {
+      await page.route(`${EMBED_DIST}embed.addon.${stem}.umd.cjs`, async (route) => {
+        const response = await route.fetch();
+        const text = await response.text();
+        const next = fn(text);
+        rewritten.push(next !== text);
+        await route.fulfill({ response, body: next });
+      });
+    }
+    const tags = [build, ...addons.map((n) => `embed.addon.${n}.umd.cjs`)]
+      .map((file) => `<script src="${EMBED_DIST}${file}"></script>`)
+      .join('\n');
+    const html = `<!doctype html><html><head><meta charset="utf-8">\n${tags}\n</head><body>${body}</body></html>`;
+    const pageUrl = 'http://127.0.0.1:8899/__scenario14.html';
+    await page.route(pageUrl, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector(ready, { timeout: 30000 }).catch(() => {});
+    return { page, warnings, errors, beacons, rewritten, collect };
+  };
+
+  /** Number of viewStart beacons the page sent for one video id. */
+  const viewStarts = (beacons, videoId) =>
+    beacons.filter((b) => b.includes('viewStart') && b.includes(videoId)).length;
+
+  /** Create the programmatic player: playlist, watermark and share all configured. */
+  const createProgrammatic = (page) => page.evaluate(async ({ src, playlist, shareUrl }) => {
+    const player = await window.ScarlettPlayer.create({
+      container: '#prog',
+      src,
+      muted: true,
+      title: 'Programmatic fixture',
+      shareUrl,
+      playlist,
+      watermark: { text: 'S14 mark' },
+    });
+    await new Promise((r) => setTimeout(r, 1000));
+    const playlistPlugin = player?.getPlugin('playlist') ?? null;
+    // The embed loads `src` itself, so the plugin has no current track until
+    // something starts it; start at the first item, then advance.
+    playlistPlugin?.play(0);
+    const before = playlistPlugin?.getCurrentTrack?.()?.title ?? null;
+    playlistPlugin?.next();
+    const after = playlistPlugin?.getCurrentTrack?.()?.title ?? null;
+    return { hasPlaylist: !!playlistPlugin, before, after };
+  }, { src: FIXTURE_VOD, playlist: JSON.parse(PLAYLIST), shareUrl: SHARE_URL });
+
+  const features = (page) => page.evaluate(() => ({
+    createType: typeof window.ScarlettPlayer?.create,
+    share: !!document.querySelector('#vid .sp-controls .sp-share'),
+    progShare: !!document.querySelector('#prog .sp-controls .sp-share'),
+    watermark: !!document.querySelector('#prog .sp-watermark'),
+    mediaSession: navigator.mediaSession?.metadata?.title ?? null,
+  }));
+
+  /** Let auto-init finish and the first beacons land. */
+  const settle = (page) => page.waitForTimeout(2500);
+
+  // ---- With every addon loaded: addons replace the bundled copies silently.
+  {
+    const { page, warnings, errors, beacons, collect } = await openHostPage14({
+      build: 'embed.umd.cjs', addons: ADDONS_ALL, body: FULL_BODY,
+    });
+    const playlist = await createProgrammatic(page);
+    await settle(page);
+    const f = await features(page);
+    record('[addons] window.ScarlettPlayer.create survives all five addon scripts', f.createType === 'function', JSON.stringify(f));
+    record(
+      '[addons] one analytics viewStart per player reaches the beacon route',
+      viewStarts(beacons, 's14-video') === 1 && viewStarts(beacons, 's14-audio') === 1,
+      `video=${viewStarts(beacons, 's14-video')} audio=${viewStarts(beacons, 's14-audio')} posts=${beacons.length}`
+    );
+    record(
+      '[addons] getPlugin("playlist") exists and next() advances',
+      playlist.hasPlaylist && playlist.before === 'One' && playlist.after === 'Two',
+      JSON.stringify(playlist)
+    );
+    record('[addons] the share control is in the bar (auto-init and create())', f.share && f.progShare, JSON.stringify(f));
+    record('[addons] .sp-watermark exists', f.watermark, JSON.stringify(f));
+    record('[addons] navigator.mediaSession metadata is set by the addon', f.mediaSession !== null, `title=${f.mediaSession}`);
+    record('[addons] zero [ScarlettPlayer] warnings or errors', warnings.length === 0 && errors.length === 0, [...warnings, ...errors].join(' | '));
+    const errs = await collect();
+    record(
+      '[addons] zero uncaught errors or unhandled rejections',
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  // ---- Without the addons: the bundled copies still work, five notices.
+  {
+    const { page, warnings, errors, beacons, collect } = await openHostPage14({
+      build: 'embed.umd.cjs', addons: [], body: FULL_BODY,
+    });
+    const playlist = await createProgrammatic(page);
+    await settle(page);
+    const f = await features(page);
+    record(
+      '[no addons] the bundled copies still work: beacons, playlist, share, watermark, media session',
+      viewStarts(beacons, 's14-video') === 1 && viewStarts(beacons, 's14-audio') === 1
+        && playlist.hasPlaylist && playlist.after === 'Two' && f.share && f.progShare && f.watermark && f.mediaSession !== null,
+      JSON.stringify({ f, playlist, video: viewStarts(beacons, 's14-video'), audio: viewStarts(beacons, 's14-audio') })
+    );
+    // The full build deprecates all five names. Media session only notices on
+    // an audio player (a titled video player is silent by design), and the
+    // page has one, so the page prints exactly one notice per name.
+    const named = ['analytics', 'playlist', 'mediaSession', 'watermark', 'share']
+      .map((name) => warnings.filter((w) => w.includes(`${name} is bundled in this build until 2.0.0`)).length);
+    record(
+      '[no addons] exactly five deprecation warnings, one each for analytics, playlist, mediaSession, watermark, share',
+      warnings.length === 5 && named.every((n) => n === 1) && errors.length === 0,
+      `${JSON.stringify(named)} :: ${[...warnings, ...errors].join(' | ')}`
+    );
+    const errs = await collect();
+    record(
+      '[no addons] zero uncaught errors or unhandled rejections',
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  // ---- Negative: the video build has no analytics or playlist, so beside only
+  // the analytics addon it gains beacons and `data-playlist` warns once.
+  {
+    const body = `
+<div id="vid" style="width:640px" data-scarlett-player data-src="${FIXTURE_VOD}" data-muted="true"
+  data-analytics-beacon-url="${BEACON}" data-analytics-video-id="s14-video" data-playlist='${PLAYLIST}'></div>`;
+    const { page, warnings, errors, beacons, collect } = await openHostPage14({
+      build: 'embed.video.umd.cjs', addons: ['analytics'], body,
+    });
+    await settle(page);
+    record('[embed.video + analytics addon] beacons arrive (new capability)', viewStarts(beacons, 's14-video') === 1, `viewStarts=${viewStarts(beacons, 's14-video')} posts=${beacons.length}`);
+    record(
+      '[embed.video + analytics addon] data-playlist gives exactly one missing-addon warning',
+      warnings.length === 1 && warnings[0].includes('data-playlist') && warnings[0].includes('embed.addon.playlist') && errors.length === 0,
+      [...warnings, ...errors].join(' | ')
+    );
+    const errs = await collect();
+    record(
+      '[embed.video + analytics addon] zero uncaught errors or unhandled rejections',
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  // ---- Review finding: a duplicate load of an addon file must not double the beacon.
+  {
+    const body = `
+<div id="vid" style="width:640px" data-scarlett-player data-src="${FIXTURE_VOD}" data-muted="true"
+  data-analytics-beacon-url="${BEACON}" data-analytics-video-id="s14-video"></div>`;
+    const { page, warnings, errors, beacons, collect } = await openHostPage14({
+      build: 'embed.umd.cjs', addons: ['analytics', 'analytics'], body,
+    });
+    await settle(page);
+    record('[duplicate load] the analytics addon loaded twice sends one viewStart', viewStarts(beacons, 's14-video') === 1, `viewStarts=${viewStarts(beacons, 's14-video')} posts=${beacons.length}`);
+    record(
+      '[duplicate load] the only diagnostic is the "replaces an earlier registration" warning',
+      warnings.length === 1 && warnings[0].includes('use("analytics") replaces an earlier registration') && errors.length === 0,
+      [...warnings, ...errors].join(' | ')
+    );
+    const errs = await collect();
+    record(
+      '[duplicate load] zero uncaught errors or unhandled rejections',
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+
+  // ---- Review finding: a version-mismatched addon is refused and the bundled creator still runs.
+  {
+    const body = '<div id="vid" style="width:640px"></div><div id="prog" style="width:640px"></div>';
+    const { page, warnings, errors, rewritten, collect } = await openHostPage14({
+      build: 'embed.umd.cjs',
+      addons: ['watermark'],
+      body,
+      ready: '#vid',
+      // registerAddon's `addonVersion = PKG_VERSION` default is the only place
+      // the addon's own version is compared; point it at a version no embed has.
+      rewrite: { watermark: (text) => text.replace(`="${EMBED_VERSION}"){`, '="0.0.1"){') },
+    });
+    const mark = await page.evaluate(async (src) => {
+      await window.ScarlettPlayer.create({ container: '#prog', src, muted: true, watermark: { text: 'S14 mark' } });
+      await new Promise((r) => setTimeout(r, 1000));
+      return !!document.querySelector('#prog .sp-watermark');
+    }, FIXTURE_VOD);
+    record('[version mismatch] the test actually rewrote the addon version', rewritten.length === 1 && rewritten[0] === true, `rewritten=${JSON.stringify(rewritten)}`);
+    record(
+      '[version mismatch] the addon is refused with a console error naming both versions',
+      errors.length === 1 && errors[0].includes('embed.addon.watermark') && errors[0].includes('0.0.1 refused') && errors[0].includes(EMBED_VERSION),
+      errors.join(' | ')
+    );
+    record(
+      '[version mismatch] the bundled watermark still runs, with its one deprecation notice',
+      mark && warnings.length === 1 && warnings[0].includes('watermark is bundled in this build until 2.0.0'),
+      `watermark=${mark} :: ${warnings.join(' | ')}`
+    );
+    const errs = await collect();
+    record(
+      '[version mismatch] zero uncaught errors or unhandled rejections',
+      errs.pageErrors.length === 0 && errs.rejections.length === 0,
+      [...errs.pageErrors, ...errs.rejections].slice(0, 3).join(' | ')
+    );
+    await page.close();
+  }
+}
+
 // ============================================================ SUMMARY
 const failed = results.filter((r) => !r.pass);
 console.log(`\n==== ${results.length - failed.length}/${results.length} checks passed ====`);

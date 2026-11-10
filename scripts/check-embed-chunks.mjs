@@ -38,8 +38,8 @@
  * this script validates is exactly what gets published.
  *
  * Usage: node scripts/check-embed-chunks.mjs (after a full
- * `pnpm --filter @scarlett-player/embed build`, which runs all five builds,
- * three embed builds plus two addons, and is what the expected set of
+ * `pnpm --filter @scarlett-player/embed build`, which runs all ten builds,
+ * three embed builds plus seven addons, and is what the expected set of
  * unprefixed chunks describes)
  * Exit code: 0 when every reference resolves and the unprefixed set matches,
  * 1 with the offending names.
@@ -56,7 +56,18 @@ const DIST = join(REPO_ROOT, 'packages', 'embed', 'dist');
  * `chunkFileNames` puts on that build's chunks. Every file the three builds
  * write is expected to start with one of these, apart from SHARED_CHUNKS.
  */
-const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio', 'embed.addon.chapters', 'embed.addon.clips'];
+const BUILD_BASE_NAMES = [
+  'embed',
+  'embed.video',
+  'embed.audio',
+  'embed.addon.chapters',
+  'embed.addon.clips',
+  'embed.addon.analytics',
+  'embed.addon.playlist',
+  'embed.addon.media-session',
+  'embed.addon.watermark',
+  'embed.addon.share',
+];
 
 /**
  * The addon builds (`BUILD_ADDON=<name>`). Each is one self-contained file per
@@ -66,7 +77,15 @@ const BUILD_BASE_NAMES = ['embed', 'embed.video', 'embed.audio', 'embed.addon.ch
  * Every addon name also starts with `embed.`, which is why the unprefixed
  * check below cannot see an addon chunk and this list has to.
  */
-const ADDON_BASE_NAMES = ['embed.addon.chapters', 'embed.addon.clips'];
+const ADDON_BASE_NAMES = [
+  'embed.addon.chapters',
+  'embed.addon.clips',
+  'embed.addon.analytics',
+  'embed.addon.playlist',
+  'embed.addon.media-session',
+  'embed.addon.watermark',
+  'embed.addon.share',
+];
 
 /**
  * The chunk names `chunkFileNames` deliberately leaves unprefixed, kept in
