@@ -21,16 +21,20 @@ Standalone, CDN-ready embed package for Scarlett Player. Drop in a single `<scri
 ### CDN Usage (Recommended for Embeds)
 
 ```html
-<!-- Full build (video + audio + all plugins) -->
+<!-- Option A: Full build (video + audio + all plugins) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Video-only build (lightweight) -->
+<!-- Option B: Video-only build (lightweight) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.video.umd.cjs"></script>
 
-<!-- Audio-only build (audio + playlist + media-session) -->
+<!-- Option C: Audio-only build (audio + playlist + media-session) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.audio.umd.cjs"></script>
 
-<!-- Optional addons, after a full or video build (see Addons) -->
+<!-- Load one of the three builds above, not several: each sets window.ScarlettPlayer,
+     and the Audio build replaces it. -->
+
+<!-- Optional addons, only after the Full or Video build and from the same
+     version directory (see Addons) -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.chapters.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.clips.umd.cjs"></script>
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.addon.analytics.umd.cjs"></script>
@@ -169,10 +173,10 @@ The simplest way to embed a player. Just add the script and use data attributes:
 
 | Attribute | Type | Builds | Description |
 |-----------|------|--------|-------------|
-| `data-title` | string | Full, Audio, with the [media-session addon](#addons) for Video | Track/episode title |
-| `data-artist` | string | Full, Audio, with the [media-session addon](#addons) for Video | Artist/creator name |
-| `data-album` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album name |
-| `data-artwork` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album art / cover image URL |
+| `data-title` | string | Full, Audio, with the [media-session addon](#addons) for Video | Track/episode title. On a video player the media-session addon installs only when this attribute is present |
+| `data-artist` | string | Full, Audio, with the [media-session addon](#addons) for Video | Artist/creator name. On a video player it does not enable the addon on its own: `data-title` is required |
+| `data-album` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album name. On a video player it does not enable the addon on its own: `data-title` is required |
+| `data-artwork` | string | Full, Audio, with the [media-session addon](#addons) for Video | Album art / cover image URL. On a video player it does not enable the addon on its own: `data-title` is required |
 | `data-playlist` | JSON | Full, Audio (or Video with the [playlist addon](#addons)) | Array of `{ src, videoId?, title?, artist?, poster?, artwork?, duration? }`. Each item that loads is its own analytics view, reported under its `videoId`, or under `data-analytics-video-id` when it has none. The first item's `videoId` applies from the first view unless `data-src` names a different source |
 
 #### Analytics Attributes (Full build, or any build with the analytics addon)
@@ -553,7 +557,7 @@ uses that embed's own UI, so its control appears in the embed's control bar.
 | Trigger | Addon file | Builds | What happens without the addon |
 |---------|-----------|--------|-------------------------------|
 | `data-analytics-beacon-url`, `data-analytics-video-id`, `data-analytics-api-key`, `data-analytics-anonymous`, `data-analytics-respect-dnt`, `data-analytics-batch`, or `create({ analytics })` | `embed.addon.analytics` | Full, Video, Audio | No beacons. One warning: "data-analytics-beacon-url ignored: load embed.addon.analytics…" (the Full build bundles analytics, so it logs only a deprecation notice instead, and only when the bundled copy is used) |
-| `data-playlist`, or `create({ playlist })` | `embed.addon.playlist` | Full, Video (Audio: built in, addon refused) | Only the first playlist item plays. One warning: "data-playlist ignored: only the first item plays; load embed.addon.playlist.js (or …umd.cjs) after the embed to enable playlist navigation." |
+| `data-playlist`, or `create({ playlist })` | `embed.addon.playlist` | Full, Video (Audio: built in, addon refused) | No playlist navigation. When `data-src` is set the player plays that source, and the first playlist item is the fallback only when `data-src` is absent. One warning: "data-playlist ignored: only the first item plays; load embed.addon.playlist.js (or …umd.cjs) after the embed to enable playlist navigation." |
 | audio `data-title`/`data-artist`/`data-album`/`data-artwork`, or `create({ title?, artist?, album?, artwork? })` | `embed.addon.media-session` | Full, Video (Audio: built in, addon refused) | No lock-screen or media-key metadata for audio players (one warning). Titled video players: no warning, but they lose lock-screen metadata in 2.0; load the addon to keep it |
 | `create({ watermark })` | `embed.addon.watermark` | Full, Video | No anti-piracy overlay. One `console.error` (missing watermark is a content-protection loss) |
 | `data-share-url`, `data-embed-base-url`, or `iframe.html?share-url=` | `embed.addon.share` | Full, Video | No share button. One warning: "data-share-url ignored: load embed.addon.share…". `iframe.html` loads the addon itself in 2.0; until then, add it beside the embed when `share-url` is set |

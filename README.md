@@ -226,7 +226,7 @@ const { player, isReady, currentTime, duration, progress, play, pause, seek } =
      media session, captions, gestures, watermark, share -->
 <script src="https://assets.thestreamplatform.com/scarlett-player/latest/embed.umd.cjs"></script>
 
-<!-- Or pin a version: .../scarlett-player/v1.15.1/embed.umd.cjs -->
+<!-- Or pin a version: .../scarlett-player/v1.28.0/embed.umd.cjs -->
 
 <!-- Optional addons, after the embed and from the same version directory:
      chapters (data-chapters), clips (data-clips-*), analytics (data-analytics-*),

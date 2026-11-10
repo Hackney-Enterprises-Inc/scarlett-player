@@ -65,6 +65,11 @@ dist/ (generated)
 ├── embed.audio.js / embed.audio.umd.cjs        # Audio-only build
 ├── embed.addon.chapters.js / .umd.cjs          # Chapters addon
 ├── embed.addon.clips.js / .umd.cjs             # Clips addon
+├── embed.addon.analytics.js / .umd.cjs         # Analytics addon
+├── embed.addon.playlist.js / .umd.cjs          # Playlist addon
+├── embed.addon.media-session.js / .umd.cjs     # Media session addon (stem differs from the mediaSession use() name)
+├── embed.addon.watermark.js / .umd.cjs         # Watermark addon
+├── embed.addon.share.js / .umd.cjs             # Share addon
 ├── hls.<version>.js                            # Shared hls.js chunk (ESM only)
 ├── hls.light.<version>.js                      # Shared hls.js/light chunk
 ├── *.d.ts                                      # Declarations, emitted by tsc
