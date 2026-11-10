@@ -150,6 +150,43 @@ const MANIFEST_PHASE_ERRORS = [
 ];
 
 /**
+ * Floor on how late a stall-watchdog check or the stall ceiling may run before
+ * the gap reads as a suspended page rather than a stall, in milliseconds.
+ * Decoupled from the tick: the native live watchdog ticks every second, and
+ * iOS timer coalescing routinely delays a tick by a few seconds, which must
+ * not read as a suspension (it would reset the clock, so nothing would ever
+ * be detected).
+ */
+const SUSPEND_GAP_FLOOR_MS = 10000;
+
+/** Stall-watchdog tick on a native live stream, in milliseconds. */
+const NATIVE_LIVE_TICK_MS = 1000;
+
+/** Default stalled time before a native live stall is nudged, in milliseconds. */
+const DEFAULT_LIVE_STALL_NUDGE_MS = 4000;
+
+/**
+ * Where a native source is in its load, per source.
+ *
+ * `deferred`: no `src` yet, waiting for play intent (`autoStartLoad: false`).
+ * `loading`: `src` set, no metadata yet. `loaded`: metadata arrived.
+ * `released`: `src` removed after a long live pause (`nativePauseReleaseMs`),
+ * waiting for play intent. `none`: no native source.
+ */
+type NativeLoadPhase = 'none' | 'deferred' | 'loading' | 'loaded' | 'released';
+
+/** What the attach half of a native load hands to the fetch half. */
+interface NativeAttachment {
+  /** The media element the handlers are attached to */
+  videoEl: HTMLVideoElement;
+  /**
+   * True from the moment a provider reload starts until its load settles; the
+   * element handlers read it to tag a failed reload (TSP-571).
+   */
+  reloadInFlight: boolean;
+}
+
+/**
  * Message of a load that hit `loadTimeoutMs`, identical on the native and
  * hls.js paths. Hosts' Sentry groups on it (TSP-WEB-2G9, TSP-WEB-2FJ). The
  * fatal carrying it also carries `detail.timedOut` and, with auto-reconnect
@@ -375,7 +412,6 @@ export function createHLSPluginWith(
   // Playback stall watchdog: if timeupdate stops advancing while playing,
   // synthesize a recoverable error into the reconnect scheduler.
   let stallWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastStallCheckTime = 0;
   let lastStallCheckPosition = 0;
   // Stall ceiling: armed at the first stall detection and kept across
   // reconnect attempts (a "successful" reconnect that stalls again must not
@@ -390,7 +426,46 @@ export function createHLSPluginWith(
   // that runs far later than that means timers were suspended (iOS background,
   // lock, app switch), not that the stream stalled.
   let lastCheckRanAt = 0;
+  // pausedClock() when the check last ran
+  let lastCheckPausedClock = 0;
   let stallCheckIntervalMs = 15000;
+  // Stalled time accumulated as the sum of eligible tick gaps without
+  // progress. A pause adds nothing and resets nothing, so a viewer's
+  // pause/play during a stall no longer restarts the clock.
+  let stalledMs = 0;
+  // Whether this source has produced its first `playing`. Startup buffering is
+  // never a stall (`loadTimeoutMs` covers it), so counting starts here. Reset
+  // by cleanup() and by a source release; a pipeline reload keeps it.
+  let stallCountable = false;
+  // Whether the current stall episode has had its live-edge nudge
+  let nudgedThisStall = false;
+  // A seek this plugin issued (the nudge) that has not completed. It is
+  // neither progress nor a viewer seek, so it must not reset the stall clock.
+  let providerSeekActive = false;
+  // The element finished a seek since the watchdog's last check
+  let seekedSinceCheck = false;
+  let stallSeekedCleanup: (() => void) | null = null;
+  // Wall time the viewer has spent paused, as a monotonic counter (closed
+  // intervals plus the open one, see pausedClock()). The stall watchdog and the
+  // stall ceiling measure against it, so paused seconds are never stalled ones.
+  let pausedTotalMs = 0;
+  let pausedSince = 0;
+  // Whether the viewer has asked to play this source (a `playing`, or `paused`
+  // going false). A switch to native defers only before any play intent.
+  let playIntentSeen = false;
+  // pausedClock() at the start of the current stall episode (ceiling clock)
+  let stallStartedPausedClock = 0;
+  // `currentTime` when the stall episode started or was last re-based. The
+  // ceiling compares against it, so playback that resumed without anything
+  // re-arming the watchdog is still recognised as recovery.
+  let stallStartedPosition = 0;
+  /** Removes the ceiling's `seeked` / `loadedmetadata` re-base listeners. */
+  let stallCeilingRebaseCleanup: (() => void) | null = null;
+
+  // Native load phase and play-intent hook (deferred load, pause release)
+  let nativePhase: NativeLoadPhase = 'none';
+  let removePlayHook: (() => void) | null = null;
+  let pauseReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   // Whether this outage's first failed provider reload has been reported on
   // `media:error`. Later failures of the same outage are logged only. Reset
   // when the outage ends (a successful load, `cancelReconnect`, `cleanup`).
@@ -512,6 +587,60 @@ export function createHLSPluginWith(
   };
 
   /**
+   * The position a native live viewer should be put at: the live sync
+   * position, held inside the newest seekable range.
+   *
+   * Shared by the reload rejoin and the stall nudge, so both clamp the same
+   * way. The newest range can be shorter than the hold-back, and landing in
+   * the gap before it (a discontinuity splits the window) goes nowhere.
+   *
+   * @param media - The native media element
+   * @param metrics - Current snapshot from {@link readLiveMetrics}
+   * @returns The target in seconds, or undefined when nothing reveals the edge
+   */
+  const nativeLiveRejoinTarget = (
+    media: HTMLVideoElement,
+    metrics: LiveMetrics
+  ): number | undefined => {
+    const syncPosition = computeLiveSyncPosition(
+      metrics,
+      metrics.targetLatency ?? DEFAULT_TARGET_LATENCY
+    );
+    if (syncPosition === undefined || !media.seekable?.length) return undefined;
+    const start = media.seekable.start(media.seekable.length - 1);
+    return Math.max(start, safeSeekTarget(syncPosition));
+  };
+
+  /**
+   * Nudge a stalled native live stream to the live edge.
+   *
+   * Seeks to the live sync position when the playlist has advanced more than a
+   * second past the viewer, and does nothing when no window lies ahead (the
+   * playlist is not advancing, so a seek would only stall somewhere else). The
+   * seek is flagged as the provider's own, so the stall watchdog treats its
+   * position jump as neither progress nor a viewer seek.
+   *
+   * @returns True when a seek was issued
+   */
+  const nudgeNativeLiveStall = (): boolean => {
+    if (!video || !isNative || !api?.getState('live')) return false;
+    const metrics = readLiveMetrics();
+    if (!metrics) return false;
+    const target = nativeLiveRejoinTarget(video, metrics);
+    if (target === undefined || target - video.currentTime <= 1) return false;
+
+    api.logger.info('Native live stall: nudging to the live edge', {
+      from: Math.round(video.currentTime),
+      to: Math.round(target),
+    });
+    providerSeekActive = true;
+    // Re-based first: the jump is not progress
+    lastStallCheckPosition = target;
+    video.currentTime = target;
+    return true;
+  };
+
+  /**
    * Put a reloaded native live source at the live sync position.
    *
    * Wait for a seekable window when metadata arrives first. A viewer seek
@@ -535,15 +664,9 @@ export function createHLSPluginWith(
       if (!metrics) return;
       remove();
       if (metrics.atEdge) return;
-      const syncPosition = computeLiveSyncPosition(
-        metrics,
-        metrics.targetLatency ?? DEFAULT_TARGET_LATENCY
-      );
-      if (syncPosition === undefined) return;
-      // The newest range can be shorter than the hold-back. Do not land in
-      // the gap before it when a discontinuity splits the window.
-      const start = media.seekable.start(media.seekable.length - 1);
-      media.currentTime = Math.max(start, safeSeekTarget(syncPosition));
+      const target = nativeLiveRejoinTarget(media, metrics);
+      if (target === undefined) return;
+      media.currentTime = target;
     };
     for (const event of events) media.addEventListener(event, rejoin);
     media.addEventListener('seeking', remove);
@@ -627,10 +750,12 @@ export function createHLSPluginWith(
     }
 
     // Stop the stall watchdog — no point monitoring a pipeline being torn down
-    if (stallWatchdogTimer) {
-      clearTimeout(stallWatchdogTimer);
-      stallWatchdogTimer = null;
-    }
+    stopStallWatchdog();
+
+    // A pending pause release and a waiting play-intent hook both belong to
+    // the pipeline being torn down; whoever tears down re-arms what it needs
+    clearPauseReleaseTimer();
+    removePlayHook?.();
 
     if (hls) {
       hls.destroy();
@@ -654,6 +779,8 @@ export function createHLSPluginWith(
     errorCount = 0;
     errorWindowStart = 0;
     reloadErrorReported = false;
+    nativePhase = 'none';
+    stallCountable = false;
 
     // Live bookkeeping belongs to the playlist being abandoned. Left behind,
     // the next source (or the other side of a provider switch) inherits the
@@ -1397,13 +1524,28 @@ export function createHLSPluginWith(
     initial = false,
     reload?: Pick<NativeReloadContext, 'phase' | 'attempt'>
   ): Promise<void> => {
-    const session = loadSession;
+    return fetchNative(src, initial, attachNative(src, reload));
+  };
+
+  /**
+   * First half of a native load: the element, its event handlers and the
+   * media-type evidence. Touches no `src`, so a deferred load (and a released
+   * source) can sit in this state with nothing fetched.
+   *
+   * @param src - Source URL
+   * @param reload - The provider reload this attach belongs to, if any
+   * @returns The attachment {@link fetchNative} completes
+   */
+  const attachNative = (
+    src: string,
+    reload?: Pick<NativeReloadContext, 'phase' | 'attempt'>
+  ): NativeAttachment => {
     const videoEl = getOrCreateVideo();
     isNative = true;
 
     // True from the moment this reload starts until its load settles. The
     // element handlers read it through the getter below; `settle()` clears it.
-    let reloadInFlight = reload !== undefined;
+    const attachment: NativeAttachment = { videoEl, reloadInFlight: reload !== undefined };
 
     // Same single entry point as the hls.js path below: readLiveMetrics()
     // picks its source from the live pipeline, so on this branch it measures
@@ -1412,7 +1554,7 @@ export function createHLSPluginWith(
       cleanupVideoEvents = setupVideoEventHandlers(videoEl, api, readLiveMetrics, playbackGate, {
         native: true,
         reload: () => {
-          if (!reload || !reloadInFlight) return null;
+          if (!reload || !attachment.reloadInFlight) return null;
           const report = !reloadErrorReported;
           reloadErrorReported = true;
           return { phase: reload.phase, attempt: reload.attempt, report };
@@ -1427,7 +1569,38 @@ export function createHLSPluginWith(
     mediaTypeClassifier?.beginSource(src);
     mediaTypeClassifier?.attach(videoEl);
 
+    return attachment;
+  };
+
+  /**
+   * Second half of a native load: set `src`, start the `loadTimeoutMs`
+   * watchdog and settle on `loadedmetadata`. Runs synchronously up to the
+   * `src` write, which is what lets a deferred load's play-intent hook fetch
+   * inside the viewer's tap. Semantics (initial budget, fatal before reject,
+   * timeout hand-off) are those documented on {@link loadNative}.
+   *
+   * @param src - Source URL
+   * @param initial - Whether this is the first load of a user `loadSource()`
+   *        (or the first fetch of a deferred one)
+   * @param attachment - What {@link attachNative} returned
+   * @param playAfterRetry - Play again once an in-load retry's metadata lands.
+   *        The retry re-runs the load algorithm, which pauses the element
+   *        without a `pause` event, so a deferred load whose play intent was
+   *        already seen would otherwise sit paused behind a "playing" state
+   * @returns Resolves on `loadedmetadata`
+   */
+  const fetchNative = (
+    src: string,
+    initial: boolean,
+    attachment: NativeAttachment,
+    playAfterRetry = false
+  ): Promise<void> => {
+    const session = loadSession;
+    const { videoEl } = attachment;
+    nativePhase = 'loading';
+
     return new Promise((resolve, reject) => {
+      let retried = false;
       let watchdog: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
       // Last element error of an initial load, reported if the watchdog wins
@@ -1437,7 +1610,7 @@ export function createHLSPluginWith(
         settled = true;
         // The reload (if this was one) is over: later element errors are the
         // playback's own again
-        reloadInFlight = false;
+        attachment.reloadInFlight = false;
         // Only release the abort hook if it is still ours - a newer load may
         // have installed its own by the time a stale listener fires
         if (abortPendingLoad === abort) {
@@ -1469,6 +1642,7 @@ export function createHLSPluginWith(
         }
         settle();
 
+        nativePhase = 'loaded';
         hasPlayedContent = true;
         // The source loaded: whatever outage was reporting is over, so the
         // next one's first failed reload is reported again
@@ -1516,6 +1690,13 @@ export function createHLSPluginWith(
 
         api?.setState('source', { src, type: 'application/x-mpegURL' });
         api?.emit('media:loaded', { src, type: 'application/x-mpegURL' });
+
+        if (retried && playAfterRetry) {
+          // Intent survives the retry (see `playAfterRetry`) unless the viewer
+          // paused during the backoff. Already past the viewer's tap, so a
+          // refusal is the autoplay policy's, not a bug
+          if (api?.getState('paused') !== true) void videoEl.play().catch(() => {});
+        }
 
         resolve();
       };
@@ -1570,6 +1751,7 @@ export function createHLSPluginWith(
         retryTimeout = setTimeout(() => {
           retryTimeout = null;
           if (settled || session !== loadSession) return;
+          retried = true;
           videoEl.src = src;
           videoEl.load();
         }, delay);
@@ -1869,8 +2051,68 @@ export function createHLSPluginWith(
     return true;
   };
 
+  /**
+   * Fold the viewer's pause state into the paused-time counter.
+   *
+   * The `paused` state events call this with the new value; the stall checks
+   * call it with no argument to reconcile against `getState('paused')`, so a
+   * missed event cannot leave an interval open or closed wrongly.
+   *
+   * @param paused - The new value, when the caller has it
+   */
+  const syncPaused = (paused?: boolean): void => {
+    const isPaused = paused ?? api?.getState('paused') === true;
+    const now = Date.now();
+    if (isPaused && pausedSince === 0) {
+      pausedSince = now;
+    } else if (!isPaused && pausedSince !== 0) {
+      pausedTotalMs += now - pausedSince;
+      pausedSince = 0;
+    }
+  };
+
+  /**
+   * Total wall time the viewer has been paused, up to now.
+   *
+   * @returns A counter that only grows; the difference of two readings is the
+   *          paused time between them
+   */
+  const pausedClock = (): number => {
+    syncPaused();
+    return pausedTotalMs + (pausedSince !== 0 ? Date.now() - pausedSince : 0);
+  };
+
+  /** Arm the stall ceiling at the first detection of a stall episode. */
+  const armStallCeiling = (): void => {
+    const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+    if (ceilingMs <= 0 || stallStartedAt !== 0) return;
+    stallStartedAt = Date.now();
+    stallStartedPausedClock = pausedClock();
+    stallStartedPosition = video?.currentTime ?? 0;
+    stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs) as unknown as ReturnType<typeof setTimeout>;
+
+    // A finished seek (viewer's, the live-edge rejoin's, a reconnect reload's)
+    // or a reloaded source moves the position without any playback: re-base
+    // the reference so only what plays after it counts as progress.
+    stallCeilingRebaseCleanup?.();
+    const media = video;
+    if (media) {
+      const rebase = (): void => {
+        stallStartedPosition = media.currentTime;
+      };
+      media.addEventListener('seeked', rebase);
+      media.addEventListener('loadedmetadata', rebase);
+      stallCeilingRebaseCleanup = () => {
+        media.removeEventListener('seeked', rebase);
+        media.removeEventListener('loadedmetadata', rebase);
+      };
+    }
+  };
+
   /** Disarm the stall ceiling and forget when the current stall began. */
   const clearStallCeiling = (): void => {
+    stallCeilingRebaseCleanup?.();
+    stallCeilingRebaseCleanup = null;
     if (stallCeilingTimer) {
       clearTimeout(stallCeilingTimer);
       stallCeilingTimer = null;
@@ -1883,29 +2125,70 @@ export function createHLSPluginWith(
    *
    * Stops the reconnect loop (live included, which has no window of its
    * own) and reports through the same terminal path as an exhausted window,
-   * with `detail.stalled: true`. Skipped, with the clock cleared for the next
-   * detection to restart, when the viewer paused or the page is hidden or
-   * offline: that is not the stream's stall. Also skipped, with the clock
-   * restarted, when the timer fires more than two check intervals late: the
-   * page was suspended and the wall clock counted time nothing could stall.
+   * with `detail.stalled: true`. While the viewer is paused the episode's
+   * clock is kept and the ceiling looks again once the unpaused remainder
+   * could have run out: that is not the stream's stall, but the episode is not
+   * over. A hidden or offline page clears the clock for the next detection to
+   * restart. Skipped, with the clock restarted, when the timer fires more than
+   * two check intervals late: the page was suspended and the wall clock
+   * counted time nothing could stall. Time the viewer spent paused is
+   * excluded: a timer that fires with less than `stallTimeoutMs` of unpaused
+   * stall behind it re-arms for the remainder.
+   *
+   * It also checks progress itself: the reference position is re-based on
+   * every `seeked` and `loadedmetadata` for the life of the episode, so a seek
+   * or reload is never read as playback. If `currentTime` (not seeking) has
+   * then advanced more than half a second past the reference, playback
+   * recovered, so the episode is cleared and the watchdog re-armed instead of
+   * reporting a fatal on a healthy stream.
    */
   const onStallCeiling = (): void => {
     stallCeilingTimer = null;
     if (!api || stallStartedAt === 0) return;
-    if (api.getState('paused') || !stallCheckable()) {
-      stallStartedAt = 0;
+    const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
+    if (api.getState('paused')) {
+      // The viewer's pause is not the stream's stall, but the episode is not
+      // over: keep its clock. The watchdog may be stopped (a hand-off with
+      // auto-reconnect off), so nothing else would re-arm the ceiling after
+      // the resume. Look again once the unpaused remainder could have run out.
+      const unpaused = Date.now() - stallStartedAt - (pausedClock() - stallStartedPausedClock);
+      const remaining = Math.max(1000, ceilingMs - unpaused);
+      stallCeilingTimer = setTimeout(onStallCeiling, remaining) as unknown as ReturnType<typeof setTimeout>;
       return;
     }
-    const elapsed = Date.now() - stallStartedAt;
-    // The timer ran more than two check intervals late: the page was suspended
-    // (iOS background, lock), and the wall clock kept counting. That is not
-    // `stallTimeoutMs` of stall, so restart the clock rather than give up.
-    const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
-    if (elapsed - ceilingMs > 2 * stallCheckIntervalMs) {
+    if (!stallCheckable()) {
+      clearStallCeiling();
+      return;
+    }
+    // Playback that advanced since the episode began is not a stall, whatever
+    // the watchdog (possibly stopped by a hand-off with auto-reconnect off, or
+    // a check away from seeing it) has or has not noticed yet. End the episode
+    // and make sure a watchdog is running. A reconnect in progress re-arms it
+    // itself.
+    if (video && !api.getState('seeking') && video.currentTime - stallStartedPosition > 0.5) {
+      api.logger.info('Stall ceiling found playback advancing; the stall is over');
+      clearStallCeiling();
+      if (stallCountable && !isReconnecting && !reconnectTimer) startStallWatchdog();
+      return;
+    }
+    // Paused time is not stalled time: only the part of the wall time the
+    // viewer was playing counts toward the ceiling
+    const elapsed = Date.now() - stallStartedAt - (pausedClock() - stallStartedPausedClock);
+    if (elapsed < ceilingMs) {
+      stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs - elapsed) as unknown as ReturnType<typeof setTimeout>;
+      return;
+    }
+    // The timer ran far too late (more than two check intervals, and never
+    // less than SUSPEND_GAP_FLOOR_MS): the page was suspended (iOS background,
+    // lock), and the wall clock kept counting. That is not `stallTimeoutMs` of
+    // stall, so restart the clock rather than give up.
+    if (elapsed - ceilingMs > Math.max(2 * stallCheckIntervalMs, SUSPEND_GAP_FLOOR_MS)) {
       api.logger.info('Stall ceiling ran late; page was suspended, restarting the clock', {
         elapsedMs: Math.round(elapsed),
       });
       stallStartedAt = Date.now();
+      stallStartedPausedClock = pausedClock();
+      stallStartedPosition = video?.currentTime ?? 0;
       stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs) as unknown as ReturnType<typeof setTimeout>;
       return;
     }
@@ -1920,28 +2203,50 @@ export function createHLSPluginWith(
     loadSession++;
     teardownPipeline(new Error('HLS load cancelled: playback stalled'));
     isReconnecting = false;
-    stallStartedAt = 0;
+    clearStallCeiling();
     emitReconnectExhausted(elapsed, mergedConfig.stallTimeoutMs ?? 0, true);
   };
 
   /**
    * Start the playback stall watchdog.
    *
-   * Monitors `video.currentTime`: if it fails to advance within the timeout
-   * window while the player believes it is playing, a recoverable network
-   * error is synthesized into `maybeScheduleReconnect` and the stall ceiling
-   * (`stallTimeoutMs`) is armed. Checks are skipped while the page is hidden
-   * or the browser is offline, and the baseline is reset so that time is not
-   * counted. So is a check that runs more than two intervals late: timers were
-   * suspended (iOS background, lock, app switch), and the gap is not a stall.
+   * Monitors `video.currentTime`: stalled time is the sum of check gaps in
+   * which it advanced by no more than half a second, while the viewer is not
+   * paused and the source has played (armed by its first `playing`). Past the
+   * threshold a recoverable network error is synthesized into
+   * `maybeScheduleReconnect` and the stall ceiling (`stallTimeoutMs`) is armed.
+   * A pause freezes the clock (nothing added, nothing reset), so a pause/play
+   * during a stall does not restart detection; an element that resumed but is
+   * still buffering counts. Hidden, offline, ended and mid-seek checks reset
+   * it. So does a check that runs far late (more than two intervals, and never
+   * less than 10 s): timers were suspended (iOS background, lock, app switch),
+   * and the gap is not a stall. A position jump from a finished seek is
+   * re-based, not progress.
+   *
+   * Cadence: 15 s (or four target durations, capped at 30 s) for hls.js and
+   * native VOD. A native live stream ticks every second, nudges to the live
+   * edge at `liveStallNudgeMs` of stalled time (once per episode, and the
+   * ceiling arms there), and hands off to the reload at 15 s of stalled time.
    * Shared by the hls.js and native pipelines.
    */
   const startStallWatchdog = (): void => {
     if (!video || stallWatchdogTimer) return;
 
-    lastStallCheckTime = Date.now();
+    // Defensive: a hand-off or stop already removed the previous arming's
+    // `seeked` listener; make sure none is left before adding this one's
+    stallSeekedCleanup?.();
+    stallSeekedCleanup = null;
+
     lastStallCheckPosition = video.currentTime;
+    stalledMs = 0;
+    nudgedThisStall = false;
+    providerSeekActive = false;
+    seekedSinceCheck = false;
     seekingSince = 0;
+
+    // The native live fast path: a 1 s tick, so the nudge and the reload land
+    // close to their thresholds. hls.js and native VOD keep the slow cadence
+    const fastPath = isNative && api?.getState('live') === true;
 
     const levelTargetDuration =
       (hls as any)?.targetDuration ??
@@ -1949,9 +2254,41 @@ export function createHLSPluginWith(
       0;
     const targetDuration = Math.max(15, 4 * (levelTargetDuration || 0) || 15);
     // targetDuration is in seconds; setTimeout wants ms, so convert before capping.
-    const checkInterval = Math.min(targetDuration * 1000, 30000);
+    const checkInterval = fastPath
+      ? NATIVE_LIVE_TICK_MS
+      : Math.min(targetDuration * 1000, 30000);
     stallCheckIntervalMs = checkInterval;
     lastCheckRanAt = Date.now();
+    lastCheckPausedClock = pausedClock();
+
+    // The element's own report that a seek finished. The position is re-based
+    // right here, so the jump the seek caused is not read as progress while
+    // anything the stream plays after it still is.
+    const media = video;
+    const onSeeked = (): void => {
+      lastStallCheckPosition = media.currentTime;
+      seekedSinceCheck = true;
+    };
+    media.addEventListener('seeked', onSeeked);
+    stallSeekedCleanup = () => media.removeEventListener('seeked', onSeeked);
+
+    const schedule = (): void => {
+      stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+    };
+
+    /**
+     * Nothing countable now: forget the stalled time and start over.
+     *
+     * @param keepSeekingSince - Leave the run of `seeking` checks alone, so a
+     *        seek that never ends can still be recognised as one
+     */
+    const resetClock = (keepSeekingSince = false): void => {
+      stalledMs = 0;
+      nudgedThisStall = false;
+      providerSeekActive = false;
+      lastStallCheckPosition = video?.currentTime ?? 0;
+      if (!keepSeekingSince) seekingSince = 0;
+    };
 
     const check = () => {
       if (!video || !api) return;
@@ -1960,55 +2297,98 @@ export function createHLSPluginWith(
       // switch), but the wall clock does. A check that runs far later than
       // its interval would read that suspension as a stall of the whole gap
       // and reload while the network is still coming back. Start the
-      // measurement over instead.
+      // measurement over instead. The floor keeps a 1 s tick that iOS delayed
+      // by a few seconds from reading as a suspension.
       const ranAt = Date.now();
       const sinceLastCheck = ranAt - lastCheckRanAt;
-      const late = sinceLastCheck > 2 * checkInterval;
+      const late = sinceLastCheck > Math.max(2 * checkInterval, SUSPEND_GAP_FLOOR_MS);
       lastCheckRanAt = ranAt;
+      // Paused seconds inside this tick are not stalled seconds
+      const pausedNow = pausedClock();
+      const pausedInTick = pausedNow - lastCheckPausedClock;
+      lastCheckPausedClock = pausedNow;
       if (late) {
         api.logger.info('Stall check ran late; page was suspended, not stalled', {
           sinceLastCheckMs: Math.round(sinceLastCheck),
         });
-        lastStallCheckTime = ranAt;
-        lastStallCheckPosition = video.currentTime;
-        seekingSince = 0;
-        stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+        resetClock();
+        seekedSinceCheck = false;
+        schedule();
         return;
       }
 
-      const isPlaying = api.getState('playing');
+      // A pause freezes the clock: it adds nothing and resets nothing, so a
+      // viewer's pause/play during a stall does not restart detection. The
+      // position is re-based, because the viewer may have seeked meanwhile.
+      if (api.getState('paused')) {
+        lastStallCheckPosition = video.currentTime;
+        seekedSinceCheck = false;
+        seekingSince = 0;
+        schedule();
+        return;
+      }
+
       const isSeeking = api.getState('seeking');
+      const eligible = stallCountable && !api.getState('ended') && stallCheckable();
 
       // A seek that outlives one stall threshold is not a seek any more: with
       // no segment arriving, hls.js keeps re-seeking to the moving live window
       // and `currentTime` jumps forward while nothing is shown. Count the
       // seeking time as stalled time and ignore those jumps.
       let stuckSeeking = false;
-      if (isPlaying && isSeeking && stallCheckable()) {
+      if (eligible && isSeeking) {
         if (seekingSince === 0) seekingSince = Date.now();
         stuckSeeking = Date.now() - seekingSince >= targetDuration * 1000;
       } else {
         seekingSince = 0;
       }
 
-      if (!isPlaying || (isSeeking && !stuckSeeking) || !stallCheckable()) {
-        // Not in a state where stall detection is meaningful. Restart the
-        // baseline so hidden/offline time is not counted as stalled time.
-        lastStallCheckTime = Date.now();
-        lastStallCheckPosition = video.currentTime;
-        stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+      // A short viewer seek is not meaningful stall evidence. The provider's
+      // own nudge is: it is still waiting for the stream to answer.
+      const viewerSeeking = isSeeking && !providerSeekActive;
+      if (!eligible || (viewerSeeking && !stuckSeeking)) {
+        // Not in a state where stall detection is meaningful (startup, ended,
+        // hidden, offline, mid-seek). Start over so that time is not counted.
+        resetClock(true);
+        seekedSinceCheck = false;
+        schedule();
         return;
       }
 
-      const elapsed = stuckSeeking ? Date.now() - seekingSince : Date.now() - lastStallCheckTime;
+      // A seek finished since the last check (its jump was re-based by the
+      // `seeked` listener). A viewer's seek also ends the stall episode it
+      // interrupted (a new position, a fresh clock); the nudge's own seek
+      // does not.
+      if (seekedSinceCheck) {
+        seekedSinceCheck = false;
+        if (!providerSeekActive) {
+          stalledMs = 0;
+          nudgedThisStall = false;
+        }
+      }
+      if (providerSeekActive && !isSeeking) providerSeekActive = false;
+
       const positionDelta = video.currentTime - lastStallCheckPosition;
 
       if (!stuckSeeking && positionDelta > 0.5) {
         // Making progress: reset the watchdog and the stall ceiling
-        lastStallCheckTime = Date.now();
+        stalledMs = 0;
+        nudgedThisStall = false;
+        providerSeekActive = false;
         lastStallCheckPosition = video.currentTime;
         clearStallCeiling();
-      } else if (stuckSeeking || elapsed > targetDuration * 1000) {
+        schedule();
+        return;
+      }
+
+      stalledMs += Math.max(0, sinceLastCheck - pausedInTick);
+      const elapsed = stuckSeeking ? Date.now() - seekingSince : stalledMs;
+      const thresholdMs = targetDuration * 1000;
+      // The legacy cadence compares strictly (its first check lands exactly on
+      // the threshold); the 1 s tick compares inclusively so it lands on it
+      const overThreshold = fastPath ? elapsed >= thresholdMs : elapsed > thresholdMs;
+
+      if (stuckSeeking || overThreshold) {
         // Stalled: time hasn't advanced for longer than the target duration.
         // Synthesize a recoverable network error.
         api.logger.warn('Playback stall detected — no timeupdate progress', {
@@ -2019,28 +2399,39 @@ export function createHLSPluginWith(
 
         // The ceiling clock starts at the FIRST detection and survives the
         // reconnects that follow
-        const ceilingMs = mergedConfig.stallTimeoutMs ?? 0;
-        if (ceilingMs > 0 && stallStartedAt === 0) {
-          stallStartedAt = Date.now();
-          stallCeilingTimer = setTimeout(onStallCeiling, ceilingMs) as unknown as ReturnType<typeof setTimeout>;
-        }
+        armStallCeiling();
 
         seekingSince = 0;
+        stalledMs = 0;
+        nudgedThisStall = false;
+        providerSeekActive = false;
         const stallError: HLSError = {
           type: 'network',
           details: 'Playback stalled — no data received',
           fatal: true,
         };
+        // This arming's life ends here. A fresh one starts from the
+        // reconnect's own re-arm, or from the element's recovery (`waiting`
+        // clearing), and it is that one that sees progress and clears the
+        // ceiling.
+        stopStallWatchdog();
         maybeScheduleReconnect(stallError);
-        // Do NOT restart the watchdog here — if reconnect fails, the
-        // watchdog will be restarted when playback resumes.
         return;
       }
 
-      stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+      const nudgeMs = mergedConfig.liveStallNudgeMs ?? DEFAULT_LIVE_STALL_NUDGE_MS;
+      if (fastPath && nudgeMs > 0 && !nudgedThisStall && stalledMs >= nudgeMs) {
+        if (nudgeNativeLiveStall()) {
+          nudgedThisStall = true;
+          // The ceiling clock starts at the first nudge (the first detection)
+          armStallCeiling();
+        }
+      }
+
+      schedule();
     };
 
-    stallWatchdogTimer = setTimeout(check, checkInterval) as unknown as ReturnType<typeof setTimeout>;
+    schedule();
   };
 
   /** Stop the playback stall watchdog */
@@ -2049,6 +2440,8 @@ export function createHLSPluginWith(
       clearTimeout(stallWatchdogTimer);
       stallWatchdogTimer = null;
     }
+    stallSeekedCleanup?.();
+    stallSeekedCleanup = null;
   };
 
   /**
@@ -2252,6 +2645,9 @@ export function createHLSPluginWith(
     const saved_src = currentSrc;
     const was_live = api.getState('live');
     const was_native = isNative;
+    // A native source still waiting for play intent (deferred, or released
+    // after a long pause) has nothing loaded to reconnect
+    const was_idle = nativePhase === 'deferred' || nativePhase === 'released';
     // Position from the first failure, not the current (possibly reset) element
     const resume_position = reconnectResumePosition;
 
@@ -2271,6 +2667,29 @@ export function createHLSPluginWith(
       api.setState('playbackState', 'loading');
 
       if (was_native && loader.supportsNativeHLS()) {
+        // A paused viewer on a deferred or released native source is not
+        // reconnected: setting `src` would start the very download the
+        // deferral exists to prevent. The next play fetches, through the
+        // intent hook. The outage ends here, as a successful "nothing to
+        // load", so the reconnecting overlay comes down.
+        // Only a LIVE source is released this way (plan D9: VOD is never
+        // released, and a VOD reconnect keeps the viewer's position). A source
+        // that was already idle stays idle either way
+        if (
+          api.getState('paused') &&
+          (was_idle || (mergedConfig.autoStartLoad === false && was_live))
+        ) {
+          releaseNativeSource(saved_src);
+          api.setState('playbackState', 'ready');
+          api.setState('buffering', false);
+          api.emit('error:recovered', {
+            attempt: reconnectAttempts,
+            elapsedMs: Date.now() - reconnectWindowStart,
+          });
+          api.logger.info('Auto-reconnect: viewer is paused; the next play loads the source');
+          cancelReconnect();
+          return;
+        }
         await loadNative(saved_src, false, { phase: 'reconnect', attempt: reconnectAttempts });
       } else {
         // loadWithHlsJs creates its own fresh hls.js instance
@@ -2310,8 +2729,10 @@ export function createHLSPluginWith(
       // explicitly paused before the outage.
       const wasPaused = api.getState('paused');
       // The reload tore the watchdog down: re-arm it so a stream that comes
-      // back and stalls again keeps counting toward the stall ceiling
-      if (api.getState('playing')) startStallWatchdog();
+      // back and stalls again keeps counting toward the stall ceiling. Armed
+      // whether `playing` is true yet or not: nothing counts until the
+      // source's first `playing`, and a stalled element never fires another
+      if (!wasPaused) startStallWatchdog();
       if (!wasPaused) {
         try {
           await video?.play();
@@ -2324,6 +2745,9 @@ export function createHLSPluginWith(
         }
       } else {
         api.logger.info('Stream reconnected while paused; maintaining pause at live edge');
+        // The reload tore down the pause-release timer: a pause that outlasts
+        // the reconnect still releases the source
+        onPausedChanged(true);
       }
     } catch {
       // A superseded attempt must not respawn the reconnect loop
@@ -2333,6 +2757,205 @@ export function createHLSPluginWith(
     } finally {
       isReconnecting = false;
     }
+  };
+
+  /** Cancel a pending native pause release. */
+  const clearPauseReleaseTimer = (): void => {
+    if (pauseReleaseTimer) {
+      clearTimeout(pauseReleaseTimer);
+      pauseReleaseTimer = null;
+    }
+  };
+
+  /**
+   * Wait for play intent on the native element.
+   *
+   * Play intent is any `video.play()`: the UI plays the element directly, so a
+   * core event alone would miss most plays. Setting `src` after `play()` runs
+   * the load algorithm and rejects the pending play with `AbortError`, and a
+   * second `play()` from the element's `play` event runs outside the viewer's
+   * tap, where iOS may refuse it. So the hook is an own-property wrapper on the
+   * element's `play`: it runs `start` (which sets `src` synchronously), then
+   * calls the element's original `play`, so the tap stays the gesture that
+   * starts playback.
+   *
+   * The wrapper removes itself on the first call, from `teardownPipeline()`
+   * (so `cleanup()` and `destroy()` restore the element), and a host-supplied
+   * element comes back with no own `play` property it did not have. A call
+   * from a superseded session only unhooks.
+   *
+   * @param start - Begins the fetch; runs at most once, inside the play call
+   */
+  const armPlayIntent = (start: () => void): void => {
+    removePlayHook?.();
+    const el = video;
+    if (!el) return;
+    const session = loadSession;
+    const hadOwnPlay = Object.prototype.hasOwnProperty.call(el, 'play');
+    const prior = el.play;
+
+    const remove = (): void => {
+      if (removePlayHook === remove) removePlayHook = null;
+      // Someone else replaced it since: leave their wrapper alone
+      if (el.play !== wrapper) return;
+      if (hadOwnPlay) el.play = prior;
+      else delete (el as { play?: unknown }).play;
+    };
+    const wrapper = function (this: unknown, ...args: []): Promise<void> {
+      remove();
+      if (session === loadSession && api) start();
+      return prior.apply(el, args);
+    };
+
+    el.play = wrapper;
+    removePlayHook = remove;
+  };
+
+  /**
+   * Begin the network fetch of a native source that was waiting for play
+   * intent: the first fetch of a deferred load, or the resume of a released
+   * live source. Runs inside the viewer's `play()` call.
+   *
+   * The first fetch is the load's initial one (initial retry budget, the
+   * fatal reported before the rejection, the timeout hand-off to
+   * auto-reconnect), which nobody awaits any more, so the rejection is
+   * swallowed after it has reported. A resume is a provider reload: the first
+   * failure of an outage is reported tagged, the live edge is rejoined on
+   * success, and a failure hands off to auto-reconnect.
+   *
+   * @param src - Source URL
+   * @param resume - Whether this resumes a released source
+   * @param attached - The attachment made at deferral, when there is one
+   */
+  const beginNativeFetch = (src: string, resume: boolean, attached?: NativeAttachment): void => {
+    if (!api || src !== currentSrc) return;
+    const session = loadSession;
+    const attachment = attached ?? attachNative(src, resume ? { phase: 'resume', attempt: 1 } : undefined);
+
+    if (!resume) {
+      fetchNative(src, true, attachment, true).catch(() => {
+        // Reported through emitFatalError() or superseded; nobody is waiting
+      });
+      return;
+    }
+
+    api.setState('playbackState', 'loading');
+    api.setState('buffering', true);
+    fetchNative(src, false, attachment).then(
+      () => {
+        if (session !== loadSession || !api) return;
+        applyAudioState();
+        rejoinNativeLiveEdge();
+        api.setState('playbackState', 'ready');
+        api.setState('buffering', false);
+        // The fetch tore down the pause-release timer: a viewer who paused
+        // while it loaded still gets the release
+        if (api.getState('paused')) onPausedChanged(true);
+      },
+      (error: unknown) => {
+        if (session !== loadSession || !api) return;
+        const message = error instanceof Error ? error.message : 'Failed to load HLS source';
+        const failure: NativeHLSError =
+          message === LOAD_TIMEOUT_MESSAGE
+            ? buildLoadTimeoutError(0)
+            : { type: 'network', details: message, fatal: true };
+        if (!canAutoReconnect(failure)) {
+          // Nothing will retry this (autoReconnect off): report it for real,
+          // or the loading and buffering state set above never comes down
+          api.logger.warn('Native live resume failed and auto-reconnect is off', { message });
+          // Stop the fetch for real, as a failed initial load does: handlers
+          // off first, then `src` away, so a late manifest cannot play behind
+          // the error overlay
+          teardownPipeline();
+          video?.removeAttribute('src');
+          video?.load();
+          emitFatalError(failure, false, message === LOAD_TIMEOUT_MESSAGE ? LOAD_TIMEOUT_MESSAGE : undefined);
+          return;
+        }
+        api.logger.warn('Native live resume failed; handing off to auto-reconnect', { message });
+        maybeScheduleReconnect(failure);
+      }
+    );
+  };
+
+  /**
+   * Leave the native element with no source, waiting for play intent.
+   *
+   * Used by a long live pause (`nativePauseReleaseMs`) and by a reconnect that
+   * lands while the viewer is paused and loading is deferred. The handlers go
+   * first (the `emptied` and `durationchange` the reset fires reach nobody, so
+   * `live`, `duration`, `currentTime` and `paused` keep their values), then
+   * `src` is removed and the fetch aborted. A release is not a stall: the
+   * stall ceiling is cleared and the watchdog stays off until the next
+   * `playing`.
+   *
+   * @param src - Source URL the next play fetches again
+   */
+  const releaseNativeSource = (src: string): void => {
+    const el = video;
+    if (!el || !api) return;
+    teardownPipeline(new Error('HLS load cancelled: native source released'));
+    el.removeAttribute('src');
+    el.load();
+    clearStallCeiling();
+    stallCountable = false;
+
+    // A source that never loaded is fetched like a first load, not a resume
+    const resume = hasPlayedContent;
+    nativePhase = resume ? 'released' : 'deferred';
+    armPlayIntent(() => beginNativeFetch(src, resume));
+  };
+
+  /**
+   * Defer a native source until play intent (`autoStartLoad: false`).
+   *
+   * Attaches the element handlers and the media-type classifier, writes
+   * `preload = 'none'` (also on a host-supplied element), and hooks `play()`.
+   * Sets no `src` and starts no `loadTimeoutMs` watchdog, so the returned
+   * load is already settled. The only `load()` call is the one that drops a
+   * previous source still attached to a reused element.
+   *
+   * @param src - Source URL
+   * @returns A resolved promise
+   */
+  const deferNativeLoad = (src: string): Promise<void> => {
+    const el = getOrCreateVideo();
+    el.preload = 'none';
+    // A previous source may still be attached (loaded, then replaced by this
+    // one): the caller's cleanup already detached its handlers, so dropping
+    // the `src` here keeps it from downloading behind the deferral
+    if (el.getAttribute('src') !== null) {
+      el.removeAttribute('src');
+      el.load();
+    }
+    const attachment = attachNative(src);
+    nativePhase = 'deferred';
+    armPlayIntent(() => beginNativeFetch(src, false, attachment));
+    return Promise.resolve();
+  };
+
+  /**
+   * Start or cancel the native pause release as the viewer pauses and plays.
+   *
+   * Applies to a loaded native LIVE source only. The timer is a plain
+   * `setTimeout`, so a page iOS suspended may release late, which is harmless.
+   *
+   * @param paused - The new value of the `paused` state key
+   */
+  const onPausedChanged = (paused: boolean): void => {
+    clearPauseReleaseTimer();
+    const releaseMs = mergedConfig.nativePauseReleaseMs ?? 0;
+    if (!paused || releaseMs <= 0) return;
+    if (!isNative || nativePhase !== 'loaded' || !api?.getState('live')) return;
+
+    const session = loadSession;
+    pauseReleaseTimer = setTimeout(() => {
+      pauseReleaseTimer = null;
+      if (session !== loadSession || !isNative || nativePhase !== 'loaded') return;
+      if (!api?.getState('paused') || !api.getState('live') || !currentSrc) return;
+      api.logger.info('Native live source paused; releasing it', { afterMs: releaseMs });
+      releaseNativeSource(currentSrc);
+    }, releaseMs);
   };
 
   // Plugin implementation
@@ -2569,16 +3192,39 @@ export function createHLSPluginWith(
         unsubLive();
       });
 
-      // Stall watchdog: start when playing, stop when paused.
-      // Monitors timeupdate advancement and synthesizes a recoverable error
-      // if playback stalls without an HLS error event.
+      // Stall watchdog: armed by the source's first `playing`, so startup
+      // buffering is never a stall, and kept armed until teardown, a new
+      // source or a stall hand-off. A pause or a `playing: false` does not
+      // stop it: the check freezes the clock while `paused` and counts a
+      // resumed-but-buffering element as stalled. Monitors timeupdate
+      // advancement and synthesizes a recoverable error if playback stalls
+      // without an HLS error event.
       const unsubPlayState = api.subscribeToState((event) => {
-        if (event.key === 'playing') {
-          if (event.value) {
-            startStallWatchdog();
-          } else {
-            stopStallWatchdog();
-          }
+        if (event.key === 'playing' && event.value) {
+          stallCountable = true;
+          playIntentSeen = true;
+          startStallWatchdog();
+        }
+        // Recovery after a stall hand-off: `playing` is still true then, so
+        // core publishes no change for it, but the element's `playing` (or
+        // `canplay`) clears `waiting`. Startup buffering is not a recovery:
+        // nothing counts until the source's first `playing`. A reconnect in
+        // progress re-arms itself.
+        if (
+          event.key === 'waiting' &&
+          !event.value &&
+          stallCountable &&
+          !isReconnecting &&
+          !reconnectTimer
+        ) {
+          startStallWatchdog();
+        }
+        if (event.key === 'paused') {
+          // Paused time is excluded from the stall clocks
+          syncPaused(Boolean(event.value));
+          if (!event.value) playIntentSeen = true;
+          // Native pause policy: a long live pause releases the source
+          onPausedChanged(Boolean(event.value));
         }
       });
       api.onDestroy(unsubPlayState);
@@ -2618,6 +3264,7 @@ export function createHLSPluginWith(
       const session = ++loadSession;
       cancelReconnect();
       hasPlayedContent = false;
+      playIntentSeen = false;
       isLiveClassified = false;
       api.setState('live', false);
 
@@ -2658,13 +3305,13 @@ export function createHLSPluginWith(
       let load: Promise<void>;
       if (api.getState('airplayActive') && loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS (AirPlay active)');
-        load = loadNative(src, true);
+        load = mergedConfig.autoStartLoad === false ? deferNativeLoad(src) : loadNative(src, true);
       } else if (loader.isHlsJsSupported()) {
         api.logger.info(`Using ${variant.engineLabel} for HLS playback`);
         load = loadWithHlsJs(src);
       } else if (loader.supportsNativeHLS()) {
         api.logger.info('Using native HLS playback (hls.js not supported)');
-        load = loadNative(src, true);
+        load = mergedConfig.autoStartLoad === false ? deferNativeLoad(src) : loadNative(src, true);
       } else {
         const probes = loader.describeSupport();
         const message = `HLS playback not supported in this browser (${summarizeSupport(probes)})`;
@@ -2829,12 +3476,23 @@ export function createHLSPluginWith(
       currentSrc = savedSrc;
       lastKnownTargetLatency = savedTargetLatency;
 
-      // Load with native HLS
-      const load = loadNative(
-        savedSrc,
-        takes_over,
-        takes_over ? undefined : { phase: 'switch', attempt: 1 }
-      );
+      // Load with native HLS. A viewer who has not asked to play yet on a page
+      // that defers loading gets a deferred native source too: the switch must
+      // not start the download the deferral exists to prevent
+      // A viewer who has played (then paused) has already asked for the
+      // stream: loading as before, at the saved position, is what they expect
+      const deferred =
+        mergedConfig.autoStartLoad === false &&
+        !wasPlaying &&
+        !playIntentSeen &&
+        api?.getState('paused') !== false;
+      const load = deferred
+        ? deferNativeLoad(savedSrc)
+        : loadNative(
+            savedSrc,
+            takes_over,
+            takes_over ? undefined : { phase: 'switch', attempt: 1 }
+          );
       takeOverUserLoad(session, load);
       await load;
 
@@ -2842,9 +3500,13 @@ export function createHLSPluginWith(
       if (session !== loadSession) return;
 
       // Restore position
-      if (video && currentTime > 0) {
+      if (!deferred && video && currentTime > 0) {
         video.currentTime = currentTime;
       }
+
+      // The load tore down the pause-release timer, and a viewer who is still
+      // paused (played, then paused) never changes `paused` again
+      if (!deferred && api?.getState('paused')) onPausedChanged(true);
 
       // Resume if was playing
       if (wasPlaying && video) {

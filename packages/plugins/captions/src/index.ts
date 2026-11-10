@@ -16,11 +16,95 @@
  * - SettingsMenu captions submenu
  */
 
-import type { IPluginAPI, Plugin, PluginType, TextTrack as ScarlettTextTrack } from '@scarlett-player/core';
-import type { CaptionsPluginConfig, CaptionSource } from './types';
+import type { IPluginAPI, PluginType, TextTrack as ScarlettTextTrack } from '@scarlett-player/core';
+import type { CaptionsPlugin, CaptionsPluginConfig, CaptionSource } from './types';
+import {
+  DEFAULT_STYLE_STORAGE_KEY,
+  buildCueCss,
+  isCaptionStyleKey,
+  readStoredStyle,
+  sanitizeCaptionStyle,
+  writeStoredStyle,
+  type CaptionStyle,
+  type CaptionStylePatch,
+} from './caption-style';
 import { PKG_VERSION } from './version';
 
-export type { CaptionsPluginConfig, CaptionSource } from './types';
+export type { CaptionsPlugin, CaptionsPluginConfig, CaptionSource } from './types';
+export type {
+  CaptionBackgroundOpacity,
+  CaptionColor,
+  CaptionEdgeStyle,
+  CaptionFontFamily,
+  CaptionFontSize,
+  CaptionPaletteColor,
+  CaptionStyle,
+  CaptionStylePatch,
+  CaptionsStyleApi,
+} from './caption-style';
+export { sanitizeCaptionStyle } from './caption-style';
+
+declare module '@scarlett-player/core' {
+  interface StateStore {
+    /**
+     * The caption text style in effect: the integrator's `style` config with
+     * the viewer's overrides on top. Written by the captions plugin on init
+     * and on every style change. Absent fields use the browser default.
+     */
+    captionStyle: CaptionStyle;
+  }
+}
+
+/** Attribute set on the player container to scope its caption stylesheet. */
+const SCOPE_ATTRIBUTE = 'data-sp-caption-scope';
+
+/**
+ * Key for the scope counter, shared by every copy of this module on a page.
+ *
+ * `Symbol.for` reaches the global symbol registry, so two separately bundled
+ * copies of the plugin - the embed full and video builds, or a host bundle
+ * beside the embed - read and write the same counter. A module-local counter
+ * restarts at 1 in each copy, and two players sharing a scope value would be
+ * styled by each other's rule, because the selector matches by attribute
+ * anywhere in the document.
+ */
+const SCOPE_COUNTER_KEY = Symbol.for('@scarlett-player/captions/scope-counter');
+
+/**
+ * The last scope value this copy of the module handed out. It backs the shared
+ * counter up: when the global object cannot be used, ids still never repeat
+ * within this copy.
+ */
+let localScopeCounter = 0;
+
+/**
+ * The next scope value, unique across every copy of this module on the page.
+ *
+ * Never throws. A page that froze its globals refuses the write to the shared
+ * counter, and an engine without `globalThis` fails on the reference itself;
+ * either way the module-local counter answers instead. Uniqueness across
+ * separately bundled copies is then best effort, and still holds within this
+ * copy.
+ *
+ * @returns The scope id to put on a player container
+ */
+function nextScopeId(): string {
+  let next = localScopeCounter + 1;
+
+  try {
+    const registry = globalThis as typeof globalThis & { [SCOPE_COUNTER_KEY]?: number };
+    const shared = registry[SCOPE_COUNTER_KEY];
+    if (typeof shared === 'number' && shared >= next) {
+      next = shared + 1;
+    }
+    registry[SCOPE_COUNTER_KEY] = next;
+  } catch {
+    // Global unusable: `next` already holds the module-local value.
+  }
+
+  localScopeCounter = next;
+  return String(next);
+}
 
 /** HLS.js subtitle track shape (subset we need) */
 interface HlsSubtitleTrack {
@@ -70,8 +154,18 @@ const HLS_INSTANCE_RETRY_MS = 500;
 /**
  * Create a Captions Plugin instance.
  *
+ * Besides managing tracks, the plugin styles the cue text. When a `style` is
+ * configured or the viewer saved one, `init` adds a `<style>` inside the
+ * player container holding one `video::cue` rule scoped to that container, so
+ * it survives source changes and container fullscreen and never reaches
+ * another player. With nothing configured and nothing saved, no stylesheet is
+ * added. The effective style is published as the `captionStyle` state key, and
+ * the returned plugin carries `getCaptionStyle`, `getCaptionStyleOverrides`,
+ * `setCaptionStyle` and `resetCaptionStyle`. `destroy` removes the stylesheet
+ * and the scope attribute.
+ *
  * @param config - Plugin configuration
- * @returns Captions Plugin instance
+ * @returns Captions Plugin instance, including the caption style methods
  *
  * @example
  * ```ts
@@ -93,7 +187,7 @@ const HLS_INSTANCE_RETRY_MS = 500;
  * });
  * ```
  */
-export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin {
+export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): CaptionsPlugin {
   let api: IPluginAPI | null = null;
   let video: HTMLVideoElement | null = null;
   let addedTrackElements: HTMLTrackElement[] = [];
@@ -121,6 +215,74 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
    * track it names may not exist in the element's TextTrackList yet.
    */
   const defaultSource = config.sources?.find((source) => source.default) ?? null;
+
+  const persistStyle = config.persistStyle !== false;
+  const styleStorageKey =
+    typeof config.styleStorageKey === 'string' && config.styleStorageKey
+      ? config.styleStorageKey
+      : DEFAULT_STYLE_STORAGE_KEY;
+  /** Integrator defaults, validated once. Rejected keys are logged at init. */
+  const { style: configStyle, rejected: rejectedConfigKeys } = sanitizeCaptionStyle(config.style);
+  /** The viewer's overrides. Read from storage at init, changed by the style methods. */
+  let viewerStyle: CaptionStyle = {};
+  /** The `<style>` holding this player's `video::cue` rule, when one is needed. */
+  let styleEl: HTMLStyleElement | null = null;
+  /** The container carrying the scope attribute, kept for teardown after `api` is gone. */
+  let scopedContainer: HTMLElement | null = null;
+  let scopeId = '';
+
+  /**
+   * The style in effect: integrator defaults with the viewer's overrides on top.
+   */
+  const effectiveStyle = (): CaptionStyle => ({ ...configStyle, ...viewerStyle });
+
+  /**
+   * Write the effective style to the container's stylesheet and to state.
+   *
+   * The `<style>` lives inside the container so it follows the player into
+   * container fullscreen and leaves with it. It exists only while there is
+   * something to say: an empty style removes it, so an unstyled player carries
+   * no stylesheet at all.
+   */
+  const applyStyle = (): void => {
+    if (!api || !scopedContainer) return;
+
+    const effective = effectiveStyle();
+    const css = buildCueCss(`[${SCOPE_ATTRIBUTE}="${scopeId}"]`, effective);
+
+    if (!css) {
+      styleEl?.remove();
+      styleEl = null;
+    } else {
+      if (!styleEl || styleEl.parentNode !== scopedContainer) {
+        styleEl?.remove();
+        styleEl = document.createElement('style');
+        styleEl.setAttribute('data-sp-caption-style', '');
+        scopedContainer.appendChild(styleEl);
+      }
+      styleEl.textContent = css;
+    }
+
+    api.setState('captionStyle', effective);
+  };
+
+  /**
+   * Remove the stylesheet and the scope attribute. Safe to call twice.
+   */
+  const removeStyle = (): void => {
+    styleEl?.remove();
+    styleEl = null;
+    scopedContainer?.removeAttribute(SCOPE_ATTRIBUTE);
+    scopedContainer = null;
+  };
+
+  /**
+   * Save the viewer layer, or delete the saved copy when it is empty.
+   */
+  const persistViewerStyle = (): void => {
+    if (!persistStyle) return;
+    writeStoredStyle(styleStorageKey, Object.keys(viewerStyle).length > 0 ? viewerStyle : null);
+  };
 
   /**
    * Get video element from container.
@@ -501,6 +663,23 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       api.setState('textTracks', []);
       api.setState('currentTextTrack', null);
 
+      // Caption style. Scope first, so the rule can only ever match this player.
+      scopedContainer = api.container;
+      scopeId = nextScopeId();
+      scopedContainer.setAttribute(SCOPE_ATTRIBUTE, scopeId);
+
+      if (rejectedConfigKeys.length > 0) {
+        api.logger.warn('Ignoring invalid caption style config', { rejected: rejectedConfigKeys });
+      }
+
+      if (persistStyle) {
+        // A change made before init wins over what was saved.
+        viewerStyle = { ...readStoredStyle(styleStorageKey), ...viewerStyle };
+      }
+
+      api.defineState('captionStyle', effectiveStyle());
+      applyStyle();
+
       // Listen for track:text events (from CaptionsButton / SettingsMenu)
       const unsubTrackText = api.on('track:text', ({ trackId }) => {
         selectTrack(trackId);
@@ -551,6 +730,7 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
         unsubscribeFromHls();
         unobserveTextTracks();
         cleanupTracks();
+        removeStyle();
       });
     },
 
@@ -559,8 +739,47 @@ export function createCaptionsPlugin(config: CaptionsPluginConfig = {}): Plugin 
       unsubscribeFromHls();
       unobserveTextTracks();
       cleanupTracks();
+      removeStyle();
       video = null;
       api = null;
+    },
+
+    getCaptionStyle(): CaptionStyle {
+      return effectiveStyle();
+    },
+
+    getCaptionStyleOverrides(): CaptionStyle {
+      return { ...viewerStyle };
+    },
+
+    setCaptionStyle(patch: CaptionStylePatch): void {
+      if (typeof patch !== 'object' || patch === null) return;
+
+      const next: Record<string, unknown> = { ...viewerStyle };
+      const values: Record<string, unknown> = {};
+
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null && isCaptionStyleKey(key)) {
+          delete next[key];
+        } else {
+          values[key] = value;
+        }
+      }
+
+      const { style, rejected } = sanitizeCaptionStyle(values);
+      if (rejected.length > 0) {
+        api?.logger.warn('Ignoring invalid caption style values', { rejected });
+      }
+
+      viewerStyle = { ...(next as CaptionStyle), ...style };
+      persistViewerStyle();
+      applyStyle();
+    },
+
+    resetCaptionStyle(): void {
+      viewerStyle = {};
+      persistViewerStyle();
+      applyStyle();
     },
   };
 }

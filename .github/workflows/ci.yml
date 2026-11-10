@@ -115,6 +115,14 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node demo/docs-build.mjs --check
 
+      # Builds the release Slack message from the current CHANGELOGs and prints
+      # it without sending anything (--dry-run never reads the webhook secret and
+      # makes no network call). Catches a CHANGELOG format change from
+      # @changesets/changelog-github before it breaks a release notification.
+      - name: Check release notification (dry run)
+        if: github.event_name == 'pull_request'
+        run: node scripts/release-notify.mjs --dry-run
+
       # ---- Real-browser verification: push to main only ----
       #
       # jsdom has no layout engine and no MSE, so three classes of defect are

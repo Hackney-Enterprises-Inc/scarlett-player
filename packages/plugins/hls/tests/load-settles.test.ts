@@ -109,4 +109,35 @@ describe('hls.js load() settling on a live failure', () => {
 
     await plugin.destroy();
   });
+
+  // HEI-SCARLETT-68: a deferred native load has nothing to wait for, so it
+  // settles at once, and its watchdog belongs to the first play
+  it('settles a deferred native load without metadata, and times out from the first play', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(hlsLoader, 'supportsNativeHLS').mockReturnValue(true);
+    vi.spyOn(hlsLoader, 'isHlsJsSupported').mockReturnValue(false);
+    vi.spyOn(hlsLoader, 'isHLSSupported').mockReturnValue(true);
+    const plugin = createHLSPlugin({ autoStartLoad: false, loadTimeoutMs: 5000 });
+    await plugin.init(api);
+
+    let outcome: 'pending' | 'resolved' | 'rejected' = 'pending';
+    plugin.loadSource(SRC).then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; }
+    );
+    await flush();
+    expect(outcome).toBe('resolved');
+
+    // The watchdog is not running while nothing is fetched
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fatalErrors()).toHaveLength(0);
+
+    const video = (api.container as HTMLElement).querySelector('video') as HTMLVideoElement;
+    void video.play();
+    await vi.advanceTimersByTimeAsync(5001);
+    expect(fatalErrors()).toHaveLength(1);
+    expect(fatalErrors()[0].detail).toMatchObject({ timedOut: true });
+
+    await plugin.destroy();
+  });
 });

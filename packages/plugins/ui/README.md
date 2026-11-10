@@ -129,6 +129,35 @@ that, the Speed sub-panel is 253px tall against a 211px portrait phone player
 and loses its Back header and its first three speeds to the host's
 `overflow: hidden`.
 
+### Caption style
+
+With `@scarlett-player/captions` 1.28 or later installed, the Captions panel
+of the settings menu ends with a **Style** row (`Default`, or `Custom` once the
+viewer has changed something). It opens a Caption style screen with one row per
+field and a **Reset** item:
+
+| Row | Options |
+|---|---|
+| Text size | Default, 50%, 75%, 100%, 150%, 200% |
+| Text color | Default, White, Yellow, Green, Cyan, Blue, Magenta, Red, Black |
+| Background color | Default and the same eight colours |
+| Background opacity | Default, 0%, 25%, 50%, 75%, 100% |
+| Edge style | Default, None, Drop shadow, Raised, Depressed, Outline |
+| Font | Default, Sans-serif, Serif, Monospace |
+
+Each row shows the value in effect. Picking an option applies it at once and
+returns to the Caption style screen with the menu still open, so several fields
+can be set in a row; the other pickers (quality, speed, track) close the menu.
+`Default` clears the viewer's choice for that field, and Reset clears them all,
+back to the integrator's defaults. Back and Escape step up one level at a time:
+option list, Caption style, Captions, main menu.
+
+The UI finds the style methods on the `captions` plugin by shape and has no
+dependency on that package. With an older captions plugin, or none, the Style
+row is not shown and the menu is unchanged. What the options can and cannot
+change, and where the choice is saved, is in the
+[captions README](../captions/README.md#caption-style).
+
 ## Layout
 
 `controls` is the order of slots in the bar. The default is:

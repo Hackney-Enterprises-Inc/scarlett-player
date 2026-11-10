@@ -1331,6 +1331,46 @@ describe('addons: use() and addonRuntime', () => {
     expect(warnings.every((w) => /video build/.test(w))).toBe(true);
   });
 
+  it('warns once in an audio build when caption style is set, with or without sources', async () => {
+    const captionWarnings = (): string[] =>
+      vi
+        .mocked(console.warn)
+        .mock.calls.map((c) => String(c[0]))
+        .filter((w) => /caption/i.test(w));
+
+    const api = createScarlettPlayerAPI(freshAudioCreators(), ['audio', 'audio-mini'], '1.0.0-audio');
+
+    await api.create({ container, type: 'audio', src: 'a.mp3', captions: { style: { fontSize: 150 } } });
+    expect(captionWarnings()).toHaveLength(1);
+    expect(captionWarnings()[0]).toMatch(/video build/);
+
+    vi.mocked(console.warn).mockClear();
+    await api.create({
+      container,
+      type: 'audio',
+      src: 'a.mp3',
+      captions: {
+        sources: [{ language: 'en', label: 'English', src: 'en.vtt' }],
+        style: { fontSize: 150 },
+      },
+    });
+    expect(captionWarnings()).toHaveLength(1);
+
+    // persistStyle alone styles nothing, so there is nothing to warn about.
+    vi.mocked(console.warn).mockClear();
+    await api.create({ container, type: 'audio', src: 'a.mp3', captions: { persistStyle: false } });
+    expect(captionWarnings()).toHaveLength(0);
+  });
+
+  it('passes caption style through to the captions plugin in a video build', async () => {
+    const creators = freshVideoCreators();
+    const captions = { style: { fontSize: 150 as const, color: 'yellow' as const }, persistStyle: false };
+
+    await createEmbedPlayer(container, { src: 'v.m3u8', captions }, creators, videoOnlyTypes);
+
+    expect(creators.captions).toHaveBeenCalledWith(captions);
+  });
+
   it('leaves config and plugin list byte-identical for an embed with no new attributes and no addon', async () => {
     const before = freshVideoCreators();
     const withUse = freshVideoCreators();

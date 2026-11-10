@@ -103,6 +103,46 @@ describe('HLS provider switches', () => {
     expect(api.logger.warn).not.toHaveBeenCalledWith('No source loaded');
   });
 
+  // HEI-SCARLETT-68: a switch from hls.js to native (AirPlay) before the
+  // viewer has asked to play must not start the download the deferral exists
+  // to prevent
+  it('switches to a deferred native source when loading is deferred and nobody has played', async () => {
+    const deferringPlugin = createHLSPlugin({ autoStartLoad: false });
+    await deferringPlugin.init(api);
+    const load = deferringPlugin.loadSource(SRC);
+    await flush();
+    fireManifest(created[created.length - 1]);
+    await load;
+    expect(deferringPlugin.isNativeHLS()).toBe(false);
+
+    await deferringPlugin.switchToNative();
+
+    expect(deferringPlugin.isNativeHLS()).toBe(true);
+    expect(getVideo().getAttribute('src')).toBeNull();
+    expect(getVideo().preload).toBe('none');
+
+    // The first play on the element fetches, inside the call
+    let srcAtPlay: string | null | undefined;
+    (HTMLVideoElement.prototype.play as ReturnType<typeof vi.fn>).mockImplementation(function (
+      this: HTMLVideoElement
+    ) {
+      srcAtPlay = this.getAttribute('src');
+      return Promise.resolve();
+    });
+    void getVideo().play();
+    expect(srcAtPlay).toBe(SRC);
+
+    // And hls.js picks the same source up again when AirPlay ends
+    const backToHlsJs = deferringPlugin.switchToHlsJs();
+    await flush();
+    fireManifest(created[created.length - 1]);
+    await backToHlsJs;
+    expect(deferringPlugin.isNativeHLS()).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(getVideo(), 'play')).toBe(false);
+
+    await deferringPlugin.destroy();
+  });
+
   it('drops a scheduled reconnect when a provider switch replaces the pipeline', async () => {
     vi.useFakeTimers();
     // maxNetworkRetries: 0 makes the first fatal network error terminal, so it

@@ -8,7 +8,19 @@ import type { Plugin } from '@scarlett-player/core';
 export interface HLSPluginConfig {
   /** Enable debug logging */
   debug?: boolean;
-  /** Auto start loading when source is set */
+  /**
+   * Auto start loading when source is set (default: true).
+   *
+   * Set to `false` to fetch no media until the viewer asks to play. On hls.js
+   * this is the hls.js option of the same name (the host calls `startLoad()`).
+   * On the native pipeline (iOS Safari, or AirPlay) it defers the source
+   * itself: `loadSource()` resolves with the element untouched (`preload` is
+   * `none`, no `src`, no `load()`, no `loadTimeoutMs` watchdog), and the first
+   * `video.play()` on the element, from any caller, sets `src` synchronously
+   * inside that call and then plays. `loadTimeoutMs` counts from that play.
+   * `media:loaded`, `media:loadedmetadata`, `live` and `duration` arrive after
+   * the first play instead of before it, and `getHlsInstance()` stays null.
+   */
   autoStartLoad?: boolean;
   /** Start position in seconds (-1 for default) */
   startPosition?: number;
@@ -140,6 +152,27 @@ export interface HLSPluginConfig {
    * while the page is hidden, the browser is offline, or the viewer paused.
    */
   stallTimeoutMs?: number;
+  /**
+   * Stalled time in milliseconds after which a stalled NATIVE LIVE stream
+   * (iOS Safari) is nudged to the live edge (default: 4000, 0 disables).
+   * The stall watchdog ticks every second on that pipeline and, once the
+   * stalled time reaches this, seeks to the live sync position when the
+   * playlist has advanced past the viewer, once per stall episode. If the
+   * stall goes on, the reload hand-off to auto-reconnect follows at 15 s of
+   * stalled time. hls.js and native VOD are unaffected.
+   */
+  liveStallNudgeMs?: number;
+  /**
+   * Release a paused NATIVE LIVE source after this many milliseconds paused
+   * (default: 0, off). WebKit keeps refreshing a live playlist and topping up
+   * its buffer while paused, and native playback has no buffer controls.
+   * Releasing removes the element's `src` and calls `load()`; `live`,
+   * `duration` and the other state keys keep their values. The next `play()`
+   * on the element fetches the source again and rejoins the live edge.
+   * Native live only: VOD and hls.js are never released. While released the
+   * element shows its poster (or black) rather than the last frame.
+   */
+  nativePauseReleaseMs?: number;
   /**
    * Validate every playlist response before it reaches the M3U8 parser
    * (default: true). A live refresh that returns an error page, a

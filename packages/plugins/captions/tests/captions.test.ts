@@ -871,3 +871,154 @@ describe('destroy', () => {
     expect(mockApi.video.querySelectorAll('track').length).toBe(0);
   });
 });
+
+describe('caption style lifecycle', () => {
+  it('keeps the caption style across a source change', () => {
+    const mockApi = createMockApi();
+    const handlers: Record<string, () => void> = {};
+    mockApi.on.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
+      handlers[event] = cb as () => void;
+      return vi.fn();
+    });
+
+    const plugin = createCaptionsPlugin({ style: { fontSize: 150 }, persistStyle: false });
+    plugin.init(mockApi);
+    const scope = mockApi.container.getAttribute('data-sp-caption-scope');
+    const css = mockApi.container.querySelector('style')!.textContent;
+
+    // A source change replaces the <video>; the rule targets any video in the
+    // container, so it must still be there, untouched.
+    handlers['media:load-request']();
+    mockApi.video.remove();
+    mockApi.container.appendChild(document.createElement('video'));
+    handlers['media:loaded']();
+
+    expect(mockApi.container.getAttribute('data-sp-caption-scope')).toBe(scope);
+    expect(mockApi.container.querySelectorAll('style')).toHaveLength(1);
+    expect(mockApi.container.querySelector('style')!.textContent).toBe(css);
+  });
+
+  it('initialises with a scope attribute when the global scope counter cannot be written', () => {
+    // A locked-down page (frozen globals) refuses the write to the shared
+    // counter. That must not abort init, even with no style configured.
+    const key = Symbol.for('@scarlett-player/captions/scope-counter');
+    const registry = globalThis as unknown as Record<symbol, unknown>;
+    const previous = Object.getOwnPropertyDescriptor(registry, key);
+    Object.defineProperty(registry, key, { value: 7, writable: false, configurable: true });
+
+    try {
+      const first = createMockApi();
+      const second = createMockApi();
+      const pluginA = createCaptionsPlugin();
+      const pluginB = createCaptionsPlugin();
+
+      expect(() => pluginA.init(first)).not.toThrow();
+      expect(() => pluginB.init(second)).not.toThrow();
+
+      const scopeA = first.container.getAttribute('data-sp-caption-scope');
+      const scopeB = second.container.getAttribute('data-sp-caption-scope');
+      expect(scopeA).toBeTruthy();
+      expect(scopeB).toBeTruthy();
+      expect(scopeB).not.toBe(scopeA);
+    } finally {
+      if (previous) {
+        Object.defineProperty(registry, key, previous);
+      } else {
+        delete registry[key];
+      }
+    }
+  });
+
+  it('initialises with a scope attribute when the global registry object is frozen', () => {
+    const real = globalThis;
+    const descriptor = Object.getOwnPropertyDescriptor(real, 'globalThis')!;
+    Object.defineProperty(real, 'globalThis', { ...descriptor, value: Object.freeze({}) });
+
+    let error: unknown;
+    let scopeA: string | null = null;
+    let scopeB: string | null = null;
+    const first = createMockApi();
+    const second = createMockApi();
+    const pluginA = createCaptionsPlugin();
+    const pluginB = createCaptionsPlugin();
+
+    try {
+      pluginA.init(first);
+      pluginB.init(second);
+      scopeA = first.container.getAttribute('data-sp-caption-scope');
+      scopeB = second.container.getAttribute('data-sp-caption-scope');
+    } catch (caught) {
+      error = caught;
+    } finally {
+      Object.defineProperty(real, 'globalThis', descriptor);
+    }
+
+    expect(error).toBeUndefined();
+    expect(scopeA).toBeTruthy();
+    expect(scopeB).toBeTruthy();
+    expect(scopeB).not.toBe(scopeA);
+  });
+
+  it('initialises with a scope attribute when globalThis does not exist', () => {
+    // An old engine has no `globalThis` binding at all: reading it is a
+    // ReferenceError, not undefined. The test runner and jsdom need the
+    // binding themselves, so it is taken away from the plugin module only.
+    const real = globalThis;
+    const descriptor = Object.getOwnPropertyDescriptor(real, 'globalThis')!;
+    let denied = 0;
+    Object.defineProperty(real, 'globalThis', {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get() {
+        if (/captions[\\/]src[\\/]index/.test(new Error().stack ?? '')) {
+          denied += 1;
+          throw new ReferenceError('globalThis is not defined');
+        }
+        return real;
+      },
+    });
+
+    let error: unknown;
+    let scope: string | null = null;
+    const mockApi = createMockApi();
+    const plugin = createCaptionsPlugin();
+
+    try {
+      plugin.init(mockApi);
+      scope = mockApi.container.getAttribute('data-sp-caption-scope');
+    } catch (caught) {
+      error = caught;
+    } finally {
+      Object.defineProperty(real, 'globalThis', descriptor);
+    }
+
+    expect(error).toBeUndefined();
+    expect(scope).toBeTruthy();
+    // Proof the stub reached the plugin: it did ask for `globalThis`.
+    expect(denied).toBeGreaterThan(0);
+  });
+
+  it('removes the <style> and the scope attribute on destroy', () => {
+    const mockApi = createMockApi();
+    const plugin = createCaptionsPlugin({ style: { fontSize: 150 }, persistStyle: false });
+    plugin.init(mockApi);
+    expect(mockApi.container.querySelector('style')).not.toBeNull();
+
+    plugin.destroy();
+
+    expect(mockApi.container.querySelector('style')).toBeNull();
+    expect(mockApi.container.hasAttribute('data-sp-caption-scope')).toBe(false);
+  });
+
+  it('removes the <style> and the scope attribute through the onDestroy callback', () => {
+    const mockApi = createMockApi();
+    const plugin = createCaptionsPlugin({ style: { fontSize: 150 }, persistStyle: false });
+    plugin.init(mockApi);
+
+    const cleanup = mockApi.onDestroy.mock.calls[0][0] as () => void;
+    cleanup();
+
+    expect(mockApi.container.querySelector('style')).toBeNull();
+    expect(mockApi.container.hasAttribute('data-sp-caption-scope')).toBe(false);
+  });
+});

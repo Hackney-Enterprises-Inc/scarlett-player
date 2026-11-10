@@ -109,9 +109,10 @@ createHLSPlugin({
   initialBandwidthEstimate: undefined, // Override initial ABR estimate (bps)
 
   // Loading
-  autoStartLoad: true,
+  autoStartLoad: true,          // false: fetch nothing until Play (hls.js and native; see below)
   startPosition: -1,
   loadTimeoutMs: 30000,         // Load watchdog, then auto-reconnect; 0 disables
+  nativePauseReleaseMs: 0,      // Native live only: release a source paused this long; 0 = off
 
   // Live / low latency (see below). Every key here except lowLatencyMode is
   // left to hls.js unless you set it - none is ever passed as undefined.
@@ -136,6 +137,7 @@ createHLSPlugin({
   reconnectMaxDelayMs: 30000,
   reconnectWindowMs: 300000,    // Keep trying for 5 minutes
   stallTimeoutMs: 120000,       // Fatal error if a mid-playback stall outlasts this; 0 disables
+  liveStallNudgeMs: 4000,       // Native live: seek to the live edge after this much stall; 0 disables
 });
 ```
 
@@ -272,7 +274,9 @@ the source on the same backoff instead of failing at once. On that first load,
 network budget, including `MEDIA_ERR_SRC_NOT_SUPPORTED`, which is how Safari
 reports a manifest that answered 4xx or 5xx. Set `maxNetworkRetries: 0` to fail
 on the first error. `loadTimeoutMs` stays one ceiling over the whole load,
-retries included, and a timeout ends the load even with budget left. A
+retries included, and a timeout ends the load even with budget left. (With
+`autoStartLoad: false` the ceiling starts at the first play, see "Deferred
+loading on native HLS (iOS)" below.) A
 timeout stops the stalled fetch (the element's `src` is removed) and, with
 `autoReconnect` on, hands the source to auto-reconnect: the fatal `error` has
 `detail.reconnecting: true`, `error:reconnecting` follows, and a source that
@@ -296,24 +300,39 @@ where they apply, the fields below (the media error fields are native only):
 
 ### Stall watchdog and `stallTimeoutMs`
 
-While playing, a watchdog checks that `currentTime` advances, every
-`max(15 s, 4 x target duration)` capped at 30 s, on both hls.js and native HLS.
-When it has not moved for that long it starts auto-reconnect, as for a fatal
-network error. Checks are skipped while the page is hidden or the browser
+Once a source has started playing, a watchdog checks that `currentTime`
+advances, every `max(15 s, 4 x target duration)` capped at 30 s, on both hls.js
+and native HLS. Stalled time is the sum of the checks in which it did not
+advance. When it passes that interval the watchdog starts auto-reconnect, as for
+a fatal network error. Startup buffering is never a stall (`loadTimeoutMs` covers
+it): counting starts at the source's first `playing`. A pause freezes the clock
+without resetting it, so a viewer's pause/play during a stall does not restart
+detection, and an element that resumed but is still buffering counts as stalled.
+Checks are skipped while the page is hidden or the browser
 reports it is offline (the `online` event already retries), and that time is
 not counted as stalled time. The same goes for a suspended page: iOS stops
 timers while a page is backgrounded or locked, but the clock keeps running, so a
-check that runs more than two intervals late (and a `stallTimeoutMs` timer that
-fires that late) starts its measurement over instead of counting the gap as a
-stall. A seek is not a stall, but one that never ends is:
+check that runs far late (more than two intervals, and never less than 10 s) and
+a `stallTimeoutMs` timer that fires that late start their measurement over
+instead of counting the gap as a stall. A seek is not a stall, but one that
+never ends is:
 when the player has been `seeking` for a whole check interval with no segment
 arriving (hls.js then keeps re-seeking to the moving live window, so
 `currentTime` jumps forward while nothing is shown), the jumps are ignored and
 the seeking time counts as stalled time. The analytics error beacon carries
 `stalled: true` on the terminal error.
 
+**Native live (iOS Safari) is faster.** A native live stream ticks every second
+instead of every 15 s. After `liveStallNudgeMs` of stalled time (default
+`4000`, `0` disables) the plugin seeks to the live sync position, once per stall
+episode, when the playlist has advanced more than a second past the viewer, and
+skips the nudge when it has not. If the stall goes on, the reload hands off to
+auto-reconnect at 15 s of stalled time (it used to take 15 to 30 s). The nudge's
+seek is an ordinary element seek: one `playback:seeked` per episode. hls.js and
+native VOD keep the slow cadence.
+
 `stallTimeoutMs` (default `120000`, `0` disables) bounds the whole stall. Its
-clock starts at the first detection and keeps running across reconnect attempts,
+clock starts at the first detection (on native live, at the nudge) and keeps running across reconnect attempts,
 including one that reloads fine and stalls again; only real playback progress
 resets it. When it runs out, live and VOD alike, reconnecting stops and the
 player emits `error:reconnect-exhausted` followed by a fatal `error`
@@ -361,6 +380,44 @@ A load in progress carries over a provider switch: when AirPlay connects or
 disconnects before the source has loaded, and the plugin moves between native
 HLS and hls.js, `load()` stays pending and settles with the new pipeline's
 load instead of failing.
+
+### Deferred loading on native HLS (iOS)
+
+`autoStartLoad: false` has always kept hls.js idle until the host calls
+`startLoad()`. On the native pipeline (iOS Safari, or AirPlay) it now defers the
+source itself, so a page that waits for Play downloads nothing until then:
+
+- `loadSource()` / `player.load()` resolve with the element untouched: `preload`
+  is `none` (also on a host-supplied `<video>`), no `src`, no `loadTimeoutMs`
+  watchdog (the only `load()` call drops a previous source still attached to a
+  reused element). State goes to `ready`, so the big play button shows.
+- The first `video.play()` on the element, from any caller (the UI plays the
+  element directly), sets `src` synchronously inside that call and then plays,
+  so the viewer's tap stays the gesture that starts playback. `loadTimeoutMs`
+  and the initial retry budget count from that play. Core autoplay after
+  `load()` counts as a play. The element is handed back with no own `play`
+  property once the fetch starts, and on `destroy()`.
+- What arrives late: `media:loaded`, `media:loadedmetadata`, `live` and
+  `duration` come after the first play instead of before it, and so does
+  everything that waits for them (the captions plugin's native tracks, the
+  AirPlay plugin's attach, `data-start-time`). Pass `isLive` yourself if you need
+  it before Play. Startup metrics that run from the play request to the first
+  frame now include the manifest and first segment on these pages, so iOS
+  startup times rise on deferred pages; that is the deferral, not a regression.
+- `getHlsInstance()` stays `null` on native, as before.
+- An auto-reconnect that fires while the viewer is paused on a **live** or
+  not-yet-loaded source loads nothing: it ends with `error:recovered` and the
+  next play fetches. A paused VOD source reloads normally and keeps its position.
+
+`nativePauseReleaseMs` (default `0`, off) is the pause policy for a native
+**live** source, which WebKit keeps refreshing while paused. When it is above
+zero, a viewer pause lasting that long removes the element's `src` and calls
+`load()`; `live`, `duration`, `currentTime` and `paused` keep their values, and
+no error is raised. The next `play()` fetches the source again (a provider
+reload, so a failure hands off to auto-reconnect) and rejoins the live edge. VOD
+is never released. While released the element shows its `poster`, or black,
+instead of the last frame. A release is not a stall: the stall clock and ceiling
+are cleared.
 
 ### Unsupported browsers
 

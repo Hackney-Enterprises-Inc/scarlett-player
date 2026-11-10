@@ -24,7 +24,125 @@ import type { Control } from './Control';
 import { icons } from '../icons';
 import { createElement, createButton } from '../utils';
 
-type Panel = 'main' | 'quality' | 'speed' | 'captions' | 'audio';
+/** A caption style option list, one per style field. */
+type CaptionStyleOptionPanel =
+  | 'caption-style:size'
+  | 'caption-style:color'
+  | 'caption-style:bg-color'
+  | 'caption-style:bg-opacity'
+  | 'caption-style:edge'
+  | 'caption-style:font';
+
+type Panel = 'main' | 'quality' | 'speed' | 'captions' | 'audio' | 'caption-style' | CaptionStyleOptionPanel;
+
+/** The caption style fields the menu can set. */
+type CaptionStyleField =
+  | 'fontSize'
+  | 'color'
+  | 'backgroundColor'
+  | 'backgroundOpacity'
+  | 'edgeStyle'
+  | 'fontFamily';
+
+type CaptionStyleValue = string | number;
+
+/**
+ * The caption style methods of the captions plugin, as this menu uses them.
+ *
+ * Declared here and matched by shape (see {@link SettingsMenu.getCaptionStyleApi})
+ * so the UI package keeps `@scarlett-player/core` as its only peer.
+ */
+interface CaptionsStyleLike {
+  getCaptionStyle(): Partial<Record<CaptionStyleField, CaptionStyleValue>>;
+  getCaptionStyleOverrides(): Partial<Record<CaptionStyleField, CaptionStyleValue>>;
+  setCaptionStyle(patch: Partial<Record<CaptionStyleField, CaptionStyleValue | null>>): void;
+  resetCaptionStyle(): void;
+}
+
+interface CaptionStyleOption {
+  label: string;
+  value: CaptionStyleValue;
+}
+
+interface CaptionStyleFieldDef {
+  panel: CaptionStyleOptionPanel;
+  field: CaptionStyleField;
+  label: string;
+  options: CaptionStyleOption[];
+}
+
+const CAPTION_COLOR_OPTIONS: CaptionStyleOption[] = [
+  { label: 'White', value: 'white' },
+  { label: 'Yellow', value: 'yellow' },
+  { label: 'Green', value: 'green' },
+  { label: 'Cyan', value: 'cyan' },
+  { label: 'Blue', value: 'blue' },
+  { label: 'Magenta', value: 'magenta' },
+  { label: 'Red', value: 'red' },
+  { label: 'Black', value: 'black' },
+];
+
+/**
+ * The caption style screen: one row per field, in display order, with the
+ * options each offers. Every option list also gets a leading "Default", which
+ * clears the viewer's choice. Values match the captions plugin's `CaptionStyle`.
+ */
+const CAPTION_STYLE_FIELDS: CaptionStyleFieldDef[] = [
+  {
+    panel: 'caption-style:size',
+    field: 'fontSize',
+    label: 'Text size',
+    options: [50, 75, 100, 150, 200].map((value) => ({ label: `${value}%`, value })),
+  },
+  { panel: 'caption-style:color', field: 'color', label: 'Text color', options: CAPTION_COLOR_OPTIONS },
+  {
+    panel: 'caption-style:bg-color',
+    field: 'backgroundColor',
+    label: 'Background color',
+    options: CAPTION_COLOR_OPTIONS,
+  },
+  {
+    panel: 'caption-style:bg-opacity',
+    field: 'backgroundOpacity',
+    label: 'Background opacity',
+    options: [0, 0.25, 0.5, 0.75, 1].map((value) => ({ label: `${value * 100}%`, value })),
+  },
+  {
+    panel: 'caption-style:edge',
+    field: 'edgeStyle',
+    label: 'Edge style',
+    options: [
+      { label: 'None', value: 'none' },
+      { label: 'Drop shadow', value: 'drop-shadow' },
+      { label: 'Raised', value: 'raised' },
+      { label: 'Depressed', value: 'depressed' },
+      { label: 'Outline', value: 'outline' },
+    ],
+  },
+  {
+    panel: 'caption-style:font',
+    field: 'fontFamily',
+    label: 'Font',
+    options: [
+      { label: 'Sans-serif', value: 'sans-serif' },
+      { label: 'Serif', value: 'serif' },
+      { label: 'Monospace', value: 'monospace' },
+    ],
+  },
+];
+
+/**
+ * The panel "back" leads to: option lists return to the caption style screen,
+ * that screen to Captions, and every other panel to the main menu.
+ *
+ * @param panel - Panel being left
+ * @returns Its parent panel
+ */
+function parentOf(panel: Panel): Panel {
+  if (panel === 'caption-style') return 'captions';
+  if (panel.startsWith('caption-style:')) return 'caption-style';
+  return 'main';
+}
 
 /**
  * Live seekable window, in seconds, at which Speed is first offered on a
@@ -62,6 +180,11 @@ export class SettingsMenu implements Control {
   private keyHandler: (e: KeyboardEvent) => void;
   private lastQualitiesJson = '';
   private lastSpeedAvailable = true;
+  /**
+   * The caption style the open caption-style panel was rendered from, so
+   * {@link SettingsMenu.update} re-renders only when it changed.
+   */
+  private lastCaptionStyleJson = '';
   /** Rate taken away while Speed was withdrawn, and the source it belonged to. */
   private withdrawnRate: { rate: number; src: string | undefined } | null = null;
   /**
@@ -114,7 +237,7 @@ export class SettingsMenu implements Control {
         e.preventDefault();
         e.stopPropagation();
         if (this.currentPanel !== 'main') {
-          this.showPanel('main');
+          this.showPanel(parentOf(this.currentPanel));
         } else {
           this.close();
         }
@@ -199,8 +322,72 @@ export class SettingsMenu implements Control {
         this.updateCaptionsActiveStates();
       } else if (this.currentPanel === 'audio') {
         this.updateAudioActiveStates();
+      } else if (this.currentPanel.startsWith('caption-style')) {
+        this.updateCaptionStylePanel();
       }
     }
+  }
+
+  /**
+   * Keep an open caption-style panel in step with the captions plugin.
+   *
+   * The style screens hang off Captions, so they go when the tracks do (or the
+   * style API does): the menu falls back to the main panel. Otherwise the panel
+   * is rebuilt only when the style changed since it was rendered, because
+   * {@link SettingsMenu.update} runs on every state change and a rebuild on
+   * each one would keep taking focus and hover away from the viewer. Focus is
+   * put back on the same position after a rebuild.
+   */
+  private updateCaptionStylePanel(): void {
+    const textTracks: TextTrack[] = this.api.getState('textTracks') || [];
+    if (textTracks.length === 0 || !this.getCaptionStyleApi()) {
+      this.showPanel('main');
+      return;
+    }
+
+    if (this.captionStyleJson() === this.lastCaptionStyleJson) return;
+
+    const focusedIndex = this.getFocusableItems().indexOf(document.activeElement as HTMLElement);
+    this.renderPanel(this.currentPanel);
+    if (focusedIndex !== -1) {
+      this.getFocusableItems()[focusedIndex]?.focus();
+    }
+  }
+
+  /**
+   * The captions plugin's style methods, when the installed captions plugin
+   * has them.
+   *
+   * Matched by shape, like the cast plugins in CastButton, so there is no
+   * dependency on `@scarlett-player/captions`. A captions plugin from before
+   * caption styling (or none at all) gives null, and the menu then shows no
+   * Style row.
+   *
+   * @returns The style API, or null when it is not available
+   */
+  private getCaptionStyleApi(): CaptionsStyleLike | null {
+    const plugin = this.api.getPlugin<Partial<CaptionsStyleLike>>('captions');
+    if (
+      !plugin ||
+      typeof plugin.getCaptionStyle !== 'function' ||
+      typeof plugin.getCaptionStyleOverrides !== 'function' ||
+      typeof plugin.setCaptionStyle !== 'function' ||
+      typeof plugin.resetCaptionStyle !== 'function'
+    ) {
+      return null;
+    }
+    return plugin as CaptionsStyleLike;
+  }
+
+  /**
+   * A signature of the current caption style (effective and viewer layers).
+   *
+   * @returns JSON text, empty when there is no style API
+   */
+  private captionStyleJson(): string {
+    const styleApi = this.getCaptionStyleApi();
+    if (!styleApi) return '';
+    return JSON.stringify([styleApi.getCaptionStyle(), styleApi.getCaptionStyleOverrides()]);
   }
 
   /**
@@ -339,6 +526,16 @@ export class SettingsMenu implements Control {
 
   private showPanel(panel: Panel): void {
     this.currentPanel = panel;
+    this.renderPanel(panel);
+    this.focusFirstItem();
+  }
+
+  /**
+   * Render a panel's rows into the menu, without moving focus.
+   *
+   * @param panel - Panel to render
+   */
+  private renderPanel(panel: Panel): void {
     switch (panel) {
       case 'main':
         this.renderMainPanel();
@@ -355,8 +552,13 @@ export class SettingsMenu implements Control {
       case 'audio':
         this.renderAudioPanel();
         break;
+      case 'caption-style':
+        this.renderCaptionStylePanel();
+        break;
+      default:
+        this.renderCaptionStyleOptionPanel(panel);
+        break;
     }
-    this.focusFirstItem();
   }
 
   private renderMainPanel(): void {
@@ -538,6 +740,107 @@ export class SettingsMenu implements Control {
       });
       this.panel.appendChild(item);
     }
+
+    // Style row, only with a captions plugin that can style cues.
+    const styleApi = this.getCaptionStyleApi();
+    if (styleApi) {
+      const hasOverrides = Object.keys(styleApi.getCaptionStyleOverrides()).length > 0;
+      const styleRow = this.createMainRow(
+        'Style',
+        hasOverrides ? 'Custom' : 'Default',
+        () => this.showPanel('caption-style')
+      );
+      this.panel.appendChild(styleRow);
+    }
+  }
+
+  /**
+   * Render the caption style screen: one row per style field showing the value
+   * in effect (the viewer's choice, else the integrator's default, else
+   * "Default"), then a Reset item that drops every viewer choice.
+   */
+  private renderCaptionStylePanel(): void {
+    this.panel.innerHTML = '';
+    this.panel.className = 'sp-settings-panel sp-settings-panel--open sp-settings-panel--sub';
+
+    this.panel.appendChild(this.createSubHeader('Caption style', 'captions'));
+
+    const styleApi = this.getCaptionStyleApi();
+    this.lastCaptionStyleJson = this.captionStyleJson();
+    if (!styleApi) return;
+
+    const effective = styleApi.getCaptionStyle();
+    for (const def of CAPTION_STYLE_FIELDS) {
+      const value = effective[def.field];
+      // An integrator default can be a hex colour, which has no option label.
+      const valueLabel =
+        value === undefined
+          ? 'Default'
+          : (def.options.find((opt) => opt.value === value)?.label ?? String(value));
+      this.panel.appendChild(this.createMainRow(def.label, valueLabel, () => this.showPanel(def.panel)));
+    }
+
+    const resetItem = this.createMenuItem('Reset', 'reset', false);
+    resetItem.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.getCaptionStyleApi()?.resetCaptionStyle();
+      this.showPanel('caption-style');
+    });
+    this.panel.appendChild(resetItem);
+  }
+
+  /**
+   * Render the option list for one caption style field: "Default" plus the
+   * field's options. The checkmark follows the viewer's own choice, so
+   * "Default" is checked while the viewer has not set the field, even when an
+   * integrator default is in effect.
+   *
+   * @param panel - The option panel to render
+   */
+  private renderCaptionStyleOptionPanel(panel: CaptionStyleOptionPanel): void {
+    this.panel.innerHTML = '';
+    this.panel.className = 'sp-settings-panel sp-settings-panel--open sp-settings-panel--sub';
+
+    const def = CAPTION_STYLE_FIELDS.find((d) => d.panel === panel);
+    if (!def) return;
+
+    this.panel.appendChild(this.createSubHeader(def.label, 'caption-style'));
+
+    const styleApi = this.getCaptionStyleApi();
+    this.lastCaptionStyleJson = this.captionStyleJson();
+    if (!styleApi) return;
+
+    const override = styleApi.getCaptionStyleOverrides()[def.field];
+
+    const defaultItem = this.createMenuItem('Default', 'default', override === undefined);
+    defaultItem.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.selectCaptionStyle(def.field, null);
+    });
+    this.panel.appendChild(defaultItem);
+
+    for (const opt of def.options) {
+      const item = this.createMenuItem(opt.label, String(opt.value), opt.value === override);
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.selectCaptionStyle(def.field, opt.value);
+      });
+      this.panel.appendChild(item);
+    }
+  }
+
+  /**
+   * Apply one caption style choice and return to the caption style screen.
+   *
+   * Unlike the other pickers this does not close the menu: a viewer setting up
+   * captions usually changes several fields in a row.
+   *
+   * @param field - Style field to change
+   * @param value - New value, or null to clear the viewer's choice
+   */
+  private selectCaptionStyle(field: CaptionStyleField, value: CaptionStyleValue | null): void {
+    this.getCaptionStyleApi()?.setCaptionStyle({ [field]: value });
+    this.showPanel('caption-style');
   }
 
   private renderAudioPanel(): void {
@@ -592,7 +895,14 @@ export class SettingsMenu implements Control {
     });
   }
 
-  private createSubHeader(title: string): HTMLDivElement {
+  /**
+   * Build a sub-panel's header, which doubles as its back control.
+   *
+   * @param title - Header text
+   * @param back - Panel the header returns to
+   * @returns The header element
+   */
+  private createSubHeader(title: string, back: Panel = 'main'): HTMLDivElement {
     const header = createElement('div', { className: 'sp-settings-panel__header' });
     header.setAttribute('role', 'menuitem');
     header.setAttribute('tabindex', '0');
@@ -608,13 +918,13 @@ export class SettingsMenu implements Control {
 
     header.addEventListener('click', (e) => {
       e.preventDefault();
-      this.showPanel('main');
+      this.showPanel(back);
     });
 
     header.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        this.showPanel('main');
+        this.showPanel(back);
       }
     });
 

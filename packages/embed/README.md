@@ -212,6 +212,13 @@ custom endpoint.
 | Attribute | Type | Builds | Description |
 |-----------|------|--------|-------------|
 | `data-captions` | JSON | Full, Video | Array of `{ language, label, src, kind?, default? }`: WebVTT subtitle or caption tracks. `kind` is `subtitles` (default) or `captions`; `default: true` selects that track on load. Invalid JSON, or JSON that is not an array, logs a warning and is ignored. The audio build warns that captions need a video build |
+| `data-captions-font-size` | number | Full, Video | Default caption text size, as a percentage of the browser's own: `50`, `75`, `100`, `150` or `200`. See [Caption style](#caption-style) for all the `data-captions-*` style attributes |
+| `data-captions-color` | string | Full, Video | Default caption text colour: `white`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `red`, `black`, or a `#rgb` / `#rrggbb` hex |
+| `data-captions-background-color` | string | Full, Video | Default caption background colour, same values. Drawn at 0.8 opacity unless `data-captions-background-opacity` is set |
+| `data-captions-background-opacity` | number | Full, Video | Default caption background opacity: `0`, `0.25`, `0.5`, `0.75` or `1`. On black unless `data-captions-background-color` is set |
+| `data-captions-edge-style` | string | Full, Video | Default caption text edge: `none`, `drop-shadow`, `raised`, `depressed` or `outline` |
+| `data-captions-font-family` | string | Full, Video | Default caption font: `sans-serif`, `serif` or `monospace` |
+| `data-captions-persist-style` | boolean | Full, Video | `false` stops the player saving the viewer's caption style in `localStorage`. Any other value, or leaving it out, keeps saving on |
 | `data-chapters` | JSON or URL | Full, Video, with the [chapters addon](#addons) | A value starting with `[` is a JSON array of `{ time, label, endTime?, subtitle?, thumbnail? }` (seconds); anything else is the URL of a WebVTT chapters file (cross-origin needs CORS). Invalid JSON logs a warning and is ignored. Without the addon: one warning naming the addon file, nothing installed |
 | `data-clips-endpoint` | string | Full, Video, with the [clips addon](#addons) | URL the viewer's clip is POSTed to. **Inert without `data-clips-csrf="meta"`**: the player warns once and installs nothing, see [Clips and your CSRF token](#clips-and-your-csrf-token). Without the addon: the addon warning instead |
 | `data-clips-csrf` | string | as above | `meta`, the only accepted value: send your page's `<meta name="csrf-token">` as `X-CSRF-TOKEN` with each submission. Any other value logs a warning and counts as absent |
@@ -229,6 +236,37 @@ custom endpoint.
   data-clips-media-id="abc123"
 ></div>
 ```
+
+##### Caption style
+
+Viewers can change the caption text size, colour, background, edge and font
+from the settings menu (Captions > Style), and their choice is saved in
+`localStorage` for your origin. The `data-captions-*` style attributes set the
+defaults they start from. A viewer's saved choice beats your default, and your
+default beats the browser's.
+
+```html
+<div data-scarlett-player
+  data-src="https://example.com/event.m3u8"
+  data-captions='[{"language":"en","label":"English","src":"/subs/en.vtt","default":true}]'
+  data-captions-font-size="150"
+  data-captions-color="yellow"
+  data-captions-background-color="black"
+  data-captions-background-opacity="0.5"
+></div>
+```
+
+- The style attributes work without `data-captions`, so subtitles carried in
+  an HLS manifest are styled too.
+- A value outside the lists in the table is ignored, with one console warning
+  naming the dropped fields. The rest of the style still applies.
+- With no style attribute and nothing saved by the viewer, the player adds no
+  caption stylesheet and captions look as they did before.
+- The audio build has no captions plugin: it warns once that captions need a
+  video build.
+- What the browser lets a page style, and where it does not apply (system
+  caption settings, the iPhone's fullscreen player, Picture-in-Picture, Cast),
+  is in the [captions README](../plugins/captions/README.md#known-limits).
 
 The auto-initializer also accepts `data-sp` in place of `data-scarlett-player`.
 
@@ -363,6 +401,8 @@ or camelCase):
 - `hide-delay`, `playback-rate`, `start-time`
 - `share-url` - the page the viewer should be sent to. Setting it adds the share button; omitting it leaves the control bar unchanged. See [Sharing](#sharing)
 - `embed-base-url` - optional canonical embed URL. Enables the **Embed** snippet target in the share sheet without leaking signed playback parameters
+
+There are no caption parameters yet, so caption style defaults cannot be set on the iframe. Viewers can still change the style from the settings menu.
 
 `share-url` is the one parameter the player cannot work out for itself. Inside
 the iframe, `window.location.href` is the player page rather than your page, and
